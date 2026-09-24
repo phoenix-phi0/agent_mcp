@@ -1,0 +1,11 @@
+{#- 列表：只列当前用户自己的。
+    :当前用户 是路由器从登录 cookie 认出来的，前端改不了——请求体里塞
+    「当前用户」也会被路由器覆盖。取全部列（owner 除外），编辑时整行拷进
+    表单。 -#}
+-- {{ e | 标签 }}列表，只含当前用户自己的。
+SELECT {{ e | 主键 }}{% for f in e.fields %}{% if f.name != (e | 主键) and f.name != "owner" %}, {{ f.name }}{% endif %}{% endfor %}
+
+FROM {{ e.name }}
+WHERE owner = :当前用户
+ORDER BY {{ e | 主键 }} DESC
+LIMIT CAST(:条数 AS INTEGER)

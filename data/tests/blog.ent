@@ -1,0 +1,12 @@
+# 博客的数据模型。三套模板都从这里派生：
+#   SQL 的列定义和 CHECK、SQLAlchemy 的 Mapped 注解、前端的控件和选项。
+# 改一行，三边一起变——.ui 里因此不写类型、不写必填、不写枚举选项。
+
+实体 article 文章
+  字段 title 文本 必填 唯一 标题
+  字段 body 长文本 正文
+  字段 status 枚举 draft,published,archived 必填 发布状态
+  字段 published_at 日期 发布时间
+  字段 featured 布尔 是否推荐
+  字段 views 整数 阅读量
+结束

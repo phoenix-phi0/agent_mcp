@@ -1,0 +1,7 @@
+{#- 列表查询。带上主键供界面跳转用。 -#}
+-- {{ e | 标签 }}列表。带上 {{ e | 主键 }} 供界面跳转用。
+SELECT {{ e | 主键 }}{% for f in e.fields | 上列表 %}{% if f.name != (e | 主键) %}, {{ f.name }}{% endif %}{% endfor %}
+
+FROM {{ e.name }}
+ORDER BY {{ e | 主键 }} DESC
+LIMIT CAST(:条数 AS INTEGER)

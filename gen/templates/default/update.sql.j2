@@ -1,0 +1,9 @@
+{#- 更新。
+    SET 里不能有主键：它在 WHERE 里定位，同时又被改的话等于允许改主键，
+    而那要级联改所有引用它的表，不是一条 UPDATE 能办的事。 -#}
+-- 更新一条{{ e | 标签 }}。{{ e | 主键 }} {% if e | 主键自增 %}从界面的 state 来（列表跳转时存进去的）{% else %}是表单字段{% endif %}。
+UPDATE {{ e.name }} SET
+{% for f in e.fields | 可写 | 除去(e | 主键) %}
+  {{ f | 转赋值 }}{{ "," if not loop.last }}
+{% endfor %}
+WHERE {{ e | 主键 }} = :{{ e | 主键 }}

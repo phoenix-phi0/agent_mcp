@@ -1,0 +1,113 @@
+<% from "widgets.j2" import 字段, 动作, 文案, 消息流, 显示, 当 with context %>
+{#- 图单独一个文件：它是唯一带外部依赖（Vue Flow + dagre）的控件，
+    分开放好找也好删，widgets.j2 也不必再长一截。 -#}
+<% from "graph.j2" import 图 with context %>
+
+{#- 布局类：方向、伸缩、固定位置。
+    「顶栏」「底栏」让界面能做成三段式（头尾固定、中间自己滚），
+    这是旧版手写界面的形状，也是 .ui 原有词汇说不了的一层。 -#}
+<% macro 布局类(node) -%>
+<% if node.has("横排") %>row<% elif node.has("网格") %>grid<% else %>col<% endif %><% if node.has("占满") %> grow<% endif %><% if node.has("顶栏") %> bar-top<% endif %><% if node.has("底栏") %> bar-bottom<% endif %>
+<%- endmacro %>
+
+{#- 「比 n」「列数 n」和尺寸是每个节点自己的值，class 装不下，走内联
+    style——除非预生成 .ratio-1 到 .ratio-12 那种，不划算。 -#}
+<% macro 样式(node) -%>
+<% set 片段 = [] %>
+<% if node.ratio %><% set _ = 片段.append("flex:" ~ node.ratio ~ " 1 0%") %><% set _ = 片段.append("min-width:0") %><% set _ = 片段.append("min-height:0") %><% endif %>
+<% if node.cols %><% set _ = 片段.append("grid-template-columns:repeat(" ~ node.cols ~ ",1fr)") %><% endif %>
+{#- 定宽同时给 flex:none，否则父容器是 flex 时会被压缩 -#}
+<% if node.size.get("width") %><% set _ = 片段.append("width:" ~ node.size["width"]) %><% set _ = 片段.append("flex:none") %><% endif %>
+<% if node.size.get("height") %><% set _ = 片段.append("height:" ~ node.size["height"]) %><% endif %>
+<% if node.size.get("gap") %><% set _ = 片段.append("gap:" ~ node.size["gap"]) %><% endif %>
+<% if node.size.get("align") %><% set _ = 片段.append("align-items:" ~ node.size["align"]) %><% endif %>
+<% if node.size.get("padding") %><% set _ = 片段.append("padding:" ~ node.size["padding"]) %><% endif %>
+<% if 片段 %> style="<%= 片段 | join(";") %>"<% endif %>
+<%- endmacro %>
+
+<% macro 节点(node) %>
+<% if node.kind == "文案" %>
+<%= 文案(node) %>
+<% elif node.kind == "动作" %>
+<%= 动作(node) %>
+<% elif node.kind == "字段" %>
+<%= 字段(node) %>
+<% elif node.kind == "消息流" %>
+<%= 消息流(node) %>
+<% elif node.kind == "显示" %>
+<%= 显示(node) %>
+<% elif node.kind == "图" %>
+<%= 图(node) %>
+<% elif node.kind == "列" %>
+{# 有意留空：列由「列表」分支渲染成 th/td。单独走到这里说明它跑到了
+   列表外面，那是解析器该拦的事，这里不产出任何东西。 #}
+<% elif node.kind == "界面" %>
+<% for c in node.children %>
+<%= 节点(c) %>
+<% endfor %>
+<% elif node.kind == "浮层" %>
+{#- 浮层：遮罩 + 面板。点遮罩关掉，点面板内部不关（@click.stop）。
+
+    用 v-if 而不是 v-show：关掉时内容整个不在 DOM 里，里面的输入框不会
+    被 Tab 摸到，也不会被 document.querySelector 误伤——clearFields 和
+    focus 现在就是靠选择器找 textarea 的，v-show 会让它们摸到藏起来的框。
+
+    浮层由 app.js.j2 渲染在 <form> 之外：嵌在表单里的话，浮层内的提交
+    按钮会连带触发外层表单的 submit。 -#}
+<div class="overlay" v-if="openOverlay === '<%= node.name %>'" @click="closeOverlay()">
+  <section class="overlay-box"<%= 样式(node) %> @click.stop>
+    <% if node.name %><h3 class="overlay-h"><%= node.name %></h3>
+    <% endif %>
+    <% for c in node.children %>
+    <%= 节点(c) %>
+    <% endfor %>
+  </section>
+</div>
+<% elif node.kind == "列表" %>
+<section class="table-wrap"<%= 当(node) %><%= 样式(node) %>>
+  <table>
+    <thead>
+      <tr>
+        <% for c in node.children if c.kind == "列" %>
+        <th><%= c.label or c.name %></th>
+        <% endfor %>
+        <% if node.of_kind("动作") %>
+        <th></th>
+        <% endif %>
+      </tr>
+    </thead>
+    <tbody>
+      <tr v-for="(row, i) in rows" :key="i">
+        <% for c in node.children if c.kind == "列" %>
+        <td>{{ row.<%= c.bind or c.name %> }}</td>
+        <% endfor %>
+        <% if node.of_kind("动作") %>
+        <td class="row-acts">
+          <% for a in node.of_kind("动作") %>
+          <button type="button" class="btn btn-ghost" @click="onRow('<%= a.name %>', row)"><%= a.label or a.name %></button>
+          <% endfor %>
+        </td>
+        <% endif %>
+      </tr>
+    </tbody>
+  </table>
+  <% for c in node.children if c.kind not in ("列", "动作") %>
+  <%= 节点(c) %>
+  <% endfor %>
+</section>
+<% elif node.kind in ("布局", "区域", "分组") %>
+<section class="<%= node.kind == "布局" and "layout" or node.kind == "区域" and "region" or "group" %> <%= 布局类(node) %>"<%= 当(node) %><%= 样式(node) %>>
+  {#- 顶栏底栏的名字只是给人看 .ui 时定位用的，不渲染成标题。
+      早先靠样式表里 display:none 藏，那是拿 CSS 盖住一个本来就不该
+      产生的东西。 -#}
+  <% if node.kind == "分组" and node.name and not (node.has("顶栏") or node.has("底栏")) %>
+  <h3><%= node.name %></h3>
+  <% elif node.kind == "区域" and node.name %>
+  <header class="region-h"><%= node.name %></header>
+  <% endif %>
+  <% for c in node.children %>
+  <%= 节点(c) %>
+  <% endfor %>
+</section>
+<% endif %>
+<% endmacro %>

@@ -1,0 +1,9 @@
+{#- 更新。SET 里既没有主键也没有 owner——不能把记录改到别人名下。
+    WHERE 带 owner = :当前用户：改别人的记录影响 0 行，接口回 404，跟
+    不存在一样，不透露那条记录在不在。 -#}
+-- 更新一条{{ e | 标签 }}，只能改自己的。
+UPDATE {{ e.name }} SET
+{% for f in e.fields | 可写 | 除去(e | 主键) | 除去("owner") %}
+  {{ f | 转赋值 }}{{ "," if not loop.last }}
+{% endfor %}
+WHERE {{ e | 主键 }} = :{{ e | 主键 }} AND owner = :当前用户

@@ -1,0 +1,398 @@
+"""db 包：查 SQLite，SQL 写在 .sql 文件里。
+
+## 为什么 SQL 不写在 DSL 里
+
+动词参数不能有空格，而 SQL 全是空格——硬塞的话每条查询都要先存进变量，
+两行才能查一次。更要紧的是拼字符串等于开放 SQL 注入，接口场景下用户
+输入会直接进 WHERE。
+
+所以 DSL 里只报查询名，SQL 放 `queries/` 下的 `.sql`：
+
+```sql
+-- queries/作者文章.sql
+SELECT id, title, views FROM post
+WHERE author = :作者
+LIMIT CAST(:条数 AS INTEGER)
+```
+
+```
+用包 db
+
+设 文章 = 查询 试验.db 作者文章 作者=a01 条数=3
+遍历 行 于 {文章}
+  打印 {行.title}（{行.views}）
+结束
+```
+
+参数走 `:名字` 占位符绑定，不是字符串拼接——注入不可能发生。
+
+## 参数一律是字符串，数值比较要 CAST
+
+**最容易踩的一条。** DSL 里的值全是文本，绑进 SQL 也是文本。
+
+SQLite 有列亲和性：拿字符串跟 INTEGER 列比会自动转，所以
+`WHERE views > :下限` 能工作。但左边一变成表达式——`count(*)`、
+`sum(x)`、`a + b`——亲和性就没了，比较退回纯值比较，而 SQLite 的类型
+序里**文本永远大于数字**。结果恒真或恒假，**而且不报错**。
+
+    HAVING count(r.score) >= :最少评分数                     -- 恒假
+    HAVING count(r.score) >= CAST(:最少评分数 AS INTEGER)    -- 对
+
+`LIMIT :条数` 同理。
+
+考虑过在动词里自动转（看着像数字就转），没做——那会变成一条所有查询
+都受影响的隐式规则，而「什么算数字」永远有边界：`007` 转成 `7` 就匹配
+不上文本编号列。写在 SQL 里，每条查询自己说清楚。
+
+## 事务
+
+```
+用包 db
+
+事务 学习.db
+  写库 学习.db 记作答 学习者={who} 题号={q} 对错=1
+  写库 学习.db 加错题 学习者={who} 题号={q}
+结束
+```
+
+块正常结束就提交，块内任何一步出错就回滚再把错抛出去。
+
+引擎不认识数据库——它只在块的三个时刻调 `事务开始` / `事务提交` /
+`事务回滚` 这三个约定好的动词，由这个包提供。
+
+**事务里的连接是复用的**：`事务开始` 建一个连接挂在线程上，块内的
+`写库` 和 `查询` 认出它就不再自己开。这样它们才在同一个事务里——
+各开各的连接的话，提交是各提交各的，回滚也回滚不到别人。
+
+连接挂在 `threading.local` 上而不是模块全局：Flask 是多线程的，全局
+的话两个请求的事务会互相串。
+
+**没有嵌套事务**。块里再开一个事务会报错——SQLite 的嵌套要用
+SAVEPOINT，语义跟外层回滚怎么交互得另说，现在不值得。
+
+## 查询目录跟着 workspace 走
+
+`<workspace>/queries/`，跟库路径同一个基准。找不到就退回项目根的
+`queries/`——教学那套的 workspace 是 `workspace/japanese/`，而 SQL 在
+项目根，这个退路让它继续能用。
+
+## 动词
+
+    查询 库 查询名 参数=值 ...     返回行列表（每行一个对象）
+    查一行 库 查询名 参数=值 ...   返回单个对象，没有就是空对象
+    查一值 库 查询名 参数=值 ...   第一行第一列，**只适合单列查询**
+    写库 库 语句名 参数=值 ...     增删改，返回影响行数
+    事务开始 库 / 事务提交 / 事务回滚   给「事务」块用，一般不直接写
+    列查询                        有哪些查询可用，附各自要的参数
+    表结构 库 [表名]              看有哪些表、每张表有哪些列
+
+参数最多八个。八而不是四：三四个很快就不够用了，而位置绑定的动词
+参数个数只能写死。再多就该考虑把值塞进一个 JSON 参数了。
+
+叫「写库」而不是「执行」：那个词已经是 DSL 的语句了（执行子脚本）。
+
+`查一值` 拿的是第一行第一列，对多列查询会得到第一个字段，不是你想要
+的那个。要某一列就用 `查一行` 再取字段。
+
+## 出错怎么表现
+
+查询失败返回错误文本而不是抛异常——接口场景下查询失败很常见，让脚本
+能判断并给出像样的响应，比整个请求崩掉强。
+
+**但事务里不一样**：`写库` 在事务中出错会抛异常，好让块回滚。不抛的话
+一步失败、后面几步照跑，最后还提交了，那比崩掉糟得多。
+
+代价是不检查的话错误会静默变成怪输出。稳妥的写法：
+
+    设 行表 = 查询 试验.db 某查询
+    如果 {行表.0.错误} 不为空
+      打印 查询失败：{行表.0.错误}
+    否则
+      遍历 行 于 {行表}
+        ...
+      结束
+    结束
+"""
+
+import re
+import sqlite3
+import threading
+from pathlib import Path
+
+# SQL 里的命名占位符。排除 :: 开头的（Postgres 的类型转换写法），
+# 虽然 sqlite 用不到，但抄 SQL 过来时容易带进来
+PARAM_RE = re.compile(r"(?<!:):([a-zA-Z_\u4e00-\u9fff][\w\u4e00-\u9fff]*)")
+
+# 事务期间复用的连接。挂在线程上而不是模块全局：Flask 多线程，
+# 全局的话两个请求的事务会互相串。
+_tx = threading.local()
+
+# 加载时注入
+WORKSPACE = Path(".")
+PACK_DIR = Path(".")
+
+
+def register(reg, workspace):
+    workspace = Path(workspace).resolve()
+    # 项目根：PACK_DIR 是 verbs/db，往上两级
+    project_root = PACK_DIR.parent.parent
+
+    def queries_dir() -> Path:
+        """查询目录。跟 workspace 走，没有就退回项目根。
+
+        每次调用时算而不是在 register 里定死：workspace 下的 queries/
+        可能是脚本跑起来之后才建的，定死的话得重启才认。
+        """
+        local = workspace / "queries"
+        return local if local.is_dir() else (project_root / "queries").resolve()
+
+    def safe_db(path: str) -> Path:
+        """库文件限制在工作目录内。
+
+        路径来自脚本，而脚本内容可能是模型生成的——不检查的话
+        「查询 ../../系统.db」就成立了。
+        """
+        p = (workspace / path).resolve()
+        if p != workspace and workspace not in p.parents:
+            raise ValueError(f"路径越界：{path}")
+        return p
+
+    def load_sql(name: str) -> str:
+        """按名字读一条查询。名字里不能有路径分隔符。"""
+        if "/" in name or "\\" in name or ".." in name:
+            raise ValueError(f"查询名不能含路径：{name}")
+        d = queries_dir()
+        f = d / (name if name.endswith(".sql") else f"{name}.sql")
+        if not f.is_file():
+            有哪些 = "、".join(sorted(p.stem for p in d.glob("*.sql")
+                                     if not p.name.startswith("_")))
+            raise ValueError(f"没有这条查询：{name}。{d} 下有：{有哪些 or '无'}")
+        return f.read_text(encoding="utf-8")
+
+    def parse_params(pairs) -> dict:
+        """把 ["条数=3", "作者=a01"] 变成字典。
+
+        值一律保持字符串，不猜类型。数值比较由 SQL 里的 CAST 负责。
+        """
+        out = {}
+        for item in pairs:
+            if not item.strip():
+                continue
+            k, sep, v = item.partition("=")
+            if not sep:
+                raise ValueError(f"参数要写成 名=值，收到：{item}")
+            out[k.strip()] = v.strip()
+        return out
+
+    def bind(sql: str, given: dict) -> dict:
+        """检查 SQL 要的参数都给了，返回绑定字典。
+
+        少给直接报错而不是当 NULL：少传一个参数通常是笔误，静默当 NULL
+        会让「查不到结果」变成一个要翻半天的谜。
+        """
+        needed = set(PARAM_RE.findall(sql))
+        missing = needed - set(given)
+        if missing:
+            raise ValueError(
+                f"缺少参数：{'、'.join(sorted(missing))}。"
+                f"这条查询要：{'、'.join(sorted(needed)) or '无'}")
+        # 多给的丢掉——sqlite3 对多余的命名参数会报错
+        return {k: v for k, v in given.items() if k in needed}
+
+    def open_conn(db: str) -> sqlite3.Connection:
+        p = safe_db(db)
+        if not p.is_file():
+            raise ValueError(f"数据库不存在：{db}")
+        con = sqlite3.connect(p)
+        con.row_factory = sqlite3.Row
+        # 外键是每个连接各开一次的，建库时开了不算——不开的话外键约束
+        # 只是摆设，插一条指向不存在的行也不报错
+        con.execute("PRAGMA foreign_keys = ON")
+        return con
+
+    def in_tx() -> sqlite3.Connection | None:
+        return getattr(_tx, "con", None)
+
+    def query(db: str, name: str, pairs) -> list:
+        """跑一条查询。事务里复用那个连接，否则用完就关。"""
+        sql = load_sql(name)
+        args = bind(sql, parse_params(pairs))
+        con = in_tx()
+        if con is not None:
+            return [dict(r) for r in con.execute(sql, args).fetchall()]
+        con = open_conn(db)
+        try:
+            return [dict(r) for r in con.execute(sql, args).fetchall()]
+        finally:
+            con.close()
+
+    # ------------------------------------------------------------------
+    # 查询
+    # ------------------------------------------------------------------
+
+    @reg.verb("按名字执行 queries/ 下的查询，返回行列表。"
+              "例如 查询 数据.db 作者文章 作者=a01 条数=3")
+    def 查询(库: str, 查询名: str, 参数一: str = "", 参数二: str = "",
+             参数三: str = "", 参数四: str = "", 参数五: str = "",
+             参数六: str = "", 参数七: str = "", 参数八: str = "") -> list:
+        pairs = [参数一, 参数二, 参数三, 参数四, 参数五, 参数六, 参数七, 参数八]
+        try:
+            return query(库, 查询名, pairs)
+        except (ValueError, sqlite3.Error) as e:
+            # 事务里要抛出去让块回滚；块外返回错误文本，脚本能判断
+            if in_tx() is not None:
+                raise
+            return [{"错误": str(e)}]
+
+    @reg.verb("同「查询」，但只返回第一行。没有结果返回空对象。")
+    def 查一行(库: str, 查询名: str, 参数一: str = "", 参数二: str = "",
+               参数三: str = "", 参数四: str = "", 参数五: str = "",
+               参数六: str = "", 参数七: str = "", 参数八: str = "") -> dict:
+        pairs = [参数一, 参数二, 参数三, 参数四, 参数五, 参数六, 参数七, 参数八]
+        try:
+            rows = query(库, 查询名, pairs)
+        except (ValueError, sqlite3.Error) as e:
+            if in_tx() is not None:
+                raise
+            return {"错误": str(e)}
+        return rows[0] if rows else {}
+
+    @reg.verb("第一行第一列，适合 count(*) 这类单列查询。"
+              "多列查询会拿到第一个字段，要某一列请用「查一行」。")
+    def 查一值(库: str, 查询名: str, 参数一: str = "", 参数二: str = "",
+               参数三: str = "", 参数四: str = "", 参数五: str = "",
+               参数六: str = "", 参数七: str = "", 参数八: str = "") -> str:
+        pairs = [参数一, 参数二, 参数三, 参数四, 参数五, 参数六, 参数七, 参数八]
+        try:
+            rows = query(库, 查询名, pairs)
+        except (ValueError, sqlite3.Error) as e:
+            if in_tx() is not None:
+                raise
+            return f"[出错] {e}"
+        if not rows:
+            return ""
+        return str(next(iter(rows[0].values()), ""))
+
+    @reg.verb("执行增删改，返回影响的行数。语句同样放 queries/ 下。"
+              "在「事务」块里出错会抛出去让整块回滚。")
+    def 写库(库: str, 语句名: str, 参数一: str = "", 参数二: str = "",
+             参数三: str = "", 参数四: str = "", 参数五: str = "",
+             参数六: str = "", 参数七: str = "", 参数八: str = "") -> str:
+        pairs = [参数一, 参数二, 参数三, 参数四, 参数五, 参数六, 参数七, 参数八]
+        try:
+            sql = load_sql(语句名)
+            args = bind(sql, parse_params(pairs))
+            con = in_tx()
+            if con is not None:
+                # 事务里不 commit——那是「事务提交」的事
+                return str(con.execute(sql, args).rowcount)
+            con = open_conn(库)
+            try:
+                cur = con.execute(sql, args)
+                con.commit()
+                return str(cur.rowcount)
+            finally:
+                con.close()
+        except (ValueError, sqlite3.Error):
+            # 事务里必须抛：不抛的话一步失败、后面几步照跑、最后还提交了，
+            # 那比崩掉糟得多
+            if in_tx() is not None:
+                raise
+            import traceback
+            return f"[出错] {traceback.format_exc(limit=1).strip().splitlines()[-1]}"
+
+    # ------------------------------------------------------------------
+    # 事务：给引擎的「事务」块用
+    # ------------------------------------------------------------------
+
+    @reg.verb("开一个事务。一般不直接写，用「事务 库 … 结束」块。")
+    def 事务开始(库: str) -> str:
+        if in_tx() is not None:
+            # 嵌套要用 SAVEPOINT，语义跟外层回滚怎么交互得另说，
+            # 现在不值得。明确报错比默默共用一个事务清楚。
+            return "[出错] 已经在事务里了，不支持嵌套事务"
+        try:
+            con = open_conn(库)
+        except ValueError as e:
+            return f"[出错] {e}"
+        # sqlite3 默认在 INSERT/UPDATE 前自动开事务，显式 BEGIN 是为了
+        # 让纯查询的块也处在一个一致的快照里
+        con.execute("BEGIN")
+        _tx.con = con
+        return ""
+
+    @reg.verb("提交事务。")
+    def 事务提交() -> str:
+        con = in_tx()
+        if con is None:
+            return "[出错] 不在事务里"
+        try:
+            con.commit()
+        finally:
+            con.close()
+            _tx.con = None
+        return ""
+
+    @reg.verb("回滚事务。")
+    def 事务回滚() -> str:
+        con = in_tx()
+        if con is None:
+            return "[出错] 不在事务里"
+        try:
+            con.rollback()
+        finally:
+            con.close()
+            _tx.con = None
+        return ""
+
+    # ------------------------------------------------------------------
+    # 排查
+    # ------------------------------------------------------------------
+
+    @reg.verb("列出可用的查询，附各自需要的参数。")
+    def 列查询() -> str:
+        d = queries_dir()
+        if not d.is_dir():
+            return f"[没有查询目录] {d}"
+        rows = [f"目录 {d}"]
+        for f in sorted(d.glob("*.sql")):
+            # 下划线开头的是 schema 之类的，不是查询
+            if f.name.startswith("_"):
+                continue
+            sql = f.read_text(encoding="utf-8")
+            需要 = sorted(set(PARAM_RE.findall(sql)))
+            首行 = next((l.strip().lstrip("-").strip()
+                        for l in sql.splitlines() if l.strip().startswith("--")),
+                       "")
+            rows.append(f"  {f.stem}（{'、'.join(需要) or '无参数'}）"
+                        + (f"　{首行}" if 首行 else ""))
+        return "\n".join(rows) if len(rows) > 1 else f"{d} 下没有查询"
+
+    @reg.verb("看库里有哪些表；给了表名就看那张表有哪些列。")
+    def 表结构(库: str, 表名: str = "") -> str:
+        try:
+            con = in_tx() or open_conn(库)
+            close_after = in_tx() is None
+            try:
+                if not 表名:
+                    cur = con.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' "
+                        "AND name NOT LIKE 'sqlite_%' ORDER BY name")
+                    return "、".join(r[0] for r in cur.fetchall()) or "(没有表)"
+                # 表名不能参数化（占位符只能用在值的位置），所以自己校验：
+                # 只允许字母数字下划线和汉字，挡住注入
+                if not re.fullmatch(r"[\w\u4e00-\u9fff]+", 表名):
+                    return f"[表名不合法] {表名}"
+                cols = con.execute(f"PRAGMA table_info({表名})").fetchall()
+                if not cols:
+                    return f"[没有这张表] {表名}"
+                return "\n".join(
+                    f"{c['name']}　{c['type'] or '?'}"
+                    + ("　主键" if c["pk"] else "")
+                    + ("　非空" if c["notnull"] else "")
+                    for c in cols)
+            finally:
+                if close_after:
+                    con.close()
+        except (ValueError, sqlite3.Error) as e:
+            return f"[出错] {e}"

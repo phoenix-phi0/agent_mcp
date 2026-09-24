@@ -1,0 +1,22 @@
+[
+  {
+    "role": "system",
+    "content": "你是助手"
+  },
+  {
+    "role": "user",
+    "content": "第四句"
+  },
+  {
+    "role": "assistant",
+    "content": "[模拟回复] 第四句"
+  },
+  {
+    "role": "user",
+    "content": "第五句"
+  },
+  {
+    "role": "assistant",
+    "content": "[模拟回复] 第五句"
+  }
+]

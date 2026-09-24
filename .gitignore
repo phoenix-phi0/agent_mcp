@@ -1,0 +1,30 @@
+# 依赖和缓存
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+
+# 数据库：内容由 content/ 下的源文件导入得到，不进版本库。
+# 实体改了要重建库（没有迁移），留着旧库反而误事。
+*.db
+*.db-wal
+*.db-shm
+
+# 运行产物
+sessions/
+uploads/
+*.log
+.auth_secret
+
+# 编译产物：web/ 每次 build 整个重写。
+# kg/web/kg.svg 是画图的产物，同理。
+web/
+
+# 备份和临时文件
+*.bak
+*.tmp
+.edit_backup/
+
+# 历史遗留的工作副本，跟 tools/、gen/ 下的正本同名，容易改错地方
+data/tools/
+data/gen/

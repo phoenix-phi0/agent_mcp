@@ -1,0 +1,20 @@
+# 「全部字段」试验用的实体定义。
+#
+# 故意放两个实体，而且**都有 name 字段**——那正是裸名会撞的情况：
+# 合并字段表时只剩一个，谁在后面谁赢。写成 author.name 才说得清。
+
+实体 article 文章
+  字段 title 文本 必填 唯一 标题
+  字段 body 长文本 正文
+  字段 status 枚举 draft,published,archived 必填 默认 draft 发布状态
+  字段 views 整数 必填 默认 0 阅读数
+  字段 created_at 文本 必填 默认 now 创建于
+结束
+
+
+实体 author 作者
+  字段 code 文本 必填 工号
+  字段 name 文本 必填 姓名
+  字段 level 枚举 新手,熟练,资深 必填 默认 新手 级别
+  主键 code
+结束

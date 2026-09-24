@@ -1,0 +1,8 @@
+{
+  "name": "mcp-e2e",
+  "private": true,
+  "description": "真前端连真后端的端到端测试。node run.js",
+  "dependencies": {
+    "jsdom": "^24.0.0"
+  }
+}

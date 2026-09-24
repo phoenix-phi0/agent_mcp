@@ -1,0 +1,50 @@
+{# 建表 SQL —— 每个实体一张表。
+   上下文：entities = [entity, ...]，已按依赖排过序（被引用的表在前）
+   entity：.name .fields[] .pk[] .has_implicit_id
+   field： .name .type .required .unique .indexed .options
+           .ref（关联的实体名） .default .default_is_word #}
+-- 由 DSL 生成，请勿手改。改 .entity 后重新生成。
+-- 第一版不做迁移：字段变更后请删库重建。
+
+-- 外键默认是关的，而且是**每个连接**都要开一次——建库时开了不代表
+-- 后面查询时也开着。应用侧连接后要自己 PRAGMA foreign_keys = ON，
+-- 不然外键约束只是摆设。
+PRAGMA foreign_keys = ON;
+
+{% for entity in entities %}
+{# 倒序删：被引用的表最后删，否则开着外键时删不掉。
+   entities 是按依赖正序排的，所以这里从后往前。 #}
+{% endfor %}
+{% for entity in entities | reverse %}
+DROP TABLE IF EXISTS {{ entity.name }};
+{% endfor %}
+
+{% for entity in entities %}
+{% if entity.label and entity.label != entity.name %}
+-- {{ entity.label }}
+{% endif %}
+CREATE TABLE {{ entity.name }} (
+{% if entity.has_implicit_id %}
+    {{ 主键列 }}{% if entity.fields %},{% endif %}
+
+{% endif %}
+{% for field in entity.fields %}
+    {{ field | 转SQL }}
+{%- if field.unique %} UNIQUE{% endif %}
+{%- if field.default %} DEFAULT {{ field | 转默认值 }}{% endif %}
+{%- if field.ref %} REFERENCES {{ field.ref }}({{ field.ref | 主键名(entities) }}) ON DELETE RESTRICT{% endif %}
+{%- if not loop.last or entity.pk %},{% endif %}
+
+{% endfor %}
+{% if entity.pk %}
+    PRIMARY KEY ({{ entity.pk | join(", ") }})
+{% endif %}
+);
+
+{% for field in entity.fields %}
+{% if field.indexed %}
+CREATE INDEX IF NOT EXISTS idx_{{ entity.name }}_{{ field.name }}
+    ON {{ entity.name }}({{ field.name }});
+{% endif %}
+{% endfor %}
+{% endfor %}

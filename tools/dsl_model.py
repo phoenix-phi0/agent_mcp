@@ -1,0 +1,324 @@
+# -*- coding: utf-8 -*-
+"""模型调用那一组：问、问JSON、流式、对话、挂载文件、带工具。
+
+从 dsl.py 拆出来的第二块，做成 mixin 混进 DSLEngine。
+
+## 为什么用 mixin 而不是独立的类
+
+这些方法离不开引擎状态——`self.client`、`self.system`、`self.temperature`、
+`self.history`、`self.verbs`、`self._emit`、`self.expand`。做成独立的类
+就要把这七样传来传去，或者反过来持有引擎的引用，那跟 mixin 是同一件事，
+只是多绕一道。
+
+代价是隐式依赖：这个文件里的方法用到的 self.xxx，定义在 dsl.py 里。
+改那边的属性名要记得搜这边。下面的 REQUIRES 列出全部依赖，改属性时
+照着查。
+
+## 依赖的引擎属性和方法
+
+    self.client         ZhipuClient（或假客户端）
+    self.system         系统提示词
+    self.temperature
+    self.history        对话历史
+    self.verbs          动词表
+    self.vars           变量表（store 写）
+    self._depth         嵌套深度，工具调脚本动词时要判
+    self._last_result   逐项块的自动输出
+
+    self.expand()       变量插值
+    self.store()        写变量
+    self._emit()        输出一行
+    self._safe_path()   路径越界检查
+    self._rel()         显示用的相对路径
+    self._eval_against() 重试的条件判断
+    self._sub_engine()  脚本动词起子引擎
+"""
+
+import inspect
+import json
+from pathlib import Path
+
+from .dsl_core import (ATTACH_RE, DEFAULT_TOOL_ROUNDS, DSLError,
+                       MAX_CALL_DEPTH, RETRY_RE, TOOLS_RE, to_text)
+
+
+class ModelMixin:
+    """调模型的那一组语句。混进 DSLEngine。"""
+
+    # ------------------------------------------------------------------
+    # 后缀：挂载文件、带工具
+    # ------------------------------------------------------------------
+
+    def _split_attach(self, rest: str):
+        """把「… 附 a.md,b.md」的后缀剥下来。"""
+        import re
+        m = ATTACH_RE.search(rest)
+        if not m:
+            return rest, []
+        files = [x.strip() for x in re.split(r"[,，]", m.group(1)) if x.strip()]
+        return rest[:m.start()], files
+
+    def _split_tools(self, rest: str):
+        """把「… 带工具 挑题,题目数 最多 3 轮」剥下来。"""
+        import re
+        m = TOOLS_RE.search(rest)
+        if not m:
+            return rest, [], 0
+        names = [x.strip() for x in re.split(r"[,，]", m.group(1)) if x.strip()]
+        return rest[:m.start()], names, int(m.group(2) or DEFAULT_TOOL_ROUNDS)
+
+    def _attach(self, prompt: str, files: list) -> str:
+        """文件内容拼到提示词前面。
+
+        文件在前、指令在后：长上下文里指令放最后模型更容易照做，反过来
+        的话几千字的正文会把那句要求冲淡。
+
+        读不到直接报错，不静默跳过——挂载失败而照样发请求的话，模型会
+        基于空上下文编个答案，看着像正常回复，比报错难查。
+        """
+        if not files:
+            return prompt
+        blocks = []
+        for name in files:
+            path = self._safe_path(self.expand(name))
+            if not path.is_file():
+                raise DSLError(f"挂载的文件不存在：{self._rel(path)}")
+            blocks.append(
+                f"── {self._rel(path)} ──\n{path.read_text(encoding='utf-8')}")
+        return "\n\n".join(blocks) + "\n\n" + prompt
+
+    def _prompt_of(self, rest: str, kw: str):
+        """生成类语句的共同前半段：剥挂载后缀、拆赋值、展开、拼文件。"""
+        rest, files = self._split_attach(rest)
+        name, prompt = self._split_assign(rest, kw)
+        return name, self._attach(self.expand(prompt), files)
+
+    # ------------------------------------------------------------------
+    # 工具调用
+    # ------------------------------------------------------------------
+
+    def _tools_schema(self, names: list) -> list:
+        """动词转 OpenAI 兼容的 tools 定义。
+
+        参数一律 string——动词签名本来就全是 str。必填与否从函数签名的
+        默认值读：有默认值的不进 required，模型就知道那个可以不给。
+
+        实测智谱认中文函数名，所以不用做名字映射。
+        """
+        tools = []
+        for name in names:
+            if not self.verbs or not self.verbs.has(name):
+                raise DSLError(f"没有名为「{name}」的动词，无法当工具用")
+            params = self.verbs.params_of(name)
+            kind, impl = self.verbs.resolve(name)
+            desc = (getattr(impl, "__verb_description__", "")
+                    if kind == "python" else f"执行脚本 {name}")
+
+            required = list(params)
+            if kind == "python":
+                try:
+                    required = [
+                        p.name
+                        for p in inspect.signature(impl).parameters.values()
+                        if p.default is inspect.Parameter.empty]
+                except (TypeError, ValueError):
+                    pass
+
+            tools.append({"type": "function", "function": {
+                "name": name, "description": desc,
+                "parameters": {
+                    "type": "object",
+                    "properties": {p: {"type": "string", "description": p}
+                                   for p in params},
+                    "required": required,
+                }}})
+        return tools
+
+    def _call_verb_by_name(self, name: str, args: dict) -> str:
+        """按参数名调用动词。
+
+        模型给的是参数对象，顺序跟函数签名不一定一致——所以按名字绑定。
+        多给的键丢掉（通常是模型自己编的字段，塞进去会 TypeError），
+        少给的让动词用默认值。
+        """
+        if not self.verbs or not self.verbs.has(name):
+            return f"[没有这个动词] {name}"
+        params = self.verbs.params_of(name)
+        kwargs = {k: to_text(v) for k, v in args.items() if k in params}
+        kind, impl = self.verbs.resolve(name)
+        if kind != "python":
+            sub = self._sub_engine()
+            sub.vars.update(kwargs)
+            return sub.run(Path(impl).read_text(encoding="utf-8"))
+        try:
+            return to_text(impl(**kwargs))
+        except Exception as e:
+            # 不抛出去：工具执行失败是模型该知道的信息，让它换参数重试，
+            # 比整个脚本崩掉强
+            return f"[执行失败] {type(e).__name__}: {e}"
+
+    def _chat_tools(self, messages: list, names: list,
+                    max_rounds: int) -> str:
+        """带工具的对话循环。messages 会被就地追加。"""
+        tools = self._tools_schema(names)
+
+        for _ in range(max(1, max_rounds)):
+            data = self.client.chat_raw(messages, tools=tools,
+                                        tool_choice="auto",
+                                        temperature=self.temperature)
+            msg = data["choices"][0]["message"]
+            # reasoning_content 不能回传：推理模型返回的思考过程原样发
+            # 回去白烧 token，有的接口还会报错
+            messages.append({k: v for k, v in msg.items()
+                             if k in ("role", "content", "tool_calls")})
+
+            calls = msg.get("tool_calls") or []
+            if not calls:
+                return msg.get("content") or ""
+
+            for c in calls:
+                fn = c.get("function", {})
+                raw_args = fn.get("arguments") or "{}"
+                try:
+                    args = json.loads(raw_args)
+                except json.JSONDecodeError:
+                    args = {}
+                result = self._call_verb_by_name(fn.get("name", ""), args)
+                # 打印出来，不静默执行——这是 agent 最难调试的地方
+                self._emit(f"[工具] {fn.get('name')}({raw_args[:60]}) "
+                           f"→ {result[:80]}")
+                messages.append({"role": "tool",
+                                 "tool_call_id": c.get("id", ""),
+                                 "content": result})
+
+        self._emit(f"[工具调用满 {max_rounds} 轮仍未收敛]")
+        return messages[-1].get("content") or ""
+
+    # ------------------------------------------------------------------
+    # 语句
+    # ------------------------------------------------------------------
+
+    def _generate(self, prompt: str) -> str:
+        return self.client.chat(prompt, system=self.system,
+                                temperature=self.temperature)
+
+    def _do_ask(self, rest: str, lineno: int) -> None:
+        """问 X = 提示词 [附 文件] [带工具 …] [重试 N 次 直到 条件]
+
+        后缀从外往里剥：重试最外，然后带工具，最后挂载。所以
+        「附 a.md 带工具 X 重试 2 次 直到 …」这个顺序是对的。
+        """
+        retry, cond = 0, None
+        m = RETRY_RE.search(rest)
+        if m:
+            retry, cond = int(m.group(1)), m.group(2).strip()
+            rest = rest[:m.start()]
+
+        rest, tool_names, max_rounds = self._split_tools(rest)
+        name, prompt = self._prompt_of(rest, "问")
+
+        def once() -> str:
+            if not tool_names:
+                return self._generate(prompt)
+            msgs = []
+            if self.system:
+                msgs.append({"role": "system", "content": self.system})
+            msgs.append({"role": "user", "content": prompt})
+            return self._chat_tools(msgs, tool_names, max_rounds)
+
+        result = once()
+        attempts = 1
+        while cond and not self._eval_against(result, cond, lineno):
+            if attempts >= max(1, retry):
+                self._emit(f"[重试 {attempts} 次后仍不满足「{cond}」，"
+                           f"采用最后一次结果]")
+                break
+            attempts += 1
+            result = once()
+
+        self.store(name, result)
+        self._last_result = result
+
+    def _do_ask_json(self, rest: str, lineno: int) -> None:
+        """问JSON X = 提示词 —— 要一个 JSON 回来，直接得到结构。
+
+        解析失败抛错而不是给空对象：后面 {决策.意图} 取不到会原样保留成
+        字符串，扔进条件判断只会一路走到「否则」，错得很隐蔽。
+        """
+        name, prompt = self._prompt_of(rest, "问JSON")
+        try:
+            result = self.client.chat_json(
+                prompt, system=self.system, temperature=self.temperature)
+        except ValueError as e:
+            raise DSLError(f"第 {lineno + 1} 行：{e}") from e
+        self.store(name, result)
+        self._last_result = to_text(result)
+
+    def _do_stream(self, rest: str) -> None:
+        """流式 X = 提示词 —— 边生成边打印，最后把整段存进变量。"""
+        name, prompt = self._prompt_of(rest, "流式")
+        parts = []
+        for chunk in self.client.stream(prompt, system=self.system,
+                                        temperature=self.temperature):
+            parts.append(chunk)
+            if self.verbose:
+                print(chunk, end="", flush=True)
+        if self.verbose:
+            print()
+        text = "".join(parts)
+        self.store(name, text)
+        self._last_result = text
+
+    def _do_chat(self, rest: str) -> None:
+        """对话 X = 提示词 [带工具 …] —— 多轮，保留历史。"""
+        rest, tool_names, max_rounds = self._split_tools(rest)
+        name, prompt = self._prompt_of(rest, "对话")
+        self._ensure_system()
+        self.history.append({"role": "user", "content": prompt})
+        if tool_names:
+            # _chat_tools 自己会追加 assistant 消息，这里不要再 append
+            reply = self._chat_tools(self.history, tool_names, max_rounds)
+        else:
+            reply = self.client.chat_messages(
+                self.history, temperature=self.temperature)
+            self.history.append({"role": "assistant", "content": reply})
+        self.store(name, reply)
+        self._last_result = reply
+
+    def _do_verdict(self, rest: str, lineno: int) -> None:
+        """判定 X = 提示词 甲→输出 乙→输出 否则→输出
+
+        注意分支列表**不会发给模型**，它们只在本地匹配模型的回复开头。
+        所以期望的选项要自己写进提示词里，否则模型回一段话，
+        startswith 不命中，直接落到「否则」。
+        """
+        from .dsl_core import BRANCH_RE, check_name
+        import re
+
+        name, _, tail = rest.partition("=")
+        if not name.strip():
+            raise DSLError(f"第 {lineno + 1} 行：「判定」的语法应为："
+                           f"判定 名 = 提示词 值→输出")
+
+        branches = [(m.group(1), m.group(2)) for m in BRANCH_RE.finditer(tail)]
+        if not branches:
+            raise DSLError(f"第 {lineno + 1} 行：「判定」至少要有一个分支，"
+                           f"形如 正确→○")
+        first = re.search(r"\S+?\s*(?:→|->)", tail)
+        prompt = tail[:first.start()].strip() if first else tail.strip()
+
+        result = self._generate(self.expand(prompt))
+        self.store(check_name(name.strip(), lineno), result)
+        self._last_result = result
+
+        fallback = None
+        for key, out in branches:
+            if key in ("否则", "else", "其他"):
+                fallback = out
+                continue
+            if result.strip().startswith(key):
+                self._emit(out)
+                break
+        else:
+            if fallback:
+                self._emit(fallback)

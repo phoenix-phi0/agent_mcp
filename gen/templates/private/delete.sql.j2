@@ -1,0 +1,3 @@
+-- 删一条{{ e | 标签 }}，只能删自己的：删别人的影响 0 行。
+DELETE FROM {{ e.name }}
+WHERE {{ e | 主键 }} = :{{ e | 主键 }} AND owner = :当前用户

@@ -1,0 +1,264 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1552 1256" width="1552" height="1256" font-family="-apple-system,'Hiragino Sans','Noto Sans CJK SC','Microsoft YaHei',sans-serif">
+<rect width="1552" height="1256" fill="#faf9f7"/>
+<rect x="0" y="128" width="1552" height="104" fill="#f3f0eb"/>
+<rect x="0" y="336" width="1552" height="104" fill="#f3f0eb"/>
+<rect x="0" y="544" width="1552" height="312" fill="#f3f0eb"/>
+<rect x="0" y="960" width="1552" height="104" fill="#f3f0eb"/>
+<g fill="none">
+<path d="M606,76 C606,56 796,56 796,36" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M606,76 C606,56 946,56 946,36" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M606,76 C606,108 396,108 396,140" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M396,180 C396,160 586,160 586,140" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M586,180 C586,160 776,160 776,140" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M776,180 C776,160 966,160 966,140" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M966,180 C966,160 1156,160 1156,140" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M946,76 C946,160 361,160 361,244" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M966,180 C966,212 361,212 361,244" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M946,76 C946,160 511,160 511,244" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M966,180 C966,212 511,212 511,244" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M361,284 C361,264 701,264 701,244" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M361,284 C361,264 851,264 851,244" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M361,284 C361,264 1001,264 1001,244" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M1001,284 C1001,264 1191,264 1191,244" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M511,284 C511,316 131,316 131,348" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M131,388 C131,368 321,368 321,348" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M321,388 C321,368 511,368 511,348" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M321,388 C321,368 661,368 661,348" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M661,388 C661,368 851,368 851,348" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M701,284 C701,316 1041,316 1041,348" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M851,284 C851,316 1231,316 1231,348" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M511,388 C511,368 1421,368 1421,348" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M851,388 C851,368 1421,368 1421,348" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M361,284 C361,368 171,368 171,452" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M131,388 C131,420 171,420 171,452" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M171,492 C171,472 511,472 511,452" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M511,492 C511,472 851,472 851,452" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M851,492 C851,472 1041,472 1041,452" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M851,492 C851,472 1191,472 1191,452" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M361,284 C361,368 321,368 321,452" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M171,492 C171,472 661,472 661,452" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M1421,388 C1421,420 1381,420 1381,452" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M661,388 C661,472 251,472 251,556" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M661,388 C661,472 401,472 401,556" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M661,388 C661,472 551,472 551,556" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M661,388 C661,472 701,472 701,556" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M661,388 C661,472 851,472 851,556" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M661,388 C661,472 1001,472 1001,556" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M661,388 C661,472 1151,472 1151,556" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M661,388 C661,472 1301,472 1301,556" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M851,388 C851,524 191,524 191,660" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M851,388 C851,524 341,524 341,660" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M511,388 C511,524 681,524 681,660" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M511,388 C511,524 831,524 831,660" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M511,388 C511,524 981,524 981,660" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M131,388 C131,524 1171,524 1171,660" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M1041,388 C1041,524 1361,524 1361,660" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M1421,388 C1421,576 306,576 306,764" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M1421,388 C1421,576 456,576 456,764" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M1421,388 C1421,576 606,576 606,764" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M1421,388 C1421,576 756,576 756,764" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M851,388 C851,524 491,524 491,660" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M321,388 C321,576 1096,576 1096,764" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M321,388 C321,576 1246,576 1246,764" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M1421,388 C1421,576 906,576 906,764" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M321,388 C321,628 246,628 246,868" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M511,492 C511,680 246,680 246,868" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M131,388 C131,628 586,628 586,868" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M321,388 C321,628 396,628 396,868" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M511,388 C511,628 776,628 776,868" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M851,492 C851,680 776,680 776,868" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M511,388 C511,628 926,628 926,868" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M511,492 C511,680 926,680 926,868" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M776,908 C776,888 1116,888 1116,868" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M926,908 C926,888 1116,888 1116,868" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M511,284 C511,576 1306,576 1306,868" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M511,492 C511,680 1306,680 1306,868" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M661,388 C661,680 436,680 436,972" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M851,492 C851,732 436,732 436,972" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M436,1012 C436,992 626,992 626,972" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M1421,388 C1421,680 816,680 816,972" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M776,908 C776,940 816,940 816,972" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M1421,388 C1421,680 966,680 966,972" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M1421,388 C1421,680 1116,680 1116,972" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M816,1012 C816,1044 491,1044 491,1076" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M966,1012 C966,1044 491,1044 491,1076" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M1116,1012 C1116,1044 491,1044 491,1076" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M626,1012 C626,1044 491,1044 491,1076" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M1041,388 C1041,732 681,732 681,1076" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M1231,388 C1231,732 681,732 681,1076" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M251,596 C251,836 681,836 681,1076" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M946,76 C946,576 871,576 871,1076" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M681,1116 C681,1096 871,1096 871,1076" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M681,1116 C681,1096 1061,1096 1061,1076" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M1191,284 C1191,680 1061,680 1061,1076" stroke="#e2ddd5" stroke-width="1"/>
+<path d="M606,81 L796,81" stroke="#cfc4b4" stroke-width="1" stroke-dasharray="3,3"/>
+<path d="M701,289 L851,289" stroke="#cfc4b4" stroke-width="1" stroke-dasharray="3,3"/>
+<path d="M851,393 L661,393" stroke="#cfc4b4" stroke-width="1" stroke-dasharray="3,3"/>
+<path d="M1041,393 L1231,393" stroke="#cfc4b4" stroke-width="1" stroke-dasharray="3,3"/>
+<path d="M701,601 L851,601" stroke="#cfc4b4" stroke-width="1" stroke-dasharray="3,3"/>
+<path d="M681,705 L831,705" stroke="#cfc4b4" stroke-width="1" stroke-dasharray="3,3"/>
+<path d="M1361,705 L1171,705" stroke="#cfc4b4" stroke-width="1" stroke-dasharray="3,3"/>
+<path d="M456,809 L306,809" stroke="#cfc4b4" stroke-width="1" stroke-dasharray="3,3"/>
+<path d="M756,809 L606,809" stroke="#cfc4b4" stroke-width="1" stroke-dasharray="3,3"/>
+<path d="M1096,809 L1246,809" stroke="#cfc4b4" stroke-width="1" stroke-dasharray="3,3"/>
+<path d="M396,913 L586,913" stroke="#cfc4b4" stroke-width="1" stroke-dasharray="3,3"/>
+<path d="M776,913 L1306,913" stroke="#cfc4b4" stroke-width="1" stroke-dasharray="3,3"/>
+<path d="M926,913 L776,913" stroke="#cfc4b4" stroke-width="1" stroke-dasharray="3,3"/>
+<path d="M816,1017 L1116,1017" stroke="#cfc4b4" stroke-width="1" stroke-dasharray="3,3"/>
+<path d="M966,1017 L816,1017" stroke="#cfc4b4" stroke-width="1" stroke-dasharray="3,3"/>
+<path d="M966,1017 L1116,1017" stroke="#cfc4b4" stroke-width="1" stroke-dasharray="3,3"/>
+</g>
+<text x="12" y="61" font-size="12" fill="#a89f93">0　文字</text>
+<text x="12" y="165" font-size="12" fill="#a89f93">1　音韵</text>
+<text x="12" y="269" font-size="12" fill="#a89f93">2　词类</text>
+<text x="12" y="373" font-size="12" fill="#a89f93">3　基本活用</text>
+<text x="12" y="477" font-size="12" fill="#a89f93">4　助词</text>
+<text x="12" y="581" font-size="12" fill="#a89f93">5　句型</text>
+<text x="12" y="893" font-size="12" fill="#a89f93">6　高级活用</text>
+<text x="12" y="997" font-size="12" fill="#a89f93">7　待遇表现</text>
+<text x="12" y="1101" font-size="12" fill="#a89f93">8　综合</text>
+<g opacity="1"><rect x="547" y="36" width="118" height="40" rx="7" fill="#fff" stroke="#7c6a9c" stroke-width="2.2"/>
+<text x="606" y="60" text-anchor="middle" font-size="13" fill="#7c6a9c">平假名</text></g>
+<g opacity="0.72"><rect x="737" y="36" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="796" y="60" text-anchor="middle" font-size="13" fill="#b5aca1">片假名</text></g>
+<g opacity="0.72"><rect x="887" y="36" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="946" y="60" text-anchor="middle" font-size="13" fill="#b5aca1">汉字与音训读</text></g>
+<g opacity="0.72"><rect x="337" y="140" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="396" y="164" text-anchor="middle" font-size="13" fill="#b5aca1">浊音半浊音</text></g>
+<g opacity="0.72"><rect x="527" y="140" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="586" y="164" text-anchor="middle" font-size="13" fill="#b5aca1">拗音</text></g>
+<g opacity="0.72"><rect x="717" y="140" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="776" y="164" text-anchor="middle" font-size="13" fill="#b5aca1">促音</text></g>
+<g opacity="0.72"><rect x="907" y="140" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="966" y="164" text-anchor="middle" font-size="13" fill="#b5aca1">长音</text></g>
+<g opacity="0.72"><rect x="1097" y="140" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1156" y="164" text-anchor="middle" font-size="13" fill="#b5aca1">高低音调</text></g>
+<g opacity="0.72"><rect x="302" y="244" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="361" y="268" text-anchor="middle" font-size="13" fill="#b5aca1">名词</text></g>
+<circle cx="417" cy="247" r="9" fill="#4a8a72"/><text x="417" y="251" text-anchor="middle" font-size="10" fill="#fff">5</text>
+<g opacity="0.72"><rect x="452" y="244" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="511" y="268" text-anchor="middle" font-size="13" fill="#b5aca1">动词三类划分</text></g>
+<g opacity="0.72"><rect x="642" y="244" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="701" y="268" text-anchor="middle" font-size="13" fill="#b5aca1">い形容词</text></g>
+<g opacity="0.72"><rect x="792" y="244" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="851" y="268" text-anchor="middle" font-size="13" fill="#b5aca1">な形容词</text></g>
+<g opacity="0.72"><rect x="942" y="244" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1001" y="268" text-anchor="middle" font-size="13" fill="#b5aca1">副词</text></g>
+<g opacity="0.72"><rect x="1132" y="244" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1191" y="268" text-anchor="middle" font-size="13" fill="#b5aca1">拟声拟态词</text></g>
+<g opacity="0.72"><rect x="72" y="348" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="131" y="372" text-anchor="middle" font-size="13" fill="#b5aca1">ます形</text></g>
+<g opacity="0.72"><rect x="262" y="348" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="321" y="372" text-anchor="middle" font-size="13" fill="#b5aca1">辞书形</text></g>
+<circle cx="377" cy="351" r="9" fill="#b07d48"/><text x="377" y="355" text-anchor="middle" font-size="10" fill="#fff">6</text>
+<g opacity="0.72"><rect x="452" y="348" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="511" y="372" text-anchor="middle" font-size="13" fill="#b5aca1">ない形</text></g>
+<circle cx="567" cy="351" r="9" fill="#b07d48"/><text x="567" y="355" text-anchor="middle" font-size="10" fill="#fff">6</text>
+<g opacity="0.72"><rect x="602" y="348" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="661" y="372" text-anchor="middle" font-size="13" fill="#b5aca1">て形</text></g>
+<circle cx="717" cy="351" r="9" fill="#b07d48"/><text x="717" y="355" text-anchor="middle" font-size="10" fill="#fff">10</text>
+<g opacity="0.72"><rect x="792" y="348" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="851" y="372" text-anchor="middle" font-size="13" fill="#b5aca1">た形</text></g>
+<g opacity="0.72"><rect x="982" y="348" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1041" y="372" text-anchor="middle" font-size="13" fill="#b5aca1">い形容词活用</text></g>
+<g opacity="0.72"><rect x="1172" y="348" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1231" y="372" text-anchor="middle" font-size="13" fill="#b5aca1">な形容词活用</text></g>
+<g opacity="0.72"><rect x="1362" y="348" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1421" y="372" text-anchor="middle" font-size="13" fill="#b5aca1">简体与敬体</text></g>
+<circle cx="1477" cy="351" r="9" fill="#b07d48"/><text x="1477" y="355" text-anchor="middle" font-size="10" fill="#fff">9</text>
+<g opacity="0.72"><rect x="112" y="452" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="171" y="476" text-anchor="middle" font-size="13" fill="#b5aca1">は と が</text></g>
+<g opacity="0.72"><rect x="452" y="452" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="511" y="476" text-anchor="middle" font-size="13" fill="#b5aca1">を</text></g>
+<g opacity="0.72"><rect x="792" y="452" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="851" y="476" text-anchor="middle" font-size="13" fill="#b5aca1">に と で</text></g>
+<g opacity="0.72"><rect x="982" y="452" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1041" y="476" text-anchor="middle" font-size="13" fill="#b5aca1">へ と と</text></g>
+<g opacity="0.72"><rect x="1132" y="452" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1191" y="476" text-anchor="middle" font-size="11" fill="#b5aca1">から まで より</text></g>
+<g opacity="0.72"><rect x="262" y="452" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="321" y="476" text-anchor="middle" font-size="13" fill="#b5aca1">の</text></g>
+<g opacity="0.72"><rect x="602" y="452" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="661" y="476" text-anchor="middle" font-size="13" fill="#b5aca1">も</text></g>
+<g opacity="0.72"><rect x="1322" y="452" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1381" y="476" text-anchor="middle" font-size="11" fill="#b5aca1">终助词 か ね よ</text></g>
+<g opacity="0.72"><rect x="192" y="556" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="251" y="580" text-anchor="middle" font-size="13" fill="#b5aca1">ている</text></g>
+<g opacity="0.72"><rect x="342" y="556" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="401" y="580" text-anchor="middle" font-size="13" fill="#b5aca1">てください</text></g>
+<g opacity="0.72"><rect x="492" y="556" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="551" y="580" text-anchor="middle" font-size="13" fill="#b5aca1">てから</text></g>
+<g opacity="0.72"><rect x="642" y="556" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="701" y="580" text-anchor="middle" font-size="13" fill="#b5aca1">てもいい</text></g>
+<g opacity="0.72"><rect x="792" y="556" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="851" y="580" text-anchor="middle" font-size="13" fill="#b5aca1">てはいけない</text></g>
+<g opacity="0.72"><rect x="942" y="556" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1001" y="580" text-anchor="middle" font-size="13" fill="#b5aca1">ておく</text></g>
+<g opacity="0.72"><rect x="1092" y="556" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1151" y="580" text-anchor="middle" font-size="13" fill="#b5aca1">てしまう</text></g>
+<g opacity="0.72"><rect x="1242" y="556" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1301" y="580" text-anchor="middle" font-size="13" fill="#b5aca1">てみる</text></g>
+<g opacity="0.72"><rect x="132" y="660" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="191" y="684" text-anchor="middle" font-size="13" fill="#b5aca1">たことがある</text></g>
+<g opacity="0.72"><rect x="282" y="660" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="341" y="684" text-anchor="middle" font-size="13" fill="#b5aca1">たほうがいい</text></g>
+<g opacity="0.72"><rect x="622" y="660" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="681" y="684" text-anchor="middle" font-size="11" fill="#b5aca1">なければならない</text></g>
+<g opacity="0.72"><rect x="772" y="660" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="831" y="684" text-anchor="middle" font-size="13" fill="#b5aca1">なくてもいい</text></g>
+<g opacity="0.72"><rect x="922" y="660" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="981" y="684" text-anchor="middle" font-size="13" fill="#b5aca1">ないでください</text></g>
+<g opacity="0.72"><rect x="1112" y="660" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1171" y="684" text-anchor="middle" font-size="13" fill="#b5aca1">たい</text></g>
+<g opacity="0.72"><rect x="1302" y="660" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1361" y="684" text-anchor="middle" font-size="13" fill="#b5aca1">ほしい</text></g>
+<g opacity="0.72"><rect x="247" y="764" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="306" y="788" text-anchor="middle" font-size="13" fill="#b5aca1">と思う</text></g>
+<g opacity="0.72"><rect x="397" y="764" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="456" y="788" text-anchor="middle" font-size="13" fill="#b5aca1">という</text></g>
+<g opacity="0.72"><rect x="547" y="764" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="606" y="788" text-anchor="middle" font-size="13" fill="#b5aca1">ので と から</text></g>
+<g opacity="0.72"><rect x="697" y="764" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="756" y="788" text-anchor="middle" font-size="13" fill="#b5aca1">が と けど</text></g>
+<g opacity="0.72"><rect x="432" y="660" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="491" y="684" text-anchor="middle" font-size="13" fill="#b5aca1">たら</text></g>
+<g opacity="0.72"><rect x="1037" y="764" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1096" y="788" text-anchor="middle" font-size="13" fill="#b5aca1">ば</text></g>
+<g opacity="0.72"><rect x="1187" y="764" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1246" y="788" text-anchor="middle" font-size="13" fill="#b5aca1">と（条件）</text></g>
+<g opacity="0.72"><rect x="847" y="764" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="906" y="788" text-anchor="middle" font-size="13" fill="#b5aca1">なら</text></g>
+<g opacity="0.72"><rect x="187" y="868" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="246" y="892" text-anchor="middle" font-size="13" fill="#b5aca1">可能形</text></g>
+<g opacity="0.72"><rect x="527" y="868" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="586" y="892" text-anchor="middle" font-size="13" fill="#b5aca1">意志形</text></g>
+<g opacity="0.72"><rect x="337" y="868" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="396" y="892" text-anchor="middle" font-size="13" fill="#b5aca1">命令形</text></g>
+<g opacity="0.72"><rect x="717" y="868" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="776" y="892" text-anchor="middle" font-size="13" fill="#b5aca1">受身形</text></g>
+<g opacity="0.72"><rect x="867" y="868" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="926" y="892" text-anchor="middle" font-size="13" fill="#b5aca1">使役形</text></g>
+<g opacity="0.72"><rect x="1057" y="868" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1116" y="892" text-anchor="middle" font-size="13" fill="#b5aca1">使役受身形</text></g>
+<g opacity="0.72"><rect x="1247" y="868" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1306" y="892" text-anchor="middle" font-size="13" fill="#b5aca1">自他动词对</text></g>
+<g opacity="0.72"><rect x="377" y="972" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="436" y="996" text-anchor="middle" font-size="9.5" fill="#b5aca1">授受 あげる くれる もらう</text></g>
+<g opacity="0.72"><rect x="567" y="972" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="626" y="996" text-anchor="middle" font-size="9.5" fill="#b5aca1">てあげる てくれる てもらう</text></g>
+<g opacity="0.72"><rect x="757" y="972" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="816" y="996" text-anchor="middle" font-size="13" fill="#b5aca1">尊敬语</text></g>
+<g opacity="0.72"><rect x="907" y="972" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="966" y="996" text-anchor="middle" font-size="13" fill="#b5aca1">谦让语</text></g>
+<g opacity="0.72"><rect x="1057" y="972" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1116" y="996" text-anchor="middle" font-size="13" fill="#b5aca1">丁宁语</text></g>
+<g opacity="0.72"><rect x="432" y="1076" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="491" y="1100" text-anchor="middle" font-size="13" fill="#b5aca1">敬语综合运用</text></g>
+<g opacity="0.72"><rect x="622" y="1076" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="681" y="1100" text-anchor="middle" font-size="13" fill="#b5aca1">近义词辨析</text></g>
+<g opacity="0.72"><rect x="812" y="1076" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="871" y="1100" text-anchor="middle" font-size="13" fill="#b5aca1">汉字书写</text></g>
+<g opacity="0.72"><rect x="1002" y="1076" width="118" height="40" rx="7" fill="#fff" stroke="#ddd8d0" stroke-width="1"/>
+<text x="1061" y="1100" text-anchor="middle" font-size="13" fill="#b5aca1">惯用搭配</text></g>
+<text x="56" y="1236" font-size="11" fill="#8a827a">实心=已掌握　粗描边=可学　淡出=未解锁　角标=下游节点数　虚线=对照关系　共 69 个节点，最长链 13 步</text>
+</svg>

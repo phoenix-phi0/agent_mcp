@@ -1,0 +1,44 @@
+# 界面表单的字段定义。
+#
+# **这个文件不建表**，只喂给 .ui 的字段表。gendb 读的是 entities/ 下的
+# 文件，不碰这里。
+#
+# 为什么单独一个：.ui 里的字段是**输入框**，.entity 里的字段是**表列**，
+# 两者只是恰好都叫「字段」。message 和 answer 是用户当场输入、用完就没的
+# 东西，硬塞进 entities/学习.entity 会让 gendb 生成几个不存在的表列。
+#
+# 同样的语法、同样的 field_table() / options_map()，只是这一份的产物是
+# 界面而不是 SQL。
+#
+# 对得上的那部分仍然该保持一致：learner 在库里是 learner.code，这里也是
+# 文本；course 在库里是 answer.course，这里多了枚举选项——那是界面要的
+# 约束，库里不强制（题库随时会加课）。
+
+实体 form 教学界面
+
+  # 学习者标识。跟 entities/学习.entity 的 learner.code 是同一个东西。
+  字段 learner 文本 必填 学习者
+
+  # 对话模式的输入框
+  字段 message 长文本 说点什么
+
+  # 练习模式的作答框
+  字段 answer 长文本 你的答案
+
+  # 课程下拉。选项就是题库里的课程文件名，加一课要同步改这里——
+  # 真正该做的是生成时从题库现查，见文件末尾的注释。
+  字段 course 枚举 doushi_01,doushi_02,doushi_03,doushi_04,fukushi_01,fukushi_02,fukushi_03,keiyoshi_01,keiyoshi_02,keiyoshi_03,keiyoshi_04,onomatope_01 必填 课程
+
+  # 考点下拉。「全部考点」是占位项，接口那边把它当成不筛选。
+  字段 kind 枚举 全部考点,词义,汉字书写 考点
+
+结束
+
+
+# 待办：course 的选项现在是手抄的题库文件名，加一课要改两处。
+# build.py 可以在生成时调 quiz 包的「列课程」动词现查，把结果覆盖进
+# options_map——那样加一课只要放个 jsonl。
+#
+# 没这么做是因为生成器现在不依赖题库，加上之后 build 就要求题库在场；
+# 而 startup.ui 那个自检窗口恰恰是在环境不齐的时候生成的。
+# 真要做的话只对 main.ui 生效。

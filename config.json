@@ -1,0 +1,9 @@
+{
+  "api_key": "36ee1c7a37f957e37d06a37a4d87a196.z6N5CVUSyxXe9LZ0",
+  "model": "glm-5.3-flash",
+  "timeout": 60,
+  "temperature": 0.7,
+  "embedding_model": "embedding-3",
+  "image_model": "cogview-4",
+  "base_url": "https://open.bigmodel.cn/api/paas/v4"
+}

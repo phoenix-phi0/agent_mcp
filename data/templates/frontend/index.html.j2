@@ -1,0 +1,58 @@
+{#- StrictUndefined 开着，这几个得有默认值，否则不走内联的调用方会炸。
+    这正是当初开 StrictUndefined 想要的行为：模板里冒出没人给的变量要
+    立刻报错，而不是静默渲染成空标签。 -#}
+<% set inline_css = inline_css if inline_css is defined else "" %>
+<% set inline_js = inline_js if inline_js is defined else "" %>
+<% set vue_source = vue_source if vue_source is defined else "" %>
+<% set has_graphs = has_graphs if has_graphs is defined else false %>
+{#- 图的两个依赖。默认走 CDN；要离线（app2 是桌面程序，断网时 CDN 一
+    挂图就白了）就在 options 里传本地路径覆盖，跟 vue_path 一个路子。
+    版本写死不用 latest：CDN 上游一升级，生成好的页面不该跟着变。 -#}
+<% set graph_js = graph_js if graph_js is defined else "https://unpkg.com/@vue-flow/core@1.48.2/dist/vue-flow-core.iife.js" %>
+<% set graph_css = graph_css if graph_css is defined else "https://unpkg.com/@vue-flow/core@1.48.2/dist/style.css" %>
+<% set dagre_js = dagre_js if dagre_js is defined else "https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js" %>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title><%= title %></title>
+{#- 三者都有值时，这一份就是完整的应用：不落盘、不起服务器、不联网，
+    可以直接交给 pywebview 的 create_window(html=...)。
+    缺省走外链，跟原来一样。
+    只有一份外壳模板：另起一套会把这里抄一遍，而抄一遍就会分叉。 -#}
+<% if inline_css %>
+  <style>
+<%= inline_css %>
+  </style>
+<% else %>
+  <link rel="stylesheet" href="./style.css">
+<% endif %>
+<% if has_graphs %>
+  <link rel="stylesheet" href="<%= graph_css %>">
+<% endif %>
+<% if vue_source %>
+  <script>
+<%= vue_source %>
+  </script>
+<% else %>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<% endif %>
+{#- 这两个必须在 app.js 之前：IIFE 构建挂到 window 上（VueFlowCore、
+    dagre），app.js 一执行就要用。 -#}
+<% if has_graphs %>
+  <script src="<%= graph_js %>"></script>
+  <script src="<%= dagre_js %>"></script>
+<% endif %>
+</head>
+<body>
+  <div id="app"></div>
+<% if inline_js %>
+  <script>
+<%= inline_js %>
+  </script>
+<% else %>
+  <script src="./app.js"></script>
+<% endif %>
+</body>
+</html>

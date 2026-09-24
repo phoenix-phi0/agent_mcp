@@ -1,0 +1,33 @@
+# tests/test_page.js 的输入。改这里要同步改 test_page.js 里的断言。
+# 覆盖了七种类型里的五种、三种布局修饰、条件显示、两种动作、列表和文案。
+
+界面 表单 文章编辑
+  布局 横排
+    区域 侧栏 竖排
+      分组 发布设置 竖排
+        字段 status 必填 发布状态
+        字段 published_at 发布时间
+        字段 featured 是否推荐
+      结束
+    结束
+    区域 主区 占满
+      分组 基本信息 网格
+        字段 title 必填 标题
+        字段 body 正文内容
+        字段 slug 当 form.featured 短链
+      结束
+      动作 save 提交 保存
+      动作 delete 危险 删除
+    结束
+  结束
+结束
+
+界面 列表 文章列表
+  列表 articles
+    列 title 标题
+    列 status 状态
+    列 published_at 发布时间
+    动作 edit 编辑
+  结束
+  文案 点编辑跳回表单
+结束

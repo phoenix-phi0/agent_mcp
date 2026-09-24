@@ -1,0 +1,192 @@
+{#- 三段式全屏：顶栏和底栏固定，中间那段自己滚。靠 .ui 里的「顶栏」
+    「底栏」修饰指定谁是头尾，没标的都在中间那段里。
+
+    配色照 app2 旧版 agents/serve.py 的 PAGE，逐项对比过零差异。这一层
+    是主题不是结构——换个应用大概率要改 :root 里那组变量，但下面的布局
+    规则不用动。
+
+    三处踩过的坑，改之前先读注释：CSS 特异性两处、flex 简写一处。 -#}
+:root {
+  --bg:#faf9f7; --panel:#fff; --line:#e6e2dc;
+  --ink:#2b2825; --dim:#8a827a; --accent:#6b5b95;
+  --user:#eef1f8; --tool:#f5f2ed; --ok:#3d7a4e; --no:#a8443c;
+}
+* { box-sizing:border-box; }
+body {
+  margin:0; background:var(--bg); color:var(--ink);
+  font:15px/1.7 -apple-system,"Hiragino Sans","Noto Sans CJK SC",
+       "Microsoft YaHei",sans-serif;
+  height:100vh; overflow:hidden;
+}
+#app { height:100vh; display:flex; flex-direction:column; }
+
+/* 引擎为「多个界面」生成的切换条，在 .screen 外面自成一行。
+
+   .ui 里用了「切到」的话模板根本不生成这段——界面切换已经自己安排好了
+   （app2 把模式按钮放进了顶栏，因为 nav 和 .screen 是纵向 flex 的两个
+   兄弟，样式上并不到一行）。
+
+   早先这里写 nav { display:none } 无条件藏掉，对 app2 正好，但任何没用
+   「切到」的 .ui 就再也切不了界面——nav 是它唯一的入口。该由引擎判断的
+   事不要写死在样式表里。 */
+nav {
+  display:flex; gap:8px; align-items:center;
+  padding:12px 20px 0; background:var(--panel);
+}
+nav a {
+  padding:5px 12px; border:1px solid var(--line); background:var(--panel);
+  border-radius:5px; font-size:13px; text-decoration:none; color:var(--ink);
+}
+nav a:hover { background:var(--tool); }
+nav a.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+
+/* 「切到」动作渲染成的模式按钮：选中的用主色 */
+.btn-mode-on { background:var(--accent); color:#fff; border-color:var(--accent); }
+
+/* 一个界面就是一整屏，三段式 */
+.screen {
+  flex:1; min-height:0; display:flex; flex-direction:column;
+}
+
+/* 顶栏/底栏：不滚，横排一行 */
+.bar-top, .bar-bottom {
+  flex:none; background:var(--panel); padding:12px 20px;
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+}
+.bar-top { border-bottom:1px solid var(--line); }
+.bar-bottom { border-top:1px solid var(--line); }
+.bar-top .field, .bar-bottom .field {
+  flex-direction:row; align-items:center; gap:6px; margin:0;
+}
+/* 底栏里没标尺寸的字段占满剩余——输入框几乎总是这样。
+   .ui 里标了「宽」的会带 flex:none，优先级更高，覆盖得掉这条。 */
+.bar-bottom .field { flex:1; }
+.bar-top select, .bar-top input { font-size:13px; padding:4px 8px; }
+
+/* 中间那段：唯一可滚的区域。
+
+   不要写成 .screen > :not(.bar-top):not(.bar-bottom) { flex:none } ——
+   :not() 的特异性按它参数里的选择器算，那样是三个类，会压过
+   .screen > .stream 的两个类，结果 flex:none 赢，消息流撑不开、底栏
+   也不贴底，整个三段式塌成普通文档流。class 全对，看着却像没生效。
+
+   通配符的特异性是 0，所以下面这条谁都压不过，.stream 稳赢。 */
+.screen > * { flex:none; }
+.screen > .stream, .screen > .grow { flex:1 1 auto; min-height:0; overflow-y:auto; }
+
+/* 顶栏底栏要排除掉：它们自带 12px 20px，而这条写在后面、特异性相同，
+   会把垂直内边距抹成 0——同一个元素 class="group row bar-top" 两条都命中。 */
+.region, .group:not(.bar-top):not(.bar-bottom) { padding:0 20px; }
+.group h3, .region-h {
+  font-size:12px; color:var(--dim); margin:12px 0 6px; font-weight:600;
+}
+.row { display:flex; gap:12px; align-items:flex-start; }
+.col { display:flex; flex-direction:column; }
+.grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.grow { flex:1; min-height:0; }
+
+/* 消息流：内容居中，行别太长 */
+.stream { padding:24px 20px; overflow-y:auto; }
+.stream-body { max-width:760px; margin:0 auto; }
+.smsg { margin-bottom:22px; }
+.who { display:block; font-size:12px; color:var(--dim); margin-bottom:5px; }
+.smsg .body { white-space:pre-wrap; word-break:break-word; }
+.smsg-user .body {
+  background:var(--user); padding:10px 14px; border-radius:10px;
+  display:inline-block; max-width:100%;
+}
+.smsg-ok .body { color:var(--ok); }
+.smsg-no .body { color:var(--no); }
+.smsg-pending .body { color:var(--dim); }
+
+/* 工具调用折叠面板 */
+.tools {
+  margin-top:10px; font-size:12px; color:var(--dim);
+  background:var(--tool); border-radius:8px; padding:8px 12px;
+  font-family:ui-monospace,"SF Mono",Menlo,monospace; line-height:1.6;
+}
+.tools summary { cursor:pointer; outline:none; }
+.tools div { margin-top:5px; white-space:pre-wrap; }
+
+/* 表单控件 */
+.field { display:flex; flex-direction:column; gap:5px; margin-bottom:10px; }
+.lbl { font-size:13px; color:var(--dim); }
+.req { color:var(--no); margin-left:3px; }
+input, textarea, select {
+  border:1px solid var(--line); border-radius:5px; padding:6px 10px;
+  font:inherit; background:var(--panel); color:var(--ink);
+}
+input:focus, textarea:focus, select:focus { outline:none; border-color:var(--accent); }
+/* rows="1" 起手，grow() 跟着内容长；min-height 托住下限，max 封顶后滚动 */
+textarea { resize:none; min-height:46px; max-height:180px; border-radius:8px; }
+
+/* 控件默认占满所在字段——底栏那个输入框几乎总是要铺开的。
+   .ui 里标了「宽」的控件带内联 flex:none，优先级更高，压得住这条。
+
+   写成三个长属性而不是简写 flex:1 1 0：jsdom 的 getComputedStyle 不
+   展开 flex 简写，读 flexGrow 永远是 0，测试里看着像没生效。真浏览器
+   两种等价，但测不出来的规则没法验。 */
+.field > input, .field > textarea, .field > select {
+  flex-grow:1; flex-shrink:1; flex-basis:0; min-width:0;
+}
+
+.radios { display:flex; flex-wrap:wrap; gap:10px; }
+.opt { display:flex; align-items:center; gap:5px; font-size:14px; }
+
+/* 按钮 */
+.btn {
+  border:1px solid var(--line); background:var(--panel); color:var(--ink);
+  border-radius:5px; padding:5px 12px; font:inherit; font-size:13px;
+  cursor:pointer; flex:none;
+}
+.btn:hover { background:var(--tool); }
+.btn:disabled { opacity:.45; cursor:default; }
+.btn-primary {
+  background:var(--accent); color:#fff; border-color:var(--accent);
+  border-radius:8px; padding:0 20px; align-self:stretch;
+}
+.btn-danger { color:var(--no); }
+
+/* 「显示」节点：.ui 里不写标签就只出值。
+   margin-left:auto 顶替了旧版那个 <span class="sp"> 弹簧。 */
+.dyn {
+  margin:0; font-size:12px; color:var(--dim);
+  font-variant-numeric:tabular-nums;
+}
+.dyn .lbl { margin-right:6px; }
+.bar-top .dyn { margin-left:auto; }
+
+/* 「文案」：底部那行提示 */
+.copy {
+  max-width:760px; margin:6px auto 0; font-size:12px;
+  color:var(--dim); padding:0 20px;
+}
+.bar-bottom .copy { margin:0; padding:0; }
+
+table { width:100%; border-collapse:collapse; }
+th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); }
+th { font-size:12px; color:var(--dim); }
+
+/* 浮层：遮罩铺满视口，面板居中。
+
+   position:fixed 而不是 absolute——面板要相对视口定位，而 .screen 是
+   flex 容器，absolute 会跟着它跑偏。z-index 压过顶栏底栏。 */
+.overlay {
+  position:fixed; inset:0; z-index:50;
+  background:rgba(43,40,37,.38);
+  display:flex; align-items:center; justify-content:center;
+  padding:24px;
+}
+.overlay-box {
+  background:var(--panel); border-radius:12px; padding:20px;
+  box-shadow:0 12px 40px rgba(0,0,0,.18);
+  max-width:100%; max-height:100%; overflow-y:auto;
+  display:flex; flex-direction:column; gap:12px;
+}
+.overlay-h { margin:0; font-size:15px; font-weight:600; color:var(--ink); }
+/* 浮层里的按钮靠右，跟对话框的习惯一致。.btn-primary 在别处是
+   align-self:stretch（底栏里要跟输入框等高），浮层里不需要。 */
+.overlay-box .btn { align-self:auto; }
+.overlay-box > .btn { margin-left:auto; }
+.overlay-box .copy { max-width:none; margin:0; padding:0; }
+.overlay-box .group, .overlay-box .region { padding:0; }

@@ -1,0 +1,42 @@
+{# SQLAlchemy 2.x 模型 —— 每个实体一个类。
+   上下文：
+     entities = [entity, ...]   entity：.name .fields[]
+     db_name  = 字符串           决定 sqlite 文件名
+   field：.name .type .required .options
+   entity.name 即表名，类名由 转类名 filter 派生（article → Article）。 #}
+"""由 DSL 生成，请勿手改。改 .zs 后重新生成。"""
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+{{ entities | 汇总导入 }}
+
+
+class Base(DeclarativeBase):
+    pass
+
+{% for entity in entities %}
+
+class {{ entity.name | 转类名 }}(Base):
+    __tablename__ = "{{ entity.name }}"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+{% for field in entity.fields %}
+    {{ field.name }}: {{ field | 转Python }} = mapped_column({% if not field.required %}nullable=True{% endif %})
+{% endfor %}
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+{% for field in entity.fields %}
+            "{{ field.name }}": self.{{ field.name }},
+{% endfor %}
+        }
+{% endfor %}
+
+
+engine = create_engine("sqlite:///{{ db_name }}.db", echo=False)
+Session = sessionmaker(engine)
+
+
+def create_all() -> None:
+    Base.metadata.create_all(engine)

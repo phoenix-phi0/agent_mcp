@@ -1,0 +1,411 @@
+# -*- coding: utf-8 -*-
+"""DSL 的词法常量、值处理和条件求值——不碰引擎状态的那部分。
+
+从 dsl.py 拆出来的第一块。判据是「要不要 self」：这里全是纯函数和
+常量，给定输入就有确定输出，能单独测、能被别的模块直接用。
+
+拆分本身是被逼的：dsl.py 涨到一千四百行之后，改一行要整个重写，
+而这条链路上每次全文件写入都有把 MCP 服务器压垮的风险——实际崩过两次。
+拆完之后改条件求值只碰这个文件，两百多行。
+
+`tools/dsl.py` 会把这里的东西重新导出，所以 `from tools.dsl import
+to_text, DSLError` 这类老写法不受影响。
+"""
+
+import json
+import re
+
+# 中文关键字 -> 内部指令名
+KEYWORDS = {
+    "用包": "use", "依赖": "use",
+    "模型": "model", "系统": "system", "温度": "temp",
+    "设": "set", "设置": "set", "变量": "set",
+    "问": "ask", "提问": "ask",
+    "问JSON": "ask_json", "提问JSON": "ask_json",
+    "流式": "stream", "对话": "chat",
+    "重置": "reset", "清空": "reset",
+    "读历史": "load_history", "载入历史": "load_history",
+    "存历史": "save_history", "保存历史": "save_history",
+    "修剪历史": "trim_history",
+    "打印": "print", "输出": "print",
+    "保存": "save", "写入": "save",
+    "追加": "append", "续写": "append",
+    "读取": "load", "载入": "load",
+    "读JSON": "load_json", "载入JSON": "load_json",
+    "读JSONL": "load_jsonl", "载入JSONL": "load_jsonl",
+    "遍历": "each", "循环": "each", "每个": "each",
+    "逐项": "foreach", "逐个": "foreach",
+    "如果": "if", "若": "if", "否则": "else", "结束": "end",
+    "事务": "tx",
+    "执行": "call", "调用": "call",
+    "判定": "verdict",
+    "返回": "ret",
+}
+
+# 动词不能用这些名字
+RESERVED = set(KEYWORDS) | set(KEYWORDS.values())
+
+# 「事务」块在三个时刻调的动词。引擎只认这三个名字，不认数据库——
+# 语义由 db 包提供，换个存储就换个包。
+TX_BEGIN, TX_COMMIT, TX_ROLLBACK = "事务开始", "事务提交", "事务回滚"
+
+# 循环分隔词。长的排前面：否则「属于」会被「于」抢先匹配，
+# 变量名里会多出一个「属」字。
+IN_WORDS = ("属于", "于", "在", "in")
+
+CONDITION_OPS = [
+    ("不包含", "not_contains"), ("包含", "contains"),
+    ("不等于", "ne"), ("等于", "eq"),
+    ("不为空", "not_empty"), ("为空", "empty"),
+    ("不小于", "ge"), ("不大于", "le"),
+    ("大于", "gt"), ("小于", "lt"),
+    ("开头是", "startswith"), ("结尾是", "endswith"),
+]
+UNARY_OPS = {"empty", "not_empty"}
+OP_BY_WORD = dict(CONDITION_OPS)
+
+# 「为空」要认的几种形态：空串，以及结构转文本后的空数组、空对象
+EMPTY_FORMS = ("", "[]", "{}")
+
+BLOCK_OPENERS = {"each", "if", "foreach", "tx"}
+
+CJK = re.compile(r"[\u4e00-\u9fff]")
+KEYWORDS_BY_LEN = sorted(KEYWORDS, key=len, reverse=True)
+
+VAR_RE = re.compile(r"\{([^{}]+)\}")
+# 整个值就是一个没展开的 {变量}。未定义变量会原样保留成这个样子，
+# 判空时要当成「没有值」。
+UNEXPANDED_RE = re.compile(r"^\{[^{}]+\}$")
+RETRY_RE = re.compile(r"\s+重试\s+(\d+)\s*次?\s+直到\s+(.+)$")
+# 返回值末尾的三位数当状态码。三位而不是任意数字：返回一个纯数字
+# （比如「返回 200」当内容）的情况得能区分，三位数几乎只会是状态码。
+RET_STATUS_RE = re.compile(r"\s+([1-5]\d\d)\s*$")
+# 后缀不进 KEYWORDS：它们只在语句尾巴上出现，进了关键字表会让
+# 「附录 xxx」这种普通文本行被当成语句
+ATTACH_RE = re.compile(r"\s+附\s+(\S+)$")
+TOOLS_RE = re.compile(r"\s+带工具\s+(\S+)(?:\s+最多\s+(\d+)\s*轮?)?$")
+BRANCH_RE = re.compile(r"(\S+?)\s*(?:→|->)\s*(\S+)")
+CALL_PARAM_RE = re.compile(r"(\S+?)\s*=\s*(.*?)(?=\s+\S+?\s*=|$)")
+PACK_SEP_RE = re.compile(r"[,，\s]+")
+# 修剪历史的参数：纯数字是条数，带「字」后缀是字符数
+TRIM_CHARS_RE = re.compile(r"^(\d+)\s*(?:字符?|chars?)$", re.I)
+# 用来判断「这行看着像不像动词调用」
+VERB_LIKE_RE = re.compile(r"^[^\s{}=/\\:：]+$")
+
+MAX_CALL_DEPTH = 5
+DEFAULT_TOOL_ROUNDS = 3
+DEFAULT_TRIM_KEEP = 20
+
+
+class DSLError(Exception):
+    """脚本语法或运行错误。"""
+
+
+class ScriptReturn(Exception):
+    """「返回」抛出来的，不是错误——run() 接住它当正常结束。
+
+    用异常而不是层层传标志位：返回可能发生在任意深度的嵌套块里，靠返回
+    值往上传要每一层都判断一次，漏一处就成了「返回之后还接着跑」。
+    """
+
+    def __init__(self, value, status: int = 200):
+        super().__init__("script returned")
+        self.value = value
+        self.status = status
+
+
+# ----------------------------------------------------------------------
+# 文本与值
+# ----------------------------------------------------------------------
+
+
+def normalize(line: str) -> str:
+    """全角符号转半角。逗号和冒号保持原样——正文里它们是标点。"""
+    return (line.replace("＝", "=").replace("　", " ").replace("＃", "#")
+                .replace("｛", "{").replace("｝", "}"))
+
+
+def split_items(text: str) -> list:
+    """拆分列表，半角和全角逗号都算分隔符。"""
+    return [x.strip() for x in re.split(r"[,，]", text) if x.strip()]
+
+
+def is_empty(value: str) -> bool:
+    """判空。空串、空列表、空对象，以及没展开的 {变量} 都算空。
+
+    最后一条是关键：未定义变量原样保留成 {名} 这个字面量，那在语义上
+    就是「没有值」。不这么算的话，「如果 {会话.题号} 为空」在字段还
+    不存在时会判成「不为空」，一路走进处理已有值的分支。
+    """
+    s = value.strip()
+    return s in EMPTY_FORMS or bool(UNEXPANDED_RE.fullmatch(s))
+
+
+def to_text(value) -> str:
+    """结构化值转文本。插值、写文件、条件比较都走这里，统一一处转换。
+
+    紧凑 JSON 而不是缩进：插进一行文本里不该炸成多行。
+    布尔转「是/否」——脚本里写「如果 {标志} 等于 是」比 True 自然。
+    """
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "是" if value else "否"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def as_number(s):
+    try:
+        return float(s.strip())
+    except (ValueError, AttributeError):
+        return None
+
+
+# ----------------------------------------------------------------------
+# 结构化变量：按路径读写
+# ----------------------------------------------------------------------
+
+
+def index_of(key: str, seq: list):
+    """把一段路径当数组下标解析，越界或不是数字返回 None。"""
+    if not key.lstrip("-").isdigit():
+        return None
+    i = int(key)
+    return i if -len(seq) <= i < len(seq) else None
+
+
+def dig(obj, path: str):
+    """按点号路径取值，取不到返回 None。数字段当下标，支持负数。"""
+    cur = obj
+    for key in path.split("."):
+        key = key.strip()
+        if isinstance(cur, dict) and key in cur:
+            cur = cur[key]
+        elif isinstance(cur, list):
+            i = index_of(key, cur)
+            if i is None:
+                return None
+            cur = cur[i]
+        else:
+            return None
+    return cur
+
+
+def put(obj, path: str, value) -> bool:
+    """按点号路径写值。中间层不存在就建成字典。成功返回 True。
+
+    自动建中间层是为了让「从零开始记状态」能一行一行写，否则每次都得
+    先拼一个完整的 JSON 出来，既难看又容易在引号上出错。
+
+    列表只能按已有下标改，不会自动扩容——越界返回 False 让调用方报错，
+    静默追加会让「写错下标」这种笔误变成看不见的数据错位。
+    """
+    parts = [p.strip() for p in path.split(".")]
+    cur = obj
+    for key in parts[:-1]:
+        if isinstance(cur, list):
+            idx = index_of(key, cur)
+            if idx is None:
+                return False
+            cur = cur[idx]
+        elif isinstance(cur, dict):
+            if not isinstance(cur.get(key), (dict, list)):
+                cur[key] = {}
+            cur = cur[key]
+        else:
+            return False
+
+    last = parts[-1]
+    if isinstance(cur, list):
+        idx = index_of(last, cur)
+        if idx is None:
+            return False
+        cur[idx] = value
+        return True
+    if isinstance(cur, dict):
+        cur[last] = value
+        return True
+    return False
+
+
+def iter_items(value):
+    """循环要遍历什么。列表直接遍历，字典遍历键，字符串按逗号拆。"""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        return list(value.keys())
+    return split_items(to_text(value))
+
+
+def msg_size(msg: dict) -> int:
+    """一条消息占多少字。
+
+    算 content 加 tool_calls 的参数——带工具那轮的 assistant 消息 content
+    可能是空的，重量全在 tool_calls 里，只数 content 会严重低估。
+    """
+    n = len(to_text(msg.get("content")))
+    for c in msg.get("tool_calls") or []:
+        fn = c.get("function", {}) if isinstance(c, dict) else {}
+        n += len(to_text(fn.get("name"))) + len(to_text(fn.get("arguments")))
+    return n
+
+
+# ----------------------------------------------------------------------
+# 条件
+# ----------------------------------------------------------------------
+
+
+def split_condition(cond: str):
+    """拆成 (左值, 运算符, 右值)，拆不出返回 None。
+
+    先按空格分词找整词匹配的运算符——这样左右值里出现「包含」「大于」
+    这类字样不会被误切。分词找不到（紧贴写法）才退回子串匹配。
+    """
+    parts = cond.split()
+    for i, word in enumerate(parts):
+        op = OP_BY_WORD.get(word)
+        if op is None:
+            continue
+        left = " ".join(parts[:i]).strip()
+        right = " ".join(parts[i + 1:]).strip()
+        if op in UNARY_OPS:
+            if right:
+                continue
+            return left, op, ""
+        if not left or not right:
+            continue
+        return left, op, right
+
+    for zh, op in CONDITION_OPS:
+        idx = cond.find(zh)
+        if idx < 0:
+            continue
+        left, right = cond[:idx].strip(), cond[idx + len(zh):].strip()
+        if op in UNARY_OPS:
+            if right:
+                continue
+            return left, op, ""
+        if not left or not right:
+            continue
+        return left, op, right
+    return None
+
+
+def split_condition_tail(cond: str):
+    """条件省略左值时拆出 (运算符, 右值)。用于「重试 … 直到 包含 X」。"""
+    parts = cond.split()
+    if parts:
+        op = OP_BY_WORD.get(parts[0])
+        if op is not None:
+            right = " ".join(parts[1:]).strip()
+            if op in UNARY_OPS and right:
+                return None
+            return op, right
+    for zh, op in CONDITION_OPS:
+        if cond.startswith(zh):
+            right = cond[len(zh):].strip()
+            if op in UNARY_OPS and right:
+                continue
+            return op, right
+    return None
+
+
+def eval_parts(left: str, op: str, right: str) -> bool:
+    """按运算符比较两个值。两侧都能转数字时按数值比较。"""
+    if op == "empty":
+        return is_empty(left)
+    if op == "not_empty":
+        return not is_empty(left)
+    if op == "contains":
+        return right in left
+    if op == "not_contains":
+        return right not in left
+    if op == "eq":
+        return left.strip() == right.strip()
+    if op == "ne":
+        return left.strip() != right.strip()
+    if op == "startswith":
+        return left.strip().startswith(right.strip())
+    if op == "endswith":
+        return left.strip().endswith(right.strip())
+    a, b = as_number(left), as_number(right)
+    if a is None or b is None:
+        a, b = left.strip(), right.strip()
+    return {"gt": a > b, "lt": a < b, "ge": a >= b, "le": a <= b}[op]
+
+
+def parse_condition(cond: str, lineno: int):
+    """拆条件，拆不出就报错并列出可用的运算符。"""
+    parsed = split_condition(cond)
+    if parsed is None:
+        raise DSLError(
+            f"第 {lineno + 1} 行：看不懂的条件「{cond}」。可用："
+            f"包含 / 不包含 / 等于 / 不等于 / 为空 / 不为空 / "
+            f"大于 / 小于 / 不小于 / 不大于 / 开头是 / 结尾是")
+    return parsed
+
+
+def split_head(line: str):
+    """拆出指令名和剩余部分。
+
+    关键字后紧跟汉字时不算关键字：「打印机 状态」的 head 是「打印机」。
+    """
+    head, _, rest = line.partition(" ")
+    if head in KEYWORDS:
+        return KEYWORDS[head], rest.strip()
+    if head in KEYWORDS.values():
+        return head, rest.strip()
+
+    for zh in KEYWORDS_BY_LEN:
+        if line.startswith(zh):
+            tail = line[len(zh):]
+            if tail and CJK.match(tail):
+                continue
+            return KEYWORDS[zh], tail.strip()
+    return head, rest.strip()
+
+
+def check_name(name: str, lineno: int = -1) -> str:
+    """校验变量名。允许点号路径：每一段是标识符或者数字下标。"""
+    ok = bool(name) and all(
+        seg.isidentifier() or seg.lstrip("-").isdigit()
+        for seg in name.split("."))
+    if not ok:
+        where = f"第 {lineno + 1} 行：" if lineno >= 0 else ""
+        raise DSLError(f"{where}非法变量名：{name}")
+    return name
+
+
+def parse_trim_spec(spec: str, lineno: int):
+    """解析「修剪历史」的参数，返回 (条数上限, 字数上限)。
+
+    纯数字是条数，带「字」后缀是字符数，两个都写就两个上限都生效。
+
+    两种单位并存是因为各有盲区：条数挡不住「一条挂了整课课文」，
+    字数挡不住「几十条短消息」——多轮工具调用正是后者。
+    """
+    keep_n = None
+    keep_chars = None
+
+    for tok in spec.split():
+        tok = tok.strip()
+        if not tok:
+            continue
+        m = TRIM_CHARS_RE.match(tok)
+        if m:
+            keep_chars = int(m.group(1))
+            continue
+        if tok.isdigit():
+            keep_n = int(tok)
+            continue
+        raise DSLError(
+            f"第 {lineno + 1} 行：看不懂的修剪参数「{tok}」。"
+            f"写法：修剪历史 20 / 修剪历史 8000字 / 修剪历史 20 8000字")
+
+    if keep_n is None and keep_chars is None:
+        keep_n = DEFAULT_TRIM_KEEP
+    return keep_n, keep_chars

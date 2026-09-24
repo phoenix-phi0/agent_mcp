@@ -1,0 +1,457 @@
+<% from "layout.j2" import 节点 with context %>
+{#- 这几个默认值是必需的：StrictUndefined 开着，没走某条路的调用方
+    会直接报 undefined 而不是静默渲染成空。 -#}
+<% set has_shared_state = has_shared_state if has_shared_state is defined else false %>
+<% set has_endpoints = has_endpoints if has_endpoints is defined else false %>
+<% set has_to_actions = has_to_actions if has_to_actions is defined else false %>
+<% set has_goto = has_goto if has_goto is defined else false %>
+<% set has_overlays = has_overlays if has_overlays is defined else false %>
+<% set has_graphs = has_graphs if has_graphs is defined else false %>
+<% if shared_json is not defined %><% set shared_json = "{}" %><% endif %>
+<% if endpoints_json is not defined %><% set endpoints_json = "{}" %><% endif %>
+<% if first_stream_json is not defined %><% set first_stream_json = '""' %><% endif %>
+<% if clears_json is not defined %><% set clears_json = "{}" %><% endif %>
+<% if echoes_json is not defined %><% set echoes_json = "{}" %><% endif %>
+<% if screen_streams_json is not defined %><% set screen_streams_json = "{}" %><% endif %>
+<% if file_fields_json is not defined %><% set file_fields_json = "{}" %><% endif %>
+<% set has_files = file_fields_json != "{}" %>
+const { createApp, ref, computed } = Vue;
+const screens = <%= screens_json %>;
+{#- 每个界面一份表单状态，按界面名索引。共用一个对象会让同名字段串味，
+    切界面也会残留上一个界面填过的值。浮层里的字段也在这里——浮层属于
+    它所在的界面。文件字段不在这里，见下面的 files。 -#}
+const blank = <%= form_defaults_json %>;
+// 动作名 -> 提交成功后要清空的字段路径（.ui 里标了「清空」的动作）。
+// 旧版发完消息会立刻清空输入框；这是那条行为的一般化，范围限定在动作
+// 所在的那个容器，免得把练习页的课程、考点选择也一起抹掉。
+const clears = <%= clears_json %>;
+// 动作名 -> 发请求前要本地回显进消息流的字段路径（.ui 里标了「回显」）。
+// 旧版发消息时先 add('你', text) 再发请求，自己说的话立刻出现；等后端
+// 回传的话，接真模型要等好几秒，中间只有一个「…」。
+// 注意：标了回显就别让后端再回一遍同样的内容，否则会出现两条。
+const echoes = <%= echoes_json %>;
+// 界面名 -> 这个界面的消息流。回显、占位、后端返回都要落到当前界面那条。
+// 早先这三处都用全局第一条流：在练习页提交时，占位「…」被塞进对话页的
+// chat，而后端返回 stream:"drill" 把真消息放进 drill——占位永远留在 chat
+// 里清不掉，练习页什么都看不见。跟 submit_action 当初那个 bug 同形：
+// 全局取第一个，换了界面就打到别人身上，而且不报错。
+const screenStream = <%= screen_streams_json %>;
+<% if has_files %>
+// 界面名 -> 该界面的文件字段。有文件的界面提交走 FormData，没有的发 JSON。
+const fileFields = <%= file_fields_json %>;
+<% endif %>
+<% if has_endpoints %>
+// 动作名 -> 后端端点。这个常量之前漏了声明，onAction 里裸引用直接
+// ReferenceError；submitTo 里当时的 typeof 守卫更糟——不报错，只是永远
+// 走 fallback，看着像"后端没接上"而不是"代码有 bug"。
+const endpoints = <%= endpoints_json %>;
+<% endif %>
+
+const _app = createApp({
+  setup() {
+    const route = ref(decodeURIComponent(location.hash.replace(/^#\/?/, "")) || screens[0].name);
+    const forms = ref(JSON.parse(JSON.stringify(blank)));
+    const rows = ref(<%= rows_json %>);
+    // 请求期间禁用提交按钮：旧版有 send.disabled，少了它连点会重复发。
+    const busy = ref(false);
+    const current = computed(() => screens.find(s => s.name === route.value) || screens[0]);
+    // 模板里统一写 form.xxx，指向当前界面那一份。
+    const form = computed(() => forms.value[current.value.name] || {});
+    // 当前界面的消息流。没有的话退回全局第一条。
+    const myStream = () => screenStream[current.value.name] || <%= first_stream_json %>;
+<% if has_files %>
+    // 文件单独放这里，不进 form——form 要能 JSON 深拷贝（payload、snapshot
+    // 都靠它），而 File 对象走一遍 JSON 会变成 {}，静默丢失。
+    const files = ref({});
+    // 存 input 元素，清空时要连 DOM 里的文件名一起抹掉：光清 files 的话
+    // 界面上还显示着上次选的文件名，看着像没清干净。
+    const fileEls = {};
+    function setFileEl(name, el) { if (el) fileEls[name] = el; }
+
+    function pickFile(name, ev, maxsize) {
+      const picked = [...(ev.target.files || [])];
+      const limit = parseSize(maxsize);
+      if (limit) {
+        const tooBig = picked.find(f => f.size > limit);
+        if (tooBig) {
+          // 选完就拦，省得传上去才被拒。这只挡诚实的用户，后端还得再查。
+          alert(`${tooBig.name} 超过 ${maxsize}`);
+          ev.target.value = "";
+          return;
+        }
+      }
+      const box = files.value[current.value.name] || (files.value[current.value.name] = {});
+      box[name] = ev.target.multiple ? picked : (picked[0] || null);
+    }
+
+    // "5MB" / "500KB" / "1024" -> 字节数。认不出来就当没限制。
+    function parseSize(s) {
+      if (!s) return 0;
+      const m = String(s).trim().match(/^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)?$/i);
+      if (!m) return 0;
+      const unit = (m[2] || "B").toUpperCase();
+      return Number(m[1]) * ({B:1, KB:1024, MB:1048576, GB:1073741824}[unit] || 1);
+    }
+<% endif %>
+<% if has_overlays %>
+    // 当前打开的浮层名，null 表示没有。一次只开一个——真要叠加浮层的话
+    // 得改成栈，但那通常是设计出了问题，先不支持。
+    const openOverlay = ref(null);
+    function closeOverlay() { openOverlay.value = null; }
+    // Esc 关掉。浮层里的输入框正在打字时也该响应，所以挂在 window 上。
+    window.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape" && openOverlay.value) {
+        ev.preventDefault();
+        closeOverlay();
+      }
+    });
+    // 切界面时把浮层收掉，否则换了屏还浮着一个不属于它的框
+    window.addEventListener("hashchange", closeOverlay);
+<% endif %>
+<% if has_shared_state %>
+    // 跨界面状态：「共享」字段、消息流、「显示」节点都读这里。
+    const shared = ref(<%= shared_json %>);
+    const streamEls = {};
+    function setStreamEl(name, el) { if (el) streamEls[name] = el; }
+    function pushMessages(name, arr) {
+      const list = shared.value[name] || (shared.value[name] = []);
+      list.push(...arr);
+      Vue.nextTick(() => { const el = streamEls[name]; if (el) el.scrollTop = el.scrollHeight; });
+    }
+    function getPath(obj, path) {
+      return path.split(".").reduce((o, k) => (o == null ? o : o[k]), obj);
+    }
+    function putPath(obj, path, value) {
+      const parts = path.split(".");
+      let box = obj;
+      for (const k of parts.slice(0, -1)) box = box[k] || (box[k] = {});
+      box[parts[parts.length - 1]] = value;
+    }
+<% endif %>
+<% if has_graphs %>
+    // 「图」：数据从共享路径读 {nodes, edges}，dagre 算坐标，Vue Flow 画。
+    //
+    // 缓存一次结果：graphOf 在模板里被调两次（nodes 和 edges 各一次），
+    // 每次 render 都要跑一遍 dagre 的话，图一大就明显卡。按数据内容做
+    // key，数据没变就直接返回上次的。
+    const _graphCache = new Map();
+    function graphOf(path, dir) {
+      const raw = (getPath(shared.value, path) || {});
+      const src = raw.nodes || [], links = raw.edges || [];
+      const key = path + "|" + dir + "|" + JSON.stringify(raw);
+      if (_graphCache.has(key)) return _graphCache.get(key);
+
+      // 节点自带 x/y 就按给的放，只要有一个没给就整张图跑一遍布局——
+      // 混着用会让自动算的那些叠在原点上，不如统一。
+      const W = 160, H = 40;
+      let pos = {};
+      const needLayout = src.some(n => n.x == null || n.y == null);
+      if (needLayout && typeof dagre !== "undefined") {
+        const g = new dagre.graphlib.Graph();
+        g.setDefaultEdgeLabel(() => ({}));
+        g.setGraph({ rankdir: dir === "横向" ? "LR" : "TB", nodesep: 40, ranksep: 60 });
+        src.forEach(n => g.setNode(String(n.id), { width: n.width || W, height: n.height || H }));
+        links.forEach(e => g.setEdge(String(e.from), String(e.to)));
+        dagre.layout(g);
+        // dagre 给的是中心点，Vue Flow 要左上角
+        src.forEach(n => {
+          const v = g.node(String(n.id));
+          if (v) pos[n.id] = { x: v.x - (n.width || W) / 2, y: v.y - (n.height || H) / 2 };
+        });
+      }
+
+      const out = {
+        nodes: src.map(n => ({
+          id: String(n.id),
+          position: (n.x != null && n.y != null)
+            ? { x: n.x, y: n.y }
+            : (pos[n.id] || { x: 0, y: 0 }),
+          label: n.label != null ? String(n.label) : String(n.id),
+          // 整个原始节点挂在 data 上：点击时原样交出去，后端塞的额外
+          // 字段一个不丢。
+          data: n,
+        })),
+        edges: links.map((e, i) => {
+          const edge = {
+            id: e.id != null ? String(e.id) : ("e" + i),
+            source: String(e.from),
+            target: String(e.to),
+          };
+          if (e.label != null) edge.label = String(e.label);
+          return edge;
+        }),
+      };
+      _graphCache.clear();   // 只留最近一次，图一换就该重算
+      _graphCache.set(key, out);
+      return out;
+    }
+
+    // 点节点：把整个节点数据写进「选中」指定的共享路径；点空白处清掉。
+    // 不新造事件机制——写进共享状态之后，「当 shared.sel」控制显隐、
+    // 「显示 sel.label」展示内容，都是现成词汇。
+    function onGraphNode(path, ev) {
+      if (!path) return;
+      putPath(shared.value, path, ev && ev.node ? ev.node.data : null);
+    }
+<% endif %>
+    function go(name) {
+      route.value = name;
+      location.hash = encodeURIComponent(name);
+    }
+    function reset(name) {
+      forms.value[name] = JSON.parse(JSON.stringify(blank[name] || {}));
+    }
+    window.addEventListener("hashchange", () => {
+      route.value = decodeURIComponent(location.hash.replace(/^#\/?/, "")) || screens[0].name;
+    });
+<% if has_endpoints %>
+    async function postTo(url, payload, withFiles) {
+<% if has_files %>
+      // 带文件时走 FormData：表单字段整个塞成一个 JSON 字符串，文件单独
+      // append。这样后端拿到的 form 还是同一个结构，返回约定一个字不用改。
+      // 不设 Content-Type——multipart 的 boundary 要让浏览器自己填。
+      if (withFiles) {
+        const fd = new FormData();
+        fd.append("payload", JSON.stringify(payload));
+        for (const [k, v] of Object.entries(withFiles)) {
+          if (Array.isArray(v)) v.forEach(f => fd.append(k, f));
+          else if (v) fd.append(k, v);
+        }
+        const r = await fetch(url, { method: "POST", body: fd });
+        return r.json();
+      }
+<% endif %>
+      const r = await fetch(url, { method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload) });
+      return r.json();
+    }
+    // 后端返回五个可选字段，都不必知道界面长什么样：
+    //   state     合并进跨界面状态（图数据、显示值都走这里）
+    //   messages  追加到消息流
+    //   rows      替换列表数据
+    //   stream    指定 messages 进哪条流，不给就进当前界面那条
+    //   overlay   开关浮层："名字" 弹出，null 收起
+    function applyResponse(resp) {
+      if (!resp) return;
+      if (resp.state && typeof shared !== "undefined") Object.assign(shared.value, resp.state);
+      if (resp.rows) rows.value = resp.rows;
+<% if has_overlays %>
+      // 用 "overlay" in resp 而不是真值判断——null 是「关掉」，不是「没说」。
+      if ("overlay" in resp) openOverlay.value = resp.overlay;
+<% endif %>
+      const target = resp.stream || myStream();
+      if (Array.isArray(resp.messages) && target && typeof pushMessages === "function") {
+        pushMessages(target, resp.messages);
+      }
+    }
+<% endif %>
+    function onSubmit() { console.log("submit", current.value.name, form.value); }
+<% if has_endpoints %>
+    async function onAction(name) {
+      const ep = endpoints[name];
+      if (ep) { applyResponse(await postTo(ep, { action: name, form: form.value })); return; }
+      console.log("action", name, form.value);
+    }
+<% else %>
+    function onAction(name) { console.log("action", name, form.value); }
+<% endif %>
+<% if has_endpoints or has_to_actions %>
+    // 把动作管辖的字段恢复成初始值。只动本界面 form 里的字段——「共享」
+    // 字段是跨界面状态，不该被一次提交抹掉。
+    function clearFields(name) {
+      const paths = clears[name];
+      if (!paths) return;
+      const state = forms.value[current.value.name];
+      const blankState = blank[current.value.name] || {};
+      for (const p of paths) {
+        const parts = p.split(".");
+        let node = state, src = blankState;
+        for (const k of parts.slice(0, -1)) {
+          node = node && node[k]; src = src && src[k];
+        }
+        const last = parts[parts.length - 1];
+        if (node) node[last] = src ? JSON.parse(JSON.stringify(src[last])) : "";
+      }
+<% if has_files %>
+      // 文件也要清：不清的话下次提交会把上次的再传一遍，而且界面上还
+      // 显示着旧文件名。DOM 那份必须单独抹——files 只是我们自己的记录，
+      // input 元素里的文件名是浏览器管的。
+      const mine = fileFields[current.value.name] || [];
+      for (const fname of mine) {
+        const box = files.value[current.value.name];
+        if (box) delete box[fname];
+        if (fileEls[fname]) fileEls[fname].value = "";
+      }
+<% endif %>
+      // 清空后高度要收回去，否则留着上一条消息撑开的高度
+      Vue.nextTick(() => {
+        document.querySelectorAll(".screen textarea")
+          .forEach(el => { el.style.height = "auto"; });
+      });
+    }
+
+    // 记下要清空的字段当前值，请求失败时还原——网络一断不该让人白打一段字。
+    // 文件不在此列：input[type=file] 的 value 不能用脚本设置（浏览器的
+    // 安全限制），失败后只能让用户重选。
+    function snapshot(name) {
+      const paths = clears[name] || [];
+      const state = forms.value[current.value.name] || {};
+      const saved = paths.map(p => [p, JSON.parse(JSON.stringify(
+        p.split(".").reduce((o, k) => (o == null ? o : o[k]), state) ?? ""))]);
+      return () => {
+        const st = forms.value[current.value.name];
+        for (const [p, v] of saved) {
+          const parts = p.split(".");
+          let node = st;
+          for (const k of parts.slice(0, -1)) node = node && node[k];
+          if (node) node[parts[parts.length - 1]] = v;
+        }
+      };
+    }
+
+    // 把这次提交的输入本地插进消息流，先于请求。
+    // 文件字段不在 form 里，所以这里天然跳过——往消息流插一个文件名
+    // 没什么意义。
+    function echoInput(name) {
+      const paths = echoes[name];
+      if (!paths || !paths.length) return;
+      const stream = myStream();
+      if (!stream) return;
+      const state = forms.value[current.value.name] || {};
+      const text = paths
+        .map(p => p.split(".").reduce((o, k) => (o == null ? o : o[k]), state))
+        .filter(v => v !== undefined && v !== null && String(v).trim() !== "")
+        .join("\n");
+      if (text) pushMessages(stream, [{ who: "你", text, kind: "user" }]);
+    }
+
+    // closeAfter：标了「远程 关闭」的动作传 true，请求成功后关掉浮层。
+    async function submitTo(name, closeAfter) {
+      if (busy.value) return;
+      busy.value = true;
+      // 顺序照旧版：先本地回显、拷出要发的内容、清空输入框，然后才发请求。
+      // 清空必须在拷贝之后——反过来的话后端收到的是空表单。
+      // 也必须在请求之前——等回来再清的话，慢接口下那段字会在框里僵几秒。
+      echoInput(name);
+      const payload = JSON.parse(JSON.stringify(form.value));
+<% if has_files %>
+      // 这次要一起发的文件。注意 clearFields 会清掉 files，所以要在它
+      // 之前把引用拿出来。
+      const myFiles = fileFields[current.value.name]
+        ? { ...(files.value[current.value.name] || {}) } : null;
+<% endif %>
+      const restore = snapshot(name);
+      clearFields(name);
+      // 乐观占位：先摆一条「…」，请求回来再换掉。没有这个的话，
+      // 慢的接口会让界面看起来像卡住了。
+      const stream = myStream();
+      let placeholder = null;
+      if (stream && shared.value[stream]) {
+        placeholder = { who: "", text: "…", kind: "pending" };
+        shared.value[stream].push(placeholder);
+      }
+      const drop = () => {
+        if (!placeholder) return;
+        const list = shared.value[stream] || [];
+        const i = list.indexOf(placeholder);
+        if (i >= 0) list.splice(i, 1);
+        placeholder = null;
+      };
+      try {
+        const r = await _submitTo(name, drop, payload<% if has_files %>, myFiles<% endif %>);
+<% if has_overlays %>
+        // 请求成功才关浮层：失败时留着，用户能看到错误、也能改了重试
+        if (closeAfter) closeOverlay();
+<% endif %>
+        return r;
+      } catch (e) {
+        drop();
+        restore();
+        if (stream) pushMessages(stream, [{who: "出错", text: String(e), kind: "no"}]);
+      } finally {
+        busy.value = false;
+        // 焦点还给输入框，接着打字不用再点一下——旧版的 input.focus()
+        Vue.nextTick(() => {
+          const el = document.querySelector(".screen textarea");
+          if (el) el.focus();
+        });
+      }
+    }
+
+    async function _submitTo(name, drop, payload, withFiles) {
+      const ep = <% if has_endpoints %>endpoints[name]<% else %>null<% endif %>;
+      if (ep) {
+        const resp = await postTo(ep, { action: name, form: payload || form.value }, withFiles);
+        if (drop) drop();
+        applyResponse(resp);
+        return;
+      }
+      if (drop) drop();
+      console.log("submit", name, payload || form.value);
+    }
+<% endif %>
+    // 以下两样是所有界面通用的输入行为，不进 .ui 词汇表：
+    // 它们是「HTML 上的文本框该怎么用」，不是「界面上有什么」。
+    // 写进 .ui 就成了只有 HTML 目标认识的词。
+
+    // Enter 发送，Shift+Enter 换行。动作名由节点带过来，按容器就近取——
+    // 全局取第一个的话，浮层里按 Enter 会打到顶栏那个动作上，而且不报错。
+    function onKey(ev, actionName) {
+      if (ev.key !== "Enter" || ev.shiftKey) return;
+      ev.preventDefault();
+      if (actionName && !busy.value) submitTo(actionName);
+    }
+
+    // textarea 跟着内容长高，到上限就滚动
+    function grow(ev) {
+      const el = ev.target;
+      el.style.height = "auto";
+      el.style.height = Math.min(el.scrollHeight, 180) + "px";
+    }
+
+    function onRow(name, row) {
+      console.log("row", name, row);
+      if (name === "edit" && row) {
+        const target = screens.find(s => s.role === "表单");
+        if (target) {
+          Object.assign(forms.value[target.name], row);
+          go(target.name);
+        }
+      }
+    }
+    return { route, forms, form, rows, current, busy, go, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_overlays %>, openOverlay, closeOverlay<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath, putPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %> };
+  },
+  template: `
+{#- .ui 里用了「切到」就说明界面切换已经自己安排好了（比如放进顶栏），
+    这段 nav 是多余的。没用「切到」时它是唯一的切换入口，不能省。
+
+    早先是在样式表里写 nav { display:none } 无条件藏掉——那对 app2 正好
+    （模式按钮在顶栏），但任何没用「切到」的 .ui 就再也切不了界面了。
+    该由引擎判断的事不要写死在样式表里。 -#}
+<% if not has_goto %>
+    <nav>
+      <a v-for="s in screens" :key="s.name"
+         :class="{ active: current.name === s.name }"
+         href="#" @click.prevent="go(s.name)">{{ s.name }}</a>
+    </nav>
+<% endif %>
+    <% for screen_node in screens %>
+    <form v-if="current.name === '<%= screen_node.name %>'" class="screen" @submit.prevent="onSubmit">
+      <% for c in screen_node.body() %><%= 节点(c) %><% endfor %>
+    </form>
+{#- 浮层渲染在 <form> 之外：嵌在表单里的话，浮层内的提交按钮会连带触发
+    外层表单的 submit。 -#}
+    <% for o in screen_node.overlays() %>
+    <template v-if="current.name === '<%= screen_node.name %>'"><%= 节点(o) %></template>
+    <% endfor %>
+    <% endfor %>
+  `
+});
+<% if has_graphs %>
+// Vue Flow 的 IIFE 构建挂在 window.VueFlowCore 上，组件要手工注册——
+// 没有构建步骤，import 那条路走不通。index.html 里它的 <script> 在
+// app.js 之前，所以这里能直接拿到。
+_app.component("VueFlow", VueFlowCore.VueFlow);
+<% endif %>
+_app.mount("#app");

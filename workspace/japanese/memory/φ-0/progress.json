@@ -1,0 +1,28 @@
+{
+  "learner_id": "φ-0",
+  "start_date": "unknown",
+  "last_updated": "2026-09-07",
+  "current_series": "verb",
+  "current_course": "動詞 第2回 て形",
+  "hiragana": { "current_day": 3, "mastered": [], "weak": [], "correct_streak": {} },
+  "series_progress": {},
+  "greetings": { "learned": [] },
+  "sessions": { "total_count": 2, "streak_days": 1, "last_session_date": "2026-09-07" },
+  "achievements": [],
+  "assessment_history": [
+    {
+      "date": "2026-09-06",
+      "course": "doushi_01",
+      "type": "quiz",
+      "result": "1/2 correct",
+      "details": ["doushi_01-11-意味: correct", "doushi_01-18-意味: incorrect"]
+    },
+    {
+      "date": "2026-09-07",
+      "course": "doushi_02",
+      "type": "quiz",
+      "result": "1/2 correct",
+      "details": ["doushi_02-15-意味: correct", "doushi_02-26-意味: incorrect"]
+    }
+  ]
+}

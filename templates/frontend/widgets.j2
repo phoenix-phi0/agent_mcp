@@ -1,0 +1,165 @@
+{#- 语义控件 -> Vue 控件。
+
+    f.bind 是数据路径（.ui 里的「绑 a.b」），默认取字段名。v-model 和
+    options_map 都按它取，两边必须一致，否则一改绑定就丢选项；按字段名
+    给的选项仍能回退取到，两种写法都支持。
+
+    f.hint 是「提示」，进 placeholder 而不是框上方的标签——输入框顶着
+    一行长说明很难看，旧版那句本来就是框内灰字。
+
+    f.when 原样塞进 v-if——引擎承诺原样传递，这里不解析。早先这里用
+    split('=') 拆它，只能处理 a=b，写 count>3 就生成垃圾，而且跟引擎的
+    承诺自相矛盾。
+
+    注意「当」是带参修饰，必须写在标签**前面**：
+        动作 next 提交 远程 当 shared.verdict 下一题     ✓
+        动作 next 提交 远程 下一题 当 shared.verdict     ✗ 整段进标签
+    写反了不报错，按钮上会显示「下一题 当 shared.verdict」，v-if 一个
+    都不生成。「接受」「最大」也一样，要写在标签前。
+
+    宏体用 <%- -%> 吃掉换行：宏之间的空白会层层累积，不收拾的话生成的
+    HTML 里每个字段后面拖一串空行。
+
+    定界符是 <% %> 不是 {% %}——前端产物里 {{ }} 是 Vue 的插值，撞上
+    Jinja 默认定界符两边会互相吃掉。写模板时很容易顺手写错，撞上会报
+    unknown tag。 -#}
+
+{#- 「宽」用在字段上指的是控件多宽，不是「标签 + 控件」一共多宽。
+    早先加在外面那层 label.field 上，顶栏里「学习者」三个字就吃掉近
+    40px，90px 的框只剩二十几像素能打字——看着就是挤歪的。
+
+    定宽的同时要 flex:none：控件默认 flex-grow:1 占满所在字段（见
+    style.css.j2），不压住的话标了「宽」的框还是会被撑开。 -#}
+<%- macro 控件宽(f) -%><% if f.size.get("width") %> style="width:<%= f.size["width"] %>;flex:none"<% endif %><%- endmacro -%>
+
+<%- macro 控件(f) -%>
+<%- set w = f.widget or default_widgets.get(f.type, "单行") -%>
+{#- 「共享」字段存在跨界面的 shared 里，不在本界面的 form 里 -#}
+<%- set base = "shared" if f.has("共享") else "form" -%>
+<%- set model = base ~ "." ~ (f.bind or f.name) -%>
+<%- set opts = options_map.get(f.bind or f.name) or options_map.get(f.name) or [] -%>
+<%- if w == "多行" -%>
+<textarea<%= 控件宽(f) %> v-model="<%= model %>" rows="<% if f.has("单行高") %>1<% else %>8<% endif %>"<% if f.hint %> placeholder="<%= f.hint %>"<% endif %><% if f.required %> required<% endif %> @keydown="onKey($event, '<%= f.submit_action %>')" @input="grow"></textarea>
+<%- elif w == "数字" -%>
+<input<%= 控件宽(f) %> type="number" v-model.number="<%= model %>"<% if f.hint %> placeholder="<%= f.hint %>"<% endif %><% if f.required %> required<% endif %>>
+<%- elif w == "日期" -%>
+<input<%= 控件宽(f) %> type="date" v-model="<%= model %>"<% if f.required %> required<% endif %>>
+<%- elif w == "选文件" or w == "选多文件" -%>
+{#- 文件不能用 v-model：input[type=file] 的 value 是只读的，Vue 绑不上。
+    走 @change 手工接进 files（不是 form——form 要能 JSON 深拷贝，File
+    走一遍 JSON 会变成 {}）。
+
+    ref 是为了清空时能把 DOM 里的文件名也抹掉：光清 files 的话界面上
+    还显示着上次选的文件名，看着像没清干净。
+
+    accept 只是选择器的过滤，不是校验——用户能在选择框里切成「所有文件」
+    照选别的。最大也一样只挡诚实的用户。真正把关必须在后端做：查扩展名、
+    查文件头（扩展名可以随便改）、限大小。 -#}
+<input type="file"<% if w == "选多文件" %> multiple<% endif %><% if f.accept %> accept="<%= f.accept %>"<% endif %><% if f.required %> required<% endif %> :ref="el => setFileEl('<%= f.bind or f.name %>', el)" @change="pickFile('<%= f.bind or f.name %>', $event, '<%= f.maxsize %>')">
+<%- elif w == "开关" -%>
+<input type="checkbox" v-model="<%= model %>">
+<%- elif w == "下拉" -%>
+<select<%= 控件宽(f) %> v-model="<%= model %>"<% if f.required %> required<% endif %>>
+<option value="" disabled>请选择</option>
+<%- for o in opts %><option value="<%= o %>"><%= o %></option><% endfor -%>
+</select>
+<%- elif w == "单选" -%>
+<div class="radios">
+<%- for o in opts %><label class="opt"><input type="radio" v-model="<%= model %>" value="<%= o %>"> <%= o %></label><% endfor -%>
+</div>
+<%- else -%>
+<input<%= 控件宽(f) %> type="text" v-model="<%= model %>"<% if f.hint %> placeholder="<%= f.hint %>"<% endif %><% if f.required %> required<% endif %>>
+<%- endif -%>
+<%- endmacro -%>
+
+{#- 行节点的尺寸。字段传 宽给控件=true：宽度已经落到控件上了（见
+    控件宽），外层 label 只需要 flex:none 免得被父 flex 压缩。
+
+    尺寸修饰对行节点也要生效——早先只有容器节点接了尺寸，写
+    「字段 x 宽 90px」不报错也不生效，是最难查的一类失败。 -#}
+<%- macro 尺寸(n, 宽给控件=false) -%>
+<%- set 片段 = [] -%>
+<%- if n.size.get("width") -%><%- if not 宽给控件 -%><%- set _ = 片段.append("width:" ~ n.size["width"]) -%><%- endif -%><%- set _ = 片段.append("flex:none") -%><%- endif -%>
+<%- if n.size.get("height") -%><%- set _ = 片段.append("height:" ~ n.size["height"]) -%><%- endif -%>
+<%- if n.ratio -%><%- set _ = 片段.append("flex:" ~ n.ratio ~ " 1 0%") -%><%- set _ = 片段.append("min-width:0") -%><%- endif -%>
+<%- if 片段 %> style="<%= 片段 | join(";") %>"<% endif -%>
+<%- endmacro -%>
+
+{#- 「当」必须写成一行：宏输出直接嵌在标签属性位置，多余换行会破坏标签。 -#}
+<%- macro 当(node) -%><% if node.when %> v-if="<%= node.when %>"<% endif %><%- endmacro -%>
+
+<%- macro 字段(f) -%>
+<label class="field"<%= 当(f) %><%= 尺寸(f, true) %>>
+{#- 标签等于名字说明 .ui 里没写标签，那就别渲染一行英文字段名出来。
+    底栏里的输入框尤其不该顶着一行说明——说明该用「提示」进 placeholder。 -#}
+<% if f.label and f.label != f.name %><span class="lbl"><%= f.label %><% if f.required %><span class="req">*</span><% endif %></span>
+<% elif f.required %><span class="lbl"><span class="req">*</span></span>
+<% endif %><%= 控件(f) %>
+</label>
+<%- endmacro -%>
+
+{#- 动作按去处分五种，顺序即优先级：
+
+    「打开 <浮层>」 弹出浮层，本地行为
+    「关闭」        关掉所在浮层；跟「远程」叠加时先发请求、成功才关
+    「切到 <界面>」 本地切界面。引擎自带的 nav 在 .screen 外面自成一行，
+                    跟顶栏并不到一起（两个 flex item 在 column 容器里，
+                    改样式也没用），模式切换要跟别的控件并排就得这样。
+    「远程」        走 submitTo 真发请求，期间 :disabled="busy" 挡连点
+    其余            只打日志
+
+    浮层也可以由后端开关：返回 {"overlay":"名字"} 弹出、{"overlay":null}
+    收起，见 app.js.j2 的 applyResponse。练习那种「点开始 → 后端出题并
+    弹窗」的流程走这条，不需要在 .ui 里写「打开」。
+
+    这里早先判断的是 a.to，而「到 <端点>」换成「远程」旗标之后 a.to 恒为
+    None，于是所有远程动作都生成成 type="submit"，点下去走表单提交、只
+    console.log，请求根本不发。界面看着完全正常，是端到端点一次发送才
+    发现的。 -#}
+<%- macro 动作(a) -%>
+<%- set kind = "危险" if a.has("危险") else "次要" if a.has("次要") else "提交" -%>
+<%- set 色 = "btn-danger" if a.has("危险") else ("btn-ghost" if a.has("次要") else "btn-primary") -%>
+<%- if a.opens -%>
+<button type="button" class="btn <%= 色 %>" @click.prevent="openOverlay = '<%= a.opens %>'"<%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
+<%- elif a.has("关闭") and not a.has("远程") -%>
+<button type="button" class="btn <%= 色 %>" @click.prevent="closeOverlay()"<%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
+<%- elif a.goto -%>
+<button type="button" class="btn" :class="{ 'btn-mode-on': current.name === '<%= a.goto %>' }" @click.prevent="go('<%= a.goto %>')"<%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
+<%- elif kind == "提交" and a.has("远程") -%>
+<button type="button" :disabled="busy" class="btn btn-primary" @click.prevent="submitTo('<%= a.name %>'<% if a.has("关闭") %>, true<% endif %>)"<%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
+<%- elif kind == "提交" -%>
+<button type="submit" class="btn btn-primary"<%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
+<%- else -%>
+<button type="button" class="btn <%= 色 %>"<% if a.has("远程") %> :disabled="busy"<% endif %> @click.prevent="<% if a.has("远程") %>submitTo<% else %>onAction<% endif %>('<%= a.name %>'<% if a.has("远程") and a.has("关闭") %>, true<% endif %>)"<%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
+<%- endif -%>
+<%- endmacro -%>
+
+<%- macro 文案(n) -%>
+<p class="copy"<%= 当(n) %>><%= n.label %></p>
+<%- endmacro -%>
+
+{#- 消息流：内容来自 shared，后端返回的 messages 追加进来。
+    m.calls 有值时渲染成折叠面板——那是旧版工具调用面板的等价物。 -#}
+<%- macro 消息流(n) -%>
+<section class="stream"<%= 当(n) %><% if n.ratio %> style="flex:<%= n.ratio %> 1 0%;min-height:0"<% endif %>>
+<% if n.label and n.label != n.name %><header class="region-h"><%= n.label %></header>
+<% endif %><div class="stream-body" :ref="el => setStreamEl('<%= n.name %>', el)">
+<div v-for="(m, i) in shared['<%= n.name %>'] || []" :key="i" class="smsg" :class="'smsg-' + (m.kind || 'text')">
+<span class="who">{{ m.who }}</span>
+<div class="body">{{ m.text }}</div>
+<details v-if="m.calls && m.calls.length" class="tools">
+<summary>{{ m.calls.length }} 次工具调用</summary>
+<div v-for="(c, j) in m.calls" :key="j">{{ c.name }}({{ c.arguments }})
+  → {{ c.result }}</div>
+</details>
+</div>
+</div>
+</section>
+<%- endmacro -%>
+
+{#- 「显示」没写标签时只出值。顶栏右边那行统计就是纯数字，回退成英文
+    字段名会变成「usage 1,280 token」。浮层里的题干、批改结果也用它。 -#}
+<%- macro 显示(n) -%>
+<p class="dyn"<%= 当(n) %><%= 尺寸(n) %>><% if n.label and n.label != n.name %><span class="lbl"><%= n.label %></span>
+<% endif %><span class="dyn-v">{{ getPath(shared, '<%= n.bind or n.name %>') }}</span></p>
+<%- endmacro -%>

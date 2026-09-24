@@ -1,0 +1,12 @@
+def test_errors():
+    print("\n[错误处理]")
+    check_error("缺少结束", "遍历 甲 于 1\n打印 x", "没有对应")
+    check_error("多余结束", "打印 x\n结束", "多余")
+    check_error("未知语句", "跳舞 一下", "未知语句")
+    check_error("缺等号", "问 没有等号", "语法应为")
+    check_error("非法变量名", "设 1甲 = x", "非法变量名")
+    # 有「结束」，但循环头缺少「于 列表」，才会走到循环语法检查
+    check_error("循环语法错", "遍历 甲甲甲\n打印 x\n结束", "循环语法")
+
+    out, _ = run("遍历 甲 于 1\n打印 x")
+    check("错误带行号", "第 1 行" in str(out), True)
