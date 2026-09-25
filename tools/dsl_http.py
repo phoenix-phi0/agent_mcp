@@ -97,6 +97,7 @@ GET 的查询参数也注入。
 
 import argparse
 import json
+import os
 import re
 import socket
 import threading
@@ -104,15 +105,18 @@ import traceback
 from pathlib import Path
 
 from .dsl import DSLEngine, DSLError
-from .http_ctx import set_bucket, take_bucket
+from .http_ctx import set_bucket, take_auth, take_bucket
 from . import packs
 
-# 接口 POST /chat 动作 send  ——  方法和动作都可省
+# 接口 POST /chat 动作 send 公开  ——  方法、动作、公开都可省
 API_RE = re.compile(
     r"^接口\s+(?:(GET|POST|PUT|DELETE)\s+)?(/\S*)"
-    r"(?:\s+动作\s+(\S+))?\s*$", re.I)
+    r"(?:\s+动作\s+(\S+))?(\s+公开)?\s*$", re.I)
 # 服务 8091  或  服务 8091-8099
 SERVICE_RE = re.compile(r"^服务\s+(\d{2,5})(?:\s*-\s*(\d{2,5}))?\s*$")
+# 认证 必须 —— 路由目录里任何一个文件写了这行，所有接口都要求登录，
+# 只有标了「公开」的例外。不写这行的项目行为完全不变。
+AUTH_RE = re.compile(r"^认证\s+必须\s*$")
 
 # 块内这些关键字会开一层，它们的「结束」不能被当成接口的收尾
 INNER_OPENERS = {"如果", "若", "if", "遍历", "循环", "每个",
@@ -132,16 +136,21 @@ MAX_UPLOAD = 32 * 1024 * 1024
 
 
 class Endpoint:
-    """一个接口：方法、路径、服务的动作，以及块内那几行脚本。"""
+    """一个接口：方法、路径、服务的动作，以及块内那几行脚本。
+
+    public 为真表示标了「公开」：项目开了「认证 必须」时，只有这种接口
+    不登录也能调（登录、注册本身）。
+    """
 
     def __init__(self, method: str, path: str, body: list,
-                 src: Path, line: int, action: str = ""):
+                 src: Path, line: int, action: str = "", public: bool = False):
         self.method = method.upper()
         self.path = path
         self.body = body
         self.src = src
         self.line = line
         self.action = action
+        self.public = public
 
     @property
     def script(self) -> str:
@@ -149,6 +158,7 @@ class Endpoint:
 
     def __repr__(self) -> str:
         tail = f" 动作 {self.action}" if self.action else ""
+        tail += " 公开" if self.public else ""
         return f"<{self.method} {self.path}{tail} @{self.src.name}:{self.line}>"
 
 
@@ -196,9 +206,37 @@ def split_endpoints(text: str, src: Path):
             raise DSLError(f"{src.name} 第 {i + 1} 行的「接口」没有对应的「结束」")
 
         out.append(Endpoint(m.group(1) or "POST", m.group(2), body,
-                            src, i + 1, action=m.group(3) or ""))
+                            src, i + 1, action=m.group(3) or "",
+                            public=bool(m.group(4))))
         i = j + 1
     return out, ports
+
+
+def auth_required(root: Path) -> bool:
+    """路由目录里有没有哪个文件写了「认证 必须」（顶层，接口块外面）。
+
+    一个文件写了就对整个项目生效：认证是项目级的开关，不是某个文件的
+    事——不然新加一个路由文件忘了写这行，里面的接口就全是公开的。
+    """
+    if not Path(root).is_dir():
+        return False
+    for f in sorted(Path(root).rglob("*.zs")):
+        depth = 0
+        for line in f.read_text(encoding="utf-8").splitlines():
+            s = line.strip()
+            if API_RE.match(s):
+                depth = 1
+                continue
+            head = s.split(" ")[0] if s else ""
+            if depth:
+                if head in INNER_OPENERS:
+                    depth += 1
+                elif head in CLOSERS:
+                    depth -= 1
+                continue
+            if AUTH_RE.match(s):
+                return True
+    return False
 
 
 def scan_routes(root: Path):
@@ -260,8 +298,18 @@ def port_free(host: str, port: int) -> bool:
 
     绑完立刻关，中间有极小的窗口可能被别人抢走——真起服务时仍然可能撞。
     但这个探测的用途是给出像样的错误信息，不是保证，所以够用。
+
+    **探测要跟真起服务用同样的选项**：Flask（werkzeug）起服务时设了
+    SO_REUSEADDR，所以刚停掉的服务留下的 TIME_WAIT 挡不住它。探测不设的
+    话会比真实情况更悲观——停掉服务马上重启，报「端口被占用」，而其实
+    完全能绑上。并发测试连跑两遍时撞上的。
+
+    Windows 上不设：那边 SO_REUSEADDR 的意思是「可以抢别人正在监听的
+    端口」，设了探测就永远说空闲。
     """
     with socket.socket() as s:
+        if os.name != "nt":
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind((host, port))
             return True
@@ -290,7 +338,17 @@ class Router:
         self.real = real
         self.verbose = verbose
         self.table, self.ports, self.warnings = scan_routes(self.routes_dir)
+        self.auth_required = auth_required(self.routes_dir)
+        self._key = None
         self._lock = threading.Lock()
+
+    def _secret(self) -> bytes:
+        """签名密钥，第一次用到时才读或生成（在 workspace/.auth_secret）。
+        没开认证的项目永远不会碰到这里，不会凭空多出一个密钥文件。"""
+        if self._key is None:
+            from .auth import secret_for
+            self._key = secret_for(self.workspace)
+        return self._key
 
     # ---- 会话 ----
 
@@ -325,19 +383,53 @@ class Router:
         from .zhipu import ZhipuClient
         return ZhipuClient()
 
-    def handle(self, ep: Endpoint, form: dict, uploads: dict = None):
-        """跑一个接口，返回 (响应体, 状态码)。
+    def handle(self, ep: Endpoint, form: dict, uploads: dict = None,
+               user: str = ""):
+        """跑一个接口，返回 (响应体, 状态码)。要登录/退出要求的用 run。"""
+        body, status, _ = self.run(ep, form, uploads, user)
+        return body, status
+
+    def run(self, ep: Endpoint, form: dict, uploads: dict = None,
+            user: str = ""):
+        """跑一个接口，返回 (响应体, 状态码, 登录/退出要求)。
 
         uploads 是这次请求带的文件。它们不进 form——脚本要用就调「存文件」
         动词，那时才决定存哪儿、怎么命名。
-        """
-        who = str(form.get("learner") or form.get("会话") or "默认")
-        with self._lock:
-            session = self.load_session(who)
 
-        set_bucket({}, uploads)
+        user 是路由器从 cookie 认出来的当前用户，没登录是空串。它以
+        {当前用户} 交给脚本，并且**强制覆盖** {请求} 里的同名字段——
+        请求体是前端给的，前端塞一个「当前用户: 别人」进来，不能让
+        「写库表 … {请求}」把它绑进 SQL。
+        """
+        # 会话按谁分：登录了按用户名——那是服务器认出来的。没登录才退回
+        # 请求里的 learner 字段；开了认证的项目里，没登录能走到这儿的只有
+        # 公开接口，统一放进一个匿名会话，不让请求体挑会话文件。
+        if user:
+            who = user
+        elif self.auth_required:
+            who = "_匿名"
+        else:
+            who = str(form.get("learner") or form.get("会话") or "默认")
+
+        # 会话只在用得到时才读、变了才写。
+        #
+        # 早先每个请求都读一次、写一次——增删改查的接口一处会话都不用，
+        # 也照样往 sessions/ 里写一个 默认.json，白做一次磁盘写入。
+        #
+        # 「用得到」看脚本文本里有没有「会话」。「执行」的子脚本不用另算：
+        # 子脚本是独立作用域，看不到父脚本的变量，要用会话只能由父脚本显式
+        # 传 `执行 子.zs 会话={会话}`——那一行里本来就有「会话」。
+        needs_session = "会话" in ep.script
+        session = {}
+        if needs_session:
+            with self._lock:
+                session = self.load_session(who)
+        before = json.dumps(session, ensure_ascii=False, sort_keys=True)
+
+        set_bucket({}, uploads, user)
         text = ""
         returned = None
+        auth = None
         try:
             engine = DSLEngine(
                 self._client(),
@@ -348,6 +440,11 @@ class Router:
             )
             # 请求字段直接当变量：{answer}、{learner} 在脚本里可用
             engine.vars.update(form)
+            # 请求体整个给一份，写库表这类动词收字典时用
+            engine.vars["请求"] = dict(form)
+            # 当前用户放在请求字段之后，盖掉请求体里可能伪造的同名字段
+            engine.vars["当前用户"] = user
+            engine.vars["请求"]["当前用户"] = user
             engine.vars["会话"] = session
 
             text = engine.run(ep.script)
@@ -355,23 +452,28 @@ class Router:
 
             # 脚本改了会话就存回去。「返回」提前结束的情况下也要存——
             # 早返回之前做的状态变更同样有效。
+            #
+            # 跟进来时比一下，没变就不写：只读会话的接口（查题号、看进度）
+            # 不该每次都重写一遍文件。
             after = engine.vars.get("会话")
-            if isinstance(after, dict):
+            if isinstance(after, dict) and json.dumps(
+                    after, ensure_ascii=False, sort_keys=True, default=str) != before:
                 with self._lock:
                     self.save_session(who, after)
         finally:
             # 异常路径也要清，否则线程复用时下个请求读到残留
             bucket = take_bucket()
+            auth = take_auth()
 
         # 「返回」赢：它一出现脚本就结束了，消息那套没意义
         if returned is not None:
-            return returned[0], returned[1]
+            return returned[0], returned[1], auth
 
         out = dict(bucket)
         # 脚本里的「打印」没进响应字段，但调试时有用，兜底塞进 messages
         if text.strip() and not out.get("messages"):
             out["messages"] = [{"who": "", "text": text}]
-        return out, 200
+        return out, 200, auth
 
     def _read_request(self):
         """读请求体，返回 (字段表, 上传的文件表)。
@@ -419,8 +521,36 @@ class Router:
             form = {**form, **inner}
         return form, uploads
 
+    def _identify(self, request) -> str:
+        """从 cookie 认出当前用户，认不出是空串。
+
+        没开认证的项目不认人：{当前用户} 一律是空串，也不会去读或生成
+        签名密钥。
+        """
+        if not self.auth_required:
+            return ""
+        from .auth import COOKIE, read_token
+        return read_token(request.cookies.get(COOKIE), self._secret())
+
+    def _apply_auth(self, resp, auth) -> None:
+        """按动词的要求设或删登录 cookie。
+
+        HttpOnly：页面上的 JS 读不到它，被注入了脚本也偷不走。
+        SameSite=Lax：别的网站发来的跨站 POST 不带它，挡住大部分 CSRF。
+        没设 Secure：本机跑的是 http，设了浏览器就不发了。部署到 https
+        时要加上。
+        """
+        if not auth:
+            return
+        from .auth import COOKIE, TTL, make_token
+        if auth.get("login"):
+            resp.set_cookie(COOKIE, make_token(auth["login"], self._secret()),
+                            max_age=TTL, httponly=True, samesite="Lax", path="/")
+        elif auth.get("logout"):
+            resp.delete_cookie(COOKIE, path="/", samesite="Lax")
+
     def dispatch(self):
-        from flask import request, jsonify
+        from flask import jsonify, make_response, request
 
         key = (request.method.upper(), request.path)
         ep = self.table.get(key)
@@ -429,22 +559,41 @@ class Router:
                 {"who": "出错", "text": f"没有这个接口：{key[0]} {key[1]}",
                  "kind": "no"}]}), 404
 
+        user = self._identify(request)
+        # 默认拒绝：开了认证的项目，没标「公开」的接口一律要登录。检查在
+        # 路由器里而不是在每个接口的脚本里——手写的接口忘了写那一行，就是
+        # 一个不设防的口子，而且不报错。
+        if self.auth_required and not ep.public and not user:
+            return jsonify({"error": "请先登录"}), 401
+
         form, uploads = self._read_request()
         # GET 的查询参数也注入，跟 body 字段并列
         for k, v in request.args.items():
             form.setdefault(k, v)
 
         try:
-            body, status = self.handle(ep, form, uploads)
+            body, status, auth = self.run(ep, form, uploads, user)
             # 纯文本返回不包 JSON——「返回 ok」就该是 ok
-            if isinstance(body, str):
-                return body, status
-            return jsonify(body), status
+            resp = make_response(body if isinstance(body, str) else jsonify(body),
+                                 status)
+            self._apply_auth(resp, auth)
+            return resp
         except DSLError as e:
+            # 用户造成的错（重名、必填为空……）：引擎一层层包成 DSLError，
+            # 原来那个挂在错误链上。找到了就回它的状态码和人话，不当成
+            # 服务器故障回 500。
+            from .db_errors import find_client_error
+            ce = find_client_error(e)
+            if ce is not None:
+                return jsonify({"error": ce.message}), ce.status
             return jsonify({"messages": [
                 {"who": "脚本出错", "text": f"{ep.src.name}: {e}",
                  "kind": "no"}]}), 500
-        except Exception:
+        except Exception as e:
+            from .db_errors import find_client_error
+            ce = find_client_error(e)
+            if ce is not None:
+                return jsonify({"error": ce.message}), ce.status
             return jsonify({"messages": [
                 {"who": "出错", "text": traceback.format_exc(limit=3),
                  "kind": "no"}]}), 500

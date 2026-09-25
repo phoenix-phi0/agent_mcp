@@ -125,7 +125,14 @@ PARAM_RE = re.compile(r"(?<!:):([a-zA-Z_\u4e00-\u9fff][\w\u4e00-\u9fff]*)")
 
 # 事务期间复用的连接。挂在线程上而不是模块全局：Flask 多线程，
 # 全局的话两个请求的事务会互相串。
-_tx = threading.local()
+#
+# 而且**不放在这个文件里**：这个包每次「用包 db」都会被重新导入成一个新的
+# 模块对象，放这儿的话每次加载都是一个新的 _tx。并发时一个请求的事务做到
+# 一半，调到的动词可能来自另一次加载——事务开始挂上的连接，事务提交时找
+# 不到，报「不在事务里」，那个连接没人提交也没人关，一直占着写锁，别的
+# 请求等到超时报「database is locked」。90 次交错新建错过 7 到 34 次，
+# 就是这个。tools/db_tx.py 是普通模块，只导入一次，所有加载共用。
+from tools.db_tx import TX as _tx
 
 # 加载时注入
 WORKSPACE = Path(".")
@@ -213,6 +220,60 @@ def register(reg, workspace):
     def in_tx() -> sqlite3.Connection | None:
         return getattr(_tx, "con", None)
 
+    def changed(con, sql, params) -> int:
+        """执行一条增删改，返回影响的行数。
+
+        不用 cursor.rowcount：Python 的 sqlite3 只在语句以 INSERT/UPDATE/
+        DELETE 开头时才填它，以 WITH 开头的写语句（带递归检查的插入）拿到
+        的是 -1——脚本里判「影响 等于 0」就永远不成立，被拒的插入看起来像
+        成功了。total_changes 前后一减，不管语句怎么开头都对。
+        """
+        before = con.total_changes
+        try:
+            con.execute(sql, params)
+        except sqlite3.IntegrityError as e:
+            # 约束冲突（重名、必填为空、关联不存在）是用户输入的问题，不是
+            # 服务器故障：翻译成人话、带上 409/400，路由器照这个回。所有写
+            # 操作都经过这里，所以只在这一处翻译。
+            from tools.db_errors import translate
+            raise translate(e, workspace) from e
+        return con.total_changes - before
+
+    def as_dict(参数表) -> dict:
+        """参数表可能是字典，也可能是 JSON 文本。
+
+        脚本里整个参数就是一个变量引用时（`{请求}`），引擎传的是原对象；
+        夹在文字里时传过来的是 JSON 文本。两种都收。
+        """
+        if isinstance(参数表, str):
+            import json as _json
+            try:
+                参数表 = _json.loads(参数表)
+            except _json.JSONDecodeError:
+                raise ValueError(f"参数表不是合法 JSON：{参数表[:80]}")
+        if not isinstance(参数表, dict):
+            raise ValueError(f"参数表要是一个对象，收到 {type(参数表).__name__}")
+        return 参数表
+
+    def text_values(d: dict) -> dict:
+        """值一律转成字符串，跟按位置传参时一致。
+
+        布尔要特别处理：str(True) 是 "True"，而 CAST('True' AS INTEGER)
+        是 0——勾了的框会存成没勾，不报错。
+        """
+        out = {}
+        for k, v in d.items():
+            if isinstance(v, bool):
+                out[k] = "1" if v else "0"
+            elif v is None:
+                out[k] = ""
+            elif isinstance(v, (dict, list)):
+                import json as _json
+                out[k] = _json.dumps(v, ensure_ascii=False)
+            else:
+                out[k] = str(v)
+        return out
+
     def query(db: str, name: str, pairs) -> list:
         """跑一条查询。事务里复用那个连接，否则用完就关。"""
         sql = load_sql(name)
@@ -238,11 +299,16 @@ def register(reg, workspace):
         pairs = [参数一, 参数二, 参数三, 参数四, 参数五, 参数六, 参数七, 参数八]
         try:
             return query(库, 查询名, pairs)
-        except (ValueError, sqlite3.Error) as e:
-            # 事务里要抛出去让块回滚；块外返回错误文本，脚本能判断
-            if in_tx() is not None:
-                raise
-            return [{"错误": str(e)}]
+        except (ValueError, sqlite3.Error):
+            # 出错一律抛出去，不管在不在事务里。
+            #
+            # 早先块外返回 [{"错误": …}]，说是「脚本能判断」——但引擎没有
+            # 捕获语句，实际没有脚本判断；而且那看起来就是一行数据：交给
+            # 页面当表格，多一行空白，人看不到任何报错。这里的错几乎都是
+            # 该修的毛病（查询名写错、少参数、SQL 写错、库被锁），不该被
+            # 吞掉。抛出去之后，接口回错误、前端弹红色提示并还原输入；
+            # 普通脚本停在出错那一行，带行号。
+            raise
 
     @reg.verb("同「查询」，但只返回第一行。没有结果返回空对象。")
     def 查一行(库: str, 查询名: str, 参数一: str = "", 参数二: str = "",
@@ -251,10 +317,10 @@ def register(reg, workspace):
         pairs = [参数一, 参数二, 参数三, 参数四, 参数五, 参数六, 参数七, 参数八]
         try:
             rows = query(库, 查询名, pairs)
-        except (ValueError, sqlite3.Error) as e:
-            if in_tx() is not None:
-                raise
-            return {"错误": str(e)}
+        except (ValueError, sqlite3.Error):
+            # 一律抛出去，理由见「查询」。早先返回 {"错误": …}，看起来像
+            # 一条查到的记录
+            raise
         return rows[0] if rows else {}
 
     @reg.verb("第一行第一列，适合 count(*) 这类单列查询。"
@@ -265,10 +331,9 @@ def register(reg, workspace):
         pairs = [参数一, 参数二, 参数三, 参数四, 参数五, 参数六, 参数七, 参数八]
         try:
             rows = query(库, 查询名, pairs)
-        except (ValueError, sqlite3.Error) as e:
-            if in_tx() is not None:
-                raise
-            return f"[出错] {e}"
+        except (ValueError, sqlite3.Error):
+            # 一律抛出去，理由见「查询」
+            raise
         if not rows:
             return ""
         return str(next(iter(rows[0].values()), ""))
@@ -285,21 +350,76 @@ def register(reg, workspace):
             con = in_tx()
             if con is not None:
                 # 事务里不 commit——那是「事务提交」的事
-                return str(con.execute(sql, args).rowcount)
+                return str(changed(con, sql, args))
             con = open_conn(库)
             try:
-                cur = con.execute(sql, args)
+                n = changed(con, sql, args)
                 con.commit()
-                return str(cur.rowcount)
+                return str(n)
             finally:
                 con.close()
         except (ValueError, sqlite3.Error):
             # 事务里必须抛：不抛的话一步失败、后面几步照跑、最后还提交了，
-            # 那比崩掉糟得多
-            if in_tx() is not None:
-                raise
-            import traceback
-            return f"[出错] {traceback.format_exc(limit=1).strip().splitlines()[-1]}"
+            # 那比崩掉糟得多。事务外也抛：返回 "[出错] …" 的话，调用方判
+            # 「影响 等于 0」不成立，失败会被当成成功，接着回一句「已保存」
+            raise
+
+    def query_table(db: str, name: str, 参数表) -> list:
+        """跟 query 一样，但参数来自一个字典，不按空格切。
+
+        搜索就卡在这上面：关键词是用户输入的，「第一 条」按空格切之后成了
+        `关键词=第一` 和 `条` 两截，绑定错位**而且不报错**。
+        """
+        sql = load_sql(name)
+        args = bind(sql, text_values(as_dict(参数表)))
+        con = in_tx()
+        if con is not None:
+            return [dict(r) for r in con.execute(sql, args).fetchall()]
+        con = open_conn(db)
+        try:
+            return [dict(r) for r in con.execute(sql, args).fetchall()]
+        finally:
+            con.close()
+
+    @reg.verb("同「查询」，但参数从一个结构里取——值含空格时用这个"
+              "（搜索关键词几乎总是）。例如 查询表 app.db word_search {请求}")
+    def 查询表(库: str, 查询名: str, 参数表) -> list:
+        return query_table(库, 查询名, 参数表)
+
+    @reg.verb("同「查一行」，但参数从一个结构里取。"
+              "例如 查一行表 app.db word_one {请求}")
+    def 查一行表(库: str, 查询名: str, 参数表) -> dict:
+        rows = query_table(库, 查询名, 参数表)
+        return rows[0] if rows else {}
+
+    @reg.verb("同「查一值」，但参数从一个结构里取。"
+              "例如 查一值表 app.db word_count {请求}")
+    def 查一值表(库: str, 查询名: str, 参数表) -> str:
+        rows = query_table(库, 查询名, 参数表)
+        if not rows:
+            return ""
+        return str(next(iter(rows[0].values()), ""))
+
+    @reg.verb("同「写库」，但参数从一个结构里取——值含空格时用这个。"
+              "例如 写库表 app.db article_insert {表单}")
+    def 写库表(库: str, 语句名: str, 参数表) -> str:
+        """参数装在一个字典里，不按空格切。
+
+        表单字段的值常常带空格（标题、正文、日语例句），按位置传参时
+        「标题=第一 条」会被切成两截，绑定错位而且不报错。
+        """
+        sql = load_sql(语句名)
+        args = bind(sql, text_values(as_dict(参数表)))
+        con = in_tx()
+        if con is not None:
+            return str(changed(con, sql, args))
+        con = open_conn(库)
+        try:
+            n = changed(con, sql, args)
+            con.commit()
+            return str(n)
+        finally:
+            con.close()
 
     # ------------------------------------------------------------------
     # 事务：给引擎的「事务」块用
