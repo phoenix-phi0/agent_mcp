@@ -17,7 +17,7 @@
 
 ## 只传数据，不传命令
 
-四个字段：messages（追加）、state（合并）、rows（覆盖）、
+四个字段：messages（追加）、state（合并）、lists（按数据键填表格）、
 stream（这批消息进哪条流）。
 
 **先前有个「浮层」动词，用来让后端控制模态框开关，已经删掉。**
@@ -45,7 +45,7 @@ def _as_data(v):
 
 def register(reg, workspace):
 
-    @reg.verb("往响应里塞一个字段：messages / state / rows / stream。")
+    @reg.verb("往响应里塞一个字段：messages / state / lists / stream。")
     def 响应(字段: str, 内容) -> str:
         b = current()
         if b is None:
@@ -94,15 +94,22 @@ def register(reg, workspace):
         b["stream"] = 名字
         return ""
 
-    @reg.verb("整块替换表格数据。内容是对象列表。")
-    def 表格(内容) -> str:
+    @reg.verb("填一张表格。数据键就是界面上那张表的名字（「绑」能另指）。"
+              "例如 表格 prereq {行表}")
+    def 表格(数据键: str, 内容) -> str:
         b = current()
         if b is None:
             return "[不在请求里]"
         rows = _as_data(内容)
         if not isinstance(rows, list):
             return "[表格数据要是列表]"
-        b["rows"] = rows
+        # 早先这个动词直接写 b["rows"]，那时一个界面只能有一张表。现在按
+        # 数据键分开放，跟「响应 lists {字典}」落在同一个地方——一个界面
+        # 可以有几张表，哪张填哪组必须说清楚。
+        #
+        # 响应字段的白名单里已经没有 rows 了，所以再写那个键的话，整份
+        # 数据会被静默丢掉：调了等于没调，还不报错。
+        b.setdefault("lists", {})[数据键] = rows
         return ""
 
     @reg.verb("把上传的文件存到磁盘。返回存好的相对路径。")
