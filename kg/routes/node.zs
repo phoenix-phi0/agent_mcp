@@ -1,14 +1,21 @@
-# 知识点的列表和全貌。
+# 知识点：列表、全貌、整张图。
 #
-# 全貌一次返回三组列表：lists 里按数据键给，界面上三个列表各取各的。
-# 数据键默认是表名，「绑」能另指一个。
+# 图的数据走 state 而不是 lists：节点图是从共享路径读 {nodes, edges} 的，
+# 那是一整个对象，不是表格的行。
 
-# 列表页。
+# 列表页，同时把整张图也给出去——一次请求把这一页要的都拿齐。
 接口 POST /node/list 动作 node_list
   用包 db http
   设 行表 = 查询 app.db node_all 条数=500
   设 组.nodes = {行表}
   响应 lists {组}
+
+  设 点表 = 查询 app.db kg_all_nodes
+  设 边表 = 查询 app.db kg_all_edges
+  设 图.nodes = {点表}
+  设 图.edges = {边表}
+  设 状态.graph = {图}
+  响应 state {状态}
 结束
 
 
