@@ -85,6 +85,36 @@ def register(reg, workspace):
         r["text"] = format_report(r)
         return json.dumps(r, ensure_ascii=False)
 
+    @reg.verb("算出整张图的节点和边，节点带好坐标，给「节点图」控件用。"
+              "布局跟 py -m kg svg 画的静态图一致：按依赖深度分层、同层按"
+              "主前置分簇、对照关系排到相邻、一行超过 8 个折行。"
+              "例如 设 图 = 图数据 app.db")
+    def 图数据(库: str) -> dict:
+        """节点带 x / y，前端就不跑 dagre 了（见 templates/frontend/graph.j2）。
+
+        dagre 是通用布局，不知道中文标签多宽，也不知道「同层按主前置分簇」
+        「对照关系挨着放」这些跟语言有关的讲究——那些是 tools/kg_svg.py 里
+        一点点调出来的。既然那套算法在，直接复用，两边看起来就一样。
+        """
+        from tools.kg_svg import BOX_H, BOX_W, layout, load
+
+        nodes = load(safe(库))
+        if not nodes:
+            return {"nodes": [], "edges": []}
+        pos, _, _, _ = layout(nodes)
+
+        out_nodes, out_edges = [], []
+        for n in nodes:
+            x, y = pos[n["id"]]
+            out_nodes.append({
+                "id": n["id"], "label": n["label"],
+                # 坐标转成左上角：SVG 里是中心点，而 Vue Flow 要左上角
+                "x": round(x - BOX_W / 2), "y": round(y - BOX_H / 2),
+            })
+            for p in n["prereq"]:
+                out_edges.append({"from": p, "to": n["id"]})
+        return {"nodes": out_nodes, "edges": out_edges}
+
     @reg.verb("把库里的知识图谱导出成文件，格式跟导入的一样，能直接再导入。"
               "按学习顺序排；「解锁」按前置倒推补回来。格式不给就看扩展名"
               "（.jsonl 走 JSONL）。例如 导出图谱 app.db content/export.json")
