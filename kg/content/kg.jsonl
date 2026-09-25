@@ -54,3 +54,16 @@
 {"id": "kanji-homophone", "label": "同音异字", "prereq": ["kanji-onkun", "synonym-nuance"]}
 {"id": "kanji-okurigana", "label": "送假名", "prereq": ["i-adj-conj", "kanji-onkun"]}
 {"id": "particle", "label": "助词", "prereq": ["masu-form", "noun"]}
+{"id": "f-condition", "label": "条件表达", "prereq": ["dict-form", "plain-polite", "ta-form"]}
+{"id": "f-cause", "label": "原因理由", "prereq": ["particle"]}
+{"id": "f-concession", "label": "逆接让步", "prereq": ["adv-conjunctive", "particle"]}
+{"id": "f-obligation", "label": "义务许可禁止", "prereq": ["dict-form", "nai-form", "te-form"]}
+{"id": "f-desire", "label": "意愿希望", "prereq": ["i-adj-conj", "masu-form"]}
+{"id": "f-conjecture", "label": "推量判断", "prereq": ["i-adj-conj", "masu-form", "na-adj-conj", "plain-polite"]}
+{"id": "f-time", "label": "时间关系", "prereq": ["dict-form", "masu-form", "ta-form", "te-form"]}
+{"id": "f-emphasis", "label": "限定强调", "prereq": ["particle"]}
+{"id": "f-aspect", "label": "体与补助动词", "prereq": ["ageru-kureru", "te-form"]}
+{"id": "f-written", "label": "书面提示", "prereq": ["particle", "passive", "plain-polite"]}
+{"id": "f-request", "label": "请求指示", "prereq": ["nai-form", "te-form"]}
+{"id": "f-quote", "label": "引用与传闻", "prereq": ["plain-polite"]}
+{"id": "f-evaluate", "label": "建议评价", "prereq": ["ta-form"]}

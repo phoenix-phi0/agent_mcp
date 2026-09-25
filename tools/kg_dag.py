@@ -290,6 +290,7 @@ def import_items(db, qdir, path) -> dict:
             existed = con.execute("SELECT 1 FROM item WHERE code = ?",
                                   (code,)).fetchone()
             con.execute(sql, {"code": code, "label": label, "point": point,
+                              "form": str((obj or {}).get("form") or "").strip(),
                               "after": ""})
             report["updated" if existed else "new"] += 1
             after = str((obj or {}).get("after") or "").strip()

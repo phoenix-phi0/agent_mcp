@@ -29,10 +29,12 @@
   设 前置 = 查询 app.db kg_parents code={code}
   设 后续 = 查询 app.db kg_children code={code}
   设 条目 = 查询 app.db item_by_point point={code}
+  设 接续 = 查询 app.db item_by_form code={code}
   设 词表 = 查询 app.db word_by_point point={code} 条数=200
   设 三组.prereq = {前置}
   设 三组.children = {后续}
   设 三组.items = {条目}
+  设 三组.forms = {接续}
   设 三组.point_words = {词表}
   响应 form {一条}
   响应 lists {三组}
