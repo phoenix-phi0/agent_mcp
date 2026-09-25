@@ -248,6 +248,14 @@ FLAG_MODIFIERS = {
     "关闭",                          # action: close the overlay it sits in;
                                      # combines with 远程 (request, then close)
     "清空",                          # action: reset its own container's fields
+    "重置",                          # 打开 action: reset the whole screen form
+                                     # before popping the overlay. The "new"
+                                     # button needs it: after editing a row in
+                                     # the same overlay, that row's values are
+                                     # still in the form.
+    "进入时",                        # action: fire once each time its screen is
+                                     # entered (first load, 切到, back/forward).
+                                     # 列表页靠它打开就有数据，不用先点刷新。
     "远程",                          # action fires a request; the address is
                                      # the caller's business, not the .ui's
 }
@@ -763,7 +771,8 @@ def vue_backend(screens, options=None):
                        endpoints=options.get("endpoints") or {},
                        inline=options.get("inline", False),
                        vue_source=options.get("vue_source"),
-                       vue_path=options.get("vue_path"))
+                       vue_path=options.get("vue_path"),
+                       nav=options.get("nav"))
     return _envelope(screens, files, "vue")
 
 
@@ -1013,9 +1022,16 @@ def _tag_clears(screens) -> None:
                 a.clears = paths
 
 
+def _walk_nodes(node):
+    """深度遍历一棵节点树，含它自己。"""
+    yield node
+    for c in getattr(node, "children", ()) or ():
+        yield from _walk_nodes(c)
+
+
 def render_vue(screens, title="UI", options_map=None, rows=None,
                endpoints=None, inline=False, vue_source=None, vue_path=None,
-               template_dir=None):
+               template_dir=None, nav=None):
     """Render the frontend. Jinja is imported here, not at module scope.
 
     inline=False  index.html + style.css + app.js, Vue from a CDN tag.
@@ -1050,7 +1066,35 @@ def render_vue(screens, title="UI", options_map=None, rows=None,
             [{"name": s.name, "role": s.role or DEFAULT_ROLE} for s in screens],
             ensure_ascii=False),
         "form_defaults_json": json.dumps(_form_defaults(screens), ensure_ascii=False),
-        "rows_json": json.dumps(rows, ensure_ascii=False),
+        # 表格数据的初值，按数据键分开：预览时每张表都塞同一份示例数据。
+        # 数据键默认是表名，「绑」能另指一个。
+        #
+        # 早先是一份全局的 rows_json（一个界面只能有一张表），跟前端那个
+        # 全局 rows 一起去掉了。
+        "lists_init_json": json.dumps(
+            {(n.bind or n.name): rows
+             for s in screens for n in _walk_nodes(s) if n.kind == "列表"},
+            ensure_ascii=False),
+        # 界面名 -> 「载入」用的动作。带着地址参数进来时用它把记录拉回来。
+        "loaders_json": json.dumps({s.name: s.load for s in screens if s.load},
+                                   ensure_ascii=False),
+        # 界面名 -> 标了「进入时」的动作，每次进入那个界面自动跑一次。
+        # 列表页靠它打开就有数据，不用先点一下刷新。
+        "enter_json": json.dumps(
+            {s.name: [a.name for a in s.actions() if a.has("进入时")]
+             for s in screens
+             if any(a.has("进入时") for a in s.actions())},
+            ensure_ascii=False),
+        # 浮层名 -> 浮层上的「载入」。地址里带着「浮层=X&id=5」时用它拉记录
+        "overlay_loaders_json": json.dumps(
+            {o.name: o.load for s in screens for o in s.overlays() if o.load},
+            ensure_ascii=False),
+        # 顶部导航，由项目编译时算好传进来（见 gen/project.py 的 build）。
+        # 传了就用它，不管有没有「切到」；没传照旧按 has_goto 决定。
+        "nav": bool(nav),
+        "nav_json": json.dumps(nav or [], ensure_ascii=False),
+        # 导航里的「退出登录」：只有真有这个接口时才放，不然点了没反应
+        "nav_logout": bool(nav) and "auth_logout" in (endpoints or {}),
         "has_shared_state": bool(shared),
         "shared_json": json.dumps(shared, ensure_ascii=False),
         "has_endpoints": bool(endpoints),
@@ -1139,6 +1183,55 @@ def parse_ui(text):
     return parse(text)
 
 
+# 前端模板认得的控件名（templates/frontend/widgets.j2 的「控件」宏）。
+# 两边要一起改：模板里加了一种控件，这里也要加上。
+KNOWN_WIDGETS = {"单行", "多行", "数字", "日期", "开关", "下拉", "单选",
+                 "密码", "选文件", "选多文件"}
+
+
+def check_widgets(screens) -> list:
+    """「控件 X」里的 X 前端认不认得。
+
+    不认得的名字在模板里落到最后的 else，变成普通文本框，而且什么都不报。
+    「控件 密码」就是这么把密码明文显示在屏幕上的——所以编译时查出来。
+    """
+    issues = []
+    for screen in screens:
+        for node in _walk_nodes(screen):
+            w = getattr(node, "widget", None)
+            if w and w not in KNOWN_WIDGETS:
+                issues.append(Issue(
+                    f"「控件 {w}」前端不认得，会显示成普通文本框。"
+                    f"可用：{'、'.join(sorted(KNOWN_WIDGETS))}",
+                    line=node.line, code="unknown_widget"))
+    return issues
+
+
+def check_loaders(screens, endpoints) -> list:
+    """「载入 X」的 X 得是个有接口的动作；「带 id」得配「切到」或「打开」。
+
+    载入的接口不存在的话，刷新编辑界面时表单静默地一直是空的；带了 id
+    却没说去哪儿，参数无处可去。两种都是写了等于没写、而且不报错。
+    """
+    issues = []
+    for screen in screens:
+        # 界面和它的浮层都可以写「载入」
+        for holder in [screen, *screen.overlays()]:
+            if holder.load and endpoints is not None and holder.load not in endpoints:
+                what = "界面" if holder is screen else "浮层"
+                issues.append(Issue(
+                    f"{what}「{holder.name}」要「载入 {holder.load}」，但没有这个接口",
+                    line=holder.line, code="missing_endpoint"))
+        for node in _walk_nodes(screen):
+            if (getattr(node, "carry", "") and not getattr(node, "goto", "")
+                    and not getattr(node, "opens", "")):
+                issues.append(Issue(
+                    f"动作「{node.name}」写了「带 {node.carry}」但没有「切到」"
+                    f"或「打开」，参数无处可去",
+                    line=node.line, code="carry_without_goto"))
+    return issues
+
+
 def compile_ui(text_or_screens, backend="vue", fields=None,
                require_bind=False, options=None):
     """Parse, bind, validate and emit in one call.
@@ -1154,6 +1247,8 @@ def compile_ui(text_or_screens, backend="vue", fields=None,
         issues.extend(bind(screens, fields))
     issues.extend(validate(screens, require_bind=require_bind,
                            endpoints=(options or {}).get("endpoints")))
+    issues.extend(check_widgets(screens))
+    issues.extend(check_loaders(screens, (options or {}).get("endpoints")))
     if backend not in BACKENDS:
         raise ValueError(f"未知后端「{backend}」，可用：{'、'.join(sorted(BACKENDS))}")
     result = BACKENDS[backend](screens, options or {})

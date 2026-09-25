@@ -40,6 +40,32 @@ nav a {
 nav a:hover { background:var(--tool); }
 nav a.active { background:var(--accent); color:#fff; border-color:var(--accent); }
 
+/* 顶部导航（项目编译时算出来的那条，见 gen/project.py 的 compute_nav）。
+   跟上面那个 nav 共用样式，只多一点：退出登录推到最右边。 */
+.app-nav { display:flex; gap:8px; align-items:center; }
+/* 退出登录是 button（它是动作不是跳转），这里把它压成跟导航项一样的样子 */
+.app-nav .nav-logout {
+  margin-left:auto; background:none; border:1px solid transparent;
+  color:var(--muted); cursor:pointer; font:inherit; padding:4px 10px;
+  border-radius:4px;
+}
+.app-nav .nav-logout:hover { background:var(--tool); color:var(--ink); }
+
+/* 提示条：固定在底部中间，几秒后自己消失，点一下也能关。给没有消息流的
+   界面用——保存成功、后端报错，总得有个地方说一声。早先这类界面的消息
+   被静默丢掉：点保存成功了什么都不显示，人不知道到底存没存。
+
+   z-index 压过浮层（.overlay 是 100）：浮层里保存失败时提示得让人看见，
+   不然只会觉得点了没反应。 */
+.toast {
+  position:fixed; left:50%; bottom:28px; transform:translateX(-50%);
+  max-width:min(560px, 90vw); padding:10px 18px; border-radius:6px;
+  font-size:14px; line-height:1.5; cursor:pointer; z-index:200;
+  box-shadow:0 4px 16px rgba(0,0,0,.18); word-break:break-word;
+}
+.toast-ok { background:var(--ink); color:#fff; }
+.toast-no { background:#b3261e; color:#fff; }
+
 /* 「切到」动作渲染成的模式按钮：选中的用主色 */
 .btn-mode-on { background:var(--accent); color:#fff; border-color:var(--accent); }
 

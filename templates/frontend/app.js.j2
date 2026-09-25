@@ -13,6 +13,13 @@
 <% if echoes_json is not defined %><% set echoes_json = "{}" %><% endif %>
 <% if screen_streams_json is not defined %><% set screen_streams_json = "{}" %><% endif %>
 <% if file_fields_json is not defined %><% set file_fields_json = "{}" %><% endif %>
+<% if lists_init_json is not defined %><% set lists_init_json = "{}" %><% endif %>
+<% if loaders_json is not defined %><% set loaders_json = "{}" %><% endif %>
+<% if overlay_loaders_json is not defined %><% set overlay_loaders_json = "{}" %><% endif %>
+<% if enter_json is not defined %><% set enter_json = "{}" %><% endif %>
+<% if nav_json is not defined %><% set nav_json = "[]" %><% endif %>
+<% set nav = nav if nav is defined else false %>
+<% set nav_logout = nav_logout if nav_logout is defined else false %>
 <% set has_files = file_fields_json != "{}" %>
 const { createApp, ref, computed } = Vue;
 const screens = <%= screens_json %>;
@@ -35,6 +42,16 @@ const echoes = <%= echoes_json %>;
 // 里清不掉，练习页什么都看不见。跟 submit_action 当初那个 bug 同形：
 // 全局取第一个，换了界面就打到别人身上，而且不报错。
 const screenStream = <%= screen_streams_json %>;
+// 动作名 -> 界面名，标了「进入时」的动作：每次进入那个界面自动跑一次，
+// 打开就有数据，不用先点一下刷新。
+const enterActions = <%= enter_json %>;
+// 界面名 -> 带着地址参数进来时用哪个接口把记录拉回来（.ui 里的「载入」）
+const loaders = <%= loaders_json %>;
+// 浮层名 -> 同上，浮层上的「载入」
+const overlayLoaders = <%= overlay_loaders_json %>;
+// 顶部导航：[{label, target, group}]。group 是同属一个实体的几个界面名，
+// 在其中任何一个上时那一项高亮。由项目编译时算好传进来。
+const nav = <%= nav_json %>;
 <% if has_files %>
 // 界面名 -> 该界面的文件字段。有文件的界面提交走 FormData，没有的发 JSON。
 const fileFields = <%= file_fields_json %>;
@@ -48,11 +65,65 @@ const endpoints = <%= endpoints_json %>;
 
 createApp({
   setup() {
-    const route = ref(decodeURIComponent(location.hash.replace(/^#\/?/, "")) || screens[0].name);
+    // 地址：#界面名?参数=值。界面名用 encodeURIComponent 编过（名字里的
+    // 「?」会变成 %3F），所以裸的「?」一定是分隔符。
+    //   #笔记列表?浮层=笔记&id=5   刷新、把地址发给别人，都还知道是哪一条
+    function parseHash() {
+      const raw = location.hash.replace(/^#\/?/, "");
+      const cut = raw.indexOf("?");
+      const name = decodeURIComponent(cut < 0 ? raw : raw.slice(0, cut));
+      const params = cut < 0 ? {} : Object.fromEntries(new URLSearchParams(raw.slice(cut + 1)));
+      return [name || screens[0].name, params];
+    }
+    const route = ref(parseHash()[0]);
+    const params = ref(parseHash()[1]);
     const forms = ref(JSON.parse(JSON.stringify(blank)));
-    const rows = ref(<%= rows_json %>);
+    // 表格数据，按列表的数据键分开存（数据键默认是表名，「绑」能另指一个）。
+    // 接口用 lists 按键给：{"prereq": …, "children": …}。
+    //
+    // 早先是一个全局的 rows，一个界面就只能有一张表——「知识点全貌」那种
+    // 要同时显示前置、后续、挂着的词的页面根本做不了。
+    //
+    // 初值是编译时塞的示例数据，给没有后端的预览用。
+    const lists = ref(<%= lists_init_json %>);
+    const rowsOf = name => lists.value[name] || [];
     // 请求期间禁用提交按钮：旧版有 send.disabled，少了它连点会重复发。
     const busy = ref(false);
+    // 界面底部的一条提示，几秒后自己消失，点一下也能关。给没有消息流的
+    // 界面用：保存成功、后端报错，总得让人看见。出错的留久一点。
+    //
+    // 放在所有条件块外面：下面的 return 无条件导出 notice，定义在
+    // has_endpoints 里的话，没有后端的界面（编辑器预览）直接白屏。
+    const notice = ref(null);
+    let noticeTimer = null;
+    function showNotice(text, kind) {
+      notice.value = { text: String(text), kind: kind || "ok" };
+      clearTimeout(noticeTimer);
+      noticeTimer = setTimeout(() => { notice.value = null; },
+                               kind === "no" ? 6000 : 2500);
+    }
+    // 登录。界面名「登录」「注册」是约定（gen auth 生成的就叫这两个）：
+    // 收到 401 时跳到「登录」，登录成功后回到被打断的那个界面。
+    const LOGIN = "登录";
+    const AUTH_SCREENS = [LOGIN, "注册"];
+    let afterLogin = "";
+    const firstAppScreen = () =>
+      (screens.find(s => !AUTH_SCREENS.includes(s.name)) || screens[0]).name;
+    // 把一条记录填进某个界面的表单。列表点「编辑」、按地址参数「载入」
+    // 都走这里，类型转换只写一处。
+    //
+    // 按空白表单里那个字段的类型转：数据库里布尔存成 0/1，而勾选框的
+    // v-model 判断勾没勾用的是 String(值) === String(true)——"1" 不等于
+    // "true"，不转的话库里置顶的记录显示成没勾，而且不报错。
+    function fillForm(screen, record) {
+      if (!forms.value[screen]) forms.value[screen] = {};
+      const shape = blank[screen] || {};
+      for (const [k, v] of Object.entries(record)) {
+        forms.value[screen][k] = typeof shape[k] === "boolean"
+          ? (v === true || v === 1 || v === "1" || v === "true")
+          : v;
+      }
+    }
     const current = computed(() => screens.find(s => s.name === route.value) || screens[0]);
     // 模板里统一写 form.xxx，指向当前界面那一份。
     const form = computed(() => forms.value[current.value.name] || {});
@@ -95,8 +166,21 @@ createApp({
 <% if has_overlays %>
     // 当前打开的浮层名，null 表示没有。一次只开一个——真要叠加浮层的话
     // 得改成栈，但那通常是设计出了问题，先不支持。
-    const openOverlay = ref(null);
-    function closeOverlay() { openOverlay.value = null; }
+    //
+    // 浮层开关放在地址里：#笔记列表?浮层=笔记&id=5。刷新后还开着（配合
+    // 浮层上的「载入」把记录拉回来）、编辑链接能分享、登录完能回到那一条，
+    // 浏览器后退键能关浮层——手机上大家就是这么关弹窗的。
+    //
+    // 早先是反过来的：地址一变就关浮层，浮层本身不进地址。
+    const openOverlay = ref(parseHash()[1]["浮层"] || null);
+    function showOverlay(name, p) {
+      openOverlay.value = name;
+      go(route.value, Object.assign({ "浮层": name }, p || {}));
+    }
+    function closeOverlay() {
+      openOverlay.value = null;
+      if ((params.value || {})["浮层"]) go(route.value);
+    }
     // Esc 关掉。浮层里的输入框正在打字时也该响应，所以挂在 window 上。
     window.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape" && openOverlay.value) {
@@ -104,8 +188,12 @@ createApp({
         closeOverlay();
       }
     });
-    // 切界面时把浮层收掉，否则换了屏还浮着一个不属于它的框
-    window.addEventListener("hashchange", closeOverlay);
+    // 地址说了算：后退键把 ?浮层=… 去掉，浮层就关；切到别的界面，地址里
+    // 没有浮层参数，也就关了。直接读 parseHash 而不是 params——这个监听器
+    // 比更新 params 的那个注册得早，那时 params 还是旧的。
+    window.addEventListener("hashchange", () => {
+      openOverlay.value = parseHash()[1]["浮层"] || null;
+    });
 <% endif %>
 <% if has_shared_state %>
     // 跨界面状态：「共享」字段、消息流、「显示」节点都读这里。
@@ -121,15 +209,17 @@ createApp({
       return path.split(".").reduce((o, k) => (o == null ? o : o[k]), obj);
     }
 <% endif %>
-    function go(name) {
+    function go(name, p) {
+      const q = p && Object.keys(p).length ? "?" + new URLSearchParams(p) : "";
       route.value = name;
-      location.hash = encodeURIComponent(name);
+      params.value = p || {};
+      location.hash = encodeURIComponent(name) + q;
     }
     function reset(name) {
       forms.value[name] = JSON.parse(JSON.stringify(blank[name] || {}));
     }
     window.addEventListener("hashchange", () => {
-      route.value = decodeURIComponent(location.hash.replace(/^#\/?/, "")) || screens[0].name;
+      [route.value, params.value] = parseHash();
     });
 <% if has_endpoints %>
     async function postTo(url, payload, withFiles) {
@@ -145,31 +235,94 @@ createApp({
           else if (v) fd.append(k, v);
         }
         const r = await fetch(url, { method: "POST", body: fd });
-        return r.json();
+        return afterFetch(r);
       }
 <% endif %>
       const r = await fetch(url, { method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload) });
-      return r.json();
+      return afterFetch(r);
     }
-    // 后端返回五个可选字段，都不必知道界面长什么样：
+    // 所有响应都经过这里：解析 JSON；401 就记住当前地址、跳到「登录」。
+    //
+    // 返回的不是 JSON（服务器炸了回了一页 HTML）时不抛，转成一个 error，
+    // 让提示条显示出来——早先 r.json() 直接抛，界面上什么都没有。
+    async function afterFetch(r) {
+      let data;
+      try {
+        data = await r.json();
+      } catch (e) {
+        data = { error: `服务器返回的不是 JSON（${r.status}）` };
+      }
+      if (r.status === 401 && current.value.name !== LOGIN
+          && screens.some(s => s.name === LOGIN)) {
+        if (!AUTH_SCREENS.includes(current.value.name)) {
+          // 记整个地址而不只是界面名：#笔记列表?浮层=笔记&id=5 登录完要回到
+          // 那一条，只记界面名的话回来是个空界面
+          afterLogin = location.hash;
+        }
+        go(LOGIN);
+      }
+      return data;
+    }
+    // 后端返回这几个可选字段，都不必知道界面长什么样：
     //   state     合并进跨界面状态
     //   messages  追加到消息流
-    //   rows      替换列表数据
+    //   lists     {数据键: 行表}，按键填对应的表格
+    //   form      填进当前界面的表单（「载入」拉回记录时用）
+    //   error     出错的说明，弹提示条
+    //   go        换到哪个界面，「@来处」是登录前被打断的那个
     //   stream    指定 messages 进哪条流，不给就进当前界面那条
     //   overlay   开关浮层："名字" 弹出，null 收起
     function applyResponse(resp) {
       if (!resp) return;
       if (resp.state && typeof shared !== "undefined") Object.assign(shared.value, resp.state);
-      if (resp.rows) rows.value = resp.rows;
+      // lists：{数据键: 行表}。哪张表填哪组，由键说了算。
+      if (resp.lists && typeof resp.lists === "object") {
+        for (const [k, v] of Object.entries(resp.lists)) {
+          if (Array.isArray(v)) lists.value[k] = v;
+        }
+      }
+      // form：填进当前界面的表单。「载入」按地址参数拉回记录时用。
+      if (resp.form && typeof resp.form === "object" && !Array.isArray(resp.form)) {
+        fillForm(current.value.name, resp.form);
+      }
 <% if has_overlays %>
       // 用 "overlay" in resp 而不是真值判断——null 是「关掉」，不是「没说」。
-      if ("overlay" in resp) openOverlay.value = resp.overlay;
+      // 走 showOverlay / closeOverlay 而不是直接改变量：浮层开关在地址里，
+      // 只改变量的话地址对不上，刷新就不一样了。
+      if ("overlay" in resp) {
+        if (resp.overlay) showOverlay(resp.overlay);
+        else closeOverlay();
+      }
 <% endif %>
       const target = resp.stream || myStream();
       if (Array.isArray(resp.messages) && target && typeof pushMessages === "function") {
         pushMessages(target, resp.messages);
+      } else if (Array.isArray(resp.messages) && resp.messages.length) {
+        // 这个界面没有消息流（表单、列表多半没有）。早先消息在这里被静默
+        // 丢掉：点保存成功了什么都不显示，人不知道到底存没存。
+        const m = resp.messages[resp.messages.length - 1];
+        showNotice(m.text, m.kind);
+      }
+      // 后端用「返回 {"error":…} 404」报错时，body 里只有 error。早先前端
+      // 既不看状态码也不认这个字段——点保存、失败了、界面毫无反应。
+      if (resp.error) {
+        const text = String(resp.error);
+        if (target && typeof pushMessages === "function") {
+          pushMessages(target, [{ who: "出错", text, kind: "no" }]);
+        } else {
+          showNotice(text, "no");
+        }
+      }
+      // go：后端让前端换到哪个界面。「@来处」是登录前被打断的那个地址。
+      if (resp.go === "@来处") {
+        const back = afterLogin;
+        afterLogin = "";
+        if (back) location.hash = back;
+        else go(firstAppScreen());
+      } else if (resp.go && screens.some(s => s.name === resp.go)) {
+        go(resp.go);
       }
     }
 <% endif %>
@@ -262,6 +415,13 @@ createApp({
       // 也必须在请求之前——等回来再清的话，慢接口下那段字会在框里僵几秒。
       echoInput(name);
       const payload = JSON.parse(JSON.stringify(form.value));
+      // 地址里的参数（id、编号）说明正在改的是哪一条，以它为准，盖掉表单里
+      // 的同名键。主键是显式字段（比如编号）时，编辑浮层里它也是个输入框：
+      // 把 B1 的编号改成 B2 再保存，更新语句按主键找记录，就悄悄改到了 B2
+      // 头上，还回「已保存」。端到端测试实际撞上过。
+      for (const [k, v] of Object.entries(params.value || {})) {
+        if (k !== "浮层") payload[k] = v;
+      }
 <% if has_files %>
       // 这次要一起发的文件。注意 clearFields 会清掉 files，所以要在它
       // 之前把引用拿出来。
@@ -337,26 +497,115 @@ createApp({
       el.style.height = Math.min(el.scrollHeight, 180) + "px";
     }
 
-    function onRow(name, row) {
+    function onRow(name, row, target, carry, opens) {
       console.log("row", name, row);
-      if (name === "edit" && row) {
-        const target = screens.find(s => s.role === "表单");
-        if (target) {
-          Object.assign(forms.value[target.name], row);
-          go(target.name);
-        }
+      if (!row) return;
+      const p = carry && row[carry] != null ? { [carry]: row[carry] } : null;
+      // 「打开 浮层」：浮层属于当前界面，记录也填进当前界面的表单。先清空
+      // 再填——上一次在浮层里编辑的那条留下的键（比如 id）不能混进来。
+      if (opens) {
+        reset(current.value.name);
+        fillForm(current.value.name, row);
+<% if has_overlays %>
+        showOverlay(opens, p);
+<% endif %>
+        return;
+      }
+      if (!target) return;
+      fillForm(target, row);
+      // 「带 id」：把这一行的 id 放进地址（#笔记编辑?id=5）。刷新、把地址
+      // 发给别人，都还知道是哪一条——配合目标界面的「载入」。
+      go(target, p);
+    }
+
+    // 「载入」：带着地址参数进来（#笔记列表?浮层=笔记&id=5），表单里又不是
+    // 那一条时，调界面（或浮层）声明的接口把记录拉回来。刷新、打开别人发来
+    // 的链接，表单都不再是空的。
+    //
+    // 从列表点「编辑」进来时表单已经是那一行了，参数对得上，不发请求。
+    // 要发的话先清空表单：请求回来之前不该还显示着上一条记录——那一刻点
+    // 保存，就把上一条的内容写到这一条上了。
+    let enterSeq = 0;
+    async function runLoader(name) {
+      const all = params.value || {};
+      const ov = all["浮层"];
+      const loader = (ov && overlayLoaders[ov]) || loaders[name];
+      // 地址里的「浮层」是开关，不是给接口的参数——不滤掉的话，拿它跟表单
+      // 比永远对不上，每次都会重新拉一遍
+      const p = Object.fromEntries(Object.entries(all).filter(([k]) => k !== "浮层"));
+      if (!loader || !Object.keys(p).length) return;
+      const ep = typeof endpoints !== "undefined" ? endpoints[loader] : null;
+      if (!ep) return;
+      const f = forms.value[name] || {};
+      if (Object.entries(p).every(([k, v]) => String(f[k] ?? "") === String(v))) return;
+      reset(name);
+      const seq = ++enterSeq;
+      const resp = await postTo(ep, { action: loader, form: p });
+      if (seq === enterSeq && route.value === name) applyResponse(resp);
+    }
+
+    // 进入一个界面时自动跑的动作（.ui 里标了「进入时」），打开就有数据。
+    //
+    // 切界面时上一个界面的数据不能留着：从笔记列表切到待办列表，请求回来
+    // 之前表格里还是笔记的行——那一刻点「编辑」，笔记那一行会被拷进待办的
+    // 编辑界面，保存就改掉 id 相同的那条待办。所以进入时先清空；而且只认
+    // 最后一次进入发出的请求，慢回来的旧响应不能盖掉新列表。
+    async function runEnter(name) {
+      await runLoader(name);
+      const acts = enterActions[name] || [];
+      if (!acts.length) return;
+      const remote = a => (typeof endpoints !== "undefined" ? endpoints[a] : null);
+      // 预览里没有后端，lists 是编译时塞的示例数据，清掉就什么都看不到了
+      if (acts.some(remote)) lists.value = {};
+      const seq = ++enterSeq;
+      for (const a of acts) {
+        const ep = remote(a);
+        if (!ep) { onAction(a); continue; }
+        const resp = await postTo(ep, { action: a, form: forms.value[name] || {} });
+        if (seq === enterSeq && route.value === name) applyResponse(resp);
       }
     }
-    return { route, forms, form, rows, current, busy, go, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_overlays %>, openOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %> };
+
+    // 换了界面才跑「进入时」；同一个界面、只是地址参数变了（开关浮层、换
+    // 一条记录）只跑「载入」。浮层开关进了地址之后，每开一次浮层地址都会
+    // 变——不分开的话，每开一次浮层，后面的列表就被清空重拉一遍。
+    let entered = "";
+    function onRoute() {
+      if (route.value !== entered) {
+        entered = route.value;
+        runEnter(route.value);
+      } else {
+        runLoader(route.value);
+      }
+    }
+    window.addEventListener("hashchange", onRoute);
+    onRoute();
+    return { route, params, forms, form, rowsOf, lists, notice, nav, AUTH_SCREENS, current, busy, go, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %> };
   },
   template: `
-{#- .ui 里用了「切到」就说明界面切换已经自己安排好了（比如放进顶栏），
-    这段 nav 是多余的。没用「切到」时它是唯一的切换入口，不能省。
+{#- 顶部导航。两种来路：
+
+    项目编译时算好的 nav（多个实体的列表界面，见 gen/project.py 的
+    compute_nav）——传了就用它，不管 .ui 里有没有「切到」。
+
+    没传时照旧：.ui 里用了「切到」就说明界面切换已经自己安排好了（比如
+    放进顶栏），这段是多余的；没用「切到」时它是唯一的切换入口，不能省。
 
     早先是在样式表里写 nav { display:none } 无条件藏掉——那对 app2 正好
     （模式按钮在顶栏），但任何没用「切到」的 .ui 就再也切不了界面了。
     该由引擎判断的事不要写死在样式表里。 -#}
-<% if not has_goto %>
+<% if nav %>
+    <nav class="app-nav" v-if="!AUTH_SCREENS.includes(current.name)">
+      <a v-for="n in nav" :key="n.target"
+         :class="{ active: n.group.includes(current.name) }"
+         href="#" @click.prevent="go(n.target)">{{ n.label }}</a>
+<% if nav_logout %>
+{#- 退出登录是个动作，不是跳转，所以用 button 而不是 a：键盘和读屏软件
+    认得出区别，测试里按文字找按钮也才找得到。样式上跟导航项一致。 -#}
+      <button type="button" class="nav-logout" @click.prevent="submitTo('auth_logout')">退出登录</button>
+<% endif %>
+    </nav>
+<% elif not has_goto %>
     <nav>
       <a v-for="s in screens" :key="s.name"
          :class="{ active: current.name === s.name }"
@@ -373,5 +622,9 @@ createApp({
     <template v-if="current.name === '<%= screen_node.name %>'"><%= 节点(o) %></template>
     <% endfor %>
     <% endfor %>
+{#- 提示条：保存成功、后端报错，总得让人看见。放在所有界面外面——它跟
+    当前是哪个界面无关，而且嵌在 form 里的话切界面会连提示一起消失。 -#}
+    <div v-if="notice" :class="['toast', notice.kind === 'no' ? 'toast-no' : 'toast-ok']"
+         @click="notice = null">{{ notice.text }}</div>
   `
 }).mount("#app");

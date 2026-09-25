@@ -72,14 +72,23 @@
       </tr>
     </thead>
     <tbody>
-      <tr v-for="(row, i) in rows" :key="i">
+      {#- 数据从哪组来：默认就是表名，写了「绑」就用绑的那个键。表名是
+          显示用的（可以起中文名），数据键是接口在 lists 里给的键。
+          早先所有表格都读同一个全局 rows，一个界面只能有一张表。 -#}
+      <tr v-for="(row, i) in rowsOf('<%= node.bind or node.name %>')" :key="i">
         <% for c in node.children if c.kind == "列" %>
+        {#- 布尔列显示成勾，不是库里原样的 0/1。判断写全几种形态：库里是
+            整数 1、JSON 往返后可能是 true、表单里可能是字符串 "1"。 -#}
+        <% if c.type == "布尔" %>
+        <td class="cell-bool">{{ (row.<%= c.bind or c.name %> === 1 || row.<%= c.bind or c.name %> === true || row.<%= c.bind or c.name %> === "1" || row.<%= c.bind or c.name %> === "true") ? "✓" : "" }}</td>
+        <% else %>
         <td>{{ row.<%= c.bind or c.name %> }}</td>
+        <% endif %>
         <% endfor %>
         <% if node.of_kind("动作") %>
         <td class="row-acts">
           <% for a in node.of_kind("动作") %>
-          <button type="button" class="btn btn-ghost" @click="onRow('<%= a.name %>', row)"><%= a.label or a.name %></button>
+          <button type="button" class="btn btn-ghost" @click="onRow('<%= a.name %>', row, '<%= a.goto %>', '<%= a.carry %>', '<%= a.opens %>')"><%= a.label or a.name %></button>
           <% endfor %>
         </td>
         <% endif %>

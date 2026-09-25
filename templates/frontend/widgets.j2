@@ -128,7 +128,7 @@
 <%- set kind = "危险" if a.has("危险") else "次要" if a.has("次要") else "提交" -%>
 <%- set 色 = "btn-danger" if a.has("危险") else ("btn-ghost" if a.has("次要") else "btn-primary") -%>
 <%- if a.opens -%>
-<button type="button" class="btn <%= 色 %>" @click.prevent="openOverlay = '<%= a.opens %>'"<%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
+<button type="button" class="btn <%= 色 %>" @click.prevent="<% if a.has("重置") %>reset(current.name); <% endif %>showOverlay('<%= a.opens %>')"<%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
 <%- elif a.has("关闭") and not a.has("远程") -%>
 <button type="button" class="btn <%= 色 %>" @click.prevent="closeOverlay()"<%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
 <%- elif a.goto -%>
