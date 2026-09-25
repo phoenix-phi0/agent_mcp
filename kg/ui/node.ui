@@ -50,6 +50,12 @@
         动作 goChild 切到 知识图谱 带 code 查看
       结束
 
+      文案 这个结构点上的说法
+      列表 条目 绑 items
+        列 code 编号
+        列 label 名称
+      结束
+
       文案 挂着的词
       列表 词 绑 point_words
         列 kanji 汉字

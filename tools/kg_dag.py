@@ -123,7 +123,11 @@ def import_file(db, qdir, path, contrast_path=None) -> dict:
     if contrast_path is None:
         guess = Path(path).parent / "contrast.jsonl"
         contrast_path = guess if guess.is_file() else None
-    pairs = load_items(contrast_path) if contrast_path else []
+    # contrast_path=False：这一趟不导对照。导入顺序是节点 → 条目 → 对照：
+    # 条目的 point 指向节点（外键），所以节点要先；而对照的两端可能是条目
+    # （なければならない ↔ なくてもいい），所以对照要后。
+    pairs = [] if contrast_path is False else (
+        load_items(contrast_path) if contrast_path else [])
 
     report = {
         "file": str(path), "items": len(items),
@@ -199,6 +203,115 @@ def import_file(db, qdir, path, contrast_path=None) -> dict:
     finally:
         con.close()
     return report
+
+
+def import_contrast(db, qdir, path) -> dict:
+    """单独导对照。两端可以是结构点，也可以是条目。
+
+    从 import_file 里拆出来，是因为导入有先后：节点 → 条目 → 对照。
+    条目的 point 指向节点（外键），对照的两端可能是条目。
+    """
+    p = Path(path)
+    if not p.is_file():
+        return {"file": str(p), "added": 0, "existing": 0, "rejected": []}
+
+    pairs = load_items(p)
+    sql = _sql(Path(qdir), "kg_contrast_add")
+    report = {"file": str(p), "added": 0, "existing": 0, "rejected": []}
+
+    con = sqlite3.connect(db)
+    try:
+        con.execute("PRAGMA foreign_keys = ON")
+        con.executescript(EXTRA_SCHEMA)
+        con.execute("BEGIN")
+        for no, obj in pairs:
+            a = str((obj or {}).get("a") or "").strip()
+            b = str((obj or {}).get("b") or "").strip()
+            if not a or not b:
+                report["rejected"].append((no, a, b, "缺 a 或 b"))
+                continue
+            if _changed(con, sql, {"x": a, "y": b}) == 1:
+                report["added"] += 1
+            elif a == b:
+                report["rejected"].append((no, a, b, "自己对照自己"))
+            elif not con.execute(
+                    "SELECT 1 WHERE (EXISTS(SELECT 1 FROM node WHERE code=?)"
+                    " OR EXISTS(SELECT 1 FROM item WHERE code=?))"
+                    " AND (EXISTS(SELECT 1 FROM node WHERE code=?)"
+                    " OR EXISTS(SELECT 1 FROM item WHERE code=?))",
+                    (a, a, b, b)).fetchone():
+                report["rejected"].append((no, a, b, "有一方不存在"))
+            else:
+                report["existing"] += 1
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+    return report
+
+
+def format_contrast_report(r: dict) -> str:
+    line = (f"导入 {Path(r['file']).name}：新增 {r['added']}，"
+            f"已存在 {r['existing']}")
+    for no, a, b, why in r["rejected"][:10]:
+        line += f"\n  [拒绝] 第 {no} 行：{a} ↔ {b}  {why}"
+    return line
+
+
+def import_items(db, qdir, path) -> dict:
+    """导入条目（items.jsonl）：搭在结构点上的固定表达。
+
+    先全部插入、再回填 after：after 指向同一批里的另一个条目，按文件顺序
+    插的话可能还没插到。分两遍最省事，比排序简单也比让外键宽松安全。
+    """
+    p = Path(path)
+    if not p.is_file():
+        return {"file": str(p), "items": 0, "new": 0, "updated": 0, "skipped": []}
+
+    items = load_items(p)
+    sql = _sql(Path(qdir), "item_upsert")
+    report = {"file": str(p), "items": len(items), "new": 0, "updated": 0,
+              "skipped": []}
+
+    con = sqlite3.connect(db)
+    try:
+        con.execute("PRAGMA foreign_keys = ON")
+        con.execute("BEGIN")
+        afters = []
+        for no, obj in items:
+            code = str((obj or {}).get("code") or "").strip()
+            label = str((obj or {}).get("label") or "").strip()
+            point = str((obj or {}).get("point") or "").strip()
+            if not code or not label or not point:
+                report["skipped"].append((no, "缺 code / label / point"))
+                continue
+            existed = con.execute("SELECT 1 FROM item WHERE code = ?",
+                                  (code,)).fetchone()
+            con.execute(sql, {"code": code, "label": label, "point": point,
+                              "after": ""})
+            report["updated" if existed else "new"] += 1
+            after = str((obj or {}).get("after") or "").strip()
+            if after:
+                afters.append((after, code))
+        for after, code in afters:
+            con.execute("UPDATE item SET after = ? WHERE code = ?", (after, code))
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+    return report
+
+
+def format_items_report(r: dict) -> str:
+    line = (f"导入 {Path(r['file']).name}：{r['items']} 条，"
+            f"新增 {r['new']}，更新 {r['updated']}")
+    for no, why in r["skipped"][:10]:
+        line += f"\n  [跳过] 第 {no} 行：{why}"
+    return line
 
 
 # ----------------------------------------------------------------------

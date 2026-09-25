@@ -66,7 +66,17 @@ def setup(quiet: bool = False) -> int:
     ensure_learn_index()
 
     db, qdir = PROJ / "app.db", PROJ / "queries"
-    say(format_report(import_file(db, qdir, CONTENT / "kg.jsonl")))
+
+    # 顺序：节点和边 → 条目 → 对照。
+    #   条目的 point 指向节点（外键），所以节点要先；
+    #   对照的两端可能是条目（なければならない ↔ なくてもいい），所以对照要后。
+    from tools.kg_dag import (format_contrast_report, format_items_report,
+                              import_contrast, import_items)
+    say(format_report(import_file(db, qdir, CONTENT / "kg.jsonl",
+                                  contrast_path=False)))
+    say(format_items_report(import_items(db, qdir, CONTENT / "items.jsonl")))
+    say(format_contrast_report(import_contrast(db, qdir,
+                                               CONTENT / "contrast.jsonl")))
 
     words = CONTENT / "words.jsonl"
     if words.is_file():

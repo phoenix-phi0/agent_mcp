@@ -27,30 +27,9 @@
 {"id": "kara-made", "label": "から まで より", "prereq": ["ni-de"]}
 {"id": "no", "label": "の", "prereq": ["noun"]}
 {"id": "mo", "label": "も", "prereq": ["wa-ga"]}
-{"id": "ka-ne-yo", "label": "终助词 か ね よ", "prereq": ["plain-polite"]}
 {"id": "te-iru", "label": "ている", "prereq": ["te-form"]}
-{"id": "te-kudasai", "label": "てください", "prereq": ["te-form"]}
-{"id": "te-kara", "label": "てから", "prereq": ["te-form"]}
-{"id": "te-mo-ii", "label": "てもいい", "prereq": ["te-form"]}
-{"id": "te-wa-ikenai", "label": "てはいけない", "prereq": ["te-form"]}
-{"id": "te-oku", "label": "ておく", "prereq": ["te-form"]}
-{"id": "te-shimau", "label": "てしまう", "prereq": ["te-form"]}
-{"id": "te-miru", "label": "てみる", "prereq": ["te-form"]}
-{"id": "ta-koto-ga-aru", "label": "たことがある", "prereq": ["ta-form"]}
-{"id": "ta-hou-ga-ii", "label": "たほうがいい", "prereq": ["ta-form"]}
-{"id": "nakereba", "label": "なければならない", "prereq": ["nai-form"]}
-{"id": "nakute-mo-ii", "label": "なくてもいい", "prereq": ["nai-form"]}
-{"id": "naide-kudasai", "label": "ないでください", "prereq": ["nai-form"]}
-{"id": "tai", "label": "たい", "prereq": ["masu-form"]}
-{"id": "hoshii", "label": "ほしい", "prereq": ["i-adj-conj"]}
-{"id": "to-omou", "label": "と思う", "prereq": ["plain-polite"]}
-{"id": "to-iu", "label": "という", "prereq": ["plain-polite"]}
 {"id": "node-kara", "label": "ので と から", "prereq": ["plain-polite"]}
 {"id": "ga-kedo", "label": "が と けど", "prereq": ["plain-polite"]}
-{"id": "conditional-tara", "label": "たら", "prereq": ["ta-form"]}
-{"id": "conditional-ba", "label": "ば", "prereq": ["dict-form"]}
-{"id": "conditional-to", "label": "と（条件）", "prereq": ["dict-form"]}
-{"id": "conditional-nara", "label": "なら", "prereq": ["plain-polite"]}
 {"id": "potential", "label": "可能形", "prereq": ["dict-form", "wo"]}
 {"id": "volitional", "label": "意志形", "prereq": ["masu-form"]}
 {"id": "imperative", "label": "命令形", "prereq": ["dict-form"]}
@@ -58,71 +37,29 @@
 {"id": "causative", "label": "使役形", "prereq": ["nai-form", "wo"]}
 {"id": "causative-passive", "label": "使役受身形", "prereq": ["causative", "passive"]}
 {"id": "transitive-pair", "label": "自他动词对", "prereq": ["verb-groups", "wo"]}
-{"id": "ageru-kureru", "label": "授受 あげる くれる もらう", "prereq": ["ni-de", "te-form"]}
-{"id": "te-ageru", "label": "てあげる てくれる てもらう", "prereq": ["ageru-kureru"]}
+{"id": "ageru-kureru", "label": "授受", "prereq": ["ni-de", "wo"]}
 {"id": "sonkeigo", "label": "尊敬语", "prereq": ["passive", "plain-polite"]}
 {"id": "kenjougo", "label": "谦让语", "prereq": ["plain-polite"]}
 {"id": "teineigo", "label": "丁宁语", "prereq": ["plain-polite"]}
-{"id": "keigo-usage", "label": "敬语综合运用", "prereq": ["kenjougo", "sonkeigo", "te-ageru", "teineigo"]}
+{"id": "keigo-usage", "label": "敬语综合运用", "prereq": ["ageru-kureru", "kenjougo", "sonkeigo", "teineigo"]}
 {"id": "synonym-nuance", "label": "近义词辨析", "prereq": ["i-adj-conj", "na-adj-conj", "te-iru"]}
 {"id": "kanji-writing", "label": "汉字书写", "prereq": ["kanji-basic", "synonym-nuance"]}
 {"id": "collocation", "label": "惯用搭配", "prereq": ["onomatopoeia", "synonym-nuance"]}
-{"id": "counters-basic", "label": "数量词基础 一つ 一人", "prereq": ["kanji-basic"]}
-{"id": "counters-things", "label": "事物量词 本 枚 台 匹 冊", "prereq": ["counters-basic"]}
-{"id": "counters-sound", "label": "量词音变 一本 いっぽん", "prereq": ["counters-things", "sokuon"]}
-{"id": "counters-order", "label": "次数与顺序 回 度 番 目", "prereq": ["counters-basic"]}
+{"id": "counters-basic", "label": "数量词基础", "prereq": ["kanji-basic"]}
+{"id": "counters-things", "label": "事物量词", "prereq": ["counters-basic"]}
+{"id": "counters-sound", "label": "量词音变", "prereq": ["counters-things", "sokuon"]}
+{"id": "counters-order", "label": "次数与顺序", "prereq": ["counters-basic"]}
 {"id": "time-date", "label": "日期与星期", "prereq": ["counters-basic"]}
 {"id": "time-clock", "label": "时刻", "prereq": ["counters-basic"]}
-{"id": "time-duration", "label": "时长 間 中 ずつ", "prereq": ["counters-order", "time-clock"]}
-{"id": "time-relative", "label": "相对时间 先週 来月 おととい", "prereq": ["time-date"]}
-{"id": "time-particle", "label": "时间与助词 に的有无", "prereq": ["ni-de", "time-date"]}
-{"id": "adv-degree", "label": "程度副词 とても かなり ずいぶん", "prereq": ["adverb"]}
-{"id": "adv-frequency", "label": "频度副词 いつも よく たまに めったに", "prereq": ["adverb"]}
-{"id": "adv-quantity", "label": "数量副词 たくさん 少し ほとんど", "prereq": ["adverb", "counters-basic"]}
-{"id": "adv-time", "label": "时间副词 もう まだ すぐ そろそろ", "prereq": ["adverb", "time-duration"]}
-{"id": "adv-modal", "label": "陈述副词呼应 きっと だろう 全然 ない", "prereq": ["adverb", "nai-form", "plain-polite"]}
-{"id": "adv-conjunctive", "label": "接续词 しかし それで つまり", "prereq": ["adverb", "node-kara"]}
-{"id": "ni-okeru", "label": "における において", "prereq": ["no", "plain-polite"]}
-{"id": "ni-kanshite", "label": "に関して について", "prereq": ["plain-polite"]}
-{"id": "wo-megutte", "label": "をめぐって", "prereq": ["ni-kanshite"]}
-{"id": "ni-motozuite", "label": "に基づいて", "prereq": ["ni-kanshite"]}
-{"id": "to-shite", "label": "として", "prereq": ["plain-polite"]}
-{"id": "ni-totte", "label": "にとって", "prereq": ["to-shite"]}
-{"id": "ni-yotte", "label": "によって", "prereq": ["passive"]}
-{"id": "ni-taishite", "label": "に対して", "prereq": ["ni-totte"]}
-{"id": "koso", "label": "こそ", "prereq": ["mo"]}
-{"id": "sae", "label": "さえ", "prereq": ["mo"]}
-{"id": "bakari-ka", "label": "ばかりか", "prereq": ["sae"]}
-{"id": "ni-kagitte", "label": "に限って", "prereq": ["kara-made"]}
-{"id": "dake-de-naku", "label": "だけでなく", "prereq": ["mo"]}
-{"id": "hodo", "label": "ほど", "prereq": ["dake-de-naku"]}
-{"id": "nimo-kakawarazu", "label": "にもかかわらず", "prereq": ["ga-kedo"]}
-{"id": "monono", "label": "ものの", "prereq": ["ga-kedo"]}
-{"id": "tsutsumo", "label": "つつも", "prereq": ["ga-kedo", "masu-form"]}
-{"id": "kuseni", "label": "くせに", "prereq": ["ga-kedo"]}
-{"id": "tokoroga", "label": "ところが", "prereq": ["adv-conjunctive", "ga-kedo"]}
-{"id": "okage-sei", "label": "おかげで せいで", "prereq": ["node-kara"]}
-{"id": "yueni", "label": "ゆえに", "prereq": ["node-kara"]}
-{"id": "dake-ni", "label": "だけに", "prereq": ["hodo", "node-kara"]}
-{"id": "ijou-wa", "label": "以上は", "prereq": ["node-kara", "plain-polite"]}
-{"id": "zaru-wo-enai", "label": "ざるを得ない", "prereq": ["nai-form", "nakereba"]}
-{"id": "wake-ni-wa-ikanai", "label": "わけにはいかない", "prereq": ["dict-form", "nakereba"]}
-{"id": "zu-ni-wa-irarenai", "label": "ずにはいられない", "prereq": ["nai-form"]}
-{"id": "hoka-nai", "label": "ほかない", "prereq": ["dict-form", "nai-form"]}
-{"id": "shidai", "label": "次第", "prereq": ["masu-form", "te-kara"]}
-{"id": "totanni", "label": "とたんに", "prereq": ["ta-form"]}
-{"id": "kake", "label": "かけ かける", "prereq": ["masu-form", "te-iru"]}
-{"id": "tsutsu-aru", "label": "つつある", "prereq": ["masu-form", "te-iru"]}
-{"id": "uchi-ni", "label": "うちに", "prereq": ["dict-form", "nai-form", "time-duration"]}
-{"id": "aida-ni", "label": "間に", "prereq": ["te-iru", "time-duration"]}
-{"id": "ni-chigainai", "label": "に違いない", "prereq": ["plain-polite", "to-omou"]}
-{"id": "kanenai", "label": "かねない かねる", "prereq": ["masu-form"]}
-{"id": "ppoi", "label": "っぽい", "prereq": ["i-adj-conj"]}
-{"id": "ge", "label": "げ", "prereq": ["na-adj-conj"]}
-{"id": "you-mitai", "label": "ようだ みたいだ", "prereq": ["plain-polite"]}
-{"id": "rashii", "label": "らしい", "prereq": ["you-mitai"]}
-{"id": "souda-densetsu", "label": "そうだ 伝闻", "prereq": ["plain-polite"]}
-{"id": "souda-youtai", "label": "そうだ 样态", "prereq": ["i-adj-conj", "masu-form"]}
+{"id": "time-duration", "label": "时长", "prereq": ["counters-order", "time-clock"]}
+{"id": "time-relative", "label": "相对时间", "prereq": ["time-date"]}
+{"id": "time-particle", "label": "时间与助词", "prereq": ["ni-de", "time-date"]}
+{"id": "adv-degree", "label": "程度副词", "prereq": ["adverb"]}
+{"id": "adv-frequency", "label": "频度副词", "prereq": ["adverb"]}
+{"id": "adv-quantity", "label": "数量副词", "prereq": ["adverb", "counters-basic"]}
+{"id": "adv-time", "label": "时间副词", "prereq": ["adverb", "time-duration"]}
+{"id": "adv-modal", "label": "陈述副词呼应", "prereq": ["adverb", "nai-form", "plain-polite"]}
+{"id": "adv-conjunctive", "label": "接续词", "prereq": ["adverb", "node-kara"]}
 {"id": "kanji-onkun", "label": "音读训读辨别", "prereq": ["counters-sound", "kanji-basic"]}
 {"id": "kanji-homophone", "label": "同音异字", "prereq": ["kanji-onkun", "synonym-nuance"]}
 {"id": "kanji-okurigana", "label": "送假名", "prereq": ["i-adj-conj", "kanji-onkun"]}

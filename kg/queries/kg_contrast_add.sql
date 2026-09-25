@@ -3,10 +3,16 @@
 --
 -- 对照不参与环检查——它不是依赖关系。平假名→片假名 是前置，
 -- 片假名↔平假名 是对照，两种并存完全正常。
+--
+-- 两端可以是结构点，也可以是条目：「なければならない ↔ なくてもいい」
+-- （必须做 vs 不做也行）两头都是条目，而那正是最该对照的一类。所以存在性
+-- 检查要同时看 node 和 item。
 INSERT INTO contrast(a, b)
 SELECT min(:x, :y), max(:x, :y)
 WHERE :x <> :y
-  AND EXISTS (SELECT 1 FROM node WHERE code = :x)
-  AND EXISTS (SELECT 1 FROM node WHERE code = :y)
+  AND (EXISTS (SELECT 1 FROM node WHERE code = :x)
+       OR EXISTS (SELECT 1 FROM item WHERE code = :x))
+  AND (EXISTS (SELECT 1 FROM node WHERE code = :y)
+       OR EXISTS (SELECT 1 FROM item WHERE code = :y))
   AND NOT EXISTS (SELECT 1 FROM contrast
                   WHERE a = min(:x, :y) AND b = max(:x, :y))

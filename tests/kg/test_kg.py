@@ -25,12 +25,27 @@ sys.path.insert(0, str(ROOT))
 
 from tools.entity import render_sql                                    # noqa: E402
 from tools.kg_dag import (KgError, export_file, export_items,          # noqa: E402
-                          format_export, format_report, import_file, load_items)
+                          format_export, format_report, import_contrast,
+                          import_file, import_items, load_items)
 
 KG = ROOT / "kg"
 QDIR = KG / "queries"
 SOURCE = KG / "content" / "kg.jsonl"
+ITEMS = KG / "content" / "items.jsonl"
 CONTRAST = KG / "content" / "contrast.jsonl"
+
+
+def import_all(db):
+    """按正式顺序导：节点和边 → 条目 → 对照。
+
+    顺序不是随意的：条目的 point 指向节点（外键），所以节点要先；对照的
+    两端可能是条目（なければならない ↔ なくてもいい），所以对照要后。
+    早先测试里一把导完，那 8 对引用条目的对照全被判成「有一方不存在」。
+    """
+    r = import_file(db, QDIR, SOURCE, contrast_path=False)
+    import_items(db, QDIR, ITEMS)
+    c = import_contrast(db, QDIR, CONTRAST)
+    return r, c
 
 passed = failed = 0
 
@@ -90,23 +105,24 @@ def main():
 
     print("一、真数据")
     db = fresh_db(tmp, "real.db")
-    r = import_file(db, QDIR, SOURCE)
+    r, c = import_all(db)
     print("    " + format_report(r).replace("\n", "\n    "))
     check(r["nodes_new"] == n_nodes, f"新增节点 {r['nodes_new']}/{n_nodes}")
     check(r["edges_added"] == n_edges, f"新增前置边 {r['edges_added']}/{n_edges}")
     check(not r["rejected"], f"没有被拒的边（{len(r['rejected'])}）")
-    check(r["contrast_added"] == n_pairs, f"对照 {r['contrast_added']} 对/{n_pairs}")
+    check(c["added"] == n_pairs and not c["rejected"],
+          f"对照 {c['added']} 对/{n_pairs}，拒绝 {len(c['rejected'])}")
     check((count(db, "node"), count(db, "prereq"), count(db, "contrast"))
           == (n_nodes, n_edges, n_pairs), "库里的行数跟文件一致")
 
     print("  再导一遍")
-    r2 = import_file(db, QDIR, SOURCE)
+    r2, c2 = import_all(db)
     check((r2["nodes_new"], r2["nodes_updated"]) == (0, n_nodes),
           f"节点全部是更新：新增 {r2['nodes_new']}，更新 {r2['nodes_updated']}")
     check((r2["edges_added"], r2["edges_existing"], len(r2["rejected"])) == (0, n_edges, 0),
           f"边全部已存在：新增 {r2['edges_added']}，已存在 {r2['edges_existing']}")
-    check((r2["contrast_added"], r2["contrast_existing"]) == (0, n_pairs),
-          f"对照也是：新增 {r2['contrast_added']}，已存在 {r2['contrast_existing']}")
+    check((c2["added"], c2["existing"]) == (0, n_pairs),
+          f"对照也是：新增 {c2['added']}，已存在 {c2['existing']}")
     check(count(db, "prereq") == n_edges, "行数没变")
 
     print("  图查询")
@@ -198,8 +214,11 @@ def main():
     check(not list(out.parent.glob("*.tmp")), "没留下临时文件")
 
     db4 = fresh_db(tmp, "roundtrip.db")
-    r4 = import_file(db4, QDIR, out)
+    r4 = import_file(db4, QDIR, out, contrast_path=False)
+    import_items(db4, QDIR, ITEMS)
+    c4 = import_contrast(db4, QDIR, cout)
     check(not r4["rejected"] and not r4["nodes_skipped"], "导出的文件再导入：零拒绝零跳过")
+    check(not c4["rejected"], f"对照也零拒绝：{c4['rejected'][:2]}")
     check((count(db4, "node"), count(db4, "prereq"), count(db4, "contrast"))
           == (n_nodes, n_edges, n_pairs), "再导入的新库跟原库行数相同")
 

@@ -1,0 +1,63 @@
+{"code": "ka-ne-yo", "label": "终助词 か ね よ", "point": "plain-polite", "after": ""}
+{"code": "te-kudasai", "label": "てください", "point": "te-form", "after": ""}
+{"code": "te-kara", "label": "てから", "point": "te-form", "after": ""}
+{"code": "te-mo-ii", "label": "てもいい", "point": "te-form", "after": ""}
+{"code": "te-wa-ikenai", "label": "てはいけない", "point": "te-form", "after": ""}
+{"code": "te-oku", "label": "ておく", "point": "te-form", "after": ""}
+{"code": "te-shimau", "label": "てしまう", "point": "te-form", "after": ""}
+{"code": "te-miru", "label": "てみる", "point": "te-form", "after": ""}
+{"code": "ta-koto-ga-aru", "label": "たことがある", "point": "ta-form", "after": ""}
+{"code": "ta-hou-ga-ii", "label": "たほうがいい", "point": "ta-form", "after": ""}
+{"code": "nakereba", "label": "なければならない", "point": "nai-form", "after": ""}
+{"code": "nakute-mo-ii", "label": "なくてもいい", "point": "nai-form", "after": ""}
+{"code": "naide-kudasai", "label": "ないでください", "point": "nai-form", "after": ""}
+{"code": "tai", "label": "たい", "point": "masu-form", "after": ""}
+{"code": "hoshii", "label": "ほしい", "point": "i-adj-conj", "after": ""}
+{"code": "to-omou", "label": "と思う", "point": "plain-polite", "after": ""}
+{"code": "to-iu", "label": "という", "point": "plain-polite", "after": ""}
+{"code": "conditional-tara", "label": "たら", "point": "ta-form", "after": ""}
+{"code": "conditional-ba", "label": "ば", "point": "dict-form", "after": ""}
+{"code": "conditional-to", "label": "と（条件）", "point": "dict-form", "after": ""}
+{"code": "conditional-nara", "label": "なら", "point": "plain-polite", "after": ""}
+{"code": "te-ageru", "label": "てあげる てくれる てもらう", "point": "ageru-kureru", "after": ""}
+{"code": "ni-okeru", "label": "における において", "point": "no", "after": ""}
+{"code": "ni-kanshite", "label": "に関して について", "point": "plain-polite", "after": ""}
+{"code": "wo-megutte", "label": "をめぐって", "point": "plain-polite", "after": "ni-kanshite"}
+{"code": "ni-motozuite", "label": "に基づいて", "point": "plain-polite", "after": "ni-kanshite"}
+{"code": "to-shite", "label": "として", "point": "plain-polite", "after": ""}
+{"code": "ni-totte", "label": "にとって", "point": "plain-polite", "after": "to-shite"}
+{"code": "ni-yotte", "label": "によって", "point": "passive", "after": ""}
+{"code": "ni-taishite", "label": "に対して", "point": "plain-polite", "after": "ni-totte"}
+{"code": "koso", "label": "こそ", "point": "mo", "after": ""}
+{"code": "sae", "label": "さえ", "point": "mo", "after": ""}
+{"code": "bakari-ka", "label": "ばかりか", "point": "mo", "after": "sae"}
+{"code": "ni-kagitte", "label": "に限って", "point": "kara-made", "after": ""}
+{"code": "dake-de-naku", "label": "だけでなく", "point": "mo", "after": ""}
+{"code": "hodo", "label": "ほど", "point": "mo", "after": "dake-de-naku"}
+{"code": "nimo-kakawarazu", "label": "にもかかわらず", "point": "ga-kedo", "after": ""}
+{"code": "monono", "label": "ものの", "point": "ga-kedo", "after": ""}
+{"code": "tsutsumo", "label": "つつも", "point": "ga-kedo", "after": ""}
+{"code": "kuseni", "label": "くせに", "point": "ga-kedo", "after": ""}
+{"code": "tokoroga", "label": "ところが", "point": "adv-conjunctive", "after": ""}
+{"code": "okage-sei", "label": "おかげで せいで", "point": "node-kara", "after": ""}
+{"code": "yueni", "label": "ゆえに", "point": "node-kara", "after": ""}
+{"code": "dake-ni", "label": "だけに", "point": "node-kara", "after": "hodo"}
+{"code": "ijou-wa", "label": "以上は", "point": "node-kara", "after": ""}
+{"code": "zaru-wo-enai", "label": "ざるを得ない", "point": "nai-form", "after": "nakereba"}
+{"code": "wake-ni-wa-ikanai", "label": "わけにはいかない", "point": "dict-form", "after": "nakereba"}
+{"code": "zu-ni-wa-irarenai", "label": "ずにはいられない", "point": "nai-form", "after": ""}
+{"code": "hoka-nai", "label": "ほかない", "point": "dict-form", "after": ""}
+{"code": "shidai", "label": "次第", "point": "masu-form", "after": "te-kara"}
+{"code": "totanni", "label": "とたんに", "point": "ta-form", "after": ""}
+{"code": "kake", "label": "かけ かける", "point": "masu-form", "after": ""}
+{"code": "tsutsu-aru", "label": "つつある", "point": "masu-form", "after": ""}
+{"code": "uchi-ni", "label": "うちに", "point": "dict-form", "after": ""}
+{"code": "aida-ni", "label": "間に", "point": "te-iru", "after": ""}
+{"code": "ni-chigainai", "label": "に違いない", "point": "plain-polite", "after": "to-omou"}
+{"code": "kanenai", "label": "かねない かねる", "point": "masu-form", "after": ""}
+{"code": "ppoi", "label": "っぽい", "point": "i-adj-conj", "after": ""}
+{"code": "ge", "label": "げ", "point": "na-adj-conj", "after": ""}
+{"code": "you-mitai", "label": "ようだ みたいだ", "point": "plain-polite", "after": ""}
+{"code": "rashii", "label": "らしい", "point": "plain-polite", "after": "you-mitai"}
+{"code": "souda-densetsu", "label": "そうだ 伝闻", "point": "plain-polite", "after": ""}
+{"code": "souda-youtai", "label": "そうだ 样态", "point": "i-adj-conj", "after": ""}
