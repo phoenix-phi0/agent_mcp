@@ -37,6 +37,7 @@ run 模板命名    $PY tests/gen/test_templates.py
 run 知识图谱    $PY tests/kg/test_kg.py
 run 单词        $PY tests/kg/test_word.py
 run 单词导入    $PY tests/kg/test_word_import.py
+run 学习记录    $PY tests/kg/test_learn.py
 run 认证        $PY tests/auth/test_auth.py
 run 认证攻击    $PY tests/auth/test_auth_attack.py
 run 并发隔离    $PY tests/auth/test_concurrency.py

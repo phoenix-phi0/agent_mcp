@@ -501,17 +501,31 @@ def render_db(entities, db_name: str = "app") -> dict:
 # ----------------------------------------------------------------------
 
 
-def render_sql(text: str) -> str:
-    """A .entity text -> the CREATE TABLE script."""
+def render_sql(text: str, strict: bool = False) -> str:
+    """A .entity text -> the CREATE TABLE script.
+
+    strict=True 时语法错和校验不过都抛异常，而不是把错误文字当成 SQL
+    返回。程序调用一律该用它：返回错误文字的话，调用方会把那段中文交给
+    SQLite，报的是「near "语法错误：第": syntax error」——指向的位置跟
+    真正的原因毫无关系，查起来绕一大圈。实际踩过。
+
+    默认仍然返回错误文字，因为 MCP 工具那条路要把错误显示给人看。
+    """
     try:
         entities = parse(text)
     except EntitySyntaxError as e:
+        if strict:
+            raise
         return f"语法错误：{e}"
     if not entities:
+        if strict:
+            raise EntitySyntaxError("没有解析到任何实体")
         return "没有解析到任何实体"
 
     problems = validate(entities)
     if problems:
+        if strict:
+            raise EntitySyntaxError("校验没过：" + "；".join(problems))
         return "校验没过，先修这些：\n" + "\n".join("  - " + p for p in problems)
 
     try:

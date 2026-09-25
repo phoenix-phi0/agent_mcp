@@ -30,6 +30,28 @@ ROOT = PROJ.parent
 CONTENT = PROJ / "content"
 
 
+def ensure_learn_index() -> None:
+    """mastery 每人每个知识点只该有一行。
+
+    .entity 表达不了多列唯一，而 mastery_bump 的 ON CONFLICT(learner, point)
+    要靠这个索引才认得出「同一行」——没有它，每答一题都会新增一行，汇总
+    永远是 1/1，而且不报错。边和对照的唯一索引也是这么补的。
+    """
+    import sqlite3
+    db = PROJ / "app.db"
+    if not db.is_file():
+        return
+    con = sqlite3.connect(db)
+    try:
+        if con.execute("SELECT name FROM sqlite_master WHERE type='table'"
+                       " AND name='mastery'").fetchone():
+            con.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_mastery"
+                        " ON mastery(learner, point)")
+            con.commit()
+    finally:
+        con.close()
+
+
 def setup(quiet: bool = False) -> int:
     sys.path.insert(0, str(ROOT))
     from gen.project import build, ensure_db
@@ -41,6 +63,7 @@ def setup(quiet: bool = False) -> int:
     say = (lambda *a: None) if quiet else print
 
     say(ensure_db(PROJ))
+    ensure_learn_index()
 
     db, qdir = PROJ / "app.db", PROJ / "queries"
     say(format_report(import_file(db, qdir, CONTENT / "kg.jsonl")))
