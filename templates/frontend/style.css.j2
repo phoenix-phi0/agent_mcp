@@ -216,3 +216,7 @@ th { font-size:12px; color:var(--dim); }
 .overlay-box > .btn { margin-left:auto; }
 .overlay-box .copy { max-width:none; margin:0; padding:0; }
 .overlay-box .group, .overlay-box .region { padding:0; }
+
+/* 节点图：高度由 .ui 里的「高」给（内联 style），这里让 Vue Flow 撑满容器。 */
+.graph-wrap { width:100%; min-height:240px; border:1px solid var(--line); border-radius:8px; background:var(--panel); }
+.graph-wrap > .vue-flow { width:100%; height:100%; }

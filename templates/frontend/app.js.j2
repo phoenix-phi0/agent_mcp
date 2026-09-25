@@ -21,6 +21,7 @@
 <% set nav = nav if nav is defined else false %>
 <% set nav_logout = nav_logout if nav_logout is defined else false %>
 <% set has_files = file_fields_json != "{}" %>
+<% set has_graphs = has_graphs if has_graphs is defined else false %>
 const { createApp, ref, computed } = Vue;
 const screens = <%= screens_json %>;
 {#- 每个界面一份表单状态，按界面名索引。共用一个对象会让同名字段串味，
@@ -63,7 +64,7 @@ const fileFields = <%= file_fields_json %>;
 const endpoints = <%= endpoints_json %>;
 <% endif %>
 
-createApp({
+const _app = createApp({
   setup() {
     // 地址：#界面名?参数=值。界面名用 encodeURIComponent 编过（名字里的
     // 「?」会变成 %3F），所以裸的「?」一定是分隔符。
@@ -580,7 +581,41 @@ createApp({
     }
     window.addEventListener("hashchange", onRoute);
     onRoute();
-    return { route, params, forms, form, rowsOf, lists, notice, nav, AUTH_SCREENS, current, busy, go, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %> };
+<% if has_graphs %>
+    // 节点图：数据从共享路径读 {nodes, edges}，dagre 算坐标，Vue Flow 画。
+    // 按数据内容缓存：模板里 nodes/edges 各调一次，不缓存的话每次渲染都跑 dagre。
+    const _graphCache = new Map();
+    function _graphGet(obj, path) { return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj); }
+    function _graphPut(obj, path, value) { const parts = path.split('.'); let box = obj; for (const k of parts.slice(0, -1)) box = box[k] || (box[k] = {}); box[parts[parts.length - 1]] = value; }
+    function graphOf(path, dir) {
+      const raw = _graphGet(shared.value, path) || {};
+      const src = raw.nodes || [], links = raw.edges || [];
+      const key = path + '|' + dir + '|' + JSON.stringify(raw);
+      if (_graphCache.has(key)) return _graphCache.get(key);
+      const W = 160, H = 40, pos = {};
+      // 节点自带 x/y 就按给的放；只要有一个没给就整张图跑布局，混用会叠在原点
+      if (src.some(n => n.x == null || n.y == null) && typeof dagre !== 'undefined') {
+        const g = new dagre.graphlib.Graph();
+        g.setDefaultEdgeLabel(() => ({}));
+        g.setGraph({ rankdir: dir === '横向' ? 'LR' : 'TB', nodesep: 40, ranksep: 60 });
+        src.forEach(n => g.setNode(String(n.id), { width: n.width || W, height: n.height || H }));
+        links.forEach(e => g.setEdge(String(e.from), String(e.to)));
+        dagre.layout(g);
+        // dagre 给中心点，Vue Flow 要左上角
+        src.forEach(n => { const v = g.node(String(n.id)); if (v) pos[n.id] = { x: v.x - (n.width || W) / 2, y: v.y - (n.height || H) / 2 }; });
+      }
+      const out = {
+        nodes: src.map(n => ({ id: String(n.id), position: (n.x != null && n.y != null) ? { x: n.x, y: n.y } : (pos[n.id] || { x: 0, y: 0 }), label: n.label != null ? String(n.label) : String(n.id), data: n })),
+        edges: links.map((e, i) => { const r = { id: e.id != null ? String(e.id) : 'e' + i, source: String(e.from), target: String(e.to) }; if (e.label != null) r.label = String(e.label); return r; }),
+      };
+      _graphCache.clear(); _graphCache.set(key, out);
+      return out;
+    }
+    // 点节点：整个节点对象写进「选中」路径；点空白清掉。之后用「当 shared.sel」
+    // 控制显隐、「显示 sel.label」展示内容，都是现成词汇。
+    function onGraphNode(path, ev) { if (path) _graphPut(shared.value, path, ev && ev.node ? ev.node.data : null); }
+<% endif %>
+    return { route, params, forms, form, rowsOf, lists, notice, nav, AUTH_SCREENS, current, busy, go, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
   },
   template: `
 {#- 顶部导航。两种来路：
@@ -627,4 +662,6 @@ createApp({
     <div v-if="notice" :class="['toast', notice.kind === 'no' ? 'toast-no' : 'toast-ok']"
          @click="notice = null">{{ notice.text }}</div>
   `
-}).mount("#app");
+});
+<% if has_graphs %>_app.component("VueFlow", VueFlowCore.VueFlow);<% endif %>
+_app.mount("#app");

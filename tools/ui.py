@@ -236,6 +236,10 @@ LINE_PARENT = {
 }
 
 # Bare words that toggle something on the node they follow.
+# 「节点图」：有向无环图（Vue Flow + dagre）。不叫「图」——「图」是静态图片。
+LINE_KEYWORDS = LINE_KEYWORDS | {"节点图"}
+LINE_PARENT["节点图"] = {"界面", "区域", "分组", "浮层"}
+
 FLAG_MODIFIERS = {
     "竖排", "横排", "网格", "占满",   # layout intent
     "必填",                          # field
@@ -893,12 +897,16 @@ def _shared_defaults(screens):
                 _put_path(shared, n.bind or n.name, [])
             elif n.kind == "显示":
                 _put_path(shared, n.bind or n.name, "")
-            elif n.kind == "图":
-                # 图数据整块放共享状态，后端用 state 换掉整个对象即可——
-                # 一次性全给的图不需要局部更新。
+    # 节点图数据整块放共享状态，后端用 state 换掉整个对象即可。
+    for s in screens:
+        for n in s.walk():
+            if n.kind == "节点图":
                 _put_path(shared, n.bind or n.name, {"nodes": [], "edges": []})
-                if n.selects:
-                    _put_path(shared, n.selects, None)
+                if getattr(n, "selects", ""):
+                    _box = shared
+                    for _k in n.selects.split(".")[:-1]:
+                        _box = _box.setdefault(_k, {})
+                    _box[n.selects.split(".")[-1]] = None
     return shared
 
 
@@ -1107,7 +1115,7 @@ def render_vue(screens, title="UI", options_map=None, rows=None,
         # 没有浮层的 .ui 一行浮层代码都不生成
         "has_overlays": any(s.overlays() for s in screens),
         # 有图才插 Vue Flow 和 dagre 的 CDN，没有的页面一个外部依赖都不多
-        "has_graphs": any(n.kind == "图" for s in screens for n in s.walk()),
+        "has_graphs": any(n.kind == "节点图" for s in screens for n in s.walk()),
         "first_stream_json": json.dumps(_first_stream(screens), ensure_ascii=False),
         # 界面名 -> 该界面的消息流。回显、占位、后端返回三处都按当前界面
         # 取，不能用全局第一条——见 _screen_streams 的说明。

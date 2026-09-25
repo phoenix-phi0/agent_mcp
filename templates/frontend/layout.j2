@@ -1,4 +1,5 @@
 <% from "widgets.j2" import 字段, 动作, 文案, 消息流, 显示, 当 with context %>
+<% from "graph.j2" import 节点图 with context %>
 
 {#- 布局类：方向、伸缩、固定位置。
     「顶栏」「底栏」让界面能做成三段式（头尾固定、中间自己滚），
@@ -25,6 +26,8 @@
 <% macro 节点(node) %>
 <% if node.kind == "文案" %>
 <%= 文案(node) %>
+<% elif node.kind == "节点图" %>
+<%= 节点图(node) %>
 <% elif node.kind == "动作" %>
 <%= 动作(node) %>
 <% elif node.kind == "字段" %>

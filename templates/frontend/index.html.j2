@@ -1,3 +1,7 @@
+<% set has_graphs = has_graphs if has_graphs is defined else false %>
+<% set graph_js = graph_js if graph_js is defined else "https://unpkg.com/@vue-flow/core@1.48.2/dist/vue-flow-core.iife.js" %>
+<% set graph_css = graph_css if graph_css is defined else "https://unpkg.com/@vue-flow/core@1.48.2/dist/style.css" %>
+<% set dagre_js = dagre_js if dagre_js is defined else "https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js" %>
 {#- StrictUndefined 开着，这三个得有默认值，否则不走内联的调用方会炸。
     这正是当初开 StrictUndefined 想要的行为：模板里冒出没人给的变量要
     立刻报错，而不是静默渲染成空标签。 -#}
@@ -27,6 +31,11 @@
   </script>
 <% else %>
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<% endif %>
+<% if has_graphs %>
+  <link rel="stylesheet" href="<%= graph_css %>">
+  <script src="<%= graph_js %>"></script>
+  <script src="<%= dagre_js %>"></script>
 <% endif %>
 </head>
 <body>
