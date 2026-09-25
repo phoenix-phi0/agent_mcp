@@ -137,6 +137,12 @@ class Node:
                                  # 只是选择器的筛选，不是校验——用户能在选择
                                  # 框里切成「所有文件」照选，把关必须在后端做。
     maxsize: str = ""            # 「最大 5MB」：选完就查，省得传上去才被拒
+    carry: str = ""              # 列表行上的动作「带 id」：跳过去时把这一行的
+                                 # id 放进地址（#笔记列表?浮层=笔记&id=5）。
+                                 # 刷新、把地址发给别人，都还知道是哪一条。
+    load: str = ""               # 界面或浮层上的「载入 note_open」：带着地址
+                                 # 参数进来、表单里又不是那一条时，调这个接口
+                                 # 把记录拉回来
     selects: str = ""            # 「选中 sel」：点中的图节点写进这个共享路径
     direction: str = ""          # 「方向 纵向/横向」：图的 dagre rankdir
     required: Optional[bool] = None
@@ -270,7 +276,7 @@ SIZE_KEYS = {"宽": "width", "高": "height", "间距": "gap",
 # writing the label first leaves the whole 「当 ...」 inside the label: the
 # button reads 「下一题 当 shared.verdict」 and no v-if is emitted at all.
 KEYED_MODIFIERS = ({"绑", "控件", "当", "比", "列数", "提示", "切到", "打开",
-                    "接受", "最大", "选中", "方向"}
+                    "接受", "最大", "选中", "方向", "带", "载入"}
                    | set(SIZE_KEYS))
 
 # Screen roles. Written before or after the screen name:
@@ -380,6 +386,10 @@ def _apply_keyed(node: Node, keyed: dict):
         node.accept = keyed["接受"]
     if "最大" in keyed:
         node.maxsize = keyed["最大"]
+    if "带" in keyed:
+        node.carry = keyed["带"]
+    if "载入" in keyed:
+        node.load = keyed["载入"]
     if "选中" in keyed:
         node.selects = keyed["选中"]
     if "方向" in keyed:

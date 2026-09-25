@@ -44,6 +44,11 @@
 <input<%= 控件宽(f) %> type="number" v-model.number="<%= model %>"<% if f.hint %> placeholder="<%= f.hint %>"<% endif %><% if f.required %> required<% endif %>>
 <%- elif w == "日期" -%>
 <input<%= 控件宽(f) %> type="date" v-model="<%= model %>"<% if f.required %> required<% endif %>>
+<%- elif w == "密码" -%>
+{#- type=password：输入显示成圆点。早先没有这一支，「控件 密码」落到最后
+    的 else 变成普通文本框，密码明文显示在屏幕上，而且什么都不报。
+    autocomplete 让浏览器的密码管理器认得这是密码框。 -#}
+<input<%= 控件宽(f) %> type="password" autocomplete="current-password" v-model="<%= model %>"<% if f.hint %> placeholder="<%= f.hint %>"<% endif %><% if f.required %> required<% endif %>>
 <%- elif w == "选文件" or w == "选多文件" -%>
 {#- 文件不能用 v-model：input[type=file] 的 value 是只读的，Vue 绑不上。
     走 @change 手工接进 files（不是 form——form 要能 JSON 深拷贝，File
@@ -68,7 +73,10 @@
 <%- for o in opts %><label class="opt"><input type="radio" v-model="<%= model %>" value="<%= o %>"> <%= o %></label><% endfor -%>
 </div>
 <%- else -%>
-<input<%= 控件宽(f) %> type="text" v-model="<%= model %>"<% if f.hint %> placeholder="<%= f.hint %>"<% endif %><% if f.required %> required<% endif %>>
+{#- 地址参数里有同名的（编辑时的编号、id），说明它在标识「改的是哪一条」，
+    只读——提交时本来就以地址为准，让人改了也不会生效，不如直接不让改。
+    主键是显式字段（比如编号）时，编辑框里改它会改到另一条记录上，踩过。 -#}
+<input<%= 控件宽(f) %> type="text" v-model="<%= model %>"<% if base == "form" %> :readonly="params['<%= f.bind or f.name %>'] !== undefined"<% endif %><% if f.hint %> placeholder="<%= f.hint %>"<% endif %><% if f.required %> required<% endif %>>
 <%- endif -%>
 <%- endmacro -%>
 
