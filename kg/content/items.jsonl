@@ -20,7 +20,7 @@
 {"code": "conditional-to", "label": "と（条件）", "point": "dict-form", "after": ""}
 {"code": "conditional-nara", "label": "なら", "point": "plain-polite", "after": ""}
 {"code": "te-ageru", "label": "てあげる てくれる てもらう", "point": "ageru-kureru", "after": ""}
-{"code": "ni-okeru", "label": "における において", "point": "no", "after": ""}
+{"code": "ni-okeru", "label": "における において", "point": "particle", "after": ""}
 {"code": "ni-kanshite", "label": "に関して について", "point": "plain-polite", "after": ""}
 {"code": "wo-megutte", "label": "をめぐって", "point": "plain-polite", "after": "ni-kanshite"}
 {"code": "ni-motozuite", "label": "に基づいて", "point": "plain-polite", "after": "ni-kanshite"}
@@ -28,21 +28,21 @@
 {"code": "ni-totte", "label": "にとって", "point": "plain-polite", "after": "to-shite"}
 {"code": "ni-yotte", "label": "によって", "point": "passive", "after": ""}
 {"code": "ni-taishite", "label": "に対して", "point": "plain-polite", "after": "ni-totte"}
-{"code": "koso", "label": "こそ", "point": "mo", "after": ""}
-{"code": "sae", "label": "さえ", "point": "mo", "after": ""}
-{"code": "bakari-ka", "label": "ばかりか", "point": "mo", "after": "sae"}
-{"code": "ni-kagitte", "label": "に限って", "point": "kara-made", "after": ""}
-{"code": "dake-de-naku", "label": "だけでなく", "point": "mo", "after": ""}
-{"code": "hodo", "label": "ほど", "point": "mo", "after": "dake-de-naku"}
-{"code": "nimo-kakawarazu", "label": "にもかかわらず", "point": "ga-kedo", "after": ""}
-{"code": "monono", "label": "ものの", "point": "ga-kedo", "after": ""}
-{"code": "tsutsumo", "label": "つつも", "point": "ga-kedo", "after": ""}
-{"code": "kuseni", "label": "くせに", "point": "ga-kedo", "after": ""}
+{"code": "koso", "label": "こそ", "point": "particle", "after": ""}
+{"code": "sae", "label": "さえ", "point": "particle", "after": ""}
+{"code": "bakari-ka", "label": "ばかりか", "point": "particle", "after": "sae"}
+{"code": "ni-kagitte", "label": "に限って", "point": "particle", "after": ""}
+{"code": "dake-de-naku", "label": "だけでなく", "point": "particle", "after": ""}
+{"code": "hodo", "label": "ほど", "point": "particle", "after": "dake-de-naku"}
+{"code": "nimo-kakawarazu", "label": "にもかかわらず", "point": "particle", "after": ""}
+{"code": "monono", "label": "ものの", "point": "particle", "after": ""}
+{"code": "tsutsumo", "label": "つつも", "point": "particle", "after": ""}
+{"code": "kuseni", "label": "くせに", "point": "particle", "after": ""}
 {"code": "tokoroga", "label": "ところが", "point": "adv-conjunctive", "after": ""}
-{"code": "okage-sei", "label": "おかげで せいで", "point": "node-kara", "after": ""}
-{"code": "yueni", "label": "ゆえに", "point": "node-kara", "after": ""}
-{"code": "dake-ni", "label": "だけに", "point": "node-kara", "after": "hodo"}
-{"code": "ijou-wa", "label": "以上は", "point": "node-kara", "after": ""}
+{"code": "okage-sei", "label": "おかげで せいで", "point": "particle", "after": ""}
+{"code": "yueni", "label": "ゆえに", "point": "particle", "after": ""}
+{"code": "dake-ni", "label": "だけに", "point": "particle", "after": "hodo"}
+{"code": "ijou-wa", "label": "以上は", "point": "particle", "after": ""}
 {"code": "zaru-wo-enai", "label": "ざるを得ない", "point": "nai-form", "after": "nakereba"}
 {"code": "wake-ni-wa-ikanai", "label": "わけにはいかない", "point": "dict-form", "after": "nakereba"}
 {"code": "zu-ni-wa-irarenai", "label": "ずにはいられない", "point": "nai-form", "after": ""}
@@ -52,7 +52,7 @@
 {"code": "kake", "label": "かけ かける", "point": "masu-form", "after": ""}
 {"code": "tsutsu-aru", "label": "つつある", "point": "masu-form", "after": ""}
 {"code": "uchi-ni", "label": "うちに", "point": "dict-form", "after": ""}
-{"code": "aida-ni", "label": "間に", "point": "te-iru", "after": ""}
+{"code": "aida-ni", "label": "間に", "point": "te-form", "after": ""}
 {"code": "ni-chigainai", "label": "に違いない", "point": "plain-polite", "after": "to-omou"}
 {"code": "kanenai", "label": "かねない かねる", "point": "masu-form", "after": ""}
 {"code": "ppoi", "label": "っぽい", "point": "i-adj-conj", "after": ""}
@@ -61,3 +61,13 @@
 {"code": "rashii", "label": "らしい", "point": "plain-polite", "after": "you-mitai"}
 {"code": "souda-densetsu", "label": "そうだ 伝闻", "point": "plain-polite", "after": ""}
 {"code": "souda-youtai", "label": "そうだ 样态", "point": "i-adj-conj", "after": ""}
+{"code": "wa-ga", "label": "は と が", "point": "particle", "after": ""}
+{"code": "wo", "label": "を", "point": "particle", "after": "wa-ga"}
+{"code": "ni-de", "label": "に と で", "point": "particle", "after": "wo"}
+{"code": "he-to", "label": "へ と と", "point": "particle", "after": "ni-de"}
+{"code": "kara-made", "label": "から まで より", "point": "particle", "after": "ni-de"}
+{"code": "no", "label": "の", "point": "particle", "after": ""}
+{"code": "mo", "label": "も", "point": "particle", "after": "wa-ga"}
+{"code": "te-iru", "label": "ている", "point": "te-form", "after": ""}
+{"code": "node-kara", "label": "ので と から", "point": "particle", "after": ""}
+{"code": "ga-kedo", "label": "が と けど", "point": "particle", "after": ""}

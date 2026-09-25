@@ -20,29 +20,19 @@
 {"id": "i-adj-conj", "label": "い形容词活用", "prereq": ["i-adj"]}
 {"id": "na-adj-conj", "label": "な形容词活用", "prereq": ["na-adj"]}
 {"id": "plain-polite", "label": "简体与敬体", "prereq": ["nai-form", "ta-form"]}
-{"id": "wa-ga", "label": "は と が", "prereq": ["masu-form", "noun"]}
-{"id": "wo", "label": "を", "prereq": ["wa-ga"]}
-{"id": "ni-de", "label": "に と で", "prereq": ["wo"]}
-{"id": "he-to", "label": "へ と と", "prereq": ["ni-de"]}
-{"id": "kara-made", "label": "から まで より", "prereq": ["ni-de"]}
-{"id": "no", "label": "の", "prereq": ["noun"]}
-{"id": "mo", "label": "も", "prereq": ["wa-ga"]}
-{"id": "te-iru", "label": "ている", "prereq": ["te-form"]}
-{"id": "node-kara", "label": "ので と から", "prereq": ["plain-polite"]}
-{"id": "ga-kedo", "label": "が と けど", "prereq": ["plain-polite"]}
-{"id": "potential", "label": "可能形", "prereq": ["dict-form", "wo"]}
+{"id": "potential", "label": "可能形", "prereq": ["dict-form", "particle"]}
 {"id": "volitional", "label": "意志形", "prereq": ["masu-form"]}
 {"id": "imperative", "label": "命令形", "prereq": ["dict-form"]}
-{"id": "passive", "label": "受身形", "prereq": ["nai-form", "ni-de"]}
-{"id": "causative", "label": "使役形", "prereq": ["nai-form", "wo"]}
+{"id": "passive", "label": "受身形", "prereq": ["nai-form", "particle"]}
+{"id": "causative", "label": "使役形", "prereq": ["nai-form", "particle"]}
 {"id": "causative-passive", "label": "使役受身形", "prereq": ["causative", "passive"]}
-{"id": "transitive-pair", "label": "自他动词对", "prereq": ["verb-groups", "wo"]}
-{"id": "ageru-kureru", "label": "授受", "prereq": ["ni-de", "wo"]}
+{"id": "transitive-pair", "label": "自他动词对", "prereq": ["particle", "verb-groups"]}
+{"id": "ageru-kureru", "label": "授受", "prereq": ["particle"]}
 {"id": "sonkeigo", "label": "尊敬语", "prereq": ["passive", "plain-polite"]}
 {"id": "kenjougo", "label": "谦让语", "prereq": ["plain-polite"]}
 {"id": "teineigo", "label": "丁宁语", "prereq": ["plain-polite"]}
 {"id": "keigo-usage", "label": "敬语综合运用", "prereq": ["ageru-kureru", "kenjougo", "sonkeigo", "teineigo"]}
-{"id": "synonym-nuance", "label": "近义词辨析", "prereq": ["i-adj-conj", "na-adj-conj", "te-iru"]}
+{"id": "synonym-nuance", "label": "近义词辨析", "prereq": ["i-adj-conj", "na-adj-conj", "te-form"]}
 {"id": "kanji-writing", "label": "汉字书写", "prereq": ["kanji-basic", "synonym-nuance"]}
 {"id": "collocation", "label": "惯用搭配", "prereq": ["onomatopoeia", "synonym-nuance"]}
 {"id": "counters-basic", "label": "数量词基础", "prereq": ["kanji-basic"]}
@@ -53,13 +43,14 @@
 {"id": "time-clock", "label": "时刻", "prereq": ["counters-basic"]}
 {"id": "time-duration", "label": "时长", "prereq": ["counters-order", "time-clock"]}
 {"id": "time-relative", "label": "相对时间", "prereq": ["time-date"]}
-{"id": "time-particle", "label": "时间与助词", "prereq": ["ni-de", "time-date"]}
+{"id": "time-particle", "label": "时间与助词", "prereq": ["particle", "time-date"]}
 {"id": "adv-degree", "label": "程度副词", "prereq": ["adverb"]}
 {"id": "adv-frequency", "label": "频度副词", "prereq": ["adverb"]}
 {"id": "adv-quantity", "label": "数量副词", "prereq": ["adverb", "counters-basic"]}
 {"id": "adv-time", "label": "时间副词", "prereq": ["adverb", "time-duration"]}
 {"id": "adv-modal", "label": "陈述副词呼应", "prereq": ["adverb", "nai-form", "plain-polite"]}
-{"id": "adv-conjunctive", "label": "接续词", "prereq": ["adverb", "node-kara"]}
+{"id": "adv-conjunctive", "label": "接续词", "prereq": ["adverb", "particle"]}
 {"id": "kanji-onkun", "label": "音读训读辨别", "prereq": ["counters-sound", "kanji-basic"]}
 {"id": "kanji-homophone", "label": "同音异字", "prereq": ["kanji-onkun", "synonym-nuance"]}
 {"id": "kanji-okurigana", "label": "送假名", "prereq": ["i-adj-conj", "kanji-onkun"]}
+{"id": "particle", "label": "助词", "prereq": ["masu-form", "noun"]}
