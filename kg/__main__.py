@@ -51,36 +51,54 @@ def ensure_learn_index() -> None:
         con.close()
 
 
+def run_import(quiet: bool = False) -> int:
+    """跑导入。**导入逻辑在 .zs 里，不在这儿**——这个函数只是把接口调起来。
+
+    routes/kg_import2.zs   节点、条目、边、对照
+    routes/word_import.zs  单词
+
+    早先这两样是 Python（tools/kg_dag.py、tools/word_import.py），因为
+    引擎缺两件东西：遍历拿不到下标（逐条报错说不出第几条）、可选字段缺了
+    会留成 {项.after} 字面量写进库。两样都补上之后（「序号 i」和
+    「{名 或}」），导入就是「读 JSONL + 遍历 + 写库」，DSL 能表达。
+
+    不起服务也能调：Flask 的测试客户端直接打路由，跟起服务走的是同一段
+    代码，不会出现「命令行导的和接口导的行为不一样」。
+    """
+    sys.path.insert(0, str(ROOT))
+    from gen.project import make_app
+
+    say = (lambda *a: None) if quiet else print
+    app, _ = make_app(PROJ, real=False)
+    c = app.test_client()
+
+    r = c.post("/kg/import2", json={"form": {}}).get_json() or {}
+    say(f"图：节点 {r.get('nodes')}，条目 {r.get('items')}，"
+        f"边 {r.get('edges')}（已存在 {r.get('existing')}，"
+        f"拒绝 {r.get('rejected')}），对照 {r.get('contrast')}")
+    if r.get("note"):
+        say("  " + r["note"].strip())
+
+    if (CONTENT / "words.jsonl").is_file():
+        w = c.post("/word/import2", json={"form": {}}).get_json() or {}
+        say(f"单词：新增 {w.get('new')}，更新 {w.get('updated')}，"
+            f"跳过 {w.get('skipped')}，没挂知识点 {w.get('no_point')}")
+        if w.get("note"):
+            say("  " + w["note"].strip())
+    else:
+        say("没有 words.jsonl，跳过单词导入")
+    return 0
+
+
 def setup(quiet: bool = False) -> int:
     sys.path.insert(0, str(ROOT))
     from gen.project import build, ensure_db
-    from tools.kg_dag import format_report, import_file
-    from tools.word_import import format_report as word_report
-    from tools.word_import import import_words
 
     say = (lambda *a: None) if quiet else print
 
     say(ensure_db(PROJ))
     ensure_learn_index()
-
-    db, qdir = PROJ / "app.db", PROJ / "queries"
-
-    # 顺序：节点和边 → 条目 → 对照。
-    #   条目的 point 指向节点（外键），所以节点要先；
-    #   对照的两端可能是条目（なければならない ↔ なくてもいい），所以对照要后。
-    from tools.kg_dag import (format_contrast_report, format_items_report,
-                              import_contrast, import_items)
-    say(format_report(import_file(db, qdir, CONTENT / "kg.jsonl",
-                                  contrast_path=False)))
-    say(format_items_report(import_items(db, qdir, CONTENT / "items.jsonl")))
-    say(format_contrast_report(import_contrast(db, qdir,
-                                               CONTENT / "contrast.jsonl")))
-
-    words = CONTENT / "words.jsonl"
-    if words.is_file():
-        say(word_report(import_words(db, qdir, words)))
-    else:
-        say(f"没有 {words.name}，跳过单词导入")
+    run_import(quiet)
 
     for line in build(PROJ):
         say(line)
@@ -88,19 +106,7 @@ def setup(quiet: bool = False) -> int:
 
 
 def do_import() -> int:
-    sys.path.insert(0, str(ROOT))
-    from tools.kg_dag import format_report, import_file
-    from tools.word_import import format_report as word_report
-    from tools.word_import import import_words
-
-    db, qdir = PROJ / "app.db", PROJ / "queries"
-    print(format_report(import_file(db, qdir, CONTENT / "kg.jsonl")))
-    words = CONTENT / "words.jsonl"
-    if words.is_file():
-        print(word_report(import_words(db, qdir, words)))
-    else:
-        print(f"没有 {words.name}，跳过单词导入")
-    return 0
+    return run_import()
 
 
 def main(argv: list[str]) -> int:
