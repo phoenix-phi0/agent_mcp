@@ -20,11 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from gen.project import make_app                    # noqa: E402
-from tools.entity import render_sql                 # noqa: E402
-from tools.kg_dag import import_file                # noqa: E402
-
-KG = ROOT / "kg"
+from tests.kg.helpers import client, import_graph, make_ws   # noqa: E402
 
 passed = failed = 0
 
@@ -39,22 +35,10 @@ def check(ok, msg):
 
 
 def main():
-    ws = Path(tempfile.mkdtemp(prefix="word_"))
-    import shutil
-    for d in ("entities", "queries", "routes", "content"):
-        shutil.copytree(KG / d, ws / d)
-
-    text = "\n\n".join(f.read_text(encoding="utf-8")
-                       for f in sorted((ws / "entities").glob("*.entity")))
-    con = sqlite3.connect(ws / "app.db")
-    con.executescript(render_sql(text))
-    con.commit()
-    con.close()
-    # 图先导进去，不然没有知识点可挂
-    import_file(ws / "app.db", ws / "queries", ws / "content" / "kg.jsonl")
-
-    app, _ = make_app(ws, real=False)
-    c = app.test_client()
+    ws = make_ws(Path(tempfile.mkdtemp(prefix="word_")))
+    # 图先导进去，不然没有知识点可挂。走 DSL 接口，跟 py -m kg 同一条路
+    import_graph(ws)
+    c = client(ws)
 
     def post(path, **form):
         r = c.post(path, json={"form": form})

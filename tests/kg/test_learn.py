@@ -20,11 +20,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from gen.project import make_app                     # noqa: E402
-from tools.entity import render_sql                  # noqa: E402
-from tools.kg_dag import import_file                 # noqa: E402
+from tests.kg.helpers import client, import_graph, make_ws   # noqa: E402
 
-KG = ROOT / "kg"
 passed = failed = 0
 
 
@@ -38,22 +35,9 @@ def check(ok, msg):
 
 
 def main():
-    ws = Path(tempfile.mkdtemp(prefix="learn_"))
-    for d in ("entities", "queries", "routes", "content"):
-        shutil.copytree(KG / d, ws / d)
-
-    text = "\n\n".join(f.read_text(encoding="utf-8")
-                       for f in sorted((ws / "entities").glob("*.entity")))
-    con = sqlite3.connect(ws / "app.db")
-    con.executescript(render_sql(text, strict=True))
-    con.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_mastery"
-                " ON mastery(learner, point)")
-    con.commit()
-    con.close()
-    import_file(ws / "app.db", ws / "queries", ws / "content" / "kg.jsonl")
-
-    app, _ = make_app(ws, real=False)
-    c = app.test_client()
+    ws = make_ws(Path(tempfile.mkdtemp(prefix="learn_")))
+    import_graph(ws)
+    c = client(ws)
 
     def post(path, **form):
         r = c.post(path, json={"form": form})
@@ -119,7 +103,7 @@ def main():
 
     print("六、重导知识点不清空学习记录")
     before = rows("SELECT * FROM mastery")
-    import_file(ws / "app.db", ws / "queries", ws / "content" / "kg.jsonl")
+    import_graph(ws)
     after = rows("SELECT * FROM mastery")
     check(before == after, "重导之后 mastery 一行没变")
     check(rows("SELECT count(*) n FROM attempt")[0]["n"] == 10, "流水也还在")
