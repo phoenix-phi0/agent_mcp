@@ -87,7 +87,19 @@ const _app = createApp({
     //
     // 初值是编译时塞的示例数据，给没有后端的预览用。
     const lists = ref(<%= lists_init_json %>);
-    const rowsOf = name => lists.value[name] || [];
+    // 列表的数据：先看后端返回的 lists 里这个键有没有数据；没有就把键当成共享
+    // 状态的路径去读。节点图详情浮层里的「列表 包含 绑 sel.points」读的就是
+    // 选中节点身上的数组——那份数据跟着节点来，不走 lists。
+    // lists 优先：两边都有时，接口明确给的那份算数。
+    const rowsOf = name => {
+      const v = lists.value[name];
+      if (v && v.length) return v;
+      if (typeof shared !== 'undefined') {
+        const w = name.split('.').reduce((o, k) => (o == null ? o : o[k]), shared.value);
+        if (Array.isArray(w)) return w;
+      }
+      return v || [];
+    };
     // 请求期间禁用提交按钮：旧版有 send.disabled，少了它连点会重复发。
     const busy = ref(false);
     // 界面底部的一条提示，几秒后自己消失，点一下也能关。给没有消息流的

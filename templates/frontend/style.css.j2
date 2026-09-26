@@ -242,3 +242,9 @@ th { font-size:12px; color:var(--dim); }
 .kg-node .vue-flow__handle { opacity:0; pointer-events:none; }
 .graph-wrap .vue-flow__edge-path { stroke:#e2ddd5; stroke-width:1; }
 .graph-wrap .vue-flow__edge.kg-contrast .vue-flow__edge-path { stroke:#cfc4b4; stroke-dasharray:3 3; }
+
+/* 列表行按 state 上色，跟节点图同一套状态：已掌握 / 可学 / 锁定 */
+tr.row-done td { color:#4a7a8c; font-weight:600; }
+tr.row-open td { color:var(--ink); }
+tr.row-locked td { opacity:.55; }
+.overlay-box table { margin:4px 0; }
