@@ -583,31 +583,71 @@ const _app = createApp({
     onRoute();
 <% if has_graphs %>
     // 节点图：数据从共享路径读 {nodes, edges}，dagre 算坐标，Vue Flow 画。
-    // 按数据内容缓存：模板里 nodes/edges 各调一次，不缓存的话每次渲染都跑 dagre。
+    // 按数据内容缓存：模板里 nodes/edges/key 各调一次，不缓存的话每次渲染都跑 dagre。
     const _graphCache = new Map();
     function _graphGet(obj, path) { return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj); }
     function _graphPut(obj, path, value) { const parts = path.split('.'); let box = obj; for (const k of parts.slice(0, -1)) box = box[k] || (box[k] = {}); box[parts[parts.length - 1]] = value; }
+    // 节点状态 -> class。后端也可以直接给 class，两者合并。
+    const _kgState = { done: 'kg-done', open: 'kg-open', locked: 'kg-locked', '掌握': 'kg-done', '可学': 'kg-open', '锁定': 'kg-locked' };
+    // 不参与布局的边：显式 layout:false，或 kind 为「对照」。照样画，但 dagre
+    // 不算——否则同层的对照关系会把本该并排的两个节点拉成上下两层。
+    function _kgSide(e) { return e.layout === false || e.kind === '对照'; }
     function graphOf(path, dir) {
       const raw = _graphGet(shared.value, path) || {};
       const src = raw.nodes || [], links = raw.edges || [];
       const key = path + '|' + dir + '|' + JSON.stringify(raw);
       if (_graphCache.has(key)) return _graphCache.get(key);
-      const W = 160, H = 40, pos = {};
+      const lr = dir === '横向';
+      const W = 118, H = 40, pos = {};
+      const wOf = n => n.width || W, hOf = n => n.height || H;
       // 节点自带 x/y 就按给的放；只要有一个没给就整张图跑布局，混用会叠在原点
       if (src.some(n => n.x == null || n.y == null) && typeof dagre !== 'undefined') {
         const g = new dagre.graphlib.Graph();
         g.setDefaultEdgeLabel(() => ({}));
-        g.setGraph({ rankdir: dir === '横向' ? 'LR' : 'TB', nodesep: 40, ranksep: 60 });
-        src.forEach(n => g.setNode(String(n.id), { width: n.width || W, height: n.height || H }));
-        links.forEach(e => g.setEdge(String(e.from), String(e.to)));
+        g.setGraph({ rankdir: lr ? 'LR' : 'TB', nodesep: 32, ranksep: 64 });
+        src.forEach(n => g.setNode(String(n.id), { width: wOf(n), height: hOf(n) }));
+        links.filter(e => !_kgSide(e)).forEach(e => g.setEdge(String(e.from), String(e.to)));
         dagre.layout(g);
         // dagre 给中心点，Vue Flow 要左上角
-        src.forEach(n => { const v = g.node(String(n.id)); if (v) pos[n.id] = { x: v.x - (n.width || W) / 2, y: v.y - (n.height || H) / 2 }; });
+        src.forEach(n => { const v = g.node(String(n.id)); if (v) pos[n.id] = { x: v.x - wOf(n) / 2, y: v.y - hOf(n) / 2 }; });
       }
-      const out = {
-        nodes: src.map(n => ({ id: String(n.id), position: (n.x != null && n.y != null) ? { x: n.x, y: n.y } : (pos[n.id] || { x: 0, y: 0 }), label: n.label != null ? String(n.label) : String(n.id), data: n })),
-        edges: links.map((e, i) => { const r = { id: e.id != null ? String(e.id) : 'e' + i, source: String(e.from), target: String(e.to) }; if (e.label != null) r.label = String(e.label); return r; }),
-      };
+      const at = {};
+      const nodes = src.map(n => {
+        const p = (n.x != null && n.y != null) ? { x: n.x, y: n.y } : (pos[n.id] || { x: 0, y: 0 });
+        at[String(n.id)] = p;
+        return {
+          id: String(n.id), type: 'kg', position: p,
+          label: n.label != null ? String(n.label) : String(n.id),
+          class: [_kgState[n.state], n.class].filter(Boolean).join(' '),
+          // 渲染尺寸跟布局尺寸一致，否则 dagre 按 118 宽排、画出来却是别的宽度
+          style: Object.assign({ width: wOf(n) + 'px', height: hOf(n) + 'px' }, n.style || {}),
+          // 横向时从左右出入。不设的话 Vue Flow 默认上进下出，横向图的线全绕到上下边
+          targetPosition: lr ? 'left' : 'top',
+          sourcePosition: lr ? 'right' : 'bottom',
+          data: n,
+        };
+      });
+      const edges = links.map((e, i) => {
+        const s = String(e.from), t = String(e.to), side = _kgSide(e);
+        const r = {
+          id: e.id != null ? String(e.id) : 'e' + i, source: s, target: t,
+          type: e.type || (side ? 'straight' : 'default'),
+          class: [e.kind === '对照' ? 'kg-contrast' : '', e.class].filter(Boolean).join(' '),
+        };
+        if (side) {
+          // 侧面连线：沿「垂直于层」的方向比位置，往远端那侧出、从近端那侧进
+          const a = at[s] || { x: 0, y: 0 }, b = at[t] || { x: 0, y: 0 };
+          const far = lr ? b.y >= a.y : b.x >= a.x;
+          r.sourceHandle = far ? 'qs' : 'ps';
+          r.targetHandle = far ? 'pt' : 'qt';
+        } else {
+          r.sourceHandle = 'out'; r.targetHandle = 'in';
+        }
+        if (e.style) r.style = e.style;
+        if (e.label != null) r.label = String(e.label);
+        return r;
+      });
+      const out = { nodes, edges };
       _graphCache.clear(); _graphCache.set(key, out);
       return out;
     }
@@ -663,5 +703,5 @@ const _app = createApp({
          @click="notice = null">{{ notice.text }}</div>
   `
 });
-<% if has_graphs %>_app.component("VueFlow", VueFlowCore.VueFlow);<% endif %>
+<% if has_graphs %>_app.component("VueFlow", VueFlowCore.VueFlow); _app.component("Handle", VueFlowCore.Handle);<% endif %>
 _app.mount("#app");

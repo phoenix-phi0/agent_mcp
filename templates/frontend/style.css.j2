@@ -220,3 +220,25 @@ th { font-size:12px; color:var(--dim); }
 /* 节点图：高度由 .ui 里的「高」给（内联 style），这里让 Vue Flow 撑满容器。 */
 .graph-wrap { width:100%; min-height:240px; border:1px solid var(--line); border-radius:8px; background:var(--panel); }
 .graph-wrap > .vue-flow { width:100%; height:100%; }
+
+/* 节点图的节点：照 kg_svg 的样子。未标状态时是淡色，三态由 state 给。 */
+.graph-wrap .vue-flow__node-kg { padding:0; border:0; background:transparent; }
+.kg-node {
+  box-sizing:border-box; width:100%; height:100%; position:relative;
+  display:flex; align-items:center; justify-content:center;
+  background:#fff; border:1px solid #ddd8d0; border-radius:7px;
+  font-size:13px; color:#b5aca1; cursor:pointer;
+}
+.vue-flow__node.kg-open .kg-node { border:2.2px solid #4a7a8c; color:#4a7a8c; }
+.vue-flow__node.kg-done .kg-node { background:#4a7a8c; border-color:#4a7a8c; color:#fff; }
+.vue-flow__node.kg-locked { opacity:.72; }
+.vue-flow__node.selected .kg-node { box-shadow:0 0 0 3px rgba(74,122,140,.25); }
+.kg-badge {
+  position:absolute; top:-7px; right:-7px; min-width:18px; height:18px;
+  padding:0 4px; border-radius:9px; background:#4a7a8c; color:#fff;
+  font-size:10px; line-height:18px; text-align:center;
+}
+/* 连接点只用来定线的起止位置，不给人看也不给人拖 */
+.kg-node .vue-flow__handle { opacity:0; pointer-events:none; }
+.graph-wrap .vue-flow__edge-path { stroke:#e2ddd5; stroke-width:1; }
+.graph-wrap .vue-flow__edge.kg-contrast .vue-flow__edge-path { stroke:#cfc4b4; stroke-dasharray:3 3; }
