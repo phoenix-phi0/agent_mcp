@@ -20,6 +20,7 @@
       kind 对照  虚线、从侧面连、不参与布局
       layout:false  同上但不加虚线样式
     其余字段原样挂在 data 上，点节点时整个对象写进「选中」路径。
+    「点开 <浮层>」让点节点同时弹出那个浮层，一步看详情。
 
     :key 取节点数和边数：数据是后端一次性给全的，换一批数据时让 VueFlow
     重建，fit-view-on-init 才会对新数据重新取景——否则第一次渲染时数据还
@@ -38,7 +39,7 @@
   :nodes-connectable="false"
   :elements-selectable="true"
   fit-view-on-init
-  @node-click="onGraphNode('<%= n.selects %>', $event)"
+  @node-click="onGraphNode('<%= n.selects %>', $event, '<%= n.popup %>')"
   @pane-click="onGraphNode('<%= n.selects %>', null)">
 <template #node-kg="p">
 <div class="kg-node">

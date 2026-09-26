@@ -145,6 +145,7 @@ class Node:
                                  # 把记录拉回来
     selects: str = ""            # 「选中 sel」：点中的图节点写进这个共享路径
     direction: str = ""          # 「方向 纵向/横向」：图的 dagre rankdir
+    popup: str = ""              # 「点开 节点详情」：点中节点时弹出的浮层
     required: Optional[bool] = None
     role: Optional[str] = None
     ratio: int = 0
@@ -295,6 +296,9 @@ KEYED_MODIFIERS = ({"绑", "控件", "当", "比", "列数", "提示", "切到",
 #   界面 表单 文章编辑      /      界面 文章编辑 表单
 # Kept out of FLAG_MODIFIERS on purpose: 表单 and 列表 would otherwise be
 # both a role and a modifier, and 列表 is a block keyword on top of that.
+# 节点图「点开 <浮层>」：点中节点就直接弹出这个浮层，一步看详情。
+KEYED_MODIFIERS = KEYED_MODIFIERS | {"点开"}
+
 SCREEN_ROLES = {"表单", "列表", "自定义"}
 DEFAULT_ROLE = "自定义"
 
@@ -382,6 +386,8 @@ def _parse_unnamed(rest: str):
 
 
 def _apply_keyed(node: Node, keyed: dict):
+    if "点开" in keyed:
+        node.popup = keyed["点开"]
     if "绑" in keyed:
         node.bind = keyed["绑"]
     if "控件" in keyed:
@@ -663,6 +669,17 @@ def validate(screens, require_bind: bool = False, endpoints=None) -> list:
                     f"动作「{a.name}」要打开浮层「{a.opens}」，"
                     f"但界面「{screen.name}」里没有这个浮层",
                     line=a.line, code="unknown_overlay"))
+
+    # 节点图「点开」指向的浮层要在同一界面里。写错了不报错、点节点也不弹，
+    # 跟「打开」「切到」写错是同一类静默失败，所以一样拦一道。
+    for screen in screens:
+        here = {o.name for o in screen.overlays()}
+        for n in screen.walk():
+            if n.kind == "节点图" and getattr(n, "popup", "") and n.popup not in here:
+                issues.append(Issue(
+                    f"节点图「{n.name}」要点开浮层「{n.popup}」，"
+                    f"但界面「{screen.name}」里没有这个浮层",
+                    line=n.line, code="unknown_popup"))
 
     issues.extend(_check_state_paths(screens))
     if endpoints is not None:

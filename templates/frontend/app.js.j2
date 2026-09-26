@@ -653,7 +653,14 @@ const _app = createApp({
     }
     // 点节点：整个节点对象写进「选中」路径；点空白清掉。之后用「当 shared.sel」
     // 控制显隐、「显示 sel.label」展示内容，都是现成词汇。
-    function onGraphNode(path, ev) { if (path) _graphPut(shared.value, path, ev && ev.node ? ev.node.data : null); }
+    function onGraphNode(path, ev, popup) {
+      if (path) _graphPut(shared.value, path, ev && ev.node ? ev.node.data : null);
+<% if has_overlays %>
+      // 「点开 浮层」：点中节点就直接弹详情，省掉「先选中、再点查看」那一步。
+      // 点空白处（ev 为 null）不弹。
+      if (popup && ev && ev.node) openOverlay.value = popup;
+<% endif %>
+    }
 <% endif %>
     return { route, params, forms, form, rowsOf, lists, notice, nav, AUTH_SCREENS, current, busy, go, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
   },
