@@ -924,6 +924,15 @@ def _shared_defaults(screens):
                     for _k in n.selects.split(".")[:-1]:
                         _box = _box.setdefault(_k, {})
                     _box[n.selects.split(".")[-1]] = None
+    # 最后再把所有「选中」路径压回 None：浮层里的节点图常常绑在选中节点身上
+    # （绑 sel.points），上面开槽时会把 sel 建成对象，「当 shared.sel」就恒真了。
+    for s in screens:
+        for n in s.walk():
+            if n.kind == "节点图" and getattr(n, "selects", ""):
+                _box = shared
+                for _k in n.selects.split(".")[:-1]:
+                    _box = _box.setdefault(_k, {})
+                _box[n.selects.split(".")[-1]] = None
     return shared
 
 

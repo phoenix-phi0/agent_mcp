@@ -605,10 +605,19 @@ const _app = createApp({
     // 不算——否则同层的对照关系会把本该并排的两个节点拉成上下两层。
     function _kgSide(e) { return e.layout === false || e.kind === '对照'; }
     function graphOf(path, dir) {
-      const raw = _graphGet(shared.value, path) || {};
-      const src = raw.nodes || [], links = raw.edges || [];
-      const key = path + '|' + dir + '|' + JSON.stringify(raw);
-      if (_graphCache.has(key)) return _graphCache.get(key);
+      const raw0 = _graphGet(shared.value, path);
+      // 也收纯数组：没有连线的一组知识点（比如详情浮层里的 sel.points）直接给
+      // 数组就行，dagre 把它们排在同一层，看起来就是一排方块。有先后的就给
+      // {nodes, edges}，画法跟外面那张大图完全一样。
+      const raw = Array.isArray(raw0) ? { nodes: raw0 } : (raw0 || {});
+      // 没给 id 的用 label 顶上：手写的子知识点通常只有 label
+      const src = (raw.nodes || []).map((n, i) => n.id != null ? n : Object.assign({}, n, { id: n.label != null ? n.label : 'n' + i }));
+      const links = raw.edges || [];
+      const key = dir + '|' + JSON.stringify(raw);
+      // 按路径各缓存一份：页面上常同时有两张图（外面的大图、浮层里的小图），
+      // 只缓存一份的话两张来回挤掉对方，每次渲染都要重跑 dagre。
+      const hit = _graphCache.get(path);
+      if (hit && hit.key === key) return hit.out;
       const lr = dir === '横向';
       const W = 118, H = 40, pos = {};
       const wOf = n => n.width || W, hOf = n => n.height || H;
@@ -660,7 +669,7 @@ const _app = createApp({
         return r;
       });
       const out = { nodes, edges };
-      _graphCache.clear(); _graphCache.set(key, out);
+      _graphCache.set(path, { key, out });
       return out;
     }
     // 点节点：整个节点对象写进「选中」路径；点空白清掉。之后用「当 shared.sel」
