@@ -10,10 +10,14 @@
   设 组.nodes = {行表}
   响应 lists {组}
 
-  # 图的数据：节点和边，不带坐标——布局是「节点图」控件的事。
-  # 早先在 Python 里算好坐标塞进来，那是把引擎该做的事挪进了应用。
-  设 点表 = 查询 app.db kg_all_nodes
-  设 边表 = 查询 app.db kg_all_edges
+  # 图的数据。节点带 state（掌握/可学/锁定）和 badge（下游节点数），
+  # 引擎按 state 上色、按 badge 画角标；边里对照那些带 kind=对照，画成
+  # 虚线且不参与布局——不然同层的一对会被拉成上下两层。
+  #
+  # 布局交给控件（dagre）：这是「节点图」该管的事，后端只给数据。
+  设 谁.learner = {learner 或}
+  设 点表 = 查询表 app.db kg_graph_nodes {谁}
+  设 边表 = 查询 app.db kg_graph_edges
   设 图.nodes = {点表}
   设 图.edges = {边表}
   设 状态.graph = {图}
