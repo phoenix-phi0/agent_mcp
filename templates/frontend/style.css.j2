@@ -248,3 +248,39 @@ tr.row-done td { color:#4a7a8c; font-weight:600; }
 tr.row-open td { color:var(--ink); }
 tr.row-locked td { opacity:.55; }
 .overlay-box table { margin:4px 0; }
+
+/* 节点图（科技树）：底色、层带、「第 N 步」、图例 */
+.graph-wrap { background:#faf9f7; }
+.graph-wrap .vue-flow__node-kglayer { padding:0; border:0; background:transparent; pointer-events:none !important; }
+.kg-layer { width:100%; height:100%; position:relative; }
+.kg-layer.shaded { background:rgba(214,203,186,.28); }
+.kg-layer-t { position:absolute; left:12px; top:50%; transform:translateY(-50%); font-size:12px; color:#a89f93; white-space:nowrap; }
+.kg-legend { font-size:11px; color:#8a827a; margin:6px 0 0 8px; }
+/* 科技树卡片：状态图标 + 名字 + 说明行 + 进度条。写在最后，覆盖前面小方块的样式 */
+.kg-node {
+  display:flex; flex-direction:column; justify-content:center; align-items:stretch; gap:4px;
+  padding:8px 12px; border-radius:10px; text-align:left; background:#fff; border:1px solid #ddd8d0;
+}
+.kg-head { display:flex; align-items:center; gap:6px; min-width:0; font-size:13px; font-weight:600; color:#2b2825; }
+.kg-head .kg-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kg-ico { flex:none; width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center; font-size:14px; line-height:1; }
+.kg-ico:empty { display:none; }
+.kg-sub { font-size:11px; color:#8a827a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kg-bar { height:4px; border-radius:2px; background:#ece7df; overflow:hidden; }
+.kg-bar > i { display:block; height:100%; background:#4a7a8c; }
+.vue-flow__node.kg-done .kg-node { background:#4a7a8c; border-color:#4a7a8c; }
+.vue-flow__node.kg-done .kg-head { color:#fff; }
+.vue-flow__node.kg-done .kg-sub { color:rgba(255,255,255,.8); }
+.vue-flow__node.kg-done .kg-bar { background:rgba(255,255,255,.3); }
+.vue-flow__node.kg-done .kg-bar > i { background:#fff; }
+.vue-flow__node.kg-open .kg-node { border:2px solid #4a7a8c; }
+.vue-flow__node.kg-open .kg-head { color:#2f5563; }
+.vue-flow__node.kg-open .kg-ico { color:#4a7a8c; }
+.vue-flow__node.kg-locked { opacity:1; }
+.vue-flow__node.kg-locked .kg-node { background:#f5f2ed; border-color:#e6e0d6; }
+.vue-flow__node.kg-locked .kg-head { color:#a89f93; }
+.vue-flow__node.kg-locked .kg-sub { color:#b5aca1; }
+.vue-flow__node.selected .kg-node { box-shadow:0 0 0 3px rgba(74,122,140,.3); }
+/* 直角折线：已解锁的着主色，没解锁的淡灰 */
+.graph-wrap .vue-flow__edge.kg-live .vue-flow__edge-path { stroke:#4a7a8c; stroke-width:2; }
+.graph-wrap .vue-flow__edge.kg-dim .vue-flow__edge-path { stroke:#d6cfc4; stroke-width:1.5; }

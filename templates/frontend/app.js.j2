@@ -594,91 +594,173 @@ const _app = createApp({
     window.addEventListener("hashchange", onRoute);
     onRoute();
 <% if has_graphs %>
-    // 节点图：数据从共享路径读 {nodes, edges}，dagre 算坐标，Vue Flow 画。
-    // 按数据内容缓存：模板里 nodes/edges/key 各调一次，不缓存的话每次渲染都跑 dagre。
-    const _graphCache = new Map();
+    // 节点图：Vue Flow 画，dagre 排，游戏科技树的样子。只有这一种排布。
+    //   层   = 最长前置链步数。给每条边设 minlen = 两端步数之差，dagre 的网络单纯形
+    //          会让每条边都取到最短长度（那样总长最小），于是层恰好等于步数
+    //   卡片 = 180×64；层距 = 卡片高 + ranksep = 128（横向 244）
+    //   同层 = dagre 排，减少交叉；不折行
     function _graphGet(obj, path) { return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj); }
     function _graphPut(obj, path, value) { const parts = path.split('.'); let box = obj; for (const k of parts.slice(0, -1)) box = box[k] || (box[k] = {}); box[parts[parts.length - 1]] = value; }
-    // 节点状态 -> class。后端也可以直接给 class，两者合并。
+    const _KG = { BW: 180, BH: 64, NODESEP: 40, RANKSEP: 64, PAD: 56 };
+    // 状态图标：内联 SVG，不依赖图标字体
+    const _kgIcon = {
+      'kg-done': '<svg viewBox="0 0 16 16" width="14" height="14"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      'kg-open': '<svg viewBox="0 0 16 16" width="13" height="13"><path d="M9 1.5L3.5 9H8l-1 5.5L12.5 7H8z" fill="currentColor"/></svg>',
+      'kg-locked': '<svg viewBox="0 0 16 16" width="13" height="13"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>',
+    };
+    const _kgEsc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const _kgState = { done: 'kg-done', open: 'kg-open', locked: 'kg-locked', '掌握': 'kg-done', '可学': 'kg-open', '锁定': 'kg-locked' };
-    // 不参与布局的边：显式 layout:false，或 kind 为「对照」。照样画，但 dagre
-    // 不算——否则同层的对照关系会把本该并排的两个节点拉成上下两层。
-    function _kgSide(e) { return e.layout === false || e.kind === '对照'; }
+    // 按路径各缓存一份：外面的大图和浮层里的小图同时在页面上，不能互相挤掉
+    const _graphCache = new Map();
     function graphOf(path, dir) {
       const raw0 = _graphGet(shared.value, path);
-      // 也收纯数组：没有连线的一组知识点（比如详情浮层里的 sel.points）直接给
-      // 数组就行，dagre 把它们排在同一层，看起来就是一排方块。有先后的就给
-      // {nodes, edges}，画法跟外面那张大图完全一样。
+      // 也收纯数组：没有连线的一组知识点（比如详情浮层里的 sel.points）直接给数组，排成一层
       const raw = Array.isArray(raw0) ? { nodes: raw0 } : (raw0 || {});
-      // 没给 id 的用 label 顶上：手写的子知识点通常只有 label
-      const src = (raw.nodes || []).map((n, i) => n.id != null ? n : Object.assign({}, n, { id: n.label != null ? n.label : 'n' + i }));
-      const links = raw.edges || [];
-      const key = dir + '|' + JSON.stringify(raw);
-      // 按路径各缓存一份：页面上常同时有两张图（外面的大图、浮层里的小图），
-      // 只缓存一份的话两张来回挤掉对方，每次渲染都要重跑 dagre。
+      const key = (dir || '') + '|' + JSON.stringify(raw);
       const hit = _graphCache.get(path);
       if (hit && hit.key === key) return hit.out;
+      const { BW, BH, NODESEP, RANKSEP, PAD } = _KG;
       const lr = dir === '横向';
-      const W = 118, H = 40, pos = {};
-      const wOf = n => n.width || W, hOf = n => n.height || H;
-      // 节点自带 x/y 就按给的放；只要有一个没给就整张图跑布局，混用会叠在原点
-      if (src.some(n => n.x == null || n.y == null) && typeof dagre !== 'undefined') {
+      // 没给 id 的用 label 顶上：手写的子知识点通常只有 label
+      const src = (raw.nodes || []).map((n, i) => n.id != null ? n : Object.assign({}, n, { id: n.label != null ? n.label : 'n' + i }));
+      const K = n => String(n.id);
+      const byId = {}, pre = {}, con = {};
+      src.forEach(n => { byId[K(n)] = n; pre[K(n)] = []; con[K(n)] = []; });
+      (raw.edges || []).forEach(e => {
+        const a = String(e.from), b = String(e.to);
+        if (!(a in pre) || !(b in pre)) return;
+        if (e.kind === '对照') { con[a].push(b); con[b].push(a); }   // 对照不参与布局
+        else if (e.layout !== false) pre[b].push(a);
+      });
+      // 步数：最长前置链。环在导入时已被拒掉，seen 只防死循环
+      const depth = {};
+      const dep = (k, seen) => {
+        if (k in depth) return depth[k];
+        if (seen.has(k)) return 0;
+        seen.add(k);
+        let d = 0;
+        for (const p of pre[k]) d = Math.max(d, dep(p, seen) + 1);
+        seen.delete(k);
+        return (depth[k] = d);
+      };
+      src.forEach(n => dep(K(n), new Set()));
+
+      const pos = {};
+      const given = src.length > 0 && src.every(n => n.x != null && n.y != null);
+      if (given) {
+        src.forEach(n => { pos[K(n)] = { x: n.x + BW / 2, y: n.y + BH / 2 }; });
+      } else if (src.length && typeof dagre !== 'undefined') {
         const g = new dagre.graphlib.Graph();
         g.setDefaultEdgeLabel(() => ({}));
-        g.setGraph({ rankdir: lr ? 'LR' : 'TB', nodesep: 32, ranksep: 64 });
-        src.forEach(n => g.setNode(String(n.id), { width: wOf(n), height: hOf(n) }));
-        links.filter(e => !_kgSide(e)).forEach(e => g.setEdge(String(e.from), String(e.to)));
+        g.setGraph({ rankdir: lr ? 'LR' : 'TB', nodesep: NODESEP, ranksep: RANKSEP });
+        src.forEach(n => g.setNode(K(n), { width: BW, height: BH }));
+        src.forEach(n => pre[K(n)].forEach(p => g.setEdge(p, K(n), { minlen: Math.max(1, depth[K(n)] - depth[p]) })));
+        // 虚拟根连到所有第 0 步的节点：不连的话，互不相连的几块图 dagre 会各自上下
+        // 平移（平移不改变总边长），第 0 步就不在同一层了
+        const ROOT = '__kg_root__';
+        g.setNode(ROOT, { width: 1, height: 1 });
+        src.forEach(n => { if (depth[K(n)] === 0) g.setEdge(ROOT, K(n), { minlen: 1, weight: 1 }); });
         dagre.layout(g);
-        // dagre 给中心点，Vue Flow 要左上角
-        src.forEach(n => { const v = g.node(String(n.id)); if (v) pos[n.id] = { x: v.x - wOf(n) / 2, y: v.y - hOf(n) / 2 }; });
+        src.forEach(n => { const v = g.node(K(n)); if (v) pos[K(n)] = { x: v.x, y: v.y }; });
+      } else {
+        // dagre 没加载上（断网又没配本地文件）：退回按步数分层、同层依次排开
+        const seenAt = {};
+        src.forEach(n => { const d = depth[K(n)], i = (seenAt[d] = (seenAt[d] || 0) + 1) - 1;
+          pos[K(n)] = lr ? { x: d * (BW + RANKSEP), y: i * (BH + NODESEP) } : { x: i * (BW + NODESEP), y: d * (BH + RANKSEP) }; });
       }
-      const at = {};
-      const nodes = src.map(n => {
-        const p = (n.x != null && n.y != null) ? { x: n.x, y: n.y } : (pos[n.id] || { x: 0, y: 0 });
-        at[String(n.id)] = p;
-        return {
-          id: String(n.id), type: 'kg', position: p,
-          label: n.label != null ? String(n.label) : String(n.id),
-          class: [_kgState[n.state], n.class].filter(Boolean).join(' '),
-          // 渲染尺寸跟布局尺寸一致，否则 dagre 按 118 宽排、画出来却是别的宽度
-          style: Object.assign({ width: wOf(n) + 'px', height: hOf(n) + 'px' }, n.style || {}),
-          // 横向时从左右出入。不设的话 Vue Flow 默认上进下出，横向图的线全绕到上下边
-          targetPosition: lr ? 'left' : 'top',
-          sourcePosition: lr ? 'right' : 'bottom',
-          data: n,
-        };
-      });
-      const edges = links.map((e, i) => {
-        const s = String(e.from), t = String(e.to), side = _kgSide(e);
-        const r = {
-          id: e.id != null ? String(e.id) : 'e' + i, source: s, target: t,
-          type: e.type || (side ? 'straight' : 'default'),
-          class: [e.kind === '对照' ? 'kg-contrast' : '', e.class].filter(Boolean).join(' '),
-        };
-        if (side) {
-          // 侧面连线：沿「垂直于层」的方向比位置，往远端那侧出、从近端那侧进
-          const a = at[s] || { x: 0, y: 0 }, b = at[t] || { x: 0, y: 0 };
-          const far = lr ? b.y >= a.y : b.x >= a.x;
-          r.sourceHandle = far ? 'qs' : 'ps';
-          r.targetHandle = far ? 'pt' : 'qt';
-        } else {
-          r.sourceHandle = 'out'; r.targetHandle = 'in';
+
+      // 层带和「第 N 步」：按步数分组。纵向时是横条，横向时是竖条。只有一层（比如详情
+      // 里并列的一排子知识点）或节点自带坐标时不画
+      const nodes = [];
+      const steps = [...new Set(src.map(n => depth[K(n)]))].sort((a, b) => a - b);
+      if (!given && steps.length > 1) {
+        const all = src.map(n => pos[K(n)]).filter(Boolean);
+        const minX = Math.min(...all.map(c => c.x)) - BW / 2 - PAD, maxX = Math.max(...all.map(c => c.x)) + BW / 2 + PAD;
+        const minY = Math.min(...all.map(c => c.y)) - BH / 2 - PAD, maxY = Math.max(...all.map(c => c.y)) + BH / 2 + PAD;
+        const names = raw.layerNames || {};
+        steps.forEach(L => {
+          const at = src.filter(n => depth[K(n)] === L).map(n => pos[K(n)]).filter(Boolean);
+          if (!at.length) return;
+          const text = names[L] != null ? L + '\u3000' + names[L] : '第 ' + L + ' 步';
+          const box = lr
+            ? { x: Math.min(...at.map(c => c.x)) - BW / 2 - RANKSEP / 2, y: minY, w: BW + RANKSEP, h: maxY - minY }
+            : { x: minX, y: Math.min(...at.map(c => c.y)) - BH / 2 - RANKSEP / 2, w: maxX - minX, h: BH + RANKSEP };
+          // 放在最前面、zIndex -1：先画的在下面，连线和卡片都盖在它上面
+          nodes.push({
+            id: '__layer' + L, type: 'kglayer', position: { x: box.x, y: box.y },
+            selectable: false, draggable: false, focusable: false, connectable: false, zIndex: -1,
+            style: { width: box.w + 'px', height: box.h + 'px' }, data: { text, shaded: L % 2 === 1 },
+          });
+        });
+      }
+      // 卡片上显示什么：后端给了 sub 就用；给了 progress 显示「学习中 N%」和进度条；
+      // 否则按状态——已掌握 / 可学 / 需要 XX（锁定时列出还没掌握的前置，最多两个）
+      const view = n => {
+        const st = _kgState[n.state] || '';
+        const bar = typeof n.progress === 'number' ? Math.max(0, Math.min(100, Math.round(n.progress * 100))) : null;
+        let sub = n.sub != null ? String(n.sub) : '';
+        if (n.sub == null) {
+          if (bar != null) sub = '学习中 ' + bar + '%';
+          else if (st === 'kg-done') sub = '已掌握';
+          else if (st === 'kg-open') sub = '可学';
+          else if (st === 'kg-locked') {
+            const miss = pre[K(n)].filter(p => _kgState[(byId[p] || {}).state] !== 'kg-done')
+              .map(p => byId[p] && byId[p].label != null ? String(byId[p].label) : p);
+            sub = miss.length ? '需要 ' + miss.slice(0, 2).join('、') + (miss.length > 2 ? ' 等' : '') : '未解锁';
+          }
         }
-        if (e.style) r.style = e.style;
-        if (e.label != null) r.label = String(e.label);
-        return r;
+        const icon = n.icon != null ? _kgEsc(n.icon) : (_kgIcon[st] || '');
+        return { icon, sub, bar };
+      };
+      src.forEach(n => {
+        const c = pos[K(n)];
+        if (!c) return;
+        nodes.push({
+          id: K(n), type: 'kg', position: { x: c.x - BW / 2, y: c.y - BH / 2 },
+          label: n.label != null ? String(n.label) : K(n),
+          class: [_kgState[n.state], n.class].filter(Boolean).join(' '),
+          style: Object.assign({ width: BW + 'px', height: BH + 'px' }, n.style || {}),
+          // 卡片显示用的东西放 __view，点中时剥掉，写进「选中」的仍是后端原样节点
+          draggable: false, data: Object.assign({}, n, { __view: view(n) }),
+        });
       });
-      const out = { nodes, edges };
+      const edges = [];
+      src.forEach(n => pre[K(n)].forEach(p => {
+        if (!pos[p] || !pos[K(n)]) return;
+        edges.push({
+          // 直角折线。纵向下出上进，横向右出左进；前置已掌握的线着主色，没掌握的淡灰
+          id: 'p:' + p + '>' + K(n), source: p, target: K(n), type: 'smoothstep',
+          pathOptions: { borderRadius: 8 },
+          sourceHandle: lr ? 'qs' : 'out', targetHandle: lr ? 'pt' : 'in',
+          class: _kgState[(byId[p] || {}).state] === 'kg-done' ? 'kg-live' : 'kg-dim',
+        });
+      }));
+      // 对照只连同一层的：跨层连会穿过别的卡片，看着像接错了。纵向从侧面连，横向从上下连
+      src.forEach(n => con[K(n)].forEach(c => {
+        if (c <= K(n) || depth[c] !== depth[K(n)]) return;
+        const a = pos[K(n)], b = pos[c];
+        if (!a || !b) return;
+        let s = K(n), t = c, sh, th;
+        if (lr) { if (b.y < a.y) { s = c; t = K(n); } sh = 'out'; th = 'in'; }
+        else { const far = b.x >= a.x; sh = far ? 'qs' : 'ps'; th = far ? 'pt' : 'qt'; }
+        edges.push({ id: 'c:' + K(n) + '~' + c, source: s, target: t, type: 'straight', class: 'kg-contrast', sourceHandle: sh, targetHandle: th });
+      }));
+      const longest = src.length ? Math.max(...src.map(n => depth[K(n)])) + 1 : 0;
+      const legend = '实心带勾=已掌握\u3000亮边=可学\u3000灰色带锁=未解锁\u3000角标=下游节点数\u3000虚线=对照关系\u3000共 '
+        + src.length + ' 个节点，最长链 ' + longest + ' 步';
+      const out = { nodes, edges, legend };
       _graphCache.set(path, { key, out });
       return out;
     }
-    // 点节点：整个节点对象写进「选中」路径；点空白清掉。之后用「当 shared.sel」
-    // 控制显隐、「显示 sel.label」展示内容，都是现成词汇。
+    // 点节点：原样节点对象写进「选中」路径；点空白清掉。之后用「当 shared.sel」
+    // 控制显隐、「显示 sel.label」展示内容，都是现成词汇。层带节点不算。
     function onGraphNode(path, ev, popup) {
-      if (path) _graphPut(shared.value, path, ev && ev.node ? ev.node.data : null);
+      if (ev && ev.node && ev.node.type === 'kglayer') return;
+      let d = ev && ev.node ? ev.node.data : null;
+      if (d && d.__view) { d = Object.assign({}, d); delete d.__view; }
+      if (path) _graphPut(shared.value, path, d);
 <% if has_overlays %>
-      // 「点开 浮层」：点中节点就直接弹详情，省掉「先选中、再点查看」那一步。
-      // 点空白处（ev 为 null）不弹。
+      // 「点开 浮层」：点中节点就直接弹详情。点空白处（ev 为 null）不弹。
       if (popup && ev && ev.node) openOverlay.value = popup;
 <% endif %>
     }

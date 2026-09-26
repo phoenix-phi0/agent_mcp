@@ -1,32 +1,31 @@
 <% from "widgets.j2" import 当, 尺寸 with context %>
-{#- 「节点图」控件：有向无环图，Vue Flow 画、dagre 布局。单独一个文件：它是
-    唯一带外部依赖的控件，分开放好找也好删。
+{#- 「节点图」：Vue Flow 画（能缩放、平移、点选），dagre 排，游戏科技树的样子。
+    只有这一种排布。
 
-    数据形状（从「绑」指定的共享路径读）：
+      层      给 dagre 的每条边设最短长度 = 两端「最长前置链步数」之差，dagre 排出
+              来的层就正好等于步数，「第 N 步」是真的第 N 步
+      卡片    180×64：状态图标 + 名字 + 一行说明，学习中的带进度条，右上角角标。
+              说明行：后端给 sub 就显示它；不给就按状态——已掌握 / 可学 /
+              学习中 N%（给了 progress）/ 需要 XX（锁定时列出没掌握的前置）
+      间距    nodesep 40、ranksep 64；层距 = 卡片高 + ranksep = 128（横向 244）
+      同层    顺序交给 dagre 减少交叉。dagre 不会折行：同层很多时会往横向铺开
+      层带    隔层浅底、「第 N 步」，做成铺在最底下的 kglayer 节点，半透明、不接鼠标
+      连线    smoothstep 直角折线；前置已掌握的线着主色，没掌握的淡灰
+      对照    同一层的才连，虚线
+      方向    默认从上到下；「方向 横向」从左往右，层带竖过来
 
-        shared.graph = {
-          nodes: [{ id, label, x?, y?, width?, height?, state?, badge?,
-                    class?, style?, ...自定义 }],
-          edges: [{ from, to, kind?, layout?, type?, class?, style?, label? }]
-        }
+    数据（从「绑」指定的共享路径读）：{nodes, edges}，或直接是节点数组
+      nodes: [{ id, label, state?, sub?, progress?, icon?, badge?, x?, y?, class?, style?, ...自定义 }]
+      edges: [{ from, to, kind? }]    kind 为「对照」画虚线、不参与布局
+      layerNames: { 0: "文字", ... }  可选，给层起名
+    state:    done/open/locked（或 掌握/可学/锁定）→ 实心带勾 / 亮边 / 灰色带锁
+    progress: 0~1，给了就画进度条
+    icon:     一个字或 emoji，替换状态图标
+    x/y:      全部节点都给了就按给的放（左上角），不跑 dagre，也不画层带
 
-    节点：
-      x/y       给了就按给的放（左上角），都没给才跑 dagre。后端想跟
-                kg_svg 排得一模一样，就把它算好的坐标原样送来。
-      state     done/open/locked（或 掌握/可学/锁定）→ 实心 / 粗描边 / 淡出
-      badge     右上角的小圆角标，比如下游节点数
-      class     额外的 class，跟 state 合并
-    边：
-      kind 对照  虚线、从侧面连、不参与布局
-      layout:false  同上但不加虚线样式
-    其余字段原样挂在 data 上，点节点时整个对象写进「选中」路径。
-    「点开 <浮层>」让点节点同时弹出那个浮层，一步看详情。
-
-    :key 取节点数和边数：数据是后端一次性给全的，换一批数据时让 VueFlow
-    重建，fit-view-on-init 才会对新数据重新取景——否则第一次渲染时数据还
-    是空的，取景就落空了。
-
-    只读：不能拖、不能连线。要编辑得先想清楚改动怎么回传后端。 -#}
+    点节点：原样节点对象写进「选中」路径，有「点开」就弹浮层；点空白处清掉。
+    :key 取节点数和边数：数据换一批时让 VueFlow 重建，fit-view-on-init 才会对
+    新数据重新取景。 -#}
 <%- macro 节点图(n) -%>
 <%- set path = n.bind or n.name -%>
 <%- set dir = n.direction or "纵向" -%>
@@ -38,21 +37,30 @@
   :nodes-draggable="false"
   :nodes-connectable="false"
   :elements-selectable="true"
+  :max-zoom="1.5"
   fit-view-on-init
   @node-click="onGraphNode('<%= n.selects %>', $event, '<%= n.popup %>')"
-  @pane-click="onGraphNode('<%= n.selects %>', null)">
+  @pane-click="onGraphNode('<%= n.selects %>', null, '')">
+<template #node-kglayer="p">
+<div class="kg-layer" :class="{ shaded: p.data.shaded }"><span class="kg-layer-t">{{ p.data.text }}</span></div>
+</template>
 <template #node-kg="p">
 <div class="kg-node">
-<Handle id="in" type="target" :position="p.targetPosition" />
-<Handle id="pt" type="target" :position="p.sourcePosition === 'right' ? 'top' : 'left'" />
-<Handle id="ps" type="source" :position="p.sourcePosition === 'right' ? 'top' : 'left'" />
-<span class="kg-label">{{ p.label }}</span>
+<Handle id="in" type="target" position="top" />
+<Handle id="pt" type="target" position="left" />
+<Handle id="ps" type="source" position="left" />
+<div class="kg-head"><span class="kg-ico" v-html="p.data.__view.icon"></span><span class="kg-label">{{ p.label }}</span></div>
+<div v-if="p.data.__view.sub" class="kg-sub">{{ p.data.__view.sub }}</div>
+<div v-if="p.data.__view.bar != null" class="kg-bar"><i :style="{ width: p.data.__view.bar + '%' }"></i></div>
 <span v-if="p.data.badge != null && p.data.badge !== ''" class="kg-badge">{{ p.data.badge }}</span>
-<Handle id="qt" type="target" :position="p.sourcePosition === 'right' ? 'bottom' : 'right'" />
-<Handle id="qs" type="source" :position="p.sourcePosition === 'right' ? 'bottom' : 'right'" />
-<Handle id="out" type="source" :position="p.sourcePosition" />
+<Handle id="qt" type="target" position="right" />
+<Handle id="qs" type="source" position="right" />
+<Handle id="out" type="source" position="bottom" />
 </div>
 </template>
 </VueFlow>
 </div>
+<% if n.has("图例") %>
+<p class="kg-legend"<%= 当(n) %>>{{ graphOf('<%= path %>', '<%= dir %>').legend }}</p>
+<% endif %>
 <%- endmacro -%>

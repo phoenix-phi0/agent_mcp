@@ -299,6 +299,9 @@ KEYED_MODIFIERS = ({"绑", "控件", "当", "比", "列数", "提示", "切到",
 # 节点图「点开 <浮层>」：点中节点就直接弹出这个浮层，一步看详情。
 KEYED_MODIFIERS = KEYED_MODIFIERS | {"点开"}
 
+# 节点图「图例」：图下面那行「实心带勾=已掌握　亮边=可学……」。浮层里的小图用不着。
+FLAG_MODIFIERS = FLAG_MODIFIERS | {"图例"}
+
 SCREEN_ROLES = {"表单", "列表", "自定义"}
 DEFAULT_ROLE = "自定义"
 
