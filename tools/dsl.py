@@ -18,6 +18,8 @@
     读JSON 名 = 文件           对象或列表
     读JSONL 名 = 文件          对象列表
     遍历 名 于 甲，乙 … 结束    列表变量可直接遍历
+    遍历 项 于 {表} 序号 i     序号从 1 开始，循环里用 {i}
+    {名 或 默认}               取不到或为空就用默认；{名 或} 取空
     逐项 名 于 列表 … 结束      自动加标题和输出
     如果 条件 … 否则 … 结束
     事务 库 … 结束             块内的写入要么全成要么全败
@@ -134,9 +136,29 @@ class DSLEngine(ModelMixin, HistoryMixin):
                 f"写不进去：{name}。中间某一层不是字典或列表，或者下标越界")
 
     def expand(self, text: str) -> str:
-        """{变量名} 替换成值，未定义的原样保留——为了拼写错时看得见。"""
+        """{变量名} 替换成值，未定义的原样保留——为了拼写错时看得见。
+
+        **{名字 或 默认值}**：取不到就用默认值，取到空值也用。
+
+        原样保留是有意的：`{项.标题}` 写成 `{项.标提}` 时，库里会写进
+        「{项.标提}」这串字，看一眼就知道哪儿错了；换成空字符串反而查不出。
+
+        但导入这类场景要的正相反——可选字段本来就常常没有，每个字段都先
+        判空太啰嗦。所以给一个显式的写法，而不是改掉默认行为：想要「缺了
+        当空」就写 `{项.after 或 }`，什么都不写默认值就是空。
+        """
         def repl(m):
-            got = self.lookup(m.group(1))
+            body = m.group(1)
+            # 「或」两边要有空格，否则「甲或乙」这种普通变量名会被误切
+            head, sep, alt = body.partition(" 或 ")
+            if not sep:
+                head, sep, alt = body.partition(" 或")   # {名 或} 取空
+            got = self.lookup(head.strip())
+            if sep:
+                # 取不到（None）、空串、空列表、空字典都算「没有」，用默认值。
+                # 不走 is_empty：那个函数是给字符串用的，拿到 None 会炸。
+                blank = got is None or (hasattr(got, "__len__") and not len(got))
+                return alt.strip() if blank else to_text(got)
             return m.group(0) if got is None else to_text(got)
         return VAR_RE.sub(repl, text)
 
@@ -150,7 +172,17 @@ class DSLEngine(ModelMixin, HistoryMixin):
         raw = raw.strip()
         m = VAR_RE.fullmatch(raw)
         if m:
-            got = self.lookup(m.group(1))
+            body = m.group(1)
+            # 「或 默认值」这里也要认，不然 `设 后 = {项.after 或}` 走不通：
+            # lookup 拿整串「项.after 或」去查，查不到，变量没建起来，
+            # 后面再引用只会看到 {后} 原样保留。
+            head, sep, alt = body.partition(" 或 ")
+            if not sep:
+                head, sep, alt = body.partition(" 或")
+            got = self.lookup(head.strip())
+            if sep:
+                blank = got is None or (hasattr(got, "__len__") and not len(got))
+                return alt.strip() if blank else got
             if got is not None:
                 return got
         return self.expand(raw)
@@ -277,12 +309,14 @@ class DSLEngine(ModelMixin, HistoryMixin):
             head, rest = split_head(line)
 
             if head in ("each", "foreach"):
-                name, items = self._parse_each(rest, i)
+                name, items, seq = self._parse_each(rest, i)
                 else_at, end = self._find_block(lines, i, stop)
                 if else_at is not None:
                     raise DSLError(f"第 {else_at + 1} 行：循环里不能直接写「否则」")
-                for item in iter_items(items):
+                for n, item in enumerate(iter_items(items), 1):
                     self.vars[name] = item
+                    if seq:
+                        self.vars[seq] = n
                     if head == "foreach":
                         self._emit(f"── {to_text(item)} ──")
                         mark = len(self.output)
@@ -339,16 +373,33 @@ class DSLEngine(ModelMixin, HistoryMixin):
             i += 1
 
     def _parse_each(self, rest: str, lineno: int):
+        """循环头。返回 (变量名, 要遍历的东西, 序号变量名或空)。
+
+        「遍历 项 于 {表} 序号 i」：序号从 1 开始，循环里用 {i}。
+
+        为什么要显式写而不是自动给一个 {序号}：自动的话，嵌套循环里内层
+        会悄悄盖掉外层的，而且脚本里读到 {序号} 也看不出它从哪来。显式
+        写出来，名字是自己起的，嵌套时各叫各的。
+
+        序号解决的是「逐条报错要说第几条」——导入器早先只能用 Python 写，
+        就是因为这个：几百行的文件里，不说第几行等于没报。
+        """
+        seq = ""
+        m = re.search(r"\s+序号\s+(\S+)\s*$", rest)
+        if m:
+            seq = check_name(m.group(1), lineno)
+            rest = rest[:m.start()]
         if "=" in rest:
             name, _, items = rest.partition("=")
             return (check_name(name.strip(), lineno),
-                    self._resolve_items(items))
+                    self._resolve_items(items), seq)
         for word in IN_WORDS:
             m = re.match(rf"^(.+?)\s*{re.escape(word)}\s+(.+)$", rest)
             if m:
                 return (check_name(m.group(1).strip(), lineno),
-                        self._resolve_items(m.group(2)))
-        raise DSLError(f"第 {lineno + 1} 行：循环语法应为「遍历 名 于 甲，乙，丙」")
+                        self._resolve_items(m.group(2)), seq)
+        raise DSLError(f"第 {lineno + 1} 行：循环语法应为"
+                       f"「遍历 名 于 甲，乙，丙」，可选「序号 i」")
 
     # ------------------------------------------------------------------
     # 事务

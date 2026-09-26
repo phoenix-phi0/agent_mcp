@@ -5,15 +5,17 @@
 
 # 列表页，同时把整张图也给出去——一次请求把这一页要的都拿齐。
 接口 POST /node/list 动作 node_list
-  用包 kg db http
+  用包 db http
   设 行表 = 查询 app.db node_all 条数=500
   设 组.nodes = {行表}
   响应 lists {组}
 
-  # 节点带坐标，布局跟 py -m kg svg 那张静态图一致：按依赖深度分层、
-  # 同层按主前置分簇、对照关系排到相邻。前端有坐标就不跑 dagre——那是
-  # 通用布局，不知道中文标签多宽，也没有这些跟语言有关的讲究。
-  设 图 = 图数据 app.db
+  # 图的数据：节点和边，不带坐标——布局是「节点图」控件的事。
+  # 早先在 Python 里算好坐标塞进来，那是把引擎该做的事挪进了应用。
+  设 点表 = 查询 app.db kg_all_nodes
+  设 边表 = 查询 app.db kg_all_edges
+  设 图.nodes = {点表}
+  设 图.edges = {边表}
   设 状态.graph = {图}
   响应 state {状态}
 结束

@@ -1,25 +1,24 @@
 # -*- coding: utf-8 -*-
 """知识图谱项目的启动入口。
 
-    py -m kg              建库 + 导入 + 画图 + 编译 + 起服务
-    py -m kg setup        只做前四步，不起服务
-    py -m kg import       只导入（知识点和单词）
-    py -m kg svg          只重画图
+    py -m kg              建库 + 导入 + 编译 + 起服务
+    py -m kg setup        只做前三步，不起服务
+    py -m kg import       只导入（知识点、条目、对照、单词）
     py -m kg --port 8200  参数透传给 gen run
 
-`gen run` 只管建库、编译、起服务。这个项目另有三件事在那条路之外：
+`gen run` 只管建库、编译、起服务。这个项目多一件事：**导入**。建完库是空的，
+知识点、条目、对照、单词都要导进去。早先只能起服务之后打接口，或者手写一段
+Python——同样的代码写过三遍。
 
-  **导入**：建完库是空的，知识点和单词都要导进去。早先只能起服务之后打
-  接口，或者手写一段 Python——同样的代码写过三遍。
+导入顺序不是随意的：节点 → 条目 → 对照。条目的 point 指向节点（外键），
+对照的两端可能是条目。
 
-  **画图**：web/kg.svg 是从库里画的，导入新节点之后不重画，页面上就还是
-  旧的。所以顺序必须是「导入完再画图」。
+导入是幂等的：节点按编号、条目按编号、词按「汉字+假名」认，重复导入是更新
+不是新增，所以每次启动都导一遍是安全的，省得改完数据文件忘了导。
 
-  **顺序**：画图在编译之前——编译会整个重写 web/。目前它不会删掉 kg.svg，
-  但依赖「恰好不删」不可靠，不如先画后编。
-
-导入是幂等的：节点按编号、词按「汉字+假名」认，重复导入是更新不是新增，
-所以每次启动都导一遍是安全的，省得改完数据文件忘了导。
+图怎么画不在这里——那是「节点图」控件的事（templates/frontend/graph.j2），
+.ui 里写一行 `节点图 graph` 就有。早先这里还有一步「画图」，用 Python 算
+布局、生成 SVG，那是把引擎该做的事挪进了应用。
 """
 
 import sys
@@ -56,7 +55,6 @@ def setup(quiet: bool = False) -> int:
     sys.path.insert(0, str(ROOT))
     from gen.project import build, ensure_db
     from tools.kg_dag import format_report, import_file
-    from tools.kg_svg import load, render
     from tools.word_import import format_report as word_report
     from tools.word_import import import_words
 
@@ -84,17 +82,6 @@ def setup(quiet: bool = False) -> int:
     else:
         say(f"没有 {words.name}，跳过单词导入")
 
-    nodes = load(db)
-    if nodes:
-        svg = PROJ / "web" / "kg.svg"
-        svg.parent.mkdir(parents=True, exist_ok=True)
-        svg.write_text(render(nodes), encoding="utf-8")
-        say(f"画图：web/kg.svg（{len(nodes)} 个节点）")
-    else:
-        # 库是空的（导入失败、或者数据文件还没放好）。画图会在算最长链时
-        # 对空列表求 max 抛异常，说的是别的事，查起来绕。
-        say("库里没有知识点，跳过画图")
-
     for line in build(PROJ):
         say(line)
     return 0
@@ -119,10 +106,6 @@ def do_import() -> int:
 def main(argv: list[str]) -> int:
     cmd = argv[0] if argv and not argv[0].startswith("-") else "run"
 
-    if cmd == "svg":
-        sys.path.insert(0, str(ROOT))
-        from tools.kg_svg import main as svg_main
-        return svg_main()
     if cmd == "import":
         return do_import()
     if cmd == "setup":
