@@ -35,7 +35,7 @@
 <%- set path = n.bind or n.name -%>
 <%- set dir = n.direction or "纵向" -%>
 <%- set opts = "{ around: '" ~ n.around ~ "', title: '" ~ n.title_f ~ "', sub: '" ~ n.sub_f ~ "' }" -%>
-<div class="graph-wrap"<%= 当(n) %><%= 尺寸(n) %>>
+<div class="graph-wrap<% if n.has("占满") %> grow<% endif %>"<%= 当(n) %><%= 尺寸(n) %>>
 <VueFlow
   :key="graphOf('<%= path %>', '<%= dir %>', <%= opts %>).vkey"
   :nodes="graphOf('<%= path %>', '<%= dir %>', <%= opts %>).nodes"
@@ -65,8 +65,8 @@
 </div>
 </template>
 </VueFlow>
-</div>
 <% if n.has("图例") %>
-<p class="kg-legend"<%= 当(n) %>>{{ graphOf('<%= path %>', '<%= dir %>', <%= opts %>).legend }}</p>
+<p class="kg-legend">{{ graphOf('<%= path %>', '<%= dir %>', <%= opts %>).legend }}</p>
 <% endif %>
+</div>
 <%- endmacro -%>

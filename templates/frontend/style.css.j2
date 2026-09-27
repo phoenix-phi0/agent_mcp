@@ -294,3 +294,10 @@ tr.row-locked td { opacity:.55; }
 
 /* 邻域图里的当前点 */
 .vue-flow__node.kg-center .kg-node { box-shadow:0 0 0 3px rgba(74,122,140,.45); }
+
+/* 图例浮在图的左下角，不单独占一行；不接鼠标，不挡拖动 */
+.graph-wrap { position:relative; }
+.graph-wrap > .kg-legend {
+  position:absolute; left:10px; bottom:8px; margin:0; z-index:5; pointer-events:none;
+  padding:3px 8px; border-radius:6px; background:rgba(250,249,247,.88);
+}
