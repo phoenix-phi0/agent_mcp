@@ -597,11 +597,13 @@ const _app = createApp({
     // 节点图：Vue Flow 画，dagre 排，游戏科技树的样子。只有这一种排布。
     //   层   = 最长前置链步数。给每条边设 minlen = 两端步数之差，dagre 的网络单纯形
     //          会让每条边都取到最短长度（那样总长最小），于是层恰好等于步数
-    //   卡片 = 180×64；层距 = 卡片高 + ranksep = 128（横向 244）
+    //   卡片 = 150×52；层距 = 卡片高 + ranksep = 92（横向 190）
     //   同层 = dagre 排，减少交叉；不折行
     function _graphGet(obj, path) { return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj); }
     function _graphPut(obj, path, value) { const parts = path.split('.'); let box = obj; for (const k of parts.slice(0, -1)) box = box[k] || (box[k] = {}); box[parts[parts.length - 1]] = value; }
-    const _KG = { BW: 180, BH: 64, NODESEP: 40, RANKSEP: 64, PAD: 56 };
+    // 卡片 150×52，横距 16、层距 40（层与层中心相距 92）。原先 180×64 / 40 / 64，
+    // 在 69 个点的真实图上卡片只占画面 6%，太散
+    const _KG = { BW: 150, BH: 52, NODESEP: 16, RANKSEP: 40, PAD: 40 };
     // 状态图标：内联 SVG，不依赖图标字体
     const _kgIcon = {
       'kg-done': '<svg viewBox="0 0 16 16" width="14" height="14"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -690,9 +692,13 @@ const _app = createApp({
       } else if (src.length && typeof dagre !== 'undefined') {
         const g = new dagre.graphlib.Graph();
         g.setDefaultEdgeLabel(() => ({}));
-        g.setGraph({ rankdir: lr ? 'LR' : 'TB', nodesep: NODESEP, ranksep: RANKSEP });
+        g.setGraph({ rankdir: lr ? 'LR' : 'TB', nodesep: NODESEP, ranksep: RANKSEP, edgesep: 8 });
         src.forEach(n => g.setNode(K(n), { width: BW, height: BH }));
-        src.forEach(n => pre[K(n)].forEach(p => g.setEdge(p, K(n), { minlen: Math.max(1, depth[K(n)] - depth[p]) })));
+        // 只拿跨一层的边去排。跨多层的边 dagre 会在经过的每一层塞一个占位点，每个
+        // 都占横向位置——真实图 112 条前置边里 35 条跨 2 层以上（最长 9 层），最宽
+        // 的一层只有 12 张卡片，却被撑到 7770px 宽。跨层边照样画，只是不参与排。
+        // 层不受影响：每个点都有一条从最深前置来的、正好跨一层的边，它决定这个点的层
+        src.forEach(n => pre[K(n)].forEach(p => { if (depth[K(n)] - depth[p] === 1) g.setEdge(p, K(n), { minlen: 1 }); }));
         // 虚拟根连到所有第 0 步的节点：不连的话，互不相连的几块图 dagre 会各自上下
         // 平移（平移不改变总边长），第 0 步就不在同一层了
         const ROOT = '__kg_root__';
