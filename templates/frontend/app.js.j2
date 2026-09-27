@@ -598,7 +598,7 @@ const _app = createApp({
     //   层   = 最长前置链步数。给每条边设 minlen = 两端步数之差，dagre 的网络单纯形
     //          会让每条边都取到最短长度（那样总长最小），于是层恰好等于步数
     //   卡片 = 150×52；层距 = 卡片高 + ranksep = 92（横向 190）
-    //   同层 = dagre 排，减少交叉；不折行
+    //   同层 = dagre 定先后（减少交叉），再挨着排、超过 8 张折行、每行居中
     function _graphGet(obj, path) { return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj); }
     function _graphPut(obj, path, value) { const parts = path.split('.'); let box = obj; for (const k of parts.slice(0, -1)) box = box[k] || (box[k] = {}); box[parts[parts.length - 1]] = value; }
     // 卡片 150×52，横距 16、层距 40（层与层中心相距 92）。原先 180×64 / 40 / 64，
@@ -706,6 +706,29 @@ const _app = createApp({
         src.forEach(n => { if (depth[K(n)] === 0) g.setEdge(ROOT, K(n), { minlen: 1, weight: 1 }); });
         dagre.layout(g);
         src.forEach(n => { const v = g.node(K(n)); if (v) pos[K(n)] = { x: v.x, y: v.y }; });
+        // 压紧：每一层按 dagre 排出来的先后重新挨着放，超过 8 张折成几行，每行居中。
+        // dagre 负责分层和减少交叉，这一步只管紧凑——它为了上下对齐会在同层卡片之间
+        // 留空档，最宽的那层还会一字排开，左右都是空白
+        {
+          const MAXR = 8, SUBGAP = 16;
+          const along = lr ? 'x' : 'y', across = lr ? 'y' : 'x';
+          const stepA = lr ? BW + RANKSEP : BH + RANKSEP;   // 层与层
+          const stepC = lr ? BH + NODESEP : BW + NODESEP;   // 同一行相邻两张
+          const stepS = lr ? BW + SUBGAP : BH + SUBGAP;     // 同一层折出来的几行之间
+          const byL = new Map();
+          src.forEach(n => { if (!pos[K(n)]) return; const L = depth[K(n)]; if (!byL.has(L)) byL.set(L, []); byL.get(L).push(n); });
+          let cur = 0;
+          [...byL.keys()].sort((a, b) => a - b).forEach(L => {
+            const row = byL.get(L).sort((a, b) => pos[K(a)][across] - pos[K(b)][across]);
+            const lines = Math.ceil(row.length / MAXR), per = Math.ceil(row.length / lines);
+            for (let i = 0; i < lines; i++) {
+              const part = row.slice(i * per, (i + 1) * per);
+              const start = -(part.length - 1) * stepC / 2;
+              part.forEach((n, j) => { pos[K(n)] = { [across]: start + j * stepC, [along]: cur + i * stepS }; });
+            }
+            cur += (lines - 1) * stepS + stepA;
+          });
+        }
       } else {
         // dagre 没加载上（断网又没配本地文件）：退回按步数分层、同层依次排开
         const seenAt = {};
@@ -728,8 +751,8 @@ const _app = createApp({
           // 邻域图的层只叫 直接前置 / 当前 / 直接后续，不带层号
           const text = (raw.layerTitles || {})[L] != null ? raw.layerTitles[L] : (names[L] != null ? L + '\u3000' + names[L] : '第 ' + L + ' 步');
           const box = lr
-            ? { x: Math.min(...at.map(c => c.x)) - BW / 2 - RANKSEP / 2, y: minY, w: BW + RANKSEP, h: maxY - minY }
-            : { x: minX, y: Math.min(...at.map(c => c.y)) - BH / 2 - RANKSEP / 2, w: maxX - minX, h: BH + RANKSEP };
+            ? { x: Math.min(...at.map(c => c.x)) - BW / 2 - RANKSEP / 2, y: minY, w: Math.max(...at.map(c => c.x)) - Math.min(...at.map(c => c.x)) + BW + RANKSEP, h: maxY - minY }
+            : { x: minX, y: Math.min(...at.map(c => c.y)) - BH / 2 - RANKSEP / 2, w: maxX - minX, h: Math.max(...at.map(c => c.y)) - Math.min(...at.map(c => c.y)) + BH + RANKSEP };
           // 放在最前面、zIndex -1：先画的在下面，连线和卡片都盖在它上面
           nodes.push({
             id: '__layer' + L, type: 'kglayer', position: { x: box.x, y: box.y },
