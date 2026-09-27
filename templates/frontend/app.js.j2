@@ -612,17 +612,38 @@ const _app = createApp({
     const _kgState = { done: 'kg-done', open: 'kg-open', locked: 'kg-locked', '掌握': 'kg-done', '可学': 'kg-open', '锁定': 'kg-locked' };
     // 按路径各缓存一份：外面的大图和浮层里的小图同时在页面上，不能互相挤掉
     const _graphCache = new Map();
-    function graphOf(path, dir) {
-      const raw0 = _graphGet(shared.value, path);
+    function graphOf(path, dir, opts) {
+      opts = opts || {};
+      // 共享状态里没有就去 lists 里找：详情里的条目、词这些是后端按表格行给的
+      let raw0 = _graphGet(shared.value, path);
+      if (raw0 == null && typeof lists !== 'undefined') raw0 = (lists.value || {})[path];
       // 也收纯数组：没有连线的一组知识点（比如详情浮层里的 sel.points）直接给数组，排成一层
-      const raw = Array.isArray(raw0) ? { nodes: raw0 } : (raw0 || {});
-      const key = (dir || '') + '|' + JSON.stringify(raw);
+      let raw = Array.isArray(raw0) ? { nodes: raw0 } : (raw0 || {});
+      const center0 = opts.around ? _graphGet(shared.value, opts.around) : null;
+      const cid = center0 ? String(center0.id != null ? center0.id : center0.label) : '';
+      const key = (dir || '') + '|' + JSON.stringify(opts) + '|' + cid + '|' + JSON.stringify(raw);
       const hit = _graphCache.get(path);
       if (hit && hit.key === key) return hit.out;
       const { BW, BH, NODESEP, RANKSEP, PAD } = _KG;
       const lr = dir === '横向';
       // 没给 id 的用 label 顶上：手写的子知识点通常只有 label
-      const src = (raw.nodes || []).map((n, i) => n.id != null ? n : Object.assign({}, n, { id: n.label != null ? n.label : 'n' + i }));
+      // 「标题 / 说明」：卡片的名字和说明行取哪个字段，逗号隔开取第一个有值的
+      const pick = (n, spec) => { for (const f of String(spec || '').split(',').filter(Boolean)) { if (n[f] != null && n[f] !== '') return String(n[f]); } return null; };
+      let src = (raw.nodes || []).map((n, i) => {
+        let m = n;
+        const t = opts.title ? pick(n, opts.title) : null;
+        if (t != null || opts.sub) {
+          m = Object.assign({}, n);
+          if (t != null) m.label = t;
+          if (opts.sub) {
+            const sv = String(opts.sub).split(',').filter(Boolean).map(f => n[f])
+              .filter(v => v != null && v !== '' && String(v) !== t).join('\u3000');
+            if (sv) m.sub = sv;
+          }
+        }
+        // 没给 id 的（条目、词这些）按位置编一个，名字可能重复
+        return m.id != null ? m : Object.assign({}, m, { id: 'n' + i + ':' + (m.label != null ? m.label : '') });
+      });
       const K = n => String(n.id);
       const byId = {}, pre = {}, con = {};
       src.forEach(n => { byId[K(n)] = n; pre[K(n)] = []; con[K(n)] = []; });
@@ -632,6 +653,19 @@ const _app = createApp({
         if (e.kind === '对照') { con[a].push(b); con[b].push(a); }   // 对照不参与布局
         else if (e.layout !== false) pre[b].push(a);
       });
+      // 「围绕 sel」：只留选中点和它的直接前置、直接后续，只留跟它相连的边——
+      // 详情里的邻域图。层就成了 前置 / 当前 / 后续 三层
+      if (opts.around) {
+        if (!cid || !(cid in pre)) src = [];
+        else {
+          const ps = pre[cid].slice(), cs = src.filter(n => pre[K(n)].includes(cid)).map(K);
+          const keep = new Set([cid, ...ps, ...cs]);
+          src = src.filter(n => keep.has(K(n)));
+          Object.keys(pre).forEach(k => { pre[k] = keep.has(k) ? pre[k].filter(q => keep.has(q) && (k === cid || q === cid)) : []; });
+          Object.keys(con).forEach(k => { con[k] = []; });
+          raw = Object.assign({}, raw, { layerTitles: ps.length ? { 0: '直接前置', 1: '当前', 2: '直接后续' } : { 0: '当前', 1: '直接后续' } });
+        }
+      }
       // 步数：最长前置链。环在导入时已被拒掉，seen 只防死循环
       const depth = {};
       const dep = (k, seen) => {
@@ -649,6 +683,10 @@ const _app = createApp({
       const given = src.length > 0 && src.every(n => n.x != null && n.y != null);
       if (given) {
         src.forEach(n => { pos[K(n)] = { x: n.x + BW / 2, y: n.y + BH / 2 }; });
+      } else if (src.length > 6 && src.every(n => !pre[K(n)].length)) {
+        // 一组并列的东西（没有任何先后），多于 6 个排成网格，不拉成一长排
+        const C = 6;
+        src.forEach((n, i) => { pos[K(n)] = { x: (i % C) * (BW + NODESEP), y: Math.floor(i / C) * (BH + NODESEP) }; });
       } else if (src.length && typeof dagre !== 'undefined') {
         const g = new dagre.graphlib.Graph();
         g.setDefaultEdgeLabel(() => ({}));
@@ -681,7 +719,8 @@ const _app = createApp({
         steps.forEach(L => {
           const at = src.filter(n => depth[K(n)] === L).map(n => pos[K(n)]).filter(Boolean);
           if (!at.length) return;
-          const text = names[L] != null ? L + '\u3000' + names[L] : '第 ' + L + ' 步';
+          // 邻域图的层只叫 直接前置 / 当前 / 直接后续，不带层号
+          const text = (raw.layerTitles || {})[L] != null ? raw.layerTitles[L] : (names[L] != null ? L + '\u3000' + names[L] : '第 ' + L + ' 步');
           const box = lr
             ? { x: Math.min(...at.map(c => c.x)) - BW / 2 - RANKSEP / 2, y: minY, w: BW + RANKSEP, h: maxY - minY }
             : { x: minX, y: Math.min(...at.map(c => c.y)) - BH / 2 - RANKSEP / 2, w: maxX - minX, h: BH + RANKSEP };
@@ -718,7 +757,7 @@ const _app = createApp({
         nodes.push({
           id: K(n), type: 'kg', position: { x: c.x - BW / 2, y: c.y - BH / 2 },
           label: n.label != null ? String(n.label) : K(n),
-          class: [_kgState[n.state], n.class].filter(Boolean).join(' '),
+          class: [_kgState[n.state], n.class, opts.around && K(n) === cid ? 'kg-center' : ''].filter(Boolean).join(' '),
           style: Object.assign({ width: BW + 'px', height: BH + 'px' }, n.style || {}),
           // 卡片显示用的东西放 __view，点中时剥掉，写进「选中」的仍是后端原样节点
           draggable: false, data: Object.assign({}, n, { __view: view(n) }),
@@ -748,20 +787,28 @@ const _app = createApp({
       const longest = src.length ? Math.max(...src.map(n => depth[K(n)])) + 1 : 0;
       const legend = '实心带勾=已掌握\u3000亮边=可学\u3000灰色带锁=未解锁\u3000角标=下游节点数\u3000虚线=对照关系\u3000共 '
         + src.length + ' 个节点，最长链 ' + longest + ' 步';
-      const out = { nodes, edges, legend };
+      // vkey：VueFlow 的 :key。数据或当前点一换就重建、重新取景
+      const out = { nodes, edges, legend, vkey: nodes.length + ':' + edges.length + ':' + cid };
       _graphCache.set(path, { key, out });
       return out;
     }
     // 点节点：原样节点对象写进「选中」路径；点空白清掉。之后用「当 shared.sel」
     // 控制显隐、「显示 sel.label」展示内容，都是现成词汇。层带节点不算。
-    function onGraphNode(path, ev, popup) {
+    function onGraphNode(path, ev, popup, carry) {
       if (ev && ev.node && ev.node.type === 'kglayer') return;
       let d = ev && ev.node ? ev.node.data : null;
       if (d && d.__view) { d = Object.assign({}, d); delete d.__view; }
       if (path) _graphPut(shared.value, path, d);
 <% if has_overlays %>
       // 「点开 浮层」：点中节点就直接弹详情。点空白处（ev 为 null）不弹。
-      if (popup && ev && ev.node) openOverlay.value = popup;
+      // 「带 code」：走 showOverlay，参数进地址，浮层的「载入」据此把这个点的详情
+      // 拉回来。先清空表单：上一个点的前置、条目不能还挂着
+      if (popup && ev && ev.node) {
+        if (carry && typeof showOverlay === 'function') {
+          reset(current.value.name);
+          showOverlay(popup, { [carry]: ev.node.id });
+        } else openOverlay.value = popup;
+      }
 <% endif %>
     }
 <% endif %>

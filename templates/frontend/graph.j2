@@ -24,22 +24,28 @@
     x/y:      全部节点都给了就按给的放（左上角），不跑 dagre，也不画层带
 
     点节点：原样节点对象写进「选中」路径，有「点开」就弹浮层；点空白处清掉。
+    「带 code」：点开时把节点 id 以 code 放进地址，浮层的「载入」据此拉详情。
+    「围绕 sel」：只画选中点和它的直接前置、直接后续，当前点高亮。
+    「标题 / 说明 字段」：卡片的名字和说明行取哪个字段（逗号隔开取第一个有值的）。
+    共享状态里找不到「绑」的路径时，去后端返回的 lists 里找。
+    没有任何先后关系的一组东西，多于 6 个时排成网格。
     :key 取节点数和边数：数据换一批时让 VueFlow 重建，fit-view-on-init 才会对
     新数据重新取景。 -#}
 <%- macro 节点图(n) -%>
 <%- set path = n.bind or n.name -%>
 <%- set dir = n.direction or "纵向" -%>
+<%- set opts = "{ around: '" ~ n.around ~ "', title: '" ~ n.title_f ~ "', sub: '" ~ n.sub_f ~ "' }" -%>
 <div class="graph-wrap"<%= 当(n) %><%= 尺寸(n) %>>
 <VueFlow
-  :key="graphOf('<%= path %>', '<%= dir %>').nodes.length + ':' + graphOf('<%= path %>', '<%= dir %>').edges.length"
-  :nodes="graphOf('<%= path %>', '<%= dir %>').nodes"
-  :edges="graphOf('<%= path %>', '<%= dir %>').edges"
+  :key="graphOf('<%= path %>', '<%= dir %>', <%= opts %>).vkey"
+  :nodes="graphOf('<%= path %>', '<%= dir %>', <%= opts %>).nodes"
+  :edges="graphOf('<%= path %>', '<%= dir %>', <%= opts %>).edges"
   :nodes-draggable="false"
   :nodes-connectable="false"
   :elements-selectable="true"
   :max-zoom="1.5"
   fit-view-on-init
-  @node-click="onGraphNode('<%= n.selects %>', $event, '<%= n.popup %>')"
+  @node-click="onGraphNode('<%= n.selects %>', $event, '<%= n.popup %>', '<%= n.carry %>')"
   @pane-click="onGraphNode('<%= n.selects %>', null, '')">
 <template #node-kglayer="p">
 <div class="kg-layer" :class="{ shaded: p.data.shaded }"><span class="kg-layer-t">{{ p.data.text }}</span></div>
@@ -61,6 +67,6 @@
 </VueFlow>
 </div>
 <% if n.has("图例") %>
-<p class="kg-legend"<%= 当(n) %>>{{ graphOf('<%= path %>', '<%= dir %>').legend }}</p>
+<p class="kg-legend"<%= 当(n) %>>{{ graphOf('<%= path %>', '<%= dir %>', <%= opts %>).legend }}</p>
 <% endif %>
 <%- endmacro -%>

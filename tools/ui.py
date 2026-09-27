@@ -146,6 +146,9 @@ class Node:
     selects: str = ""            # 「选中 sel」：点中的图节点写进这个共享路径
     direction: str = ""          # 「方向 纵向/横向」：图的 dagre rankdir
     popup: str = ""              # 「点开 节点详情」：点中节点时弹出的浮层
+    around: str = ""             # 节点图「围绕 sel」
+    title_f: str = ""            # 节点图「标题 kanji,kana」
+    sub_f: str = ""              # 节点图「说明 kana,meaning」
     required: Optional[bool] = None
     role: Optional[str] = None
     ratio: int = 0
@@ -302,6 +305,11 @@ KEYED_MODIFIERS = KEYED_MODIFIERS | {"点开"}
 # 节点图「图例」：图下面那行「实心带勾=已掌握　亮边=可学……」。浮层里的小图用不着。
 FLAG_MODIFIERS = FLAG_MODIFIERS | {"图例"}
 
+# 节点图：「围绕 sel」只画选中点和它的直接前置、直接后续（详情里的邻域图）；
+# 「标题 字段」「说明 字段」指定卡片拿哪个字段当名字和说明行，可写几个、逗号隔开，
+# 取第一个有值的——条目、词这些数据没有 label/sub 字段也能画成卡片。
+KEYED_MODIFIERS = KEYED_MODIFIERS | {"围绕", "标题", "说明"}
+
 SCREEN_ROLES = {"表单", "列表", "自定义"}
 DEFAULT_ROLE = "自定义"
 
@@ -389,6 +397,12 @@ def _parse_unnamed(rest: str):
 
 
 def _apply_keyed(node: Node, keyed: dict):
+    if "围绕" in keyed:
+        node.around = keyed["围绕"]
+    if "标题" in keyed:
+        node.title_f = keyed["标题"]
+    if "说明" in keyed:
+        node.sub_f = keyed["说明"]
     if "点开" in keyed:
         node.popup = keyed["点开"]
     if "绑" in keyed:
@@ -1260,7 +1274,7 @@ def check_loaders(screens, endpoints) -> list:
                     f"{what}「{holder.name}」要「载入 {holder.load}」，但没有这个接口",
                     line=holder.line, code="missing_endpoint"))
         for node in _walk_nodes(screen):
-            if (getattr(node, "carry", "") and not getattr(node, "goto", "")
+            if (getattr(node, "carry", "") and not getattr(node, "goto", "") and not getattr(node, "popup", "")
                     and not getattr(node, "opens", "")):
                 issues.append(Issue(
                     f"动作「{node.name}」写了「带 {node.carry}」但没有「切到」"

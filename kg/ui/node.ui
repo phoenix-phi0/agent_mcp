@@ -1,14 +1,15 @@
-# 知识图谱：左边全部知识点，右边整张图，详情在浮层里。
+# 知识图谱：整页一张科技树，详情在浮层里，浮层里也全是节点图。
 #
-# 为什么详情收进浮层：早先右栏并排五张表（前置、后续、条目、接续、挂着的
-# 词），一屏里每张只剩几十像素，而且多数时候三四张是空的——一个结构点通常
-# 没有条目也没挂词，看到的就是一串标题加空白。
+# 为什么不再有列表：列表只能回答「有哪些」，回答不了「怎么连」；知识点之间
+# 的先后才是这一页要看的东西。按名字找点，缩放拖一下图比翻列表快。
 #
-# 现在主页面只回答「有哪些知识点」和「它们怎么连」，详情点开再看：
-#   点左边的行   → 打开 节点详情 带 code
-#   点图上的节点 → 同一个浮层（节点图的「点开」）
+#   点图上的节点   → 打开 节点详情，「带 code」进地址，浮层的「载入」拉详情
+#   邻域图         → 从主图截出：直接前置 → 当前 → 直接后续；点前置或后续，
+#                    浮层就换成那个点
+#   条目 / 接续 / 挂着的词 → 各一张节点图，卡片排开，超过 6 个排成网格
 #
-# 列表行按 state 上色（已掌握/可学/未解锁），跟节点图同一套颜色。
+# 后端不用改：邻域从主图（state.graph）截，条目这些照旧走 lists，节点图
+# 在共享状态里找不到就去 lists 里找。
 
 界面 自定义 知识图谱 载入 node_detail
   分组 顶栏 横排 顶栏
@@ -17,64 +18,26 @@
     显示 label 名称
   结束
 
-  布局 横排 间距 16px 占满
-    区域 左 宽 320px
-      文案 全部知识点
-      列表 知识点 绑 nodes 占满
-        列 label 名称
-        动作 pick 打开 节点详情 带 id 查看
-      结束
-    结束
+  节点图 kg 绑 graph 选中 sel 点开 节点详情 带 code 图例 占满 方向 纵向
 
-    区域 右 占满
-      节点图 kg 绑 graph 选中 sel 点开 节点详情 占满 方向 纵向
-      文案 实心=已掌握　粗描边=可学　淡出=未解锁　角标=下游节点数　虚线=对照
-    结束
-  结束
-
-  浮层 节点详情 宽 720px
+  浮层 节点详情 宽 760px
     分组 抬头 横排 间距 12px
       显示 sel.label 知识点
       显示 sel.desc 学之前要先会
       显示 sel.badge 往下解锁
     结束
 
-    布局 横排 间距 16px
-      区域 前后 占满
-        文案 直接前置
-        列表 前置 绑 prereq
-          列 label 名称
-          动作 goPrereq 打开 节点详情 带 code 查看
-        结束
+    文案 直接前置 → 当前 → 直接后续
+    节点图 邻域 绑 graph 围绕 sel 选中 sel 点开 节点详情 带 code 高 320px
 
-        文案 直接后续
-        列表 后续 绑 children
-          列 label 名称
-          动作 goChild 打开 节点详情 带 code 查看
-        结束
-      结束
+    文案 当 lists.items&&lists.items.length 这个功能下的说法
+    节点图 条目 绑 items 标题 label 说明 form 高 160px 当 lists.items&&lists.items.length
 
-      区域 内容 占满
-        文案 这个功能下的说法
-        列表 条目 绑 items
-          列 label 名称
-          列 form 接在
-        结束
+    文案 当 lists.forms&&lists.forms.length 接在这个形式后面的
+    节点图 接续 绑 forms 标题 label 说明 point 高 160px 当 lists.forms&&lists.forms.length
 
-        文案 接在这个形式后面的
-        列表 接续 绑 forms
-          列 label 名称
-          列 point 功能
-        结束
-
-        文案 挂着的词
-        列表 词 绑 point_words
-          列 kanji 汉字
-          列 kana 假名
-          列 meaning 中文
-        结束
-      结束
-    结束
+    文案 当 lists.point_words&&lists.point_words.length 挂着的词
+    节点图 词 绑 point_words 标题 kanji,kana 说明 kana,meaning 高 260px 当 lists.point_words&&lists.point_words.length
 
     分组 底栏 横排 底栏
       动作 close 次要 关闭 收起
