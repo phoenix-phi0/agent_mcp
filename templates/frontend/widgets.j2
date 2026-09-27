@@ -125,6 +125,7 @@
     console.log，请求根本不发。界面看着完全正常，是端到端点一次发送才
     发现的。 -#}
 <%- macro 动作(a) -%>
+<%- if not a.has("隐藏") -%>
 <%- set kind = "危险" if a.has("危险") else "次要" if a.has("次要") else "提交" -%>
 <%- set 色 = "btn-danger" if a.has("危险") else ("btn-ghost" if a.has("次要") else "btn-primary") -%>
 <%- if a.opens -%>
@@ -139,6 +140,7 @@
 <button type="submit" class="btn btn-primary"<%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
 <%- else -%>
 <button type="button" class="btn <%= 色 %>"<% if a.has("远程") %> :disabled="busy"<% endif %> @click.prevent="<% if a.has("远程") %>submitTo<% else %>onAction<% endif %>('<%= a.name %>'<% if a.has("远程") and a.has("关闭") %>, true<% endif %>)"<%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
+<%- endif -%>
 <%- endif -%>
 <%- endmacro -%>
 

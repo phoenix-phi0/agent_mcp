@@ -310,6 +310,10 @@ FLAG_MODIFIERS = FLAG_MODIFIERS | {"图例"}
 # 取第一个有值的——条目、词这些数据没有 label/sub 字段也能画成卡片。
 KEYED_MODIFIERS = KEYED_MODIFIERS | {"围绕", "标题", "说明"}
 
+# 动作「隐藏」：不画按钮，别的照旧——配「进入时」就是进页面自动拉数据、
+# 却不在界面上摆一个没人点的「刷新」。
+FLAG_MODIFIERS = FLAG_MODIFIERS | {"隐藏"}
+
 SCREEN_ROLES = {"表单", "列表", "自定义"}
 DEFAULT_ROLE = "自定义"
 

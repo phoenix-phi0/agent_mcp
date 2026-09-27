@@ -866,7 +866,7 @@ const _app = createApp({
       <button type="button" class="nav-logout" @click.prevent="submitTo('auth_logout')">退出登录</button>
 <% endif %>
     </nav>
-<% elif not has_goto %>
+<% elif not has_goto and screens|length > 1 %>
     <nav>
       <a v-for="s in screens" :key="s.name"
          :class="{ active: current.name === s.name }"
