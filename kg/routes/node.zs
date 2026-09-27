@@ -6,8 +6,12 @@
 # 列表页，同时把整张图也给出去——一次请求把这一页要的都拿齐。
 接口 POST /node/list 动作 node_list
   用包 db http
-  设 行表 = 查询 app.db node_all 条数=500
-  设 组.nodes = {行表}
+  # 左边的列表和右边的图用同一份数据：都带 state（掌握/可学/锁定），
+  # 引擎按它给列表行加 row-done / row-open / row-locked，跟图上的颜色一致。
+  # 早先列表走 node_all（只有编号和名称），行就没有状态色。
+  设 谁.learner = {learner 或}
+  设 点表 = 查询表 app.db kg_graph_nodes {谁}
+  设 组.nodes = {点表}
   响应 lists {组}
 
   # 图的数据。节点带 state（掌握/可学/锁定）和 badge（下游节点数），
@@ -15,8 +19,6 @@
   # 虚线且不参与布局——不然同层的一对会被拉成上下两层。
   #
   # 布局交给控件（dagre）：这是「节点图」该管的事，后端只给数据。
-  设 谁.learner = {learner 或}
-  设 点表 = 查询表 app.db kg_graph_nodes {谁}
   设 边表 = 查询 app.db kg_graph_edges
   设 图.nodes = {点表}
   设 图.edges = {边表}

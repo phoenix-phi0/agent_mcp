@@ -284,3 +284,10 @@ tr.row-locked td { opacity:.55; }
 /* 直角折线：已解锁的着主色，没解锁的淡灰 */
 .graph-wrap .vue-flow__edge.kg-live .vue-flow__edge-path { stroke:#4a7a8c; stroke-width:2; }
 .graph-wrap .vue-flow__edge.kg-dim .vue-flow__edge-path { stroke:#d6cfc4; stroke-width:1.5; }
+
+/* 节点图的库没加载上时的占位。整页不该因此白掉——图那块说清楚就行 */
+.graph-missing {
+  display:flex; align-items:center; justify-content:center;
+  min-height:180px; border:1px dashed var(--line);
+  border-radius:6px; color:var(--muted); font-size:14px;
+}

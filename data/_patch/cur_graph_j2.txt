@@ -1,0 +1,58 @@
+<% from "widgets.j2" import 当, 尺寸 with context %>
+{#- 「节点图」控件：有向无环图，Vue Flow 画、dagre 布局。单独一个文件：它是
+    唯一带外部依赖的控件，分开放好找也好删。
+
+    数据形状（从「绑」指定的共享路径读）：
+
+        shared.graph = {
+          nodes: [{ id, label, x?, y?, width?, height?, state?, badge?,
+                    class?, style?, ...自定义 }],
+          edges: [{ from, to, kind?, layout?, type?, class?, style?, label? }]
+        }
+
+    节点：
+      x/y       给了就按给的放（左上角），都没给才跑 dagre。后端想跟
+                kg_svg 排得一模一样，就把它算好的坐标原样送来。
+      state     done/open/locked（或 掌握/可学/锁定）→ 实心 / 粗描边 / 淡出
+      badge     右上角的小圆角标，比如下游节点数
+      class     额外的 class，跟 state 合并
+    边：
+      kind 对照  虚线、从侧面连、不参与布局
+      layout:false  同上但不加虚线样式
+    其余字段原样挂在 data 上，点节点时整个对象写进「选中」路径。
+    「点开 <浮层>」让点节点同时弹出那个浮层，一步看详情。
+
+    :key 取节点数和边数：数据是后端一次性给全的，换一批数据时让 VueFlow
+    重建，fit-view-on-init 才会对新数据重新取景——否则第一次渲染时数据还
+    是空的，取景就落空了。
+
+    只读：不能拖、不能连线。要编辑得先想清楚改动怎么回传后端。 -#}
+<%- macro 节点图(n) -%>
+<%- set path = n.bind or n.name -%>
+<%- set dir = n.direction or "纵向" -%>
+<div class="graph-wrap"<%= 当(n) %><%= 尺寸(n) %>>
+<VueFlow
+  :key="graphOf('<%= path %>', '<%= dir %>').nodes.length + ':' + graphOf('<%= path %>', '<%= dir %>').edges.length"
+  :nodes="graphOf('<%= path %>', '<%= dir %>').nodes"
+  :edges="graphOf('<%= path %>', '<%= dir %>').edges"
+  :nodes-draggable="false"
+  :nodes-connectable="false"
+  :elements-selectable="true"
+  fit-view-on-init
+  @node-click="onGraphNode('<%= n.selects %>', $event, '<%= n.popup %>')"
+  @pane-click="onGraphNode('<%= n.selects %>', null)">
+<template #node-kg="p">
+<div class="kg-node">
+<Handle id="in" type="target" :position="p.targetPosition" />
+<Handle id="pt" type="target" :position="p.sourcePosition === 'right' ? 'top' : 'left'" />
+<Handle id="ps" type="source" :position="p.sourcePosition === 'right' ? 'top' : 'left'" />
+<span class="kg-label">{{ p.label }}</span>
+<span v-if="p.data.badge != null && p.data.badge !== ''" class="kg-badge">{{ p.data.badge }}</span>
+<Handle id="qt" type="target" :position="p.sourcePosition === 'right' ? 'bottom' : 'right'" />
+<Handle id="qs" type="source" :position="p.sourcePosition === 'right' ? 'bottom' : 'right'" />
+<Handle id="out" type="source" :position="p.sourcePosition" />
+</div>
+</template>
+</VueFlow>
+</div>
+<%- endmacro -%>

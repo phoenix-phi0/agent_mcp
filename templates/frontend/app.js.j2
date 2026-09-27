@@ -813,5 +813,18 @@ const _app = createApp({
          @click="notice = null">{{ notice.text }}</div>
   `
 });
-<% if has_graphs %>_app.component("VueFlow", VueFlowCore.VueFlow); _app.component("Handle", VueFlowCore.Handle);<% endif %>
+<% if has_graphs %>
+// 节点图的组件。VueFlowCore 从 CDN 来，加载不上就跳过注册——不判断的话这一
+// 行抛 ReferenceError，整个应用挂不起来，**连不带图的列表都是白的**。图加载
+// 不出来该是图那一块空着，不该把整页拖垮。断网、CDN 被拦（国内访问 unpkg
+// 经常超时）都会撞上；实测过，页面全白、控制台只有一句 not defined。
+if (typeof VueFlowCore !== "undefined") {
+  _app.component("VueFlow", VueFlowCore.VueFlow);
+  _app.component("Handle", VueFlowCore.Handle);
+} else {
+  console.warn("Vue Flow 没加载上，节点图不显示；页面其余部分照常。");
+  _app.component("VueFlow", { template: '<div class="graph-missing">图组件没加载（检查网络或 CDN）</div>' });
+  _app.component("Handle", { template: "<span></span>" });
+}
+<% endif %>
 _app.mount("#app");

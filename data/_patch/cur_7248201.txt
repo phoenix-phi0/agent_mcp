@@ -1,0 +1,22 @@
+commit 724820144c337aceb9e1240f1f9e868aad003cc8
+Author: ysc <ysc@local>
+Date:   Sat Sep 26 16:19:12 2026 +0900
+
+    节点图按 Notion 那份规格重写：点开浮层（点节点一步看详情）、state 三态（掌握/可学/锁定，按 mastery 算）、badge 下游节点数、对照边 kind=对照（虚线且不参与布局）；布局交给控件的 dagre
+
+ app2/startup_html.py          |   2 +-
+ data/_patch/look.py           |  13 +++++
+ data/_patch/look2.py          |   4 ++
+ data/_patch/look3.py          |   8 +++
+ data/_patch/ni.py             |  90 +++++++++++++++++++++++++++++++
+ data/_patch/nj.py             |  62 +++++++++++++++++++++
+ data/_patch/nk.py             |  52 ++++++++++++++++++
+ data/_patch/nl.py             |  71 ++++++++++++++++++++++++
+ data/_patch/nm.py             | 122 ++++++++++++++++++++++++++++++++++++++++++
+ kg/queries/kg_all_edges.sql   |   5 --
+ kg/queries/kg_all_nodes.sql   |   8 ---
+ kg/queries/kg_graph_edges.sql |  11 ++++
+ kg/queries/kg_graph_nodes.sql |  33 ++++++++++++
+ kg/routes/node.zs             |  12 +++--
+ kg/ui/node.ui                 |  29 +++++++---
+ 15 files changed, 496 insertions(+), 26 deletions(-)
