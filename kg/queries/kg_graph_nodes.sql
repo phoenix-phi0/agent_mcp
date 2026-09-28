@@ -16,7 +16,11 @@ done(code) AS (
   SELECT point FROM mastery WHERE learner = :learner AND mastered = 1
 )
 SELECT
-  n.code AS id,
+  n.code AS id,          -- 图认这个键
+  n.code,                -- 「带 code」取的是它：点节点时把编号放进地址，
+                         -- 浮层的「载入」再拿它去查详情。只给 id 的话
+                         -- row.code 是 undefined，地址里没参数，载入直接
+                         -- 返回，浮层里除了邻域什么都没有。撞过。
   n.label,
   CASE
     WHEN n.code IN (SELECT code FROM done) THEN 'done'
