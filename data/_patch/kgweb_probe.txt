@@ -1,0 +1,29 @@
+kg/ui/node.ui                    09-28 00:37
+kg/web/index.html                09-27 17:41
+kg/web/app.js                    09-27 17:41
+kg/web/style.css                 09-27 17:41
+templates/frontend/app.js.j2     09-28 00:37
+templates/frontend/graph.j2      09-27 22:49
+tools/ui.py                      09-28 00:37
+kg/web/app.js 里：整页科技树(grow)=- 邻域图(围绕)=- 卡片(kg-head)=Y 压紧折行(MAXR)=- 没有导航=- 没有刷新按钮=-
+== 谁负责生成 kg/web
+
+== kg 目录
+kg:
+__main__.py
+__pycache__
+app.db
+app.pyw
+content
+entities
+queries
+routes
+sessions
+ui
+web
+
+kg/web:
+app.js
+index.html
+style.css
+vue.global.prod.js

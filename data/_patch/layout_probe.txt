@@ -1,0 +1,57 @@
+== 主界面模板（压缩）
+ <nav> <a v-for="s in screens" :key="s.name" :class="{ active: current.name === s.name }" href="#" @click.prevent="go(s.name)">{{ s.name }}</a> </nav> <form v-if="current.name === '知识图谱'" class="screen" @submit.prevent="onSubmit"> <section class="group row bar-top"> <button type="button" :disabled="busy" class="btn btn-primary" @click.prevent="submitTo('node_list')">刷新</button> <p class="dyn"><span class="lbl">当前</span> <span class="dyn-v">{{ getPath(shared, 'code') }}</span></p> <p class="dyn"><span class="lbl">名称</span> <span class="dyn-v">{{ getPath(shared, 'label') }}</span></p> </section> <div class="graph-wrap"> <VueFlow :key="graphOf('graph', '纵向', { around: '', title: '', sub: '' }).vkey" :nodes="graphOf('graph', '纵向', { around: '', title: '', sub: '' }).nodes" :edges="graphOf('graph', '纵向', { around: '', title: '', sub: '' }).edges" :nodes-draggable="false" :nodes-connectable="false" :elements-selectable="true" :max-zoom="1.5" fit-view-on-init @node-click="onGraphNode('sel', $event, '节点详情', 'code')" @pane-click="onGraphNode('sel', null, '')"> <template #node-kg>…</template> <template #node-kg>…</template> </VueFlow> </div> <p class="kg-legend">{{ graphOf('graph', '纵向', { around: '', title: '', sub: '' }).legend }}</p> </form> <template v-if="current.name === '知识图谱'">
+
+== css .graph-wrap
+.graph-wrap { width:100%; min-height:240px; border:1px solid var(--line); border-radius:8px; background:var(--panel); }
+.graph-wrap > .vue-flow { width:100%; height:100%; }
+.graph-wrap .vue-flow__node-kg { padding:0; border:0; background:transparent; }
+.graph-wrap .vue-flow__edge-path { stroke:#e2ddd5; stroke-width:1; }
+.graph-wrap .vue-flow__edge.kg-contrast .vue-flow__edge-path { stroke:#cfc4b4; stroke-dasharray:3 3; }
+.graph-wrap { background:#faf9f7; }
+.graph-wrap .vue-flow__node-kglayer { padding:0; border:0; background:transparent; pointer-events:none !important; }
+.graph-wrap .vue-flow__edge.kg-live .vue-flow__edge-path { stroke:#4a7a8c; stroke-width:2; }
+.graph-wrap .vue-flow__edge.kg-dim .vue-flow__edge-path { stroke:#d6cfc4; stroke-width:1.5; }
+
+== css .kg-legend
+.kg-legend { font-size:11px; color:#8a827a; margin:6px 0 0 8px; }
+
+== css .screen >
+   不要写成 .screen > :not(.bar-top):not(.bar-bottom) { flex:none } ——
+   .screen > .stream 的两个类，结果 flex:none 赢，消息流撑不开、底栏
+.screen > * { flex:none; }
+.screen > .stream, .screen > .grow { flex:1 1 auto; min-height:0; overflow-y:auto; }
+
+== css .screen>
+
+
+== css .grow
+.screen > .stream, .screen > .grow { flex:1 1 auto; min-height:0; overflow-y:auto; }
+.grow { flex:1; min-height:0; }
+
+== css .copy
+.copy {
+.bar-bottom .copy { margin:0; padding:0; }
+.overlay-box .copy { max-width:none; margin:0; padding:0; }
+
+== css .kg-node
+.kg-node {
+.vue-flow__node.kg-open .kg-node { border:2.2px solid #4a7a8c; color:#4a7a8c; }
+.vue-flow__node.kg-done .kg-node { background:#4a7a8c; border-color:#4a7a8c; color:#fff; }
+.vue-flow__node.selected .kg-node { box-shadow:0 0 0 3px rgba(74,122,140,.25); }
+.kg-node .vue-flow__handle { opacity:0; pointer-events:none; }
+.kg-node {
+.vue-flow__node.kg-done .kg-node { background:#4a7a8c; border-color:#4a7a8c; }
+.vue-flow__node.kg-open .kg-node { border:2px solid #4a7a8c; }
+.vue-flow__node.kg-locked .kg-node { background:#f5f2ed; border-color:#e6e0d6; }
+.vue-flow__node.selected .kg-node { box-shadow:0 0 0 3px rgba(74,122,140,.3); }
+.vue-flow__node.kg-center .kg-node { box-shadow:0 0 0 3px rgba(74,122,140,.45); }
+
+== css .kg-sub
+.kg-sub { font-size:11px; color:#8a827a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vue-flow__node.kg-done .kg-sub { color:rgba(255,255,255,.8); }
+.vue-flow__node.kg-locked .kg-sub { color:#b5aca1; }
+
+== css .kg-layer
+.kg-layer { width:100%; height:100%; position:relative; }
+.kg-layer.shaded { background:rgba(214,203,186,.28); }
+.kg-layer-t { position:absolute; left:12px; top:50%; transform:translateY(-50%); font-size:12px; color:#a89f93; white-space:nowrap; }

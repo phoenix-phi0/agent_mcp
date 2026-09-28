@@ -1,0 +1,119 @@
+== .ui 文件
+./app2/ui/main.ui
+./app2/ui/startup.ui
+./data/.edit_backup/app2__ui__试验.ui
+./data/.edit_backup/kg__ui__node.ui
+./data/.edit_backup/kg__ui__word.ui
+./data/_probe.ui
+./data/app2/ui/main.ui
+./data/app2/ui/startup.ui
+./data/app2/ui/试验.ui
+./data/demo/ui/note.ui
+./data/demo/ui/todo.ui
+./data/site_a.ui
+./data/site_b.ui
+./data/site_dup.ui
+./data/tests/blog.ui
+./data/tests/fixture.ui
+./data/web/demo/ui/article.ui
+./data/web/demo/ui/会话.ui
+./gen/out/learner/ui/learner.ui
+./gen/out/ui/answer.ui
+./gen/out/ui/learner.ui
+./gen/out/ui/mastery.ui
+./gen/out/ui/wrong.ui
+./kg/ui/node.ui
+
+== 各 .ui 里的界面名
+./app2/ui/main.ui: 自定义 对话
+|自定义 练习
+|
+./app2/ui/startup.ui: 自定义 启动前还差点东西
+|
+./data/.edit_backup/app2__ui__试验.ui: 表单 文章编辑
+|列表 文章列表
+|
+./data/.edit_backup/kg__ui__node.ui: 自定义 知识图谱 载入 node_detail|
+./data/.edit_backup/kg__ui__word.ui: 列表 单词列表|
+./data/_probe.ui: 自定义 T
+|
+./data/app2/ui/main.ui: 自定义 对话
+|自定义 练习
+|
+./data/app2/ui/startup.ui: 自定义 启动前还差点东西
+|
+./data/app2/ui/试验.ui: 表单 文章编辑
+|列表 文章列表
+|
+./data/demo/ui/note.ui: 列表 笔记列表|表单 笔记编辑|表单 笔记新建|
+./data/demo/ui/todo.ui: 列表 待办列表|表单 待办编辑|表单 待办新建|
+./data/site_a.ui: 列表 文章列表|表单 文章编辑|
+./data/site_b.ui: 列表 作者列表|表单 作者编辑|
+./data/site_dup.ui: 表单 文章编辑|
+./data/tests/blog.ui: 表单 文章编辑
+|列表 文章列表
+|
+./data/tests/fixture.ui: 表单 文章编辑
+|列表 文章列表
+|
+./data/web/demo/ui/article.ui: 表单 文章编辑
+|列表 文章列表
+|
+./data/web/demo/ui/会话.ui: 表单 对话
+|表单 练习
+|
+./gen/out/learner/ui/learner.ui: 列表 学习者列表
+|表单 学习者编辑
+|自定义 学习者详情
+|
+./gen/out/ui/answer.ui: 列表 作答列表
+|表单 作答编辑
+|自定义 作答详情
+|
+./gen/out/ui/learner.ui: 列表 学习者列表
+|表单 学习者编辑
+|自定义 学习者详情
+|
+./gen/out/ui/mastery.ui: 列表 掌握度列表
+|表单 掌握度编辑
+|自定义 掌握度详情
+|
+./gen/out/ui/wrong.ui: 列表 错题本列表
+|表单 错题本编辑
+|自定义 错题本详情
+|
+./kg/ui/node.ui: 自定义 知识图谱 载入 node_detail|
+
+== 手写的 html（不在生成目录里的）
+./app2/web/index.html
+./data/app2/web/index.html
+./data/demo/web/index.html
+./data/tests/index.html
+./data/workspace/japanese/content/kg.html
+./kg/web/index.html
+
+== 生成出来的前端目录（有 app.js 的）
+./app2/web/app.js
+./data/app2/web/app.js
+./data/demo/web/app.js
+./data/tests/app.js
+./kg/web/app.js
+
+== 服务端直接吐 HTML 的地方（python 里的 <html / PAGE =）
+./tools/kg_build.py
+./tools/ui_editor.py
+./agents/app.py
+./agents/serve.py
+./data/tools/kg_build.py
+./data/tools/ui_editor.py
+./data/agents/app.py
+./data/agents/serve.py
+./data/app2/app.py
+./data/gen/web.py
+./data/gen/editor.py
+./data/.edit_backup/gen__editor.py
+./data/.edit_backup/gen__web.py
+./app2/app.py
+./app2/startup_html.py
+./gen/web.py
+./gen/editor.py

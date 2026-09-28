@@ -1,0 +1,24 @@
+== 图上面的模板
+ <nav> <a v-for="s in screens" :key="s.name" :class="{ active: current.name === s.name }" href="#" @click.prevent="go(s.name)">{{ s.name }}</a> </nav> <form v-if="current.name === '知识图谱'" class="screen" @submit.prevent="onSubmit"> <section class="group row bar-top"> <button type="button" :disabled="busy" class="btn btn-primary" @click.prevent="submitTo('node_list')">刷新</button> <p class="dyn"><span class="lbl">当前</span> <span class="dyn-v">{{ getPath(shared, 'code') }}</span></p> <p class="dyn"><span class="lbl">名称</span> <span class="dyn-v">{{ getPath(shared, 'label') }}</span></p> </section> <div class="graph-wrap grow"> 
+== ui.py 里 进入时 / 隐藏
+264:    "进入时",                        # action: fire once each time its screen is
+265:                                     # entered (first load, 切到, back/forward).
+1132:        # 界面名 -> 标了「进入时」的动作，每次进入那个界面自动跑一次。
+1134:        "enter_json": json.dumps(
+1135:            {s.name: [a.name for a in s.actions() if a.has("进入时")]
+1137:             if any(a.has("进入时") for a in s.actions())},
+
+== app.js.j2 里 进入时
+46:// 动作名 -> 界面名，标了「进入时」的动作：每次进入那个界面自动跑一次，
+560:    // 进入一个界面时自动跑的动作（.ui 里标了「进入时」），打开就有数据。
+564:    // 编辑界面，保存就改掉 id 相同的那条待办。所以进入时先清空；而且只认
+582:    // 换了界面才跑「进入时」；同一个界面、只是地址参数变了（开关浮层、换
+
+== widgets.j2 里 进入时 / 隐藏
+
+== app.js.j2 nav 条件
+868-    </nav>
+869-<% elif not has_goto %>
+870:    <nav>
+871-      <a v-for="s in screens" :key="s.name"
+872-         :class="{ active: current.name === s.name }"

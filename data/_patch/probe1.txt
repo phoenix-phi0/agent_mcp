@@ -1,0 +1,102 @@
+== HEAD
+fd8f68a 知识图谱页改版：主页面只留列表和图，五张详情表收进浮层；列表和图共用一份带 state 的数据，行按掌握状态上色；点列表和点图上的节点走同一个浮层。另补回断网白屏的修复（VueFlowCore 加载不上时用占位组件，不让整页挂掉）
+451a07e 节点图重写：只用 dagre，游戏科技树的样子（回滚后重做）
+421edea 节点详情里的知识点改用节点图画，跟外面那张图一个样式
+7248201 节点图按 Notion 那份规格重写：点开浮层（点节点一步看详情）、state 三态（掌握/可学/锁定，按 mastery 算）、badge 下游节点数、对照边 kind=对照（虚线且不参与布局）；布局交给控件的 dagre
+7b3d649 列表可读共享路径：节点详情里列出包含的知识点
+092bb96 节点图：「点开 <浮层>」一步弹详情
+
+== fd8f68a 改了哪些文件
+data/_patch/cur_graph_block.txt |  90 ++++++++
+ data/_patch/cur_graph_j2.txt    |  58 +++++
+ data/_patch/dump_cur.py         |  14 ++
+ data/_patch/nn.py               | 143 ++++++++++++
+ data/_patch/rebuild_techtree.py | 476 ++++++++++++++++++++++++++++++++++++++++
+ data/_patch/restore_ff.py       |  34 +++
+ data/_patch/state_check.py      |  21 ++
+ kg/routes/node.zs               |  10 +-
+ kg/ui/node.ui                   | 114 +++++-----
+ templates/frontend/app.js.j2    |  15 +-
+ templates/frontend/style.css.j2 |   7 +
+ 13 files changed, 940 insertions(+), 66 deletions(-)
+
+== ui.py 里的 载入 / 带 / 进入时
+37:Modifiers carry layout intent AND size. The earlier rule was "intent only,
+140:    carry: str = ""              # 列表行上的动作「带 id」：跳过去时把这一行的
+143:    load: str = ""               # 界面或浮层上的「载入 note_open」：带着地址
+261:    "进入时",                        # action: fire once each time its screen is
+262:                                     # entered (first load, 切到, back/forward).
+292:                    "接受", "最大", "选中", "方向", "带", "载入"}
+410:    if "带" in keyed:
+411:        node.carry = keyed["带"]
+412:    if "载入" in keyed:
+413:        node.load = keyed["载入"]
+898:            # 文件字段不进 form：form 要能 JSON 深拷贝（payload、snapshot
+1079:                  comes from vue_source or vue_path; downloading at
+1115:        # 界面名 -> 「载入」用的动作。带着地址参数进来时用它把记录拉回来。
+1116:        "loaders_json": json.dumps({s.name: s.load for s in screens if s.load},
+1118:        # 界面名 -> 标了「进入时」的动作，每次进入那个界面自动跑一次。
+1121:            {s.name: [a.name for a in s.actions() if a.has("进入时")]
+1123:             if any(a.has("进入时") for a in s.actions())},
+1125:        # 浮层名 -> 浮层上的「载入」。地址里带着「浮层=X&id=5」时用它拉记录
+1126:        "overlay_loaders_json": json.dumps(
+1127:            {o.name: o.load for s in screens for o in s.overlays() if o.load},
+1247:def check_loaders(screens, endpoints) -> list:
+1248:    """「载入 X」的 X 得是个有接口的动作；「带 id」得配「切到」或「打开」。
+1250:    载入的接口不存在的话，刷新编辑界面时表单静默地一直是空的；带了 id
+1255:        # 界面和它的浮层都可以写「载入」
+1257:            if holder.load and endpoints is not None and holder.load not in endpoints:
+1260:                    f"{what}「{holder.name}」要「载入 {holder.load}」，但没有这个接口",
+1263:            if (getattr(node, "carry", "") and not getattr(node, "goto", "")
+1266:                    f"动作「{node.name}」写了「带 {node.carry}」但没有「切到」"
+1268:                    line=node.line, code="carry_without_goto"))
+1288:    issues.extend(check_loaders(screens, (options or {}).get("endpoints")))
+
+== app.js.j2 里的 载入 / carry / load / openOverlay
+17:<% if loaders_json is not defined %><% set loaders_json = "{}" %><% endif %>
+18:<% if overlay_loaders_json is not defined %><% set overlay_loaders_json = "{}" %><% endif %>
+49:// 界面名 -> 带着地址参数进来时用哪个接口把记录拉回来（.ui 里的「载入」）
+50:const loaders = <%= loaders_json %>;
+51:// 浮层名 -> 同上，浮层上的「载入」
+52:const overlayLoaders = <%= overlay_loaders_json %>;
+125:    // 把一条记录填进某个界面的表单。列表点「编辑」、按地址参数「载入」
+146:    // 文件单独放这里，不进 form——form 要能 JSON 深拷贝（payload、snapshot
+184:    // 浮层上的「载入」把记录拉回来）、编辑链接能分享、登录完能回到那一条，
+188:    const openOverlay = ref(parseHash()[1]["浮层"] || null);
+190:      openOverlay.value = name;
+194:      openOverlay.value = null;
+199:      if (ev.key === "Escape" && openOverlay.value) {
+208:      openOverlay.value = parseHash()[1]["浮层"] || null;
+238:    async function postTo(url, payload, withFiles) {
+245:        fd.append("payload", JSON.stringify(payload));
+256:        body: JSON.stringify(payload) });
+285:    //   form      填进当前界面的表单（「载入」拉回记录时用）
+299:      // form：填进当前界面的表单。「载入」按地址参数拉回记录时用。
+430:      const payload = JSON.parse(JSON.stringify(form.value));
+436:        if (k !== "浮层") payload[k] = v;
+462:        const r = await _submitTo(name, drop, payload<% if has_files %>, myFiles<% endif %>);
+482:    async function _submitTo(name, drop, payload, withFiles) {
+485:        const resp = await postTo(ep, { action: name, form: payload || form.value }, withFiles);
+491:      console.log("submit", name, payload || form.value);
+513:    function onRow(name, row, target, carry, opens) {
+516:      const p = carry && row[carry] != null ? { [carry]: row[carry] } : null;
+530:      // 发给别人，都还知道是哪一条——配合目标界面的「载入」。
+534:    // 「载入」：带着地址参数进来（#笔记列表?浮层=笔记&id=5），表单里又不是
+545:      const loader = (ov && overlayLoaders[ov]) || loaders[name];
+549:      if (!loader || !Object.keys(p).length) return;
+550:      const ep = typeof endpoints !== "undefined" ? endpoints[loader] : null;
+556:      const resp = await postTo(ep, { action: loader, form: p });
+583:    // 一条记录）只跑「载入」。浮层开关进了地址之后，每开一次浮层地址都会
+764:      if (popup && ev && ev.node) openOverlay.value = popup;
+768:    return { route, params, forms, form, rowsOf, lists, notice, nav, AUTH_SCREENS, current, busy, go, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
+817:// 节点图的组件。VueFlowCore 从 CDN 来，加载不上就跳过注册——不判断的话这一
+821:if (typeof VueFlowCore !== "undefined") {
+822:  _app.component("VueFlow", VueFlowCore.VueFlow);
+823:  _app.component("Handle", VueFlowCore.Handle);
+
+== node_detail / node_list 在哪
+./tools/kg_store.py
+./kg/routes/node.zs
+./.venv/lib/python3.14/site-packages/rich_rst/_vendor/docutils/parsers/rst/states.py
+./.venv/lib/python3.14/site-packages/rich_rst/_vendor/docutils/parsers/rst/directives/body.py
+./.venv/lib/python3.14/site-packages/rich_rst/_vendor/docutils/parsers/rst/directives/misc.py

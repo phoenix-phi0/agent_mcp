@@ -1,0 +1,4 @@
+    s = sub1(s, "          const text = names[L] != null ? L + '\\u3000' + names[L] : '第 ' + L + ' 步';\n",
+             "          // 邻域图的层只叫 直接前置 / 当前 / 直接后续，不带层号\n"
+             "          const text = (raw.layerTitles || {})[L] != null ? raw.layerTitles[L] : (names[L] != null ? L + '\\u3000' + names[L] : '第 ' + L + ' 步');\n",
+             '层标题')

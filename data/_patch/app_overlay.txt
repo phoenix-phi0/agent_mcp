@@ -1,0 +1,134 @@
+---- 180-215
+ 180|     // 当前打开的浮层名，null 表示没有。一次只开一个——真要叠加浮层的话
+ 181|     // 得改成栈，但那通常是设计出了问题，先不支持。
+ 182|     //
+ 183|     // 浮层开关放在地址里：#笔记列表?浮层=笔记&id=5。刷新后还开着（配合
+ 184|     // 浮层上的「载入」把记录拉回来）、编辑链接能分享、登录完能回到那一条，
+ 185|     // 浏览器后退键能关浮层——手机上大家就是这么关弹窗的。
+ 186|     //
+ 187|     // 早先是反过来的：地址一变就关浮层，浮层本身不进地址。
+ 188|     const openOverlay = ref(parseHash()[1]["浮层"] || null);
+ 189|     function showOverlay(name, p) {
+ 190|       openOverlay.value = name;
+ 191|       go(route.value, Object.assign({ "浮层": name }, p || {}));
+ 192|     }
+ 193|     function closeOverlay() {
+ 194|       openOverlay.value = null;
+ 195|       if ((params.value || {})["浮层"]) go(route.value);
+ 196|     }
+ 197|     // Esc 关掉。浮层里的输入框正在打字时也该响应，所以挂在 window 上。
+ 198|     window.addEventListener("keydown", (ev) => {
+ 199|       if (ev.key === "Escape" && openOverlay.value) {
+ 200|         ev.preventDefault();
+ 201|         closeOverlay();
+ 202|       }
+ 203|     });
+ 204|     // 地址说了算：后退键把 ?浮层=… 去掉，浮层就关；切到别的界面，地址里
+ 205|     // 没有浮层参数，也就关了。直接读 parseHash 而不是 params——这个监听器
+ 206|     // 比更新 params 的那个注册得早，那时 params 还是旧的。
+ 207|     window.addEventListener("hashchange", () => {
+ 208|       openOverlay.value = parseHash()[1]["浮层"] || null;
+ 209|     });
+ 210| <% endif %>
+ 211| <% if has_shared_state %>
+ 212|     // 跨界面状态：「共享」字段、消息流、「显示」节点都读这里。
+ 213|     const shared = ref(<%= shared_json %>);
+ 214|     const streamEls = {};
+ 215|     function setStreamEl(name, el) { if (el) streamEls[name] = el; }
+---- 505-600
+ 505| 
+ 506|     // textarea 跟着内容长高，到上限就滚动
+ 507|     function grow(ev) {
+ 508|       const el = ev.target;
+ 509|       el.style.height = "auto";
+ 510|       el.style.height = Math.min(el.scrollHeight, 180) + "px";
+ 511|     }
+ 512| 
+ 513|     function onRow(name, row, target, carry, opens) {
+ 514|       console.log("row", name, row);
+ 515|       if (!row) return;
+ 516|       const p = carry && row[carry] != null ? { [carry]: row[carry] } : null;
+ 517|       // 「打开 浮层」：浮层属于当前界面，记录也填进当前界面的表单。先清空
+ 518|       // 再填——上一次在浮层里编辑的那条留下的键（比如 id）不能混进来。
+ 519|       if (opens) {
+ 520|         reset(current.value.name);
+ 521|         fillForm(current.value.name, row);
+ 522| <% if has_overlays %>
+ 523|         showOverlay(opens, p);
+ 524| <% endif %>
+ 525|         return;
+ 526|       }
+ 527|       if (!target) return;
+ 528|       fillForm(target, row);
+ 529|       // 「带 id」：把这一行的 id 放进地址（#笔记编辑?id=5）。刷新、把地址
+ 530|       // 发给别人，都还知道是哪一条——配合目标界面的「载入」。
+ 531|       go(target, p);
+ 532|     }
+ 533| 
+ 534|     // 「载入」：带着地址参数进来（#笔记列表?浮层=笔记&id=5），表单里又不是
+ 535|     // 那一条时，调界面（或浮层）声明的接口把记录拉回来。刷新、打开别人发来
+ 536|     // 的链接，表单都不再是空的。
+ 537|     //
+ 538|     // 从列表点「编辑」进来时表单已经是那一行了，参数对得上，不发请求。
+ 539|     // 要发的话先清空表单：请求回来之前不该还显示着上一条记录——那一刻点
+ 540|     // 保存，就把上一条的内容写到这一条上了。
+ 541|     let enterSeq = 0;
+ 542|     async function runLoader(name) {
+ 543|       const all = params.value || {};
+ 544|       const ov = all["浮层"];
+ 545|       const loader = (ov && overlayLoaders[ov]) || loaders[name];
+ 546|       // 地址里的「浮层」是开关，不是给接口的参数——不滤掉的话，拿它跟表单
+ 547|       // 比永远对不上，每次都会重新拉一遍
+ 548|       const p = Object.fromEntries(Object.entries(all).filter(([k]) => k !== "浮层"));
+ 549|       if (!loader || !Object.keys(p).length) return;
+ 550|       const ep = typeof endpoints !== "undefined" ? endpoints[loader] : null;
+ 551|       if (!ep) return;
+ 552|       const f = forms.value[name] || {};
+ 553|       if (Object.entries(p).every(([k, v]) => String(f[k] ?? "") === String(v))) return;
+ 554|       reset(name);
+ 555|       const seq = ++enterSeq;
+ 556|       const resp = await postTo(ep, { action: loader, form: p });
+ 557|       if (seq === enterSeq && route.value === name) applyResponse(resp);
+ 558|     }
+ 559| 
+ 560|     // 进入一个界面时自动跑的动作（.ui 里标了「进入时」），打开就有数据。
+ 561|     //
+ 562|     // 切界面时上一个界面的数据不能留着：从笔记列表切到待办列表，请求回来
+ 563|     // 之前表格里还是笔记的行——那一刻点「编辑」，笔记那一行会被拷进待办的
+ 564|     // 编辑界面，保存就改掉 id 相同的那条待办。所以进入时先清空；而且只认
+ 565|     // 最后一次进入发出的请求，慢回来的旧响应不能盖掉新列表。
+ 566|     async function runEnter(name) {
+ 567|       await runLoader(name);
+ 568|       const acts = enterActions[name] || [];
+ 569|       if (!acts.length) return;
+ 570|       const remote = a => (typeof endpoints !== "undefined" ? endpoints[a] : null);
+ 571|       // 预览里没有后端，lists 是编译时塞的示例数据，清掉就什么都看不到了
+ 572|       if (acts.some(remote)) lists.value = {};
+ 573|       const seq = ++enterSeq;
+ 574|       for (const a of acts) {
+ 575|         const ep = remote(a);
+ 576|         if (!ep) { onAction(a); continue; }
+ 577|         const resp = await postTo(ep, { action: a, form: forms.value[name] || {} });
+ 578|         if (seq === enterSeq && route.value === name) applyResponse(resp);
+ 579|       }
+ 580|     }
+ 581| 
+ 582|     // 换了界面才跑「进入时」；同一个界面、只是地址参数变了（开关浮层、换
+ 583|     // 一条记录）只跑「载入」。浮层开关进了地址之后，每开一次浮层地址都会
+ 584|     // 变——不分开的话，每开一次浮层，后面的列表就被清空重拉一遍。
+ 585|     let entered = "";
+ 586|     function onRoute() {
+ 587|       if (route.value !== entered) {
+ 588|         entered = route.value;
+ 589|         runEnter(route.value);
+ 590|       } else {
+ 591|         runLoader(route.value);
+ 592|       }
+ 593|     }
+ 594|     window.addEventListener("hashchange", onRoute);
+ 595|     onRoute();
+ 596| <% if has_graphs %>
+ 597|     // 节点图：Vue Flow 画，dagre 排，游戏科技树的样子。只有这一种排布。
+ 598|     //   层   = 最长前置链步数。给每条边设 minlen = 两端步数之差，dagre 的网络单纯形
+ 599|     //          会让每条边都取到最短长度（那样总长最小），于是层恰好等于步数
+ 600|     //   卡片 = 180×64；层距 = 卡片高 + ranksep = 128（横向 244）
