@@ -564,12 +564,17 @@ const _app = createApp({
     // 编辑界面，保存就改掉 id 相同的那条待办。所以进入时先清空；而且只认
     // 最后一次进入发出的请求，慢回来的旧响应不能盖掉新列表。
     async function runEnter(name) {
-      await runLoader(name);
       const acts = enterActions[name] || [];
-      if (!acts.length) return;
       const remote = a => (typeof endpoints !== "undefined" ? endpoints[a] : null);
+      // **清空要在「载入」之前**：载入刚拉回来的详情（浮层里那几组）也在
+      // lists 里，放在后面清会把它们一起抹掉——地址带 code 打开浮层时，
+      // /node/one 的 point_words、items 拿到了又被 /node/list 之前的这句
+      // 清空干掉，浮层里几段全是空的。实际撞上过。
+      //
       // 预览里没有后端，lists 是编译时塞的示例数据，清掉就什么都看不到了
       if (acts.some(remote)) lists.value = {};
+      await runLoader(name);
+      if (!acts.length) return;
       const seq = ++enterSeq;
       for (const a of acts) {
         const ep = remote(a);
