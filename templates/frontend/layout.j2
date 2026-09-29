@@ -10,12 +10,16 @@
 
 {#- 「比 n」「列数 n」和尺寸是每个节点自己的值，class 装不下，走内联
     style——除非预生成 .ratio-1 到 .ratio-12 那种，不划算。 -#}
-<% macro 样式(node) -%>
+{#- 定宽(node) 为真时，「宽」会同时写 flex:none——横排里的子项要这个，
+    否则父容器是 flex 时会被压缩。浮层卡片不要：它是 .overlay 的子项，
+    flex:none 会让高度按内容撑开，max-height 失效，卡片比屏幕还高，
+    下半截既看不到也滚不动。撞过。 -#}
+<% macro 样式(node, 定宽=true) -%>
 <% set 片段 = [] %>
 <% if node.ratio %><% set _ = 片段.append("flex:" ~ node.ratio ~ " 1 0%") %><% set _ = 片段.append("min-width:0") %><% set _ = 片段.append("min-height:0") %><% endif %>
 <% if node.cols %><% set _ = 片段.append("grid-template-columns:repeat(" ~ node.cols ~ ",1fr)") %><% endif %>
 {#- 定宽同时给 flex:none，否则父容器是 flex 时会被压缩 -#}
-<% if node.size.get("width") %><% set _ = 片段.append("width:" ~ node.size["width"]) %><% set _ = 片段.append("flex:none") %><% endif %>
+<% if node.size.get("width") %><% set _ = 片段.append("width:" ~ node.size["width"]) %><% if 定宽 %><% set _ = 片段.append("flex:none") %><% endif %><% endif %>
 <% if node.size.get("height") %><% set _ = 片段.append("height:" ~ node.size["height"]) %><% endif %>
 <% if node.size.get("gap") %><% set _ = 片段.append("gap:" ~ node.size["gap"]) %><% endif %>
 <% if node.size.get("align") %><% set _ = 片段.append("align-items:" ~ node.size["align"]) %><% endif %>
@@ -53,7 +57,7 @@
     浮层由 app.js.j2 渲染在 <form> 之外：嵌在表单里的话，浮层内的提交
     按钮会连带触发外层表单的 submit。 -#}
 <div class="overlay" v-if="openOverlay === '<%= node.name %>'" @click="closeOverlay()">
-  <section class="overlay-box"<%= 样式(node) %> @click.stop>
+  <section class="overlay-box"<%= 样式(node, false) %> @click.stop>
     <% if node.name %><h3 class="overlay-h"><%= node.name %></h3>
     <% endif %>
     <% for c in node.children %>

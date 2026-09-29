@@ -209,6 +209,14 @@ th { font-size:12px; color:var(--dim); }
   max-width:100%; max-height:100%; overflow-y:auto;
   display:flex; flex-direction:column; gap:12px;
 }
+
+/* 浮层内容超过一屏时**自己滚**，不要把后面的挤出视口。
+   撞过：浮层里放了邻域图 320px + 三张小图，加起来比屏幕高，后面的
+   「挂着的词」直接看不到，看着像那一段没渲染出来。
+   卡片限高 88vh，超出的部分滚动；图本身不缩，滚到就行。 */
+/* 内容超过一屏时卡片自己滚。浮层卡片的内联样式不再带 flex:none
+   （见 layout.j2 的「样式(node, false)」），所以这里不用 !important。 */
+.overlay-box { max-height:88vh; overflow-y:auto; overscroll-behavior:contain; }
 .overlay-h { margin:0; font-size:15px; font-weight:600; color:var(--ink); }
 /* 浮层里的按钮靠右，跟对话框的习惯一致。.btn-primary 在别处是
    align-self:stretch（底栏里要跟输入框等高），浮层里不需要。 */
