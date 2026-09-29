@@ -648,8 +648,15 @@ const _app = createApp({
             if (sv) m.sub = sv;
           }
         }
-        // 没给 id 的（条目、词这些）按位置编一个，名字可能重复
-        return m.id != null ? m : Object.assign({}, m, { id: 'n' + i + ':' + (m.label != null ? m.label : '') });
+        // 没给 id 的（条目、词这些）按位置编一个，名字可能重复。
+        //
+        // **id 一律转成字符串**：Vue Flow 要求 id 是 string，给数字它认不出
+        // 节点，框画得出来、里面却是空的。图节点的 id 是 code（字符串）所以
+        // 一直正常，而词、条目这些来自数据库的行，id 是自增的整数——浮层里
+        // 120 个词全是空白方块，就是这么来的。
+        return Object.assign({}, m, {
+          id: m.id != null ? String(m.id) : 'n' + i + ':' + (m.label != null ? m.label : '')
+        });
       });
       const K = n => String(n.id);
       const byId = {}, pre = {}, con = {};
