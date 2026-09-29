@@ -30,7 +30,11 @@
     节点图 接续 绑 forms 标题 label 说明 point 高 160px 当 lists.forms&&lists.forms.length
 
     文案 当 lists.point_words&&lists.point_words.length 挂着的词
-    节点图 词 绑 point_words 标题 kanji,kana 说明 kana,meaning 高 260px 当 lists.point_words&&lists.point_words.length
+    列表 词 绑 point_words 当 lists.point_words&&lists.point_words.length
+      列 kanji 汉字
+      列 kana 假名
+      列 meaning 中文
+    结束
 
     分组 底栏 横排 底栏
       动作 close 次要 关闭 收起
