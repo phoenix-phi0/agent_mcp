@@ -1,12 +1,13 @@
-# 知识图谱：整页一张科技树，详情在浮层里，浮层里也全是节点图。
+# 知识图谱：整页一张科技树，详情在浮层里。
 #
 # 为什么不再有列表：列表只能回答「有哪些」，回答不了「怎么连」；知识点之间
 # 的先后才是这一页要看的东西。按名字找点，缩放拖一下图比翻列表快。
 #
 #   点图上的节点   → 打开 节点详情，「带 code」进地址，浮层的「载入」拉详情
-#   条目 / 接续 / 挂着的词 → 各一张节点图，卡片排开，超过 6 个排成网格
+#   条目 / 接续 / 挂着的词 → 三张表格。它们之间没有先后关系，画成图只能
+#                    排成网格，还要操心视口和缩放；表格本来就够，也好翻
 #
-# 后端不用改：条目这些照旧走 lists，节点图
+# 后端不用改：条目这些照旧走 lists，图
 # 在共享状态里找不到就去 lists 里找。
 
 界面 自定义 知识图谱 载入 node_detail
@@ -24,10 +25,16 @@
     结束
 
     文案 当 lists.items&&lists.items.length 这个功能下的说法
-    节点图 条目 绑 items 标题 label 说明 form 高 160px 当 lists.items&&lists.items.length
+    列表 条目 绑 items 当 lists.items&&lists.items.length
+      列 label 名称
+      列 form 接在
+    结束
 
     文案 当 lists.forms&&lists.forms.length 接在这个形式后面的
-    节点图 接续 绑 forms 标题 label 说明 point 高 160px 当 lists.forms&&lists.forms.length
+    列表 接续 绑 forms 当 lists.forms&&lists.forms.length
+      列 label 名称
+      列 point 功能
+    结束
 
     文案 当 lists.point_words&&lists.point_words.length 挂着的词
     列表 词 绑 point_words 当 lists.point_words&&lists.point_words.length
