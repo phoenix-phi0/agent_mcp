@@ -71,3 +71,71 @@
 {"code": "te-iru", "label": "ている", "point": "f-aspect", "after": "", "form": "te-form"}
 {"code": "node-kara", "label": "ので と から", "point": "f-cause", "after": "", "form": "particle"}
 {"code": "ga-kedo", "label": "が と けど", "point": "f-concession", "after": "", "form": "particle"}
+{"code": "hira-gojuon", "label": "五十音清音", "point": "hiragana", "after": ""}
+{"code": "hira-hatsuon", "label": "拨音 ん", "point": "hiragana", "after": "hira-gojuon"}
+{"code": "kata-gojuon", "label": "片假名表", "point": "katakana", "after": ""}
+{"code": "kata-gairaigo", "label": "外来语写法", "point": "katakana", "after": "kata-gojuon"}
+{"code": "kanji-on", "label": "音读", "point": "kanji-basic", "after": ""}
+{"code": "kanji-kun", "label": "训读", "point": "kanji-basic", "after": "kanji-on"}
+{"code": "daku-seion", "label": "浊点 ば行 だ行", "point": "dakuon", "after": ""}
+{"code": "handaku-pa", "label": "半浊音 ぱ行", "point": "dakuon", "after": "daku-seion"}
+{"code": "youon-kya", "label": "拗音 きゃ しゅ ちょ", "point": "youon", "after": ""}
+{"code": "sokuon-xtu", "label": "促音 っ", "point": "sokuon", "after": ""}
+{"code": "chouon-aa", "label": "长音 おう えい", "point": "chouon", "after": ""}
+{"code": "pitch-atamadaka", "label": "头高型 中高型 尾高型", "point": "pitch", "after": ""}
+{"code": "noun-suru", "label": "名词+する", "point": "noun", "after": ""}
+{"code": "noun-no", "label": "名词修饰 の", "point": "noun", "after": "noun-suru"}
+{"code": "verb-godan", "label": "五段动词", "point": "verb-groups", "after": ""}
+{"code": "verb-ichidan", "label": "一段动词", "point": "verb-groups", "after": "verb-godan"}
+{"code": "verb-irregular", "label": "カ変 サ変", "point": "verb-groups", "after": "verb-ichidan"}
+{"code": "i-adj-basic", "label": "い形容词辞书形", "point": "i-adj", "after": ""}
+{"code": "na-adj-da", "label": "な形容词+だ", "point": "na-adj", "after": ""}
+{"code": "adv-basic", "label": "副词的位置", "point": "adverb", "after": ""}
+{"code": "giongo", "label": "拟声词 ドキドキ", "point": "onomatopoeia", "after": ""}
+{"code": "gitaigo", "label": "拟态词 っきり", "point": "onomatopoeia", "after": "giongo"}
+{"code": "masu-tsuke", "label": "连用形+ます", "point": "masu-form", "after": ""}
+{"code": "masu-mashita", "label": "ました ません", "point": "masu-form", "after": "masu-tsuke"}
+{"code": "dict-u", "label": "辞书形 う段", "point": "dict-form", "after": ""}
+{"code": "nai-nai", "label": "ない形变化", "point": "nai-form", "after": ""}
+{"code": "te-godan", "label": "五段て形 いて んで", "point": "te-form", "after": ""}
+{"code": "te-ichidan", "label": "一段て形 て", "point": "te-form", "after": "te-godan"}
+{"code": "ta-from-te", "label": "て→た で→だ", "point": "ta-form", "after": ""}
+{"code": "i-ku", "label": "い形容 くない かった", "point": "i-adj-conj", "after": ""}
+{"code": "na-dewa", "label": "な形容 ではない だった", "point": "na-adj-conj", "after": ""}
+{"code": "potential-eru", "label": "可能形 える られる", "point": "potential", "after": ""}
+{"code": "volitional-ou", "label": "意志形 おう よう", "point": "volitional", "after": ""}
+{"code": "imperative-e", "label": "命令形 え ろ", "point": "imperative", "after": ""}
+{"code": "imperative-nasai", "label": "なさい", "point": "imperative", "after": "imperative-e"}
+{"code": "passive-rareru", "label": "受身 れる られる", "point": "passive", "after": ""}
+{"code": "causative-saseru", "label": "使役 せる させる", "point": "causative", "after": ""}
+{"code": "caus-pass", "label": "使役受身 させられる", "point": "causative-passive", "after": ""}
+{"code": "jihi-pair", "label": "自他对 開く/開ける", "point": "transitive-pair", "after": ""}
+{"code": "ageru", "label": "あげる", "point": "ageru-kureru", "after": ""}
+{"code": "kureru", "label": "くれる", "point": "ageru-kureru", "after": "ageru"}
+{"code": "morau", "label": "もらう", "point": "ageru-kureru", "after": "kureru"}
+{"code": "sonkei-rareru", "label": "尊敬 られる", "point": "sonkeigo", "after": ""}
+{"code": "sonkei-special", "label": "いらっしゃる おっしゃる", "point": "sonkeigo", "after": "sonkei-rareru"}
+{"code": "kenjo-itasu", "label": "いたす 申し上げる", "point": "kenjougo", "after": ""}
+{"code": "teinei-desu", "label": "です ます", "point": "teineigo", "after": ""}
+{"code": "keigo-scene", "label": "场景里谁用哪种敬语", "point": "keigo-usage", "after": ""}
+{"code": "syn-miru", "label": "見る 観る 瞻める", "point": "synonym-nuance", "after": ""}
+{"code": "kanji-stroke", "label": "笔顺 部首", "point": "kanji-writing", "after": ""}
+{"code": "colloc-suru", "label": "和语搭配 決定する", "point": "collocation", "after": ""}
+{"code": "counter-hitotsu", "label": "つ 个", "point": "counters-basic", "after": ""}
+{"code": "counter-hon-mai", "label": "本 枚 冊", "point": "counters-things", "after": ""}
+{"code": "counter-ippai", "label": "一杯 一本 一匹", "point": "counters-sound", "after": ""}
+{"code": "counter-kai", "label": "回 番目", "point": "counters-order", "after": ""}
+{"code": "date-youbi", "label": "月日 星期", "point": "time-date", "after": ""}
+{"code": "clock-ji", "label": "时 半 分", "point": "time-clock", "after": ""}
+{"code": "duration-jikan", "label": "时间 分间", "point": "time-duration", "after": ""}
+{"code": "rel-ototoi", "label": "昨日 明日 今周", "point": "time-relative", "after": ""}
+{"code": "time-ni-kara", "label": "时间+に/から/まで", "point": "time-particle", "after": ""}
+{"code": "adv-totemo", "label": "とても ずいぶん ちょっと", "point": "adv-degree", "after": ""}
+{"code": "adv-yoku", "label": "よく 時々 あまり", "point": "adv-frequency", "after": ""}
+{"code": "adv-takusan", "label": "たくさん すこし ほとんど", "point": "adv-quantity", "after": ""}
+{"code": "adv-mou", "label": "もう まだ すぐ", "point": "adv-time", "after": ""}
+{"code": "adv-kesshite", "label": "決して〜ない 必ず〜", "point": "adv-modal", "after": ""}
+{"code": "conj-soshite", "label": "そして でも だから", "point": "adv-conjunctive", "after": ""}
+{"code": "onkun-pick", "label": "一词多音 生/生きる", "point": "kanji-onkun", "after": ""}
+{"code": "homo-hashi", "label": "同音 橋/筷/端", "point": "kanji-homophone", "after": ""}
+{"code": "okuri-kaku", "label": "送假名 書く/厚い", "point": "kanji-okurigana", "after": ""}

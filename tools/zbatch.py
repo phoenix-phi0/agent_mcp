@@ -294,16 +294,17 @@ def describe() -> str:
     强制重扫端口：这个函数就是用来确认服务到底在不在的，缓存在这儿
     是反作用。
     """
-    port = find_port(force=True)
-    if port is None:
+    found = find_port(force=True)
+    if found is None:
         return ("ZBatch 没在跑。\n"
                 f"  启动：cd {BASE} && python app.pyw")
+    host, port = found
     try:
-        js = _get(f"http://127.0.0.1:{port}/api/jobs")
+        js = _get(f"http://{host}:{port}/api/jobs")
     except Exception as e:
-        return f"ZBatch 在 {port}，但取任务列表失败：{e}"
+        return f"ZBatch 在 {host}:{port}，但取任务列表失败：{e}"
 
-    lines = [f"ZBatch 在 {port}，{len(js)} 个任务"]
+    lines = [f"ZBatch 在 {host}:{port}，{len(js)} 个任务"]
     for j in js[:5]:
         lines.append(f"  {j['id']}  {j['status']:10} {j['progress']:8} "
                      f"{j['name'][:30]}")

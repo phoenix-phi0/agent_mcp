@@ -14,11 +14,28 @@ set -u
 M=/home/ysc/mcp
 PY=$M/.venv/bin/python
 FAILED=0
+# 每组的时限。一组卡住时，没有它整个脚本会一直等下去——后面十几组
+# 根本没机会跑，而「卡住」和「很慢」从外面看一模一样。实际撞上过：
+# 跑了十分钟没结果，查完才知道是某一组挂在那儿。
+# 90 秒对现有的组都富余（最慢的 e2e 约 40 秒）。
+LIMIT=${LIMIT:-90}
 
 run() {
   local name=$1; shift
   local out code last
-  out=$("$@" 2>&1); code=$?
+  # --foreground 让 timeout 杀整个进程组，不只是它直接起的那个进程。
+  #
+  # 不加的话对 `bash -c "... node run.js"` 这种没用：timeout 杀掉 bash，
+  # 而 node 起的服务是孙子进程，活着并且握着管道的写端，$(...) 就一直
+  # 等管道关闭——脚本照样无限挂着，加了超时等于没加。实际撞上过：
+  # 以为限住了，结果又跑了十几分钟。
+  out=$(setsid timeout --foreground --signal=TERM --kill-after=5 "$LIMIT" "$@" 2>&1); code=$?
+  if [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; then
+    printf '%-12s 超时（%s 秒没跑完，已终止）\n' "$name" "$LIMIT"
+    FAILED=$((FAILED + 1))
+    printf '%s\n' "$out" | tail -6 | sed 's/^/    /'
+    return
+  fi
   last=$(printf '%s\n' "$out" | grep -E '通过 *[0-9]+|passed|OK|完成' | tail -1)
   [ -z "$last" ] && last=$(printf '%s\n' "$out" | grep -v '^\s*$' | tail -1)
   printf '%-12s 退出码 %s  %s\n' "$name" "$code" "$last"
