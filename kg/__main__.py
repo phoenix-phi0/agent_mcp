@@ -79,16 +79,21 @@ def run_import(quiet: bool = False) -> int:
     if r.get("note"):
         say("  " + r["note"].strip())
 
-    if (CONTENT / "words.jsonl").is_file():
-        w = c.post("/word/import2", json={"form": {}}).get_json() or {}
-        say(f"单词：新增 {w.get('new')}，更新 {w.get('updated')}，"
-            f"跳过 {w.get('skipped')}，没挂知识点 {w.get('no_point')}")
-        if w.get("note"):
-            say("  " + w["note"].strip())
+    # 词表可以有多份：words.jsonl 是从题库抽的（中文释义），
+    # words_jlpt.jsonl 来自 OpenJLPT（CC BY-SA 4.0，释义是英文）。
+    # 来源不同就分开放文件，将来要换掉某一批也不牵连另一批。
+    files = sorted(CONTENT.glob("words*.jsonl"))
+    if files:
+        for f in files:
+            w = c.post("/word/import2",
+                       json={"form": {"file": f"content/{f.name}"}}).get_json() or {}
+            say(f"单词 {f.name}：新增 {w.get('new')}，更新 {w.get('updated')}，"
+                f"跳过 {w.get('skipped')}，没挂知识点 {w.get('no_point')}")
+            if w.get("note"):
+                say("  " + w["note"].strip()[:200])
     else:
-        say("没有 words.jsonl，跳过单词导入")
+        say("没有 words*.jsonl，跳过单词导入")
     return 0
-
 
 def setup(quiet: bool = False) -> int:
     sys.path.insert(0, str(ROOT))
