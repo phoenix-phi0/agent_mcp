@@ -62,6 +62,7 @@ run 课文        $PY tests/kg/test_lesson.py
 run 语法题库    $PY tests/quiz/test_bunpou.py
 run 做题        $PY tests/kg/test_quiz.py
 run 并发用包    $PY tests/dsl/test_use_concurrent.py
+run 批量claude  $PY tests/tools/test_cbatch.py
 run 认证        $PY tests/auth/test_auth.py
 run 认证攻击    $PY tests/auth/test_auth_attack.py
 run 并发隔离    $PY tests/auth/test_concurrency.py

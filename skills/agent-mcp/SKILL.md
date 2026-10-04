@@ -36,6 +36,18 @@ ZBatch 每次是新进程。验证引擎改动一律用它。
 **提示词里要写明**「不要改任何文件」「测试失败就如实贴出，不要改测试脚本」——
 否则执行端可能自作主张改东西。
 
+ZBatch 服务没开时，用 CBatch 代替：参数和用法一样，执行端是本机的 `claude -p`，
+不用起服务。
+
+```
+cbatch.submit  tasks=[...] cwd="/home/ysc/mcp" model="sonnet"
+cbatch.wait    job_id=... timeout=110 every=15
+```
+
+默认不放开权限：需要批准的工具调用会被直接拒掉，被拒的工具记在任务的 `denied`
+字段里。要让它改文件就传 `permission_mode="acceptEdits"`，或者用 `allowed_tools`
+指定具体工具。`bypassPermissions` 不收。
+
 **清理起的服务不要用 `pkill -f '关键字'`**：它会匹配到跑这段脚本的 shell 自己，
 把自己杀掉（犯过三次）。记 PID 按进程组杀：
 

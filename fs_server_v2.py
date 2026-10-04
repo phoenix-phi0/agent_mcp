@@ -105,6 +105,15 @@ _CALLABLE = {
     "zbatch.wait":     ("tools.zbatch", "wait"),
     "zbatch.jobs":     ("tools.zbatch", "jobs"),
     "zbatch.cancel":   ("tools.zbatch", "cancel"),
+    # CBatch：同样的批量，执行端换成本机 Claude Code 的无头模式（claude -p）。
+    # 不用起服务，submit 起一个后台执行器就返回。默认不放开权限、不收
+    # bypassPermissions、单次上限 10 条——见 cbatch.py 模块文档。
+    "cbatch.describe": ("tools.cbatch", "describe"),
+    "cbatch.submit":   ("tools.cbatch", "submit"),
+    "cbatch.status":   ("tools.cbatch", "status"),
+    "cbatch.wait":     ("tools.cbatch", "wait"),
+    "cbatch.jobs":     ("tools.cbatch", "jobs"),
+    "cbatch.cancel":   ("tools.cbatch", "cancel"),
     # 精确编辑 data/ 下的文件：改几行不用重写整个文件。
     #
     # 路径基准是 **data/**，跟 write_file 一样。要改 tools/ verbs/ 这些
