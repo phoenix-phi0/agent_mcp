@@ -71,6 +71,11 @@ from .dsl_core import (  # noqa: F401
 )
 
 import re
+import threading
+
+# 「用包」加载动词包时持有。动词表可能被多个线程共用（见 _do_use）。
+# 只在真加载时才会等：包加载过一次之后，后面的「用包」查一下就跳过了。
+_USE_LOCK = threading.RLock()
 
 
 class DSLEngine(ModelMixin, HistoryMixin):
@@ -479,18 +484,34 @@ class DSLEngine(ModelMixin, HistoryMixin):
                                           if p.is_dir())) or "无"
                 raise DSLError(f"第 {lineno + 1} 行：没有动词包「{name}」。"
                                f"{root} 下有：{有哪些}")
-            # 已加载过就跳过——父子脚本各声明一次同一个包很常见
-            if name in self.verbs.packs:
-                continue
-            self.verbs.load_pack(pack, workspace=self.workdir)
+            # 「查过没加载」和「加载」要在一把锁里：HTTP 接口的动词表是按包
+            # 组合缓存、所有请求共用的（packs.registry），两个请求同时跑到
+            # 「用包 db」，都看到 db 还没加载，就各加载一遍——第二遍每个动词
+            # 报一条「被重复注册」，这些警告进了脚本输出，又被路由器兜底塞进
+            # messages，出现在做题页的消息流里。端到端测试撞上的，时有时无。
+            #
+            # 警告也在锁里取走、只报自己这次加载出来的：警告列表同样是共用的，
+            # 不这样的话别的请求会把这次的警告当成自己的打印出来。
+            with _USE_LOCK:
+                # 已加载过就跳过——父子脚本各声明一次同一个包很常见
+                if name in self.verbs.packs:
+                    continue
+                self.verbs.load_pack(pack, workspace=self.workdir)
+                mine = list(self.verbs.warnings)
+                self.verbs.warnings.clear()
+            for w in mine:
+                self._emit(f"[动词包] {w}")
 
         self.strict_verbs = True
 
         # 加载警告不能吞：包里的 _verbs.py 出错时动词会静悄悄少几个，
-        # 后面报「没有这个动词」时根本想不到是加载阶段就失败了
-        for w in self.verbs.warnings:
+        # 后面报「没有这个动词」时根本想不到是加载阶段就失败了。上面每加载
+        # 一个包就报它自己的；这里报的是加载之前就攒着的（建动词表时的）
+        with _USE_LOCK:
+            early = list(self.verbs.warnings)
+            self.verbs.warnings.clear()
+        for w in early:
             self._emit(f"[动词包] {w}")
-        self.verbs.warnings.clear()
 
     def _check_unknown_verb(self, head: str, rest: str, lineno: int) -> None:
         """严格模式下，右侧长得像动词调用但查不到时报错。

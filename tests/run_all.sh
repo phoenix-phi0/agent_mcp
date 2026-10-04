@@ -56,6 +56,12 @@ run 知识图谱    $PY tests/kg/test_kg.py
 run 单词        $PY tests/kg/test_word.py
 run 单词导入    $PY tests/kg/test_word_import.py
 run 学习记录    $PY tests/kg/test_learn.py
+run 掌握得分    $PY tests/kg/test_score.py
+run 对账清理    $PY tests/kg/test_prune.py
+run 课文        $PY tests/kg/test_lesson.py
+run 语法题库    $PY tests/quiz/test_bunpou.py
+run 做题        $PY tests/kg/test_quiz.py
+run 并发用包    $PY tests/dsl/test_use_concurrent.py
 run 认证        $PY tests/auth/test_auth.py
 run 认证攻击    $PY tests/auth/test_auth_attack.py
 run 并发隔离    $PY tests/auth/test_concurrency.py
@@ -63,6 +69,7 @@ run 增删改查E2E bash -c "cd $M/tests/e2e && node run.js"
 run 登录流程E2E bash -c "cd $M/tests/e2e && node auth_run.js"
 run 导航路由E2E bash -c "cd $M/tests/e2e && node route_run.js"
 run 显式主键E2E bash -c "cd $M/tests/e2e && node pk_run.js"
+run 做题页E2E   bash -c "cd $M/tests/e2e && node quiz_run.js"
 run app2编译    bash -c "cd $M/app2 && $PY build.py"
 
 # 上传要先起 dsl/ 的服务

@@ -162,13 +162,13 @@ def record(con: sqlite3.Connection, learner: str, node: str,
     """记一次作答，更新汇总，返回该节点的最新状态（含是否刚刚达标）。"""
     con.execute(
         "INSERT INTO attempt(learner,node,题号,对错,时间) "
-        "VALUES(?,?,?,?,datetime('now'))",
+        "VALUES(?,?,?,?,datetime('now','localtime'))",
         (learner, node, 题号, int(correct)))
     con.execute(
         "INSERT INTO mastery(learner,node,对,总,更新) "
-        "VALUES(:w,:n,:c,1,datetime('now')) "
+        "VALUES(:w,:n,:c,1,datetime('now','localtime')) "
         "ON CONFLICT(learner,node) DO UPDATE SET "
-        "对 = 对 + :c, 总 = 总 + 1, 更新 = datetime('now')",
+        "对 = 对 + :c, 总 = 总 + 1, 更新 = datetime('now','localtime')",
         {"w": learner, "n": node, "c": int(correct)})
 
     row = con.execute(

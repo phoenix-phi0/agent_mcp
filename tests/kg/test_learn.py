@@ -108,6 +108,28 @@ def main():
     check(before == after, "重导之后 mastery 一行没变")
     check(rows("SELECT count(*) n FROM attempt")[0]["n"] == 10, "流水也还在")
 
+    print("七、时间一律是本地时间")
+    # 实体里「默认 现在」渲染成 datetime('now','localtime')。SQL 自己填时间的
+    # 地方也得是本地时间——早先作答和掌握写的是 datetime('now')，那是 UTC，
+    # 同一个库里两种时间差 9 小时，排序、按天统计全会错，而且不报错。
+    local = rows("SELECT datetime('now','localtime') t")[0]["t"]
+    a = rows("SELECT at FROM attempt ORDER BY id DESC LIMIT 1")[0]["at"]
+    u = rows("SELECT updated FROM mastery WHERE learner='u1'")[0]["updated"]
+    check(a[:13] == local[:13], f"作答时间是本地时间：{a}（现在 {local}）")
+    check(u[:13] == local[:13], f"掌握的更新时间是本地时间：{u}")
+
+    # 防再犯：代码里不许再出现写 UTC 的 datetime('now')。注释里提到它不算
+    import re
+    bare = re.compile(r"datetime\('now'\)")
+    hits = []
+    for pattern, mark in (("kg/queries/*.sql", "--"), ("kg/routes/*.zs", "#"),
+                          ("tools/*.py", "#")):
+        for f in sorted(ROOT.glob(pattern)):
+            for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+                if bare.search(line.split(mark, 1)[0]):
+                    hits.append(f"{f.relative_to(ROOT)}:{i}")
+    check(not hits, f"代码里没有写 UTC 的 datetime('now')：{hits or '无'}")
+
     print(f"\n{'=' * 50}\n通过 {passed}，失败 {failed}")
     return 1 if failed else 0
 

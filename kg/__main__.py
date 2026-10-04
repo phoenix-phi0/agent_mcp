@@ -27,6 +27,26 @@ from pathlib import Path
 PROJ = Path(__file__).resolve().parent
 ROOT = PROJ.parent
 CONTENT = PROJ / "content"
+# 语法题库：每个等级一个 jsonl，沿用旧题库格式（见 verbs/quiz/_verbs.py）
+BANK = ROOT / "workspace" / "japanese" / "content" / "bunpou" / "题库"
+
+
+def read_bank(bank: Path) -> list:
+    """读题库目录下所有 jsonl，原样返回每一行。目录不在返回空列表。
+
+    坏行不跳过、直接抛：题库是这边生成的，坏一行说明生成出了问题，
+    悄悄少几道题比报错难查。
+    """
+    import json
+    rows = []
+    for f in sorted(Path(bank).glob("*.jsonl")) if Path(bank).is_dir() else []:
+        for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            if line.strip():
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError as e:
+                    raise SystemExit(f"{f.name} 第 {n} 行不是合法 JSON：{e}")
+    return rows
 
 
 def ensure_learn_index() -> None:
@@ -47,6 +67,64 @@ def ensure_learn_index() -> None:
             con.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_mastery"
                         " ON mastery(learner, point)")
             con.commit()
+    finally:
+        con.close()
+
+
+def ensure_new_tables(db: Path = None, entities: Path = None) -> list:
+    """实体里新加了表、库里还没有的，建出来。返回这次建了哪些表。
+
+    ensure_db 只在库不存在时建表——已有的库里不会凭空多出新实体的表，接口
+    一查就是 no such table。重新生成建表语句又会先 DROP 全部表，而 attempt /
+    mastery / score 是真学习记录，不能走那条路。
+
+    所以这里只做最保守的一件事：拿实体渲染出来的建表语句，**只执行库里还
+    没有的那些表**（连同它们的索引）。已有的表一律不碰——不删、不改列、
+    不补列。实体里给已有的表加了字段，这里不管，那得另写 ALTER。
+
+    建表语句从实体渲染，不手抄：手抄的跟新建库渲染出来的哪怕差一点（类型、
+    默认值、外键），一边正常一边出怪问题，很难查。
+
+    db / entities 不给就是本项目的；测试传临时的。
+    """
+    import re
+    import sqlite3
+    sys.path.insert(0, str(ROOT))
+    from tools.entity import render_sql
+
+    db = Path(db) if db else PROJ / "app.db"
+    entities = Path(entities) if entities else PROJ / "entities"
+    if not db.is_file():
+        return []
+    text = "\n\n".join(f.read_text(encoding="utf-8")
+                       for f in sorted(entities.glob("*.entity")))
+
+    # 渲染结果是「DROP 一串 + CREATE TABLE 一串 + CREATE INDEX 一串」，
+    # 按语句切开，只挑 CREATE 的。DROP 一句都不执行。
+    tables, indexes = {}, {}
+    for stmt in re.split(r";\s*\n", render_sql(text, strict=True)):
+        body = "\n".join(l for l in stmt.splitlines()
+                         if l.strip() and not l.strip().startswith("--")).strip()
+        m = re.match(r"CREATE TABLE (\w+)", body)
+        if m:
+            tables[m.group(1)] = body.replace(
+                "CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1)
+            continue
+        m = re.match(r"CREATE INDEX .* ON (\w+)\(", body, re.S)
+        if m:
+            indexes.setdefault(m.group(1), []).append(body)
+
+    con = sqlite3.connect(db)
+    try:
+        have = {r[0] for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        made = [t for t in tables if t not in have]
+        for t in made:
+            con.execute(tables[t])
+            for ix in indexes.get(t, []):
+                con.execute(ix)
+        con.commit()
+        return made
     finally:
         con.close()
 
@@ -79,6 +157,37 @@ def run_import(quiet: bool = False) -> int:
     if r.get("note"):
         say("  " + r["note"].strip())
 
+    # 课文挂在条目上（外键），所以排在 kg/import2 之后。文件不在就跳过：
+    # 课文是后加的，没有它整个项目照样能跑。
+    if (CONTENT / "lessons.jsonl").is_file():
+        r = c.post("/lesson/import", json={"form": {}})
+        d = r.get_json() or {}
+        if r.status_code != 200:
+            say(f"课文导入失败（{r.status_code}），库里的课文没动：{d.get('error') or d}")
+        else:
+            say(f"课文 {d.get('lessons')} 课，挂接 {d.get('links')} 条"
+                f"（没挂上 {d.get('failed')}，没挂到任何条目的课 {d.get('orphans')}）")
+            if d.get("note"):
+                say("  " + d["note"].strip()[:300])
+    else:
+        say("没有 lessons.jsonl，跳过课文导入")
+
+    # 语法题库。源文件在本项目之外（workspace/ 下，quiz 包也读它），.zs 的
+    # 读JSONL 只能读项目目录里的文件，所以这里读出来放进请求——只读文件，
+    # 不动内容，怎么进库在 routes/quiz.zs。题目挂在条目上，排在条目之后。
+    rows = read_bank(BANK)
+    if rows:
+        r = c.post("/quiz/import", json={"form": {"rows": rows}})
+        d = r.get_json() or {}
+        if r.status_code != 200:
+            say(f"题目导入失败（{r.status_code}），库里的题没动：{d.get('error') or d}")
+        else:
+            say(f"题目 {d.get('questions')} 道（条目对不上没进库的 {d.get('skipped')}）")
+            if d.get("note"):
+                say("  " + d["note"].strip()[:300])
+    else:
+        say(f"没有题库（{BANK}），跳过题目导入")
+
     # 词表可以有多份：words.jsonl 是从题库抽的（中文释义），
     # words_jlpt.jsonl 来自 OpenJLPT（CC BY-SA 4.0，释义是英文）。
     # 来源不同就分开放文件，将来要换掉某一批也不牵连另一批。
@@ -102,6 +211,9 @@ def setup(quiet: bool = False) -> int:
     say = (lambda *a: None) if quiet else print
 
     say(ensure_db(PROJ))
+    made = ensure_new_tables()
+    if made:
+        say(f"  已有的库里补建了表：{'、'.join(made)}")
     ensure_learn_index()
     run_import(quiet)
 

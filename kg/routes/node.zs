@@ -9,7 +9,13 @@
   # 左边的列表和右边的图用同一份数据：都带 state（掌握/可学/锁定），
   # 引擎按它给列表行加 row-done / row-open / row-locked，跟图上的颜色一致。
   # 早先列表走 node_all（只有编号和名称），行就没有状态色。
-  设 谁.learner = {learner 或}
+  # 学习者不传就是 me，跟 learn.zs、score.zs 同一个默认值。早先这里是空串：
+  # 答题记在 me 名下、图按「没有人」去查，图上什么都不变，也不报错。
+  设 学习者 = {learner 或}
+  如果 {学习者} 为空
+    设 学习者 = me
+  结束
+  设 谁.learner = {学习者}
   设 点表 = 查询表 app.db kg_graph_nodes {谁}
   设 组.nodes = {点表}
   响应 lists {组}

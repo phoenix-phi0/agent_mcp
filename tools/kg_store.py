@@ -180,12 +180,12 @@ def record(con: sqlite3.Connection, learner: str, node: str,
     """
     con.execute(
         "INSERT INTO attempt(learner,node,ref,correct,at) "
-        "VALUES(?,?,?,?,datetime('now'))", (learner, node, ref, int(correct)))
+        "VALUES(?,?,?,?,datetime('now','localtime'))", (learner, node, ref, int(correct)))
     con.execute(
         "INSERT INTO mastery(learner,node,correct,total,updated) "
-        "VALUES(:w,:n,:c,1,datetime('now')) "
+        "VALUES(:w,:n,:c,1,datetime('now','localtime')) "
         "ON CONFLICT(learner,node) DO UPDATE SET "
-        "correct = correct + :c, total = total + 1, updated = datetime('now')",
+        "correct = correct + :c, total = total + 1, updated = datetime('now','localtime')",
         {"w": learner, "n": node, "c": int(correct)})
 
     row = con.execute(

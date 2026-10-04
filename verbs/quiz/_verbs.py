@@ -178,6 +178,19 @@ def register(reg, workspace):
             return True, b
         return False, b
 
+    def _judge_exact(标准: str, 可接受, 作答: str) -> tuple[bool, str]:
+        """接续题：整段精确比对（归一化全半角和空白，句号不计）。
+
+        不能走填空题那套「去掉词尾假名再比」：接续题考的恰恰是词尾——
+        答案「書かせられる」，学生写「書かれる」，两个去掉假名都是「書」，
+        会被判对。所以只认标准答案和题目里列出的「可接受」写法。
+        """
+        b = _norm(作答).rstrip("。")
+        if not b:
+            return False, b
+        ok = [标准] + [str(x) for x in (可接受 or [])]
+        return any(_norm(a).rstrip("。") == b for a in ok), b
+
     def _judge(题库: str, 题号: str, 作答: str) -> str:
         q = _find(题库, 题号)
         if q is None:
@@ -189,6 +202,9 @@ def register(reg, workspace):
         if str(q.get("题型", "")) == "选择":
             对, 提取 = _judge_choice(标准, 作答)
             你的 = f"你选了 {提取}" if 提取 else "没看出你选的是哪个选项"
+        elif str(q.get("题型", "")) == "接续":
+            对, 提取 = _judge_exact(标准, q.get("可接受"), 作答)
+            你的 = f"你写的是「{提取}」" if 提取 else "没看出你的作答"
         else:
             对, 提取 = _judge_fill(标准, 作答)
             你的 = f"你写的是「{提取}」" if 提取 else "没看出你的作答"
@@ -237,6 +253,51 @@ def register(reg, workspace):
         answers += [""] * (len(ids) - len(answers))
         return ",".join(wid for wid, ans in zip(ids, answers)
                         if not _judge(题库, wid, ans).startswith("○"))
+
+    @reg.verb(
+        "判一道题，题目由调用方给，不读题库文件——题目已经导进数据库时用。"
+        "参数是一个结构：{题型, 答案, 可接受, 作答}。对返回 1，错返回 0。"
+        "规则跟「判题」是同一套（选择题抓选项字母，接续题整段比对）。"
+    )
+    def 判对错(题) -> str:
+        """跟 _judge 同一套规则，只是题目从参数来。
+
+        为什么不让调用方先把题写回文件再调「判题」：知识图谱那边题目在
+        库里，库在项目目录，题库文件在 workspace——两边的路径限制互不
+        相通。规则只写一份，在这里共用，改判题规则不会两边对不上。
+
+        参数坏了直接抛，不返回 0：调用方拿 0 当「答错」记进学习记录，
+        一个格式问题会变成一条假的错题。
+        """
+        if isinstance(题, str):
+            try:
+                题 = json.loads(题)
+            except json.JSONDecodeError:
+                raise ValueError(f"判对错的参数不是合法 JSON：{题[:80]}")
+        if not isinstance(题, dict):
+            raise ValueError("判对错的参数要是一个结构：{题型, 答案, 可接受, 作答}")
+        型 = str(题.get("题型", ""))
+        标准 = str(题.get("答案", ""))
+        作答 = str(题.get("作答", "") or "")
+        if not 标准:
+            raise ValueError("判对错：没有标准答案")
+        # 可接受在库里存的是 JSON 文本，也可能直接是列表
+        可接受 = 题.get("可接受") or []
+        if isinstance(可接受, str):
+            s = 可接受.strip()
+            try:
+                可接受 = json.loads(s) if s else []
+            except json.JSONDecodeError:
+                可接受 = [s]
+        if not isinstance(可接受, list):
+            可接受 = [可接受]
+        if 型 == "选择":
+            对, _ = _judge_choice(标准, 作答)
+        elif 型 == "接续":
+            对, _ = _judge_exact(标准, 可接受, 作答)
+        else:
+            对, _ = _judge_fill(标准, 作答)
+        return "1" if 对 else "0"
 
     # ------------------------------------------------------------------
     # 取题与查询
