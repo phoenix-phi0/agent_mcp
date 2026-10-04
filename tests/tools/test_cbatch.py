@@ -32,6 +32,21 @@ with open({str(LOG)!r}, "a", encoding="utf-8") as f:
                          "leak": sorted(k for k in os.environ
                                         if k == "CLAUDECODE" or k.startswith("CLAUDE_CODE_"))}},
                        ensure_ascii=False) + "\\n")
+if "--tools" in a:
+    # 难度评估：按每条任务里的暗号分模型。JUNK 让输出不是 JSON，GAP 让那条缺席
+    if "JUNK" in prompt:
+        out = "我觉得都挺难的"
+    else:
+        picks = []
+        for i, sec in enumerate(prompt.split("### 任务 ")[1:], 1):
+            if "GAP" in sec:
+                continue
+            m = "opus" if "HARD" in sec else "haiku" if "EASY" in sec else "sonnet"
+            picks.append({{"i": i, "model": m, "reason": "因为" + m}})
+        out = "```json\\n" + json.dumps(picks) + "\\n```"
+    print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
+                      "result": out, "session_id": "judge", "total_cost_usd": 0.002}}))
+    sys.exit(0)
 if "SLEEP" in prompt:
     time.sleep(30)
 if "BADJSON" in prompt:
@@ -124,19 +139,23 @@ def main():
     check(t[1]["status"] == "error" and "error_during_execution" in t[1]["error"],
           "is_error 记成 error", t[1])
     check(t[3].get("denied") == ["Write"], "被拒的工具记在 denied", t[3])
+    check(all(c["argv"][c["argv"].index("--model") + 1] == "sonnet" for c in cs),
+          "不传 model 默认用 sonnet")
     check(d["status"] == "partial", "有成有败是 partial", d["status"])
     check(all(c["argv"][c["argv"].index("--permission-mode") + 1] == "acceptEdits"
               and "--append-system-prompt" not in c["argv"] for c in cs),
           "permission_mode 传下去，preamble=False 不加交代")
 
     print("输出不是 JSON、超时")
-    j = cbatch.submit(["BADJSON", "SLEEP", "后面照跑"], cwd=str(TMP), timeout=1)
+    j = cbatch.submit(["BADJSON", "SLEEP", "后面照跑"], cwd=str(TMP), timeout=1, model=None)
     d = cbatch.wait(j["job_id"], timeout=30, every=0.2)
     t = d["tasks"]
     check(t[0]["status"] == "error" and "not logged in" in t[0]["output"],
           "非 JSON 输出原样留着", t[0])
     check(t[1]["status"] == "timeout", "超时的那条记 timeout", t[1]["status"])
     check(t[2]["status"] == "done", "超时之后接着跑下一条", t[2]["status"])
+    check(all("--model" not in c["argv"] for c in calls()[-3:]),
+          "model=None 不带 --model")
 
     print("取消")
     j = cbatch.submit(["SLEEP 一", "SLEEP 二"], cwd=str(TMP))
@@ -169,9 +188,43 @@ def main():
     time.sleep(0.3)
     check(cbatch.status(j["job_id"])["status"] == "died", "进程没了就是 died，wait 不会空等")
 
+    print("model=auto：haiku 评估后分模型")
+    LOG.unlink()
+    j = cbatch.submit(["EASY 跑命令", "HARD 重构", "普通活"], cwd=str(TMP), model="auto")
+    d = cbatch.wait(j["job_id"], timeout=30, every=0.2)
+    cs = calls()
+    judge = [c for c in cs if "--tools" in c["argv"]]
+    runs = [c for c in cs if "--tools" not in c["argv"]]
+    arg = lambda c, k: c["argv"][c["argv"].index(k) + 1] if k in c["argv"] else None  # noqa: E731
+    check(len(judge) == 1 and arg(judge[0], "--model") == "haiku",
+          "整批只评估一次，用 haiku", len(judge))
+    check(arg(judge[0], "--tools") == "" and "--strict-mcp-config" in judge[0]["argv"],
+          "评估时不开工具、不连 MCP")
+    check(judge[0]["cwd"] != str(TMP), "评估不在任务 cwd 里跑", judge[0]["cwd"])
+    check([arg(c, "--model") for c in runs] == ["haiku", "opus", "sonnet"],
+          "每条用分到的模型", [arg(c, "--model") for c in runs])
+    check([t["model"] for t in d["tasks"]] == ["haiku", "opus", "sonnet"]
+          and d["tasks"][1]["model_reason"] == "因为opus", "模型和理由记在任务里")
+    check(d["auto"]["ok"] and d["auto"]["cost_usd"] == 0.002, "评估结果记在 auto 里", d["auto"])
+    check(d["status"] == "done", "整批 done", d["status"])
+
+    LOG.unlink()
+    j = cbatch.submit(["HARD", "GAP"], cwd=str(TMP), model="auto")
+    d = cbatch.wait(j["job_id"], timeout=30, every=0.2)
+    check([t["model"] for t in d["tasks"]] == ["opus", "sonnet"]
+          and not d["auto"]["ok"] and "2" in d["auto"]["error"],
+          "缺的那条退回 sonnet，并记下原因", (d["tasks"], d["auto"]))
+
+    LOG.unlink()
+    j = cbatch.submit(["HARD JUNK", "EASY"], cwd=str(TMP), model="auto")
+    d = cbatch.wait(j["job_id"], timeout=30, every=0.2)
+    check({t["model"] for t in d["tasks"]} == {"sonnet"} and "解析不了" in d["auto"]["error"],
+          "评估输出坏了整批退回 sonnet", d["auto"])
+    check(d["status"] == "done", "评估失败不影响任务照跑", d["status"])
+
     print("列表和概况")
     js = cbatch.jobs()
-    check(len(js) == 5 and js[0]["id"] == j["job_id"], "jobs 新的在前", [x["id"] for x in js])
+    check(len(js) == 8 and js[0]["id"] == j["job_id"], "jobs 新的在前", [x["id"] for x in js])
     check("最近 5 个任务" in cbatch.describe(), "describe 能用")
 
     print(f"\n{'=' * 50}\n通过 {PASS}，失败 {FAIL}")

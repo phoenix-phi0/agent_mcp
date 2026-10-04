@@ -72,6 +72,38 @@ CLAUDE_BIN = (os.environ.get("CBATCH_CLAUDE") or shutil.which("claude")
 
 MAX_TASKS = 10
 
+# 默认模型。不设的话用 Claude Code 自己的默认（Opus），批量任务多是跑命令、
+# 贴结果这类活，用不着，一条贵五倍。要别的就在 submit 里传 model。
+DEFAULT_MODEL = "sonnet"
+
+# model="auto"：先让 haiku 把整批任务看一遍，每条分一个模型。
+#
+# 一次评估整批，不是每条评一次：多花的是一次调用（约两分钱、几秒），
+# 跟任务条数无关。评估在执行器里做，submit 照样立刻返回。
+#
+# 评估失败（超时、输出不是要的格式、给了不认识的模型名）就整批退回
+# AUTO_FALLBACK，不让任务卡住——选错模型的代价是贵一点或差一点，任务
+# 跑不了的代价更大。失败原因记在 job.json 的 auto 里。
+AUTO_MODELS = ("haiku", "sonnet", "opus")
+AUTO_JUDGE = "haiku"
+AUTO_FALLBACK = DEFAULT_MODEL
+AUTO_TIMEOUT = 90
+# 每条提示词给评估看的长度上限。难度看开头基本就够了，整段塞进去是白花钱。
+AUTO_PEEK = 2000
+
+AUTO_PROMPT = """下面是一批要交给编程助手（Claude Code，能读写文件、跑命令）执行的任务。
+给每条任务选一个模型，在够用的前提下选便宜的：
+
+- haiku：机械的活。跑一条命令贴输出、读文件摘一段、按明确说明改一两处、简单问答。
+- sonnet：常规开发。写一个函数或一个小模块、改 bug、写测试、读几个文件后总结。
+- opus：难的活。跨多个文件的设计或重构、原因不明的排查、要权衡取舍的方案、
+  需求含糊要自己判断的。
+
+只输出一个 JSON 数组，不要别的文字、不要代码块标记。每条任务一个对象，
+按编号顺序：[{"i": 1, "model": "haiku", "reason": "一句话理由"}, ...]
+
+"""
+
 # 单条任务的时间上限（秒）。超时就杀掉这一条，接着跑下一条。
 TASK_TIMEOUT = 600
 
@@ -161,7 +193,7 @@ def _settle(d: dict) -> dict:
 
 
 def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
-           model: str = None, permission_mode: str = None,
+           model: str = DEFAULT_MODEL, permission_mode: str = None,
            allowed_tools=None, timeout: int = TASK_TIMEOUT,
            preamble: bool = True) -> dict:
     """提交一批任务，立刻返回，不等跑完。
@@ -172,6 +204,10 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
     mode="share"：后一条用 --resume 接前一条的会话，适合「先读、再改」。
         前一条失败了，后一条就从头开新会话，不接一个坏掉的上下文。
     cwd：claude 在哪个目录跑，决定它能看到哪些文件和项目设置。默认当前目录。
+    model：默认 sonnet（DEFAULT_MODEL）。传 None 或空串就不带 --model，
+        用 Claude Code 自己的默认。传 "auto" 就先让 haiku 按难度给每条分
+        haiku / sonnet / opus，见 AUTO_PROMPT；分到的模型和理由记在每条
+        任务的 model、model_reason 里。
     permission_mode / allowed_tools：原样传给 claude，见模块文档「默认不
         放开权限」。
     timeout：单条任务的秒数上限。
@@ -207,7 +243,11 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
     if not Path(cwd).is_dir():
         raise CBatchError(f"cwd 不是目录：{cwd}")
 
-    job_id = datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
+    # 编号带毫秒：jobs() 按编号排新旧，只到秒的话同一秒提交的几批顺序是
+    # 随机的（后面那段是随机串）。测试连着提交时撞上的。
+    now = datetime.now()
+    job_id = now.strftime("%Y%m%d-%H%M%S-") + f"{now.microsecond // 1000:03d}" \
+        + uuid.uuid4().hex[:4]
     jd = _job_dir(job_id)
     jd.mkdir(parents=True)
 
@@ -218,7 +258,10 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
         "options": {"model": model, "permission_mode": permission_mode,
                     "allowed_tools": list(allowed_tools or []),
                     "timeout": int(timeout), "preamble": bool(preamble)},
+        "auto": None,
         "tasks": [dict(it, status="pending", output="", error="",
+                       model=None if model == "auto" else (model or None),
+                       model_reason="",
                        session_id=None, cost_usd=None, turns=None,
                        seconds=None) for it in items],
     }
@@ -339,13 +382,57 @@ def _child_env() -> dict:
             if k not in _ENV_DROP and not k.startswith(_ENV_DROP_PREFIX)}
 
 
-def _command(d: dict, prompt: str, resume: str = None) -> list:
+def _classify(d: dict) -> None:
+    """model="auto" 时给每条任务定模型，结果写进 t["model"] 和 d["auto"]。
+
+    评估调用不开工具（--tools ""）、不连 MCP、换掉默认系统提示，在任务目录
+    里跑而不是 cwd——它只需要看提示词，不该去读项目文件，也不该把项目的
+    CLAUDE.md 读进来白占 token。
+    """
+    body = AUTO_PROMPT + "\n\n".join(
+        f"### 任务 {i}\n{t['prompt'][:AUTO_PEEK]}"
+        for i, t in enumerate(d["tasks"], 1))
+    cmd = [CLAUDE_BIN, "-p", body, "--output-format", "json",
+           "--model", AUTO_JUDGE, "--tools", "", "--strict-mcp-config",
+           "--system-prompt", "你负责给任务评估难度、分配模型。只输出 JSON。"]
+    info = {"judge": AUTO_JUDGE, "ok": False, "error": "", "cost_usd": None}
+    picks = {}
+    try:
+        p = subprocess.run(cmd, cwd=str(_job_dir(d["id"])), env=_child_env(),
+                           stdin=subprocess.DEVNULL, capture_output=True,
+                           text=True, timeout=AUTO_TIMEOUT)
+        r = json.loads(p.stdout)
+        info["cost_usd"] = r.get("total_cost_usd")
+        text = (r.get("result") or "").strip()
+        # 叮嘱了不要代码块，还是会有，剥掉
+        if text.startswith("```"):
+            text = text.strip("`").split("\n", 1)[-1].rsplit("```", 1)[0]
+        for x in json.loads(text):
+            if x.get("model") in AUTO_MODELS:
+                picks[int(x["i"])] = (x["model"], str(x.get("reason", "")))
+        missing = [i for i in range(1, len(d["tasks"]) + 1) if i not in picks]
+        if missing:
+            info["error"] = f"第 {missing} 条没给出可用的模型，用 {AUTO_FALLBACK}"
+        else:
+            info["ok"] = True
+    except subprocess.TimeoutExpired:
+        info["error"] = f"评估超过 {AUTO_TIMEOUT} 秒，整批用 {AUTO_FALLBACK}"
+    except (json.JSONDecodeError, ValueError, TypeError, KeyError,
+            AttributeError) as e:
+        info["error"] = f"评估结果解析不了（{e}），没分到的用 {AUTO_FALLBACK}"
+
+    for i, t in enumerate(d["tasks"], 1):
+        t["model"], t["model_reason"] = picks.get(i, (AUTO_FALLBACK, "评估没给出，用默认"))
+    d["auto"] = info
+
+
+def _command(d: dict, t: dict, resume: str = None) -> list:
     o = d["options"]
-    cmd = [CLAUDE_BIN, "-p", prompt, "--output-format", "json"]
+    cmd = [CLAUDE_BIN, "-p", t["prompt"], "--output-format", "json"]
     if resume:
         cmd += ["--resume", resume]
-    if o["model"]:
-        cmd += ["--model", o["model"]]
+    if t.get("model"):
+        cmd += ["--model", t["model"]]
     if o["permission_mode"]:
         cmd += ["--permission-mode", o["permission_mode"]]
     if o["allowed_tools"]:
@@ -361,7 +448,7 @@ def _run_one(d: dict, t: dict, resume: str = None) -> None:
     try:
         # 提示词走参数不走标准输入：-p 后面跟提示词是 claude 的常规用法，
         # 而且以 - 开头的提示词也不会被当成选项（它是 -p 的值）。
-        p = subprocess.run(_command(d, t["prompt"], resume), cwd=d["cwd"],
+        p = subprocess.run(_command(d, t, resume), cwd=d["cwd"],
                            env=_child_env(), stdin=subprocess.DEVNULL,
                            capture_output=True, text=True,
                            timeout=d["options"]["timeout"])
@@ -421,6 +508,12 @@ def _run(job_id: str) -> None:
     d = _load(job_id)
     d.update(status="running", started=_now(), pid=os.getpid())
     _save(d)
+
+    if d["options"]["model"] == "auto":
+        _classify(d)
+        if cancelled():
+            return
+        _save(d)
 
     prev_session = None
     for t in d["tasks"]:

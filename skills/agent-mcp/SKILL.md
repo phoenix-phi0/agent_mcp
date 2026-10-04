@@ -40,7 +40,8 @@ ZBatch 服务没开时，用 CBatch 代替：参数和用法一样，执行端�
 不用起服务。
 
 ```
-cbatch.submit  tasks=[...] cwd="/home/ysc/mcp" model="sonnet"
+cbatch.submit  tasks=[...] cwd="/home/ysc/mcp"      # 默认 sonnet，要别的传 model
+cbatch.submit  tasks=[...] model="auto"             # haiku 先按难度给每条分 haiku/sonnet/opus
 cbatch.wait    job_id=... timeout=110 every=15
 ```
 
