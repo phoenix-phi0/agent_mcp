@@ -24,7 +24,9 @@ def make_ws(tmp: Path, with_content: bool = True) -> Path:
     """照着 kg 项目搭一个临时工作区，建好表。"""
     from tools.entity import render_sql
 
-    dirs = ("entities", "queries", "routes") + (("content",) if with_content else ())
+    # scripts/ 是接口用「执行」调的子脚本（做题的出题部分），漏了的话那几个
+    # 接口报「找不到脚本」
+    dirs = ("entities", "queries", "routes", "scripts") + (("content",) if with_content else ())
     for d in dirs:
         shutil.copytree(KG / d, tmp / d)
     if not with_content:
