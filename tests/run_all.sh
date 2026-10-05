@@ -61,7 +61,16 @@ run 对账清理    $PY tests/kg/test_prune.py
 run 课文        $PY tests/kg/test_lesson.py
 run 语法题库    $PY tests/quiz/test_bunpou.py
 run 做题        $PY tests/kg/test_quiz.py
+run 老师讲语法  $PY tests/kg/test_teacher_bunpou.py
+run 问老师      $PY tests/kg/test_teacher_chat.py
 run 并发用包    $PY tests/dsl/test_use_concurrent.py
+run 假模型脚本  $PY tests/dsl/test_mock_script.py
+run 模型可选    $PY tests/dsl/test_model_select.py
+run 模型后端    $PY tests/dsl/test_model_backends.py
+run 模型档位    $PY tests/dsl/test_model_tiers.py
+run 模型通道    $PY tests/dsl/test_model_channels.py
+run 经WSL调CLI  $PY tests/dsl/test_cli_via_wsl.py
+run 运行模式    $PY tests/dsl/test_run_mode.py
 run 批量claude  $PY tests/tools/test_cbatch.py
 run 认证        $PY tests/auth/test_auth.py
 run 认证攻击    $PY tests/auth/test_auth_attack.py
@@ -71,6 +80,7 @@ run 登录流程E2E bash -c "cd $M/tests/e2e && node auth_run.js"
 run 导航路由E2E bash -c "cd $M/tests/e2e && node route_run.js"
 run 显式主键E2E bash -c "cd $M/tests/e2e && node pk_run.js"
 run 做题页E2E   bash -c "cd $M/tests/e2e && node quiz_run.js"
+run 问老师E2E   bash -c "cd $M/tests/e2e && node teacher_run.js"
 run app2编译    bash -c "cd $M/app2 && $PY build.py"
 
 # 上传要先起 dsl/ 的服务
