@@ -312,10 +312,20 @@ def do_import() -> int:
     return run_import()
 
 
-def mode_line(mock: bool) -> str:
-    """启动时打印的一行：当前是真模型还是模拟。只写模型名，不碰 key。"""
+def parse_mode(argv: list, environ=None) -> tuple:
+    """是否模拟：(mock, 去掉 --mock/--real 之后的参数)。`py -m kg` 和 app.pyw 共用。
+
+    默认真模型；--mock 或 KG_MOCK 非空且不是 0 才是模拟。
+    """
+    environ = os.environ if environ is None else environ
+    mock = "--mock" in argv or environ.get("KG_MOCK", "") not in ("", "0")
+    return mock, [a for a in argv if a not in ("--mock", "--real")]
+
+
+def mode_label(mock: bool) -> str:
+    """模式的短说明，窗口标题用：「模拟」或「真模型：平衡=cli:claude/sonnet …」。不碰 key。"""
     if mock:
-        return "模式：模拟（--mock / KG_MOCK）——问老师的回复不是真模型"
+        return "模拟"
     sys.path.insert(0, str(ROOT))
     from tools import config
     parts = []
@@ -325,7 +335,14 @@ def mode_line(mock: bool) -> str:
             parts.append(f"{tier}={spec[0].canonical if spec else config.resolve_model(tier)}")
         except Exception as e:  # 解析不了照样启动，只是这一行提示出来
             parts.append(f"{tier}=解析失败（{type(e).__name__}）")
-    return "模式：真模型  " + "  ".join(parts)
+    return "真模型：" + "  ".join(parts)
+
+
+def mode_line(mock: bool) -> str:
+    """启动时打印的一行：当前是真模型还是模拟。只写模型名，不碰 key。"""
+    if mock:
+        return "模式：模拟（--mock / KG_MOCK）——问老师的回复不是真模型"
+    return "模式：" + mode_label(mock)
 
 
 def main(argv: list[str]) -> int:
@@ -345,8 +362,7 @@ def main(argv: list[str]) -> int:
     extra = argv[1:] if (argv and not argv[0].startswith("-")) else argv
     # 默认真模型（跟 gen run 相反）：问老师要真回答。--mock 或 KG_MOCK=1 切回
     # 模拟，测试和不想花额度时用
-    mock = "--mock" in extra or os.environ.get("KG_MOCK", "") not in ("", "0")
-    extra = [a for a in extra if a not in ("--mock", "--real")]
+    mock, extra = parse_mode(extra)
     print(mode_line(mock))
     print()
     return gen_main(["run", str(PROJ)] + ([] if mock else ["--real"]) + extra)

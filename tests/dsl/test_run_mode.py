@@ -4,6 +4,8 @@
     cd /home/ysc/mcp && .venv/bin/python tests/dsl/test_run_mode.py
 
   一、Router：real=True → real，real=False → mock；请求体伪造「当前模式」盖不掉
+  三、kg/app.pyw 的 build_app：默认 make_app(real=True)，--mock / KG_MOCK 才是 False；
+      窗口标题带模式；脚本抛错时接口回 500 + messages（前端能显示）
   二、py -m kg：默认给 gen run 加 --real；--mock / KG_MOCK=1 不加；
       启动打印一行模式，模拟时说明回复不是真模型，真模型时列出档位，不含 key
 """
@@ -64,6 +66,25 @@ def run_kg(argv, env=None):
     return seen.get("argv"), buf.getvalue()
 
 
+def app_build(argv, env):
+    """加载 app.pyw，截住它传给 make_app 的参数。返回 (real, title)。"""
+    from importlib.machinery import SourceFileLoader
+    from importlib.util import module_from_spec, spec_from_loader
+    path = str(ROOT / "kg" / "app.pyw")
+    mod = module_from_spec(spec_from_loader("kg_app_pyw", SourceFileLoader("kg_app_pyw", path)))
+    mod.__spec__.loader.exec_module(mod)
+    seen = {}
+    old = gen.project.make_app
+    gen.project.make_app = lambda root, real=False: seen.update(real=real) or (None, None)
+    buf = io.StringIO()
+    try:
+        with redirect_stdout(buf):
+            _, mock, title = mod.build_app(argv, env)
+    finally:
+        gen.project.make_app = old
+    return seen["real"], mock, title, buf.getvalue()
+
+
 def main():
     print("一、脚本里的当前模式")
     for real, want in ((True, "real"), (False, "mock")):
@@ -86,6 +107,31 @@ def main():
     check("--real" not in argv and "模拟" in out, f"KG_MOCK=1 等于 --mock：{argv}")
     argv, out = run_kg([], env={"KG_MOCK": "0"})
     check("--real" in argv, "KG_MOCK=0 还是真模型")
+
+    print("三、kg/app.pyw")
+    real, mock, title, out = app_build([], {})
+    check(real is True and mock is False, f"默认 real=True：{real}")
+    check(title.startswith("知识图谱（真模型：") and "key" not in title.lower(), f"标题：{title}")
+    check(out.startswith("模式：真模型"), "启动打印模式行")
+    real, mock, title, out = app_build(["--mock"], {})
+    check(real is False and title == "知识图谱（模拟）", f"--mock → real=False，标题：{title}")
+    real, mock, title, out = app_build([], {"KG_MOCK": "1"})
+    check(real is False and title == "知识图谱（模拟）", "KG_MOCK=1 → real=False")
+    real, _, _, _ = app_build([], {"KG_MOCK": "0"})
+    check(real is True, "KG_MOCK=0 → real=True")
+
+    print("四、脚本出错：500 + messages")
+    tmp = Path(tempfile.mkdtemp(prefix="run_err_"))
+    (tmp / "routes").mkdir()
+    (tmp / "routes" / "e.zs").write_text(
+        "接口 POST /e 动作 e\n  用包 db\n  设 行表 = 查询 app.db no_such_query\n  返回 {\"ok\":1}\n结束\n",
+        encoding="utf-8")
+    c = Router(tmp / "routes", tmp, tmp / "sessions").app().test_client()
+    r = c.post("/e", json={})
+    d = r.get_json() or {}
+    msgs = d.get("messages") or []
+    check(r.status_code == 500 and msgs and msgs[0].get("kind") == "no" and msgs[0].get("text"),
+          f"{r.status_code} {str(d)[:120]}")
 
     print(f"\n{'=' * 50}\n通过 {passed}，失败 {failed}")
     return 1 if failed else 0

@@ -100,6 +100,7 @@ import json
 import os
 import re
 import socket
+import sys
 import threading
 import traceback
 from pathlib import Path
@@ -601,6 +602,7 @@ class Router:
             ce = find_client_error(e)
             if ce is not None:
                 return jsonify({"error": ce.message}), ce.status
+            print(f"[接口出错] {ep.src.name}: {e}", file=sys.stderr, flush=True)
             return jsonify({"messages": [
                 {"who": "脚本出错", "text": f"{ep.src.name}: {e}",
                  "kind": "no"}]}), 500
@@ -609,6 +611,8 @@ class Router:
             ce = find_client_error(e)
             if ce is not None:
                 return jsonify({"error": ce.message}), ce.status
+            print(f"[接口出错] {ep.src.name}:\n{traceback.format_exc(limit=3)}",
+                  file=sys.stderr, flush=True)
             return jsonify({"messages": [
                 {"who": "出错", "text": traceback.format_exc(limit=3),
                  "kind": "no"}]}), 500

@@ -27,6 +27,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 TITLE = "知识图谱"
+# .pyw 没有控制台：启动的模式行、服务日志、模型调用的报错都写这里（*.log 已 gitignore）
+LOG = PROJ / "app.log"
 
 
 def free_port(start: int = 8180) -> int:
@@ -83,7 +85,31 @@ def error_window(missing: list) -> None:
     webview.start()
 
 
-def main() -> int:
+def start_log() -> None:
+    """把 stdout / stderr 接到 app.log。pythonw 下它们是 None，print 会直接抛。"""
+    f = open(LOG, "a", encoding="utf-8", buffering=1)
+    sys.stdout = sys.stderr = f
+    print(f"\n==== {time.strftime('%Y-%m-%d %H:%M:%S')} 启动 ====")
+
+
+def build_app(argv: list, environ=None):
+    """按命令行和环境变量决定真模型还是模拟，造出 Flask 应用。
+
+    返回 (app, mock, title)。不开窗口、不起服务，测试直接调它。
+    --mock / KG_MOCK 的判断跟 py -m kg 是同一个函数（kg.__main__.parse_mode）。
+    """
+    from gen.project import make_app
+    from kg.__main__ import mode_label, mode_line, parse_mode
+
+    mock, _ = parse_mode(argv, environ)
+    print(mode_line(mock))
+    app, _ = make_app(PROJ, real=not mock)
+    return app, mock, f"{TITLE}（{mode_label(mock)}）"
+
+
+def main(argv: list = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    start_log()
     missing = check()
     if missing:
         try:
@@ -96,14 +122,13 @@ def main() -> int:
 
     import webview
 
-    from gen.project import make_app
     from kg.__main__ import setup
 
     # 建库、导入、画图、编译。跟 py -m kg 走的是同一段。
     setup(quiet=True)
 
     port = free_port()
-    app, _ = make_app(PROJ)
+    app, _mock, title = build_app(argv)
     threading.Thread(
         target=lambda: app.run(host="127.0.0.1", port=port,
                                threaded=True, debug=False),
@@ -118,7 +143,7 @@ def main() -> int:
         time.sleep(0.05)
 
     webview.create_window(
-        TITLE, f"http://127.0.0.1:{port}",
+        title, f"http://127.0.0.1:{port}",
         width=1200, height=860, min_size=(820, 560))
     webview.start()          # 阻塞到窗口关闭
     return 0
