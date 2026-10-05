@@ -341,6 +341,7 @@ class Router:
         self.auth_required = auth_required(self.routes_dir)
         self._key = None
         self._lock = threading.Lock()
+        self.client_factory = None
 
     def _secret(self) -> bytes:
         """签名密钥，第一次用到时才读或生成（在 workspace/.auth_secret）。
@@ -376,10 +377,21 @@ class Router:
 
     # ---- 执行 ----
 
+    @property
+    def mode(self) -> str:
+        """real 用真模型客户端，其余（--mock、没传 --real）是 mock。"""
+        return "real" if self.real else "mock"
+
     def _client(self):
+        # 测试把它换成自己的工厂，拿到每次请求用的客户端（看发了什么提示词、
+        # 用的哪一档模型）
+        if self.client_factory:
+            return self.client_factory()
         if not self.real:
+            # 离线：「用 快」这类写法也不会真去调 claude -p。环境变量
+            # DSL_MOCK_SCRIPT 指向规则文件时按它回（浏览器测试用）
             from .mock import MockClient
-            return MockClient()
+            return MockClient.from_env(offline=True)
         from .zhipu import ZhipuClient
         return ZhipuClient()
 
@@ -446,6 +458,9 @@ class Router:
             engine.vars["当前用户"] = user
             engine.vars["请求"]["当前用户"] = user
             engine.vars["会话"] = session
+            # 当前是不是假客户端：mock / real。只读，放在最后盖掉请求体里的同名字段
+            engine.vars["当前模式"] = self.mode
+            engine.vars["请求"]["当前模式"] = self.mode
 
             text = engine.run(ep.script)
             returned = engine.returned

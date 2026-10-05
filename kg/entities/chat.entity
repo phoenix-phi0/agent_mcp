@@ -1,0 +1,24 @@
+# 问老师：学习者和老师的对话记录。界面在 ui/teacher.ui，接口在 routes/teacher.zs。
+#
+# 这是**学习记录**，跟 attempt / mastery / score 一样只进不改：没有迁移，
+# 已有的库靠 py -m kg setup 的 ensure_new_tables 补建这张表，绝不重建。
+#
+# role  learner（学习者说的）/ teacher（老师回的）
+# intent  老师那条记判出来的意图：出题 / 讲解 / 其他；学习者那条也记同一个，
+#         回头查「哪些问题被当成了要做题」方便
+# lesson  老师回答时参考或指向的课文编号。不写「关联」：课文是内容表，每次
+#         导入整表重灌，带外键的话重灌会被对话记录挡住（跟 question 一个做法）
+# link / link_text  老师那条带的做题页链接和链接上的字，重新进页面时原样显示
+#
+# content 同时是界面上输入框的字段（界面字段的类型从这里来）。
+
+实体 chat_message 对话记录
+  字段 learner 文本 必填 索引 学习者
+  字段 role 文本 必填 角色
+  字段 content 文本 必填 内容
+  字段 intent 文本 意图
+  字段 lesson 文本 课文
+  字段 link 文本 链接
+  字段 link_text 文本 链接文字
+  字段 created 文本 必填 默认 现在 时间
+结束
