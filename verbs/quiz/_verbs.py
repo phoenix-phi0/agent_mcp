@@ -38,6 +38,7 @@ defs/ 里的动词拿不到这里的闭包函数。需要读题库的话自己�
 导入的，不走 sys.path）。
 """
 
+import hashlib
 import json
 import random
 import re
@@ -303,9 +304,12 @@ def register(reg, workspace):
 
     @reg.verb(
         "把选择题的题干拆成「题面」和「选项列表」，给界面画成一个个按钮用。"
-        "参数是一个结构：{题干, 题型, 答案, 选了}。返回 {stem, options}，"
-        "options 每项 {key, text, state}。给了答案和选了的话标出对错："
-        "答案那项 right、选错的那项 wrong、其余 dim；没给就都是空（还没答）。"
+        "参数是一个结构：{题干, 题型, 答案, 选了, 种子}。返回 {stem, options,"
+        " picked, answer_key}，options 每项 {key, text, state}。给了答案和选了"
+        "的话标出对错：答案那项 right、选错的那项 wrong、其余 dim；没给就都是"
+        "空（还没答）。给了种子就按种子打乱选项顺序、重新标 A–D：同一个种子"
+        "顺序永远一样。这时「选了」是界面上的字母，picked 是它对应的原字母"
+        "（拿去判对错），answer_key 是正确答案在界面上的字母。"
         "不是选择题时 options 为空，stem 原样。"
     )
     def 拆选项(题) -> dict:
@@ -326,6 +330,7 @@ def register(reg, workspace):
             return {"stem": stem_all, "options": []}
         答案 = _norm(str(题.get("答案", ""))).upper()
         选了 = _norm(str(题.get("选了", ""))).upper()
+        种子 = str(题.get("种子", "") or "")
         stem, options = [], []
         for line in stem_all.splitlines():
             m = _OPTION_RE.match(line)
@@ -334,11 +339,27 @@ def register(reg, workspace):
                 options.append({"key": key, "text": m.group(2).strip(), "state": ""})
             else:
                 stem.append(line)
+        # 打乱：题库里正确答案的位置是出题人定的，按课练时同一课几道题的
+        # 答案字母可能全一样（hb-n4-012 三道都是 A），点同一个位置就全对。
+        # 种子由调用方给（学习者+题号+第几次出题），出题和判题用同一个，
+        # 顺序对得上；不用 hash()——每个进程的盐不一样。
+        orig = {o["key"]: o["key"] for o in options}
+        if 种子 and options:
+            rnd = random.Random(int(hashlib.sha256(种子.encode("utf-8")).hexdigest(), 16))
+            rnd.shuffle(options)
+            orig = {}
+            for i, o in enumerate(options):
+                shown = "ABCDEFGH"[i] if i < 8 else o["key"]
+                orig[shown] = o["key"]
+                o["key"] = shown
+        picked = orig.get(选了, 选了)
+        answer_key = next((k for k, v in orig.items() if v == 答案), 答案)
         if 答案 and 选了:
             for o in options:
-                o["state"] = ("right" if o["key"] == 答案
+                o["state"] = ("right" if orig[o["key"]] == 答案
                               else "wrong" if o["key"] == 选了 else "dim")
-        return {"stem": "\n".join(stem).strip(), "options": options}
+        return {"stem": "\n".join(stem).strip(), "options": options,
+                "picked": picked, "answer_key": answer_key}
 
     # ------------------------------------------------------------------
     # 取题与查询

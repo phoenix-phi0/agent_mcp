@@ -1003,15 +1003,6 @@ def _shared_defaults(screens):
     return shared
 
 
-def _first_stream(screens) -> str:
-    """Global fallback, used only when a screen has no stream of its own."""
-    for s in screens:
-        streams = s.streams()
-        if streams:
-            return streams[0].bind or streams[0].name
-    return ""
-
-
 def _file_fields(screens) -> dict:
     """界面名 -> 这个界面的文件字段名列表。
 
@@ -1209,7 +1200,6 @@ def render_vue(screens, title="UI", options_map=None, rows=None,
         "has_overlays": any(s.overlays() for s in screens),
         # 有图才插 Vue Flow 和 dagre 的 CDN，没有的页面一个外部依赖都不多
         "has_graphs": any(n.kind == "节点图" for s in screens for n in s.walk()),
-        "first_stream_json": json.dumps(_first_stream(screens), ensure_ascii=False),
         # 界面名 -> 该界面的消息流。回显、占位、后端返回三处都按当前界面
         # 取，不能用全局第一条——见 _screen_streams 的说明。
         "screen_streams_json": json.dumps(_screen_streams(screens),

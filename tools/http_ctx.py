@@ -50,7 +50,12 @@ _ctx = threading.local()
 # lists：{数据键: 行表}。数据键默认是界面上那张表的名字，「绑」能另指
 # 一个。早先还有个 rows（只能填一张表），已经去掉了——一个界面能有几张
 # 表，哪张填哪组必须说清楚。
-RESPONSE_FIELDS = ("messages", "state", "stream", "form", "lists")
+#
+# go：换到哪个界面（界面名），地址参数随之清掉。前端早就认它（登录成功
+# 回来处用的是「返回 {"go":…}」），但「返回」会作废之前「响应」攒的东西；
+# 想既给 state 又换地址（做题页点「开始」退出按课练、回到不带 lesson 的
+# #做题）就得能「响应 go 做题」。
+RESPONSE_FIELDS = ("messages", "state", "stream", "form", "lists", "go")
 
 
 def set_bucket(bucket: dict | None = None, uploads: dict | None = None,

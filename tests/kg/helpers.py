@@ -58,3 +58,22 @@ def import_graph(ws: Path) -> dict:
 def import_words(ws: Path, file: str = "content/words.jsonl") -> dict:
     return client(ws).post("/word/import2",
                            json={"form": {"file": file}}).get_json() or {}
+
+
+def choice_key(card: dict, stem: str, answer: str, right: bool = True) -> str:
+    """做题页选择题该点界面上的哪个字母。
+
+    选项出题时打乱过（quiz 包的「拆选项」带种子），界面上的字母跟题库里的
+    原字母对不上：按内容找正确答案在题卡上的位置。right=False 给一个错的。
+    card 是出题接口返回的 state.card，stem / answer 是题库里的题干和原字母。
+    """
+    import re
+    orig = {}
+    for line in stem.splitlines():
+        m = re.match(r"^\s*([A-D])\s*[.．、:：]\s*(.*)$", line)
+        if m:
+            orig[m.group(1)] = m.group(2).strip()
+    shown = next(o["key"] for o in card["options"] if o["text"] == orig[answer])
+    if right:
+        return shown
+    return next(o["key"] for o in card["options"] if o["key"] != shown)

@@ -12,14 +12,21 @@
 #
 # 题卡按 shared.phase 显隐：进页面时还没出题（phase 空）只显示一句提示；
 # 这时库里也许还记着上次没答完的那道，但页面上没有它，不能让人对着看不见
-# 的题交答案。ask 是在等作答，done 是判完了。
+# 的题交答案。ask 是在等作答，done 是判完了，end 是按课练这一课的题都做完
+# 一轮了（不出题，卡上一句提示和「再来一轮」「换一课」「回教材」）。
+#
+# 选项是打乱过的（每次出题顺序不同，同一道判题时顺序不变），按钮上的字母
+# 是界面上的位置，不是题库里的原字母。
+#
+# 达标喜报（shared.cheer）显示在批改下面。做题页没有消息流，不走 messages。
 #
 # 「卡片 翻页 card.code」：换了一道题 code 就变，卡片重建、播一次翻入动画。
 # 判完那一下 code 不变，卡片原地更新（选项变色、出批改），不翻。
 #
 # 按课文练：老师讲完一课给的链接是 #做题?lesson=hb-n4-118。地址带参数进来时
-# 前端调「载入」（quiz_lesson），直接出这一课的题；之后「开始」「下一题」都
-# 带着地址参数，一直留在这一课里。点导航回到 #做题 就恢复按等级、考点出。
+# 前端调「载入」（quiz_lesson），直接出这一课的题，后端记下在练这一课；
+# 之后「下一题」看后端记的，一直留在这一课里（每第三道混一道易混对比题）。
+# 点顶栏「开始」退出按课练、地址回到 #做题，按等级、考点出。
 #
 # 「当」的条件里不能有空格（修饰值按空格切），所以写成 a==='x'&&b==='y'。
 
@@ -38,7 +45,7 @@
   # （真有人这么说过）
   文案 当 !shared.phase 选好等级和考点，点上面的「开始」出第一道题。老师讲完课给的链接会直接出那一课的题。
 
-  分组 题卡 卡片 翻页 card.code 当 shared.phase
+  分组 题卡 卡片 翻页 card.code 当 shared.phase==='ask'||shared.phase==='done'
     显示 card.head
     显示 card.stem 正文
     选项 choice 绑 card.options 交给 quiz_answer 当 shared.qtype==='选择'
@@ -46,9 +53,20 @@
     动作 quiz_answer 提交 远程 清空 当 shared.phase==='ask'&&shared.qtype==='接续' 作答
     显示 card.mine 当 shared.phase==='done'&&shared.qtype==='接续' 你写的
     显示 card.verdict 正文 当 shared.phase==='done'
+    显示 cheer 正文 当 shared.phase==='done'&&shared.cheer
     # 不标「提交」：卡里只能有一个提交动作，接续题输入框里按 Enter 交的是
     # 「作答」。只在判完后出现：答题时卡上一个大大的「下一题」会被当成交卷
     动作 quiz_next 远程 当 shared.phase==='done' 下一题
+  结束
+
+  # 「分组」不能套「分组」，提示和按钮分成上下两组
+  分组 一轮 卡片 当 shared.phase==='end'
+    显示 round.text 正文
+  结束
+  分组 去处 横排 间距 12px 对齐 center 当 shared.phase==='end'
+    动作 quiz_again 远程 再来一轮
+    链接 more 绑 round.more 换一课
+    链接 back 绑 round.back 次要 回教材看这一课
   结束
 
   文案 题目来自 hanabira（CC BY 4.0）改写的语法课。选择题点选项就交，接续题把整段写出来。

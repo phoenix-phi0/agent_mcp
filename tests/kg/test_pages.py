@@ -27,7 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from tests.kg.helpers import client, import_graph, make_ws   # noqa: E402
+from tests.kg.helpers import choice_key, client, import_graph, make_ws   # noqa: E402
 from kg.__main__ import BANK, read_bank                      # noqa: E402
 
 passed = failed = 0
@@ -226,20 +226,21 @@ def main():
     def quiz_state():
         return one("SELECT * FROM quiz_state WHERE learner = 'me'")
 
-    def answer(right):
+    def answer(right, shown):
+        """shown 是出题接口的响应：选项打乱过，按题卡找界面上的字母"""
         q = one("SELECT * FROM question WHERE code = ?", quiz_state()["current"])
         if q["qtype"] == "选择":
-            pick = q["answer"] if right else next(x for x in "ABCD" if x != q["answer"])
-            return q, post("/quiz/answer", choice=pick)
+            cd = (shown.get("state") or {}).get("card") or {}
+            return q, post("/quiz/answer", choice=choice_key(cd, q["stem"], q["answer"], right))
         return q, post("/quiz/answer", given=q["answer"] if right else "ぜんぜんちがう")
 
-    st, _ = post("/quiz/lesson", lesson=LESSON)
+    st, shown = post("/quiz/lesson", lesson=LESSON)
     check(st == 200 and quiz_state().get("current"), "按课文出了第一道")
-    q1, (st1, b1) = answer(True)
+    q1, (st1, b1) = answer(True, shown)
     check(st1 == 200 and (b1.get("state") or {}).get("card", {}).get("ok") in (1, "1", True, "是", "对"),
           f"第一道答对：{(b1.get('state') or {}).get('card', {}).get('ok')}")
-    post("/quiz/next", lesson=LESSON)
-    q2, (st2, b2) = answer(False)
+    st, shown = post("/quiz/next", lesson=LESSON)
+    q2, (st2, b2) = answer(False, shown)
     check(st2 == 200 and rows("SELECT count(*) n FROM attempt")[0]["n"] == 2, "第二道答错，流水两行")
 
     point = one("SELECT point FROM item WHERE code = ?", q1["item"])["point"]

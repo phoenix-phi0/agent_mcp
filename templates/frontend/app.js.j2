@@ -8,7 +8,6 @@
 <% set has_overlays = has_overlays if has_overlays is defined else false %>
 <% if shared_json is not defined %><% set shared_json = "{}" %><% endif %>
 <% if endpoints_json is not defined %><% set endpoints_json = "{}" %><% endif %>
-<% if first_stream_json is not defined %><% set first_stream_json = '""' %><% endif %>
 <% if clears_json is not defined %><% set clears_json = "{}" %><% endif %>
 <% if echoes_json is not defined %><% set echoes_json = "{}" %><% endif %>
 <% if screen_streams_json is not defined %><% set screen_streams_json = "{}" %><% endif %>
@@ -140,8 +139,12 @@ const _app = createApp({
     const current = computed(() => screens.find(s => s.name === route.value) || screens[0]);
     // 模板里统一写 form.xxx，指向当前界面那一份。
     const form = computed(() => forms.value[current.value.name] || {});
-    // 当前界面的消息流。没有的话退回全局第一条。
-    const myStream = () => screenStream[current.value.name] || <%= first_stream_json %>;
+    // 当前界面的消息流。没有就是没有（空串）：消息弹成底部的提示条。
+    //
+    // 早先没有流时退回全局第一条流。做题页没有消息流，达标喜报被塞进了
+    // 问老师的对话里——做题页上什么都看不见，问老师那边平白多出一条。
+    // 别的界面的流不归这个界面管，往里塞什么都是串台。
+    const myStream = () => screenStream[current.value.name] || "";
 <% if has_files %>
     // 文件单独放这里，不进 form——form 要能 JSON 深拷贝（payload、snapshot
     // 都靠它），而 File 对象走一遍 JSON 会变成 {}，静默丢失。

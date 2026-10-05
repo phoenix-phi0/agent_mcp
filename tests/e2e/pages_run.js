@@ -277,7 +277,13 @@ const ITEM_HEAD = "条目|所属知识点";
   async function answer(right) {
     await waitFor(() => p.choices().length || p.box());
     const q = db(`SELECT * FROM question WHERE code = '${cur()}'`)[0];
-    if (p.choices().length) p.choice(right ? q.answer : ["A", "B", "C", "D"].find(k => k !== q.answer)).click();
+    if (p.choices().length) {
+      // 选项打乱过：按内容找正确答案在界面上的那个按钮
+      const line = q.stem.split("\n").find(l => new RegExp("^\\s*" + q.answer + "\\s*[.．、:：]").test(l)) || "";
+      const want = line.replace(/^\s*[A-D]\s*[.．、:：]\s*/, "").trim();
+      const btn = p.choices().find(b => (b.querySelector(".choice-t") || {}).textContent === want);
+      (right ? btn : p.choices().find(b => b !== btn)).click();
+    }
     else { p.type(p.box(), right ? q.answer : "ぜんぜんちがう"); p.btn("作答").click(); }
     await waitFor(() => p.verdict());
     return q;

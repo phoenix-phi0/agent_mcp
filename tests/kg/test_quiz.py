@@ -14,10 +14,16 @@
   六、学习记录：attempt 的 point 是条目所属的结构点、item 是题号；mastery
       跟着累加；刚达标时说一声、标记写上
   七、一轮的计数：开始清零、下一题接着算；没出题就作答 400
+  七之二、按课练：下一题不带 lesson 也留在这一课；每第三道混一道对比题
+      （有易混对比的先出那些）；本课题一轮全出到；一轮做完给提示、不换课；
+      再来一轮；点开始退出按课练、地址回到 #做题
   八、重导题目不碰学习记录
+  九、选项打乱：判题时的顺序跟出题时一样；正确答案的位置分散；选对的内容
+      判对、选错判错，批改标在界面上的位置
 """
 
 import json
+import re
 import sqlite3
 import sys
 import tempfile
@@ -93,6 +99,20 @@ def main():
 
     def key(code):
         return one("SELECT * FROM question WHERE code = ?", code)
+
+    def orig_options(code):
+        """题库里的原选项：{原字母: 内容}"""
+        out = {}
+        for line in key(code)["stem"].splitlines():
+            m = re.match(r"^\s*([A-D])\s*[.．、:：]\s*(.*)$", line)
+            if m:
+                out[m.group(1)] = m.group(2).strip()
+        return out
+
+    def right_key(cd):
+        """正确答案在界面上（打乱后）的字母：按内容找"""
+        want = orig_options(cd["code"])[key(cd["code"])["answer"]]
+        return next(o["key"] for o in cd["options"] if o["text"] == want)
 
     print("一、导入")
     st, body = imp(bank)
@@ -214,27 +234,31 @@ def main():
     st, body = post("/quiz/answer", choice="", given="")
     check(st == 400 and "还没作答" in (body.get("error") or ""), f"没作答：{st}")
     check(n("attempt") == before and current()["answered"] == 0, "没作答不记、这道还能答")
-    st, body = post("/quiz/answer", choice=q["answer"])
+    rk = right_key(cd)
+    st, body = post("/quiz/answer", choice=rk)
     cd = card(body)
-    check(st == 200 and cd.get("ok") == "1", f"选对：{q['answer']}")
+    check(st == 200 and cd.get("ok") == "1", f"选对（界面上的 {rk}，原字母 {q['answer']}）")
     marks = {o["key"]: o["state"] for o in cd.get("options") or []}
-    check(marks.get(q["answer"]) == "right" and all(v == "dim" for k, v in marks.items() if k != q["answer"]),
+    check(marks.get(rk) == "right" and all(v == "dim" for k, v in marks.items() if k != rk),
           f"选对：答案那项标 right，其余淡出：{marks}")
     lab = one("SELECT label FROM item WHERE code = ?", q["item"])["label"]
     check("考的是：" + lab in cd.get("verdict", ""), f"批改里说了考的条目：{lab}")
     if q.get("lesson"):
         title = one("SELECT title FROM lesson WHERE code = ?", q["lesson"]).get("title", "")
         check(title and f"《{title}》" in cd.get("verdict", ""), f"批改里有课文：{title}")
-    check(current()["choice"] == q["answer"], "选的选项记在进度里")
-    post("/quiz/next", pick_level="全部", pick_kind="挖空")
+    check(current()["choice"] == q["answer"], "选的选项记在进度里（记题库里的原字母）")
+    st, body = post("/quiz/next", pick_level="全部", pick_kind="挖空")
     q = key(current()["current"])
-    wrong = next(x for x in "ABCD" if x != q["answer"])
+    rk = right_key(card(body))
+    wrong = next(x for x in "ABCD" if x != rk)
     st, body = post("/quiz/answer", choice=wrong, given="写了也不看")
     cd = card(body)
     marks = {o["key"]: o["state"] for o in cd.get("options") or []}
     check(st == 200 and cd.get("ok") == "0", "选错；选择题不看输入框")
-    check(marks.get(wrong) == "wrong" and marks.get(q["answer"]) == "right",
+    check(marks.get(wrong) == "wrong" and marks.get(rk) == "right",
           f"选错：选的那项标 wrong、答案标 right：{marks}")
+    check(f"正确答案是 {rk}" in cd.get("verdict", ""),
+          f"批改说的正确答案是界面上的字母 {rk}：{cd.get('verdict', '')[:20]!r}")
 
     print("六、学习记录")
     tot = rows("SELECT sum(total) t, sum(right) r FROM mastery WHERE learner = 'me'")[0]
@@ -245,20 +269,25 @@ def main():
                             " JOIN item i ON i.code = q.item WHERE q.code = a.item)")
     check(bad_pt == 0, "每条流水的 point 都是那道题的条目所属的点")
 
-    # 刚达标：先给 t3 在某个点上铺 7/7，再答对一道那个点下的题
-    q = one("SELECT q.code, q.qtype, q.answer, i.point FROM question q JOIN item i ON i.code = q.item"
-            " WHERE q.qtype = '选择' LIMIT 1")
+    # 刚达标：t3 出一道选择题，在那道题的点上铺 7/7，再答对它
+    st, body = post("/quiz/start", learner="t3", pick_level="全部", pick_kind="挖空")
+    cd = card(body)
+    q = one("SELECT q.code, q.answer, i.point FROM question q JOIN item i ON i.code = q.item"
+            " WHERE q.code = ?", cd["code"])
     con = sqlite3.connect(db)
     con.execute("INSERT INTO mastery(learner, point, right, total, mastered) VALUES ('t3', ?, 7, 7, 0)",
                 (q["point"],))
-    con.execute("INSERT INTO quiz_state(learner, pick_level, pick_kind, current, answered, right, total)"
-                " VALUES ('t3', '全部', '全部', ?, 0, 0, 0)", (q["code"],))
     con.commit()
     con.close()
-    st, body = post("/quiz/answer", learner="t3", choice=q["answer"])
-    texts = " ".join(x["text"] for x in msgs(body))
+    st, body = post("/quiz/answer", learner="t3", choice=right_key(cd))
     label = one("SELECT label FROM node WHERE code = ?", q["point"])["label"]
-    check(st == 200 and f"「{label}」达标了" in texts, f"刚达标说一声：{texts[-40:]}")
+    cheer = state(body).get("cheer") or ""
+    check(st == 200 and f"「{label}」达标了" in cheer, f"刚达标说一声（state.cheer，题卡上显示）：{cheer[-40:]}")
+    # 对照在上面「还没判：不推消息」；这里是喜报不走 messages——做题页没有
+    # 消息流，走 messages 的话早先被前端塞进了问老师的对话
+    check(msgs(body) == [], f"喜报不走 messages（不会进问老师的消息流）：{msgs(body)}")
+    st, body = post("/quiz/next", learner="t3", pick_level="全部", pick_kind="挖空")
+    check(state(body).get("cheer") == "", "下一道出题时喜报清掉")
     mm = one("SELECT * FROM mastery WHERE learner = 't3' AND point = ?", q["point"])
     check(mm["right"] == 8 and mm["total"] == 8 and mm["mastered"] == 1, f"标记写上：{mm}")
     st, body = post("/learn/next", learner="t3")
@@ -278,11 +307,16 @@ def main():
     check(current()["total"] == 1, "下一题：接着算")
 
     print("七之二、按课文练（老师讲完课给的链接）")
-    per = {}
-    for x in bank:
-        per.setdefault(x["课文"], []).append(x)
-    lesson, qs = max(per.items(), key=lambda kv: len(kv[1]))
-    lv = qs[0]["课程"][-2:].upper()
+    # 挑一课：有易混对比（contrast 里跟本课条目成对）、题最多的那课
+    L = one("""SELECT q.lesson, count(*) n FROM question q
+               WHERE q.item IN (SELECT a FROM contrast UNION SELECT b FROM contrast)
+               GROUP BY q.lesson ORDER BY n DESC, q.lesson LIMIT 1""")
+    lesson, nL = L["lesson"], L["n"]
+    mine_items = {r["item"] for r in rows("SELECT DISTINCT item FROM question WHERE lesson = ?", lesson)}
+    pair = {r["x"] for r in rows("SELECT b x FROM contrast WHERE a IN (SELECT item FROM question WHERE lesson = ?)"
+                                 " UNION SELECT a FROM contrast WHERE b IN (SELECT item FROM question WHERE lesson = ?)",
+                                 lesson, lesson)}
+    lv = one("SELECT level FROM lesson WHERE code = ?", lesson)["level"]
     other = "N5" if lv != "N5" else "N4"
     title = one("SELECT title FROM lesson WHERE code = ?", lesson)["title"]
     # 顶栏停在别的等级：按课文进来时不该按它筛，不然一道都没有
@@ -291,23 +325,60 @@ def main():
     q = key(current()["current"])
     check(st == 200 and q.get("lesson") == lesson,
           f"载入：直接出这一课的题（顶栏停在 {other} 也不影响）：{q.get('code')}")
-    check(title in (state(body).get("scope") or ""), f"顶栏说明只练哪一课：{state(body).get('scope')}")
-    check(current()["total"] == 0, "按课文进来：这一轮清零")
+    scope = state(body).get("scope") or ""
+    check(title in scope and "本课 + 易混对比" in scope, f"顶栏说明练哪一课、混了易混对比：{scope}")
+    check(current()["total"] == 0 and current()["lesson"] == lesson, "按课文进来：这一轮清零，库里记下这一课")
     check("lesson" not in (body.get("form") or {}),
           f"lesson 不填回表单（离开那一课后不该还只出它）：{body.get('form')}")
-    seen = {q["code"]}
-    ok_all = True
-    for _ in range(min(6, len(qs) + 2)):
-        st, body = post("/quiz/next", pick_level=other, pick_kind="挖空", lesson=lesson)
-        q = key(current()["current"])
-        seen.add(q["code"])
-        ok_all = ok_all and st == 200 and q["lesson"] == lesson
-    check(ok_all, f"下一题带着 lesson：一直在这一课里（出过 {len(seen)} 道，这课共 {len(qs)} 道）")
-    check(len(seen) > 1 or len(qs) == 1, "不是一直出同一道")
-    st, body = post("/quiz/next", pick_level=other, pick_kind="全部")
+    # 连做下去：「下一题」不带 lesson（地址参数没并进来、直接调接口都一样），
+    # 也带着别的等级考点——都不该把人带出这一课
+    picked = [q["code"]]
+    end_body = None
+    for _ in range(nL * 3):
+        post("/quiz/answer", choice="A", given="x")
+        st, body = post("/quiz/next", pick_level=other, pick_kind="挖空")
+        if state(body).get("phase") == "end":
+            end_body = body
+            break
+        picked.append(current()["current"])
+    qs = [key(c) for c in picked]
+    own = [x for x in qs if x["lesson"] == lesson]
+    oth = [x for x in qs if x["lesson"] != lesson]
+    check({x["code"] for x in own} == {r["code"] for r in rows("SELECT code FROM question WHERE lesson = ?", lesson)}
+          and len(own) == nL, f"本课的 {nL} 道题这一轮每道出一次：出了 {len(own)} 道")
+    pos_ok = all((i % 3 == 2) == (x["lesson"] != lesson) for i, x in enumerate(qs))
+    check(pos_ok and len(oth) >= 1, f"每第三道是对比题，本课:对比 = {len(own)}:{len(oth)}"
+          f"（顺序 {''.join('O' if x['lesson'] != lesson else 'L' for x in qs)}）")
+    check(all(x["qtype"] == "选择" and x["item"] not in mine_items for x in oth),
+          "对比题都是选择题，考的不是本课的条目")
+    pair_n = n("question", "qtype = '选择' AND COALESCE(lesson, '') <> ? AND item IN (%s)"
+               % ",".join("?" * len(pair)), lesson, *pair) if pair else 0
+    check(all(x["item"] in pair for x in oth[:pair_n]),
+          f"易混对比的题先出：{[x['item'] for x in oth]}，对比条目 {sorted(pair)}")
+    check(end_body is not None, "本课题都出过了：下一题不再出题")
+    rd = state(end_body or {}).get("round") or {}
+    check(f"这一课的{nL}道题都做过一轮了" in (rd.get("text") or "") and "再来一轮" in rd.get("text", ""),
+          f"一轮做完的提示：{rd.get('text')}")
+    check(rd.get("back", "").endswith("lesson=" + lesson) and rd.get("more", "").startswith("#"),
+          f"提示里给回教材、换一课的地址：{rd}")
+    st, body = post("/quiz/next", pick_level=other, pick_kind="挖空")
+    check(state(body).get("phase") == "end" and key(current()["current"])["code"] == picked[-1],
+          "再点下一题还是那句提示，不悄悄换课")
+    st, body = post("/quiz/again", pick_level=other, pick_kind="挖空")
+    check(st == 200 and state(body).get("phase") == "ask" and key(current()["current"])["lesson"] == lesson
+          and current()["total"] == 0 and current()["round_n"] == 1,
+          f"再来一轮：从这一课重新出、计数清零：{current()['current']}")
+    # 点开始退出按课练：地址里的 lesson 前端照样会并进来，后端不管它
+    st, body = post("/quiz/start", pick_level=other, pick_kind="全部", lesson=lesson)
     q = key(current()["current"])
-    check(st == 200 and q["level"] == other and not state(body).get("scope"),
-          f"不带 lesson 就回到按等级出、说明清空：{q['code']}")
+    check(st == 200 and q["level"] == other and not state(body).get("scope")
+          and not current()["lesson"] and not current()["round_seen"],
+          f"点开始：退出按课练，按等级出、说明清空：{q['code']} {state(body).get('scope')!r} {current()['lesson']!r}")
+    check(body.get("go") == "做题", f"点开始：让前端回到不带 lesson 的 #做题：{body.get('go')}")
+    st, body = post("/quiz/next", pick_level=other, pick_kind="全部")
+    check(key(current()["current"])["level"] == other, "之后的下一题也按等级出")
+    st, body = post("/quiz/again")
+    check(st == 400, f"不在按课练时没有「再来一轮」：{st} {body.get('error')}")
     st, body = post("/quiz/lesson", lesson="hb-no-such")
     check(st == 404 and "没有这一课" in (body.get("error") or ""), f"没有这一课：{st} {body.get('error')}")
     st, body = post("/quiz/lesson")
@@ -315,7 +386,7 @@ def main():
     empty = rows("SELECT code FROM lesson WHERE code NOT IN (SELECT lesson FROM question"
                  " WHERE lesson IS NOT NULL) LIMIT 1")
     if empty:
-        st, body = post("/quiz/start", lesson=empty[0]["code"])
+        st, body = post("/quiz/lesson", lesson=empty[0]["code"])
         check(st == 404 and "还没有题" in (body.get("error") or ""),
               f"没有题的课（{empty[0]['code']}）：{st} {body.get('error')}")
 
@@ -325,6 +396,38 @@ def main():
     imp(bank)
     check({t: rows(f"SELECT * FROM {t} ORDER BY id") for t in keep} == keep,
           "重导两次，attempt / mastery 原样")
+
+    print("九、选项打乱")
+    # 对照：不打乱时正确答案就在题库写的那个字母上
+    shown_pos, same_order, judged = [], True, True
+    moved = 0
+    st, body = post("/quiz/start", learner="t9", pick_level="全部", pick_kind="挖空")
+    for i in range(60):
+        cd = card(body)
+        orig = orig_options(cd["code"])
+        texts = [o["text"] for o in cd["options"]]
+        check_set = sorted(texts) == sorted(orig.values())
+        rk = right_key(cd)
+        shown_pos.append(rk)
+        moved += [o["text"] for o in cd["options"]] != [orig[k] for k in "ABCD"]
+        # 一半选对、一半选错
+        pick = rk if i % 2 == 0 else next(k for k in "ABCD" if k != rk)
+        st, body = post("/quiz/answer", learner="t9", choice=pick)
+        ad = card(body)
+        # 判题时重拆的顺序跟出题时一模一样（同一个种子）
+        same_order = same_order and check_set and [o["text"] for o in ad["options"]] == texts
+        marks = {o["key"]: o["state"] for o in ad["options"]}
+        judged = judged and ad["ok"] == ("1" if pick == rk else "0") and marks[rk] == "right" \
+            and (pick == rk or marks[pick] == "wrong")
+        st, body = post("/quiz/next", learner="t9", pick_level="全部", pick_kind="挖空")
+    check(same_order, "判题时选项顺序跟出题时一样（刷新、重拆都是同一个顺序）")
+    check(judged, "选正确内容判对、选错判错；批改的 right / wrong 标在界面上的位置")
+    dist = {k: shown_pos.count(k) for k in "ABCD"}
+    check(len([v for v in dist.values() if v]) == 4 and max(dist.values()) <= 30,
+          f"正确答案在界面上的位置分散（60 道）：{dist}")
+    check(moved >= 30, f"大多数题的选项顺序跟题库不一样：{moved}/60")
+    t9 = rows("SELECT correct FROM attempt WHERE learner = 't9'")
+    check(len(t9) == 60 and sum(r["correct"] for r in t9) == 30, f"学习记录 60 道、对 30 道：{len(t9)}")
 
     print(f"\n{'=' * 50}\n通过 {passed}，失败 {failed}")
     return 1 if failed else 0

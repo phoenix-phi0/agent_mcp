@@ -48,7 +48,7 @@ from urllib.parse import unquote
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from tests.kg.helpers import client, import_graph, make_ws    # noqa: E402
+from tests.kg.helpers import choice_key, client, import_graph, make_ws    # noqa: E402
 from kg.__main__ import (BANK, ensure_new_columns, ensure_new_tables,  # noqa: E402
                           quiz_link, read_bank)
 from tools import config                                       # noqa: E402
@@ -268,17 +268,21 @@ def main():
     READ = "#%E6%95%99%E6%9D%90?lesson="     # 教材页读一课（界面名编过码）
     QUIZ = "#%E5%81%9A%E9%A2%98"               # 做题页
 
+    shown = {}      # 最近一次出题的题卡：选项打乱过，按它找界面上的字母
+
     def answer(learner, right):
         """用做题页的接口答当前这道：right=True 交答案，否则交一个错的。答完点下一题。"""
-        cur = rows("SELECT q.code, q.qtype, q.answer FROM quiz_state s"
+        cur = rows("SELECT q.code, q.qtype, q.answer, q.stem FROM quiz_state s"
                    " JOIN question q ON q.code = s.current WHERE s.learner = ?", learner)[0]
-        val = cur["answer"]
-        if not right:
-            val = next(x for x in "ABCD" if x != val) if cur["qtype"] == "选择" else "わざと間違える"
+        if cur["qtype"] == "选择":
+            val = choice_key(shown[learner], cur["stem"], cur["answer"], right)
+        else:
+            val = cur["answer"] if right else "わざと間違える"
         key = "choice" if cur["qtype"] == "选择" else "given"
         r = c.post("/quiz/answer", json={"form": {"learner": learner, key: val}})
         assert r.status_code == 200, r.get_json()
-        c.post("/quiz/next", json={"form": {"learner": learner}})
+        r = c.post("/quiz/next", json={"form": {"learner": learner}})
+        shown[learner] = ((r.get_json() or {}).get("state") or {}).get("card") or {}
 
     print("十一、进度进上下文")
     total = rows("SELECT count(*) n FROM node")[0]["n"]
@@ -290,6 +294,7 @@ def main():
     check("现在能学" in p, "列了现在能学的点")
     r = c.post("/quiz/lesson", json={"form": {"learner": "p1", "lesson": teru["code"]}})
     check(r.status_code == 200, f"做题页按《{teru['title']}》出题：{r.status_code}")
+    shown["p1"] = ((r.get_json() or {}).get("state") or {}).get("card") or {}
     answer("p1", True)
     answer("p1", False)
     answer("p1", False)

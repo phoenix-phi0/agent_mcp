@@ -13,7 +13,14 @@
 #           答对几道。当前题记在这里而不是由前端传：判题时用库里记的题号，
 #           前端改不了「我答的是哪道」；同一道题交两次也只算一次。
 #           choice / given 是这道题最后一次交上来的作答，界面的单选和输入框
-#           也绑这两个名字（字段类型从这里来）。
+#           也绑这两个名字（字段类型从这里来）。choice 记的是题库里的原字母
+#           （界面上的选项打乱过，见 queries/question_pick_lesson.sql 和 quiz
+#           包的「拆选项」）。
+#           按课练（#做题?lesson=…）：lesson 是在练的那一课，空就是按等级考点；
+#           round_seen 是这一轮出过的题号（,a,b, 的样子），round_n 是这一轮
+#           出了几道（每第三道混一道对比题）；seq 每出一道加一，选项打乱的
+#           种子用它——出题和判题算出同一个顺序。这四列是后加的，老库由
+#           py -m kg 的 ensure_new_columns 用 ALTER TABLE 补，不重建。
 #
 # 做题结果记进 attempt / mastery，point 是题目所属条目的**结构点**
 # （item.point）——attempt.point 有外键指向 node，条目编号写不进去。
@@ -46,5 +53,9 @@
   字段 total 整数 必填 默认 0 这一轮答了
   字段 choice 枚举 A,B,C,D 选的
   字段 given 文本 写的
+  字段 lesson 文本 在练的课
+  字段 round_seen 文本 这一轮出过的题
+  字段 round_n 整数 必填 默认 0 这一轮出了几道
+  字段 seq 整数 必填 默认 0 出题序号
   主键 learner
 结束

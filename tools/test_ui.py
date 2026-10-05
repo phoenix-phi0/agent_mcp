@@ -219,6 +219,20 @@ def test_compile():
     check("links 不是数组不画（防字符串被逐字遍历）", "Array.isArray(m.links) && m.links.length" in page, True)
     check("有 links 时旧的 link 走 v-else-if，不重复画", '<a v-else-if="m.link &&' in page, True)
 
+    # 没有消息流的界面：消息只弹提示条，不往别的界面的流里塞。早先退回
+    # 「全局第一条流」，做题页的达标喜报跑进了问老师的对话
+    two = ui + ("界面 自定义 做题\n"
+                "  动作 answer 远程 作答\n"
+                "结束\n")
+    r4 = compile_ui(two, backend="vue",
+                    options={"endpoints": {"send": "/chat", "reset": "/reset", "answer": "/a"}})
+    js4 = r4["result"]["files"]["app.js"]
+    check("对照：有流的界面登记了自己的流", '"会话": "chat"' in js4, True)
+    check("没流的界面不登记流", '"做题"' not in js4.split("const screenStream")[1].split(";")[0], True)
+    check("当前界面没流时不退回全局第一条流",
+          'const myStream = () => screenStream[current.value.name] || "";' in js4, True)
+    check("没流时 messages 弹提示条", "showNotice(m.text, m.kind)" in js4, True)
+
     # 不给端点时不该生成 fetch 胶水
     r2 = compile_ui(ui, backend="vue")
     check("无端点也能编译", [i.code for i in r2.get("issues", [])], [])
