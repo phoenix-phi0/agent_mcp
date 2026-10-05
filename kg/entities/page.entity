@@ -21,4 +21,5 @@
   字段 verdict 文本 是否达标
   字段 depth 整数 第几步
   字段 result 文本 对错
+  字段 delta 文本 变化
 结束

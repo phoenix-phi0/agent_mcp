@@ -12,8 +12,8 @@
 # me——空串和没传一样处理。
 
 
-# 记一次作答：写流水、更新汇总、重算掌握标记。三件事一个事务——中途断了
-# 就全不算，不能出现「流水记了但汇总没加」。
+# 记一次作答：写流水、更新汇总、重算掌握标记、重算掌握得分。一个事务——
+# 中途断了就全不算，不能出现「流水记了但汇总没加」。
 接口 POST /learn/answer 动作 learn_answer
   用包 common db http
 
@@ -66,9 +66,12 @@
     设 标记.point = {point}
     设 标记.mastered = {现状.ok}
     设 影响 = 写库表 app.db mastery_set {标记}
+
+    # 掌握得分跟着重算（跟做题页同一个脚本、同一套参数），分变了才记一行
+    设 打分 = 执行 scripts/score_update.zs 学习者={学习者} 知识点={point}
   结束
 
-  返回 {"right":"{现状.right}","total":"{现状.total}","rate":"{现状.rate}","mastered":"{现状.ok}","just":"{刚达标}"}
+  返回 {"right":"{现状.right}","total":"{现状.total}","rate":"{现状.rate}","mastered":"{现状.ok}","just":"{刚达标}","score":"{打分.after}"}
 结束
 
 

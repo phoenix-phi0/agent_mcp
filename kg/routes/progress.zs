@@ -9,7 +9,9 @@
 #   lists.next     现在能学：learn_next，跟 /learn/next 同一条查询
 #   lists.recent   最近作答 20 条
 #   lists.levels   N5..N1 每级的知识点掌握了几个
-#   lists.scores   掌握得分（score_now），没有打过分就是空的，界面整块不显示
+#   lists.scores   掌握得分（progress_scores）：当前分、跟上一次比的变化、
+#                  最近打分时间，分低的在前；没有打过分就是空的，界面整块不显示
+#                  概览里另有 score_text「平均得分 x」
 #
 # 学习者不传就是 me，达标线不传就是 80% / 8 题——跟 learn.zs、quiz.zs
 # 开头同一段默认值。
@@ -44,9 +46,7 @@
   设 最近 = 查询表 app.db progress_recent {谁}
   设 分级 = 查询表 app.db progress_levels {谁}
 
-  设 分.learner = {学习者}
-  设 分.point = 
-  设 得分 = 查询表 app.db score_now {分}
+  设 得分 = 查询表 app.db progress_scores {谁}
 
   设 组.doing = {在学}
   设 组.next = {能学}

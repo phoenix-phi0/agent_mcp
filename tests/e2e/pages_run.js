@@ -267,7 +267,8 @@ const ITEM_HEAD = "条目|所属知识点";
   say(!p.table("知识点|答对/答题|是否达标") && !p.table("时间|知识点|条目|对错"), "在学、最近作答不出来");
   say(!!p.table("知识点|第几步"), "对照：现在能学那张表在");
   say((p.rows("等级|已掌握/总数|答过的题") || []).map(r => r[0]).join() === "N5,N4,N3,N2,N1", "按等级五行");
-  say(!p.table("知识点|得分|打分时间"), "没打过分：得分整块不显示");
+  say(!p.table("知识点|得分|变化|打分时间"), "没打过分：得分整块不显示");
+  say(!p.texts().some(t => t.startsWith("平均得分")), "没答过不摆平均得分");
 
   console.log("八、去做题页答两道（一对一错），回来看");
   p.link("去做题页").click();
@@ -313,6 +314,16 @@ const ITEM_HEAD = "条目|所属知识点";
   const want = {};
   [q1, q2].forEach(q => { want[q.level] = (want[q.level] || 0) + 1; });
   say(lv.every(r => Number(r[2]) === (want[r[0]] || 0)), `按等级答过的题：${lv.map(r => r[0] + "=" + r[2])}`);
+  // 答题时自动打的分：掌握得分区出现答过的点，分低的在前，概览有平均得分
+  const curScores = db("SELECT n.label, s.value FROM score s JOIN node n ON n.code = s.point" +
+                 " WHERE s.learner = 'me' AND s.id = (SELECT max(id) FROM score m" +
+                 " WHERE m.learner = s.learner AND m.point = s.point) ORDER BY s.value, s.id DESC");
+  const sc = p.rows("知识点|得分|变化|打分时间") || [];
+  say(sc.length === pts.length && sc.length > 0 && sc.every((r, i) => r[0] === curScores[i].label && Number(r[1]) === curScores[i].value),
+      `掌握得分区出现答过的点，分低的在前：${sc.map(r => r.join(" "))}`);
+  say(sc.every(r => /^(首次|[+−]\d+|±0)$/.test(r[2]) && r[3]), `变化和打分时间：${sc.map(r => r[2] + " " + r[3])}`);
+  const avg = Math.round(curScores.reduce((a, x) => a + x.value, 0) / curScores.length);
+  say(p.texts().includes(`平均得分 ${avg}`), `概览有平均得分：${p.texts().filter(t => t.startsWith("平均得分"))}`);
 
   console.log("九、知识图谱浮层：答对/答题");
   const pt = pts[0];
@@ -321,12 +332,17 @@ const ITEM_HEAD = "条目|所属知识点";
                new URLSearchParams({ "浮层": "节点详情", code: pt.point }));
   say(await waitFor(() => p.$$(".overlay .dyn").some(e => e.textContent.includes(`答对 ${pt.r} / 答题 ${pt.t}`))),
       `浮层里写着「答对 ${pt.r} / 答题 ${pt.t}」`);
+  const ptScore = db(`SELECT value FROM score WHERE learner = 'me' AND point = '${pt.point}' ORDER BY id DESC LIMIT 1`)[0].value;
+  const scoreCell = () => p.$$(".overlay .dyn").find(e => e.textContent.includes("得分") && !e.textContent.includes("答对"));
+  say(await waitFor(() => scoreCell() && scoreCell().textContent.includes(String(ptScore))),
+      `答对/答题后面有「得分 ${ptScore}」：${scoreCell() && scoreCell().textContent.trim()}`);
   const fresh = db("SELECT code FROM node WHERE code NOT IN (SELECT point FROM attempt) LIMIT 1")[0].code;
   p.close();
   p = openPage("#" + encodeURIComponent("知识图谱") + "?" +
                new URLSearchParams({ "浮层": "节点详情", code: fresh }));
   say(await waitFor(() => p.$$(".overlay .dyn").some(e => e.textContent.includes("还没做过"))),
       "没做过的点写「还没做过」");
+  say(!scoreCell(), "没打过分的点不显示得分");
   p.close();
 
   console.log("十、服务端");

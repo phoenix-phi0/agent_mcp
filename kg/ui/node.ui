@@ -23,6 +23,7 @@
       显示 sel.desc 学之前要先会
       显示 sel.badge 往下解锁
       显示 node_tally 答对/答题
+      显示 node_score 当 shared.node_score 得分
     结束
 
     文案 当 lists.items&&lists.items.length 这个功能下的说法

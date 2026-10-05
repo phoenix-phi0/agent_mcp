@@ -11,8 +11,11 @@
   三、学习进度（空库）：概览是 0、说「还没有作答」；在学、最近作答、得分
       是空的；按等级五行；现在能学有根节点
   四、学习进度（答了题之后）：经 /quiz 答一对一错，概览、在学、最近作答、
-      按等级跟着变；刷到达标后已掌握数和按等级的已掌握数加一；打过分才有得分
-  五、知识图谱浮层：答对/答题，没做过说「还没做过」，别的学习者看不到
+      按等级跟着变；刷到达标后已掌握数和按等级的已掌握数加一；答题自动打分：
+      掌握得分有这个点（当前分、变化、打分时间），概览有平均得分；手工再记
+      一次分，变化跟着变；按分从低到高排
+  五、知识图谱浮层：答对/答题，没做过说「还没做过」，别的学习者看不到；
+      打过分的点后面有「得分」，没打过的没有
 
 每条「不该有」的断言前面都有一条「该有」的对照：接口整个坏掉、什么都不回
 的时候，「不该有」那几条照样会过。
@@ -206,6 +209,7 @@ def main():
     check(pg.get("empty") == 1 and pg.get("answers") == 0, "没答过：empty=1、答题 0")
     check(pg.get("head") == f"已掌握 0 / 总知识点 {nodes}", f"概览：{pg.get('head')}")
     check(pg.get("rate_text") == "正确率 —", f"没答过不算正确率：{pg.get('rate_text')}")
+    check(pg.get("score_text") == "平均得分 —", f"没打过分不算平均得分：{pg.get('score_text')}")
     check(pg.get("quiz_link") == "#%E5%81%9A%E9%A2%98", "去做题页的地址")
     nxt = lst(body, "next") or []
     check(len(nxt) > 0 and all(r["depth"] == 0 for r in nxt), f"对照：现在能学有根节点：{[r['label'] for r in nxt]}")
@@ -282,11 +286,37 @@ def main():
     doing = lst(body, "doing") or []
     check(doing and doing[0]["verdict"] == "正确率差 7 个点", f"达标线从请求来：{doing and doing[0]['verdict']}")
 
-    check(lst(body, "scores") == [], "还没打过分：得分是空的")
+    # 答题时自动打分：9 次作答，分变了才记，当前分是最新那行
+    sc = lst(body, "scores") or []
+    auto = rows("SELECT value FROM score WHERE learner = 'me' AND point = ? ORDER BY id", point)
+    check(len(sc) == 1 and sc[0]["label"] == plabel and sc[0]["value"] == auto[-1]["value"] and sc[0]["at"],
+          f"答过题就有得分（自动打的）：{sc}，历史 {[a['value'] for a in auto]}")
+    want = (f"+{auto[-1]['value'] - auto[-2]['value']}" if auto[-1]["value"] > auto[-2]["value"]
+            else f"−{auto[-2]['value'] - auto[-1]['value']}")
+    check(len(auto) >= 2 and sc and sc[0]["delta"] == want, f"变化跟上一次比：{sc and sc[0]['delta']}（要 {want}）")
+    pg = (body.get("state") or {}).get("prog") or {}
+    check(pg.get("score_text") == f"平均得分 {auto[-1]['value']}", f"概览有平均得分：{pg.get('score_text')}")
     post("/score/add", point=point, value="70")
     st, body = post("/progress/page")
     sc = lst(body, "scores") or []
-    check(len(sc) == 1 and sc[0]["value"] == 70 and sc[0]["label"] == plabel, f"打过分就有：{sc}")
+    check(len(sc) == 1 and sc[0]["value"] == 70 and sc[0]["label"] == plabel, f"再记一次分，当前分是它：{sc}")
+    d = 70 - auto[-1]["value"]
+    check(sc and sc[0]["delta"] == (f"+{d}" if d > 0 else f"−{-d}" if d < 0 else "±0"),
+          f"变化：{sc and sc[0]['delta']}")
+    # 排序：分低的在前。另一个人答两个点，一个全对、一个全错
+    pts = [r["code"] for r in rows("SELECT code FROM node ORDER BY code LIMIT 3")]
+    for _ in range(3):
+        post("/learn/answer", learner="sorter", point=pts[0], correct=1)
+    post("/learn/answer", learner="sorter", point=pts[1], correct=0)
+    post("/learn/answer", learner="sorter", point=pts[2], correct=1)
+    st, body = post("/progress/page", learner="sorter")
+    sc = lst(body, "scores") or []
+    vals = [r["value"] for r in sc]
+    check([r["code"] for r in sc] == [pts[1], pts[2], pts[0]] and vals == sorted(vals),
+          f"按分从低到高：{[(r['code'], r['value']) for r in sc]}")
+    check(all(r["delta"] == "首次" for r in sc[1:2]), f"只打过一次分的写「首次」：{[r['delta'] for r in sc]}")
+    pg = (body.get("state") or {}).get("prog") or {}
+    check(pg.get("score_text") == f"平均得分 {round(sum(vals) / len(vals))}", f"平均得分：{pg.get('score_text')} {vals}")
     st, body = post("/progress/page", learner="someone")
     pg = (body.get("state") or {}).get("prog") or {}
     check(pg.get("empty") == 1 and lst(body, "scores") == [], "别的学习者：空的（学习者默认是 me）")
@@ -306,6 +336,12 @@ def main():
     post("/learn/answer", point=other, correct=0)
     st, body = post("/node/one", code=other)
     check((body.get("state") or {}).get("node_tally") == "答对 0 / 答题 1", f"只答错过：{(body.get('state') or {}).get('node_tally')}")
+    check((body.get("state") or {}).get("node_score") not in (None, ""), f"答过就有得分：{(body.get('state') or {}).get('node_score')!r}")
+    st, body = post("/node/one", code=point)
+    check((body.get("state") or {}).get("node_score") == "70", f"浮层的得分是当前分：{(body.get('state') or {}).get('node_score')!r}")
+    third = one("SELECT code FROM node WHERE code NOT IN (?, ?) LIMIT 1", point, other)["code"]
+    st, body = post("/node/one", code=third)
+    check((body.get("state") or {}).get("node_score") == "", "没打过分的点：得分是空的（浮层不显示）")
 
     print(f"\n{'=' * 50}\n通过 {passed}，失败 {failed}")
     return 1 if failed else 0

@@ -13,6 +13,9 @@
   五、选择题：答对答错；没作答 400 且不记录；批改里有条目和课文
   六、学习记录：attempt 的 point 是条目所属的结构点、item 是题号；mastery
       跟着累加；刚达标时说一声、标记写上
+  六之二、掌握得分：批改后同一个事务里给这道题的点重算得分，state.score_change
+      是「知识点 得分 a → b」（第一次打分、没变各有说法），不走 messages；
+      同一道再交不重算
   七、一轮的计数：开始清零、下一题接着算；没出题就作答 400
   七之二、按课练：下一题不带 lesson 也留在这一课；每第三道混一道对比题
       （有易混对比的先出那些）；本课题一轮全出到；一轮做完给提示、不换课；
@@ -293,6 +296,50 @@ def main():
     st, body = post("/learn/next", learner="t3")
     nxt = [r["code"] for r in (body.get("lists") or {}).get("next") or []]
     check(q["point"] not in nxt, "掌握了的点不再出现在「能学什么」里")
+
+    print("六之二、掌握得分")
+    # 同一个点上两道接续题（进阶），用 given 交，不受选项打乱影响
+    pair = rows("SELECT q.code, q.answer, i.point FROM question q JOIN item i ON i.code = q.item"
+                " WHERE q.qtype = '接续' AND i.point IN (SELECT i2.point FROM question q2"
+                " JOIN item i2 ON i2.code = q2.item WHERE q2.qtype = '接续'"
+                " GROUP BY i2.point HAVING count(*) >= 2) ORDER BY i.point, q.code LIMIT 2")
+    plabel = one("SELECT label FROM node WHERE code = ?", pair[0]["point"])["label"]
+    post("/quiz/start", learner="sc1", pick_level="全部", pick_kind="接续")
+
+    def put_q(code):
+        con = sqlite3.connect(db)
+        con.execute("UPDATE quiz_state SET current = ?, answered = 0 WHERE learner = 'sc1'", (code,))
+        con.commit()
+        con.close()
+
+    def sc_hist():
+        return [r["value"] for r in rows("SELECT value FROM score WHERE learner = 'sc1' AND point = ?"
+                                         " ORDER BY id", pair[0]["point"])]
+
+    put_q(pair[0]["code"])
+    st, body = post("/quiz/answer", learner="sc1", given=pair[0]["answer"])
+    sc = state(body).get("score_change")
+    # 进阶题答对一道：(1.3 + 0.25) / (1.3 + 0.25 + 1.25) → 55
+    check(st == 200 and card(body).get("ok") == "1" and sc_hist() == [55],
+          f"答对一道进阶题：自动记了一行得分 {sc_hist()}")
+    check(sc == f"{plabel} 得分 55（第一次打分）", f"state 里有得分变化：{sc!r}")
+    check(msgs(body) == [], f"得分变化不走 messages：{msgs(body)}")
+    st, body = post("/quiz/answer", learner="sc1", given=pair[0]["answer"])
+    check(st == 400 and sc_hist() == [55], "同一道再交：400，不重算、不加行")
+    put_q(pair[1]["code"])
+    st, body = post("/quiz/answer", learner="sc1", given="ぜんぜんちがう")
+    sc = state(body).get("score_change")
+    check(card(body).get("ok") == "0" and len(sc_hist()) == 2 and sc_hist()[1] < 55,
+          f"答错一道：分降了 {sc_hist()}")
+    check(sc == f"{plabel} 得分 55 → {sc_hist()[-1]}", f"批改后显示「得分 a → b」：{sc!r}")
+    st, body = post("/quiz/next", learner="sc1", pick_level="全部", pick_kind="接续")
+    check(state(body).get("phase") == "ask", "下一题：phase=ask（得分那行只在判完时显示）")
+    check(not rows("SELECT 1 FROM score WHERE learner = 'me' AND point NOT IN"
+                   " (SELECT point FROM attempt WHERE learner = 'me')"),
+          "me 的得分都落在答过的点上")
+    check(rows("SELECT count(DISTINCT point) n FROM score WHERE learner = 'me'")[0]["n"]
+          == rows("SELECT count(DISTINCT point) n FROM attempt WHERE learner = 'me'")[0]["n"],
+          "对照：me 答过的每个点都有得分")
 
     print("七、一轮的计数")
     st, body = post("/quiz/answer", learner="nobody")

@@ -32,6 +32,8 @@
   十一、进度进上下文：讲解的提示词里有进度摘要——没答过题是「还没有作答记录」；
       用做题接口答三题（一对两错）后是对的数字和答错的点；别的学习者不串
   十二、「进度」意图：平衡档，提示词以进度为主，回复带读课文、做题链接
+  十二之二、掌握得分：进度摘要里有在学点的得分（低的在前）；「进度」推荐先推
+      得分低的点答错过的那课（不是最近答错的那课）；没有得分退回原来的顺序
   十三、「教材」意图：提示词里有课文目录（问 N4 只列 N4，不问等级列全部），
       问「有没有讲〜的课」附那一课的读课文
   十四、讲解附「读课文」（指向 lesson_find 命中的课）和「练一练」两个链接；
@@ -365,6 +367,54 @@ def main():
     lv = rows("SELECT level FROM lesson WHERE code = ?",
               (m.get("links") or [{}])[0].get("href", "")[len(READ):])
     check(lv and lv[0]["level"] == "N4", f"推荐的课在 N4 里：{lv}")
+
+    print("十二之二、掌握得分优先低分点")
+    qs = rows("SELECT i.point, q.code, q.lesson FROM question q JOIN item i ON i.code = q.item"
+              " WHERE q.lesson IS NOT NULL AND q.difficulty = '基础' ORDER BY i.point, q.code")
+    lessons = {}
+    for x in qs:
+        lessons.setdefault(x["point"], set()).add(x["lesson"])
+    pts = list(lessons)
+    pb = pts[0]
+    pc = next(x for x in pts[1:] if not (lessons[x] & lessons[pb]))
+    qb = next(x for x in qs if x["point"] == pb)
+    qc = next(x for x in qs if x["point"] == pc)
+    lb, lc = (rows("SELECT label FROM node WHERE code = ?", x)[0]["label"] for x in (pb, pc))
+
+    def learn(who, q, ok):
+        r = c.post("/learn/answer", json={"form": {"learner": who, "point": q["point"],
+                                                  "item": q["code"], "correct": str(ok)}})
+        assert r.status_code == 200, r.get_json()
+
+    # B 错一道（最早），C 对四道再错一道（最近答错的是 C）
+    learn("lowp", qb, 0)
+    for _ in range(4):
+        learn("lowp", qc, 1)
+    learn("lowp", qc, 0)
+    sb, sc_ = (rows("SELECT value FROM score WHERE learner = 'lowp' AND point = ? ORDER BY id DESC LIMIT 1",
+                    x)[0]["value"] for x in (pb, pc))
+    check(sb < sc_ < 80, f"B 得分 {sb} < C 得分 {sc_} < 80")
+    st, body = send("我学得怎么样", learner="lowp")
+    m = reply(body)
+    p = calls("平衡")[0]["prompt"]
+    check(f"在学知识点的掌握得分（0–100，按做题情况算，低的在前）：{lb} {sb}；{lc} {sc_}" in p,
+          f"进度摘要里有在学点的得分，低的在前：{p[p.find('掌握得分'):][:80]!r}")
+    pick = ((m.get("links") or [{}])[0].get("href") or "")[len(READ):]
+    check(pick == qb["lesson"] and f"「{lb}」掌握得分 {sb}" in p,
+          f"推荐得分最低的点（B）答错过的那课 {qb['lesson']}，不是最近答错的 C：{pick}")
+    # 对照：直接写进流水、没有得分的人，还是按最近答错的推（原来的顺序）
+    con = sqlite3.connect(db)
+    for q in (qb, qc):
+        con.execute("INSERT INTO attempt(learner, point, item, correct) VALUES ('nos', ?, ?, 0)",
+                    (q["point"], q["code"]))
+    con.commit()
+    con.close()
+    st, body = send("我学得怎么样", learner="nos")
+    m = reply(body)
+    p = calls("平衡")[0]["prompt"]
+    pick = ((m.get("links") or [{}])[0].get("href") or "")[len(READ):]
+    check(pick == qc["lesson"] and "在学知识点的掌握得分" not in p,
+          f"没有得分：退回最近答错的那课 {qc['lesson']}，摘要里不写得分：{pick}")
 
     print("十三、「教材」意图")
     st, body = send("N4有哪些课", learner="t1")

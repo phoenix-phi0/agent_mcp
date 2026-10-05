@@ -7,7 +7,9 @@
 #   最近作答    20 条：时间、知识点、条目、对错
 #   各等级      N5..N1 每级题目涉及的知识点掌握了几个、答过几题（没答过也显示，
 #               看得出每级要学几个点）
-#   掌握得分    打过分才有；没有就整块不显示
+#   掌握得分    打过分才有；没有就整块不显示。知识点、当前分、变化（跟上一次
+#               比 +x / −x，只打过一次是「首次」）、最近打分时间；分低的在前，
+#               薄弱的先看到。分是做题时自动打的（见 queries/score_calc.sql）
 #
 # 进页面时一次拉齐（progress_page），不推消息。没有表单要填：学习者是 me，
 # 跟别的接口同一个默认值。
@@ -23,6 +25,7 @@
       显示 prog.head 正文
       显示 prog.answers_text 当 String(shared.prog.empty)==='0'
       显示 prog.rate_text 当 String(shared.prog.empty)==='0'
+      显示 prog.score_text 当 String(shared.prog.empty)==='0'
       文案 当 String(shared.prog.empty)==='1' 还没有作答记录，去做题页做几道，这里就有进度了。
       链接 quiz 绑 prog.quiz_link 当 String(shared.prog.empty)==='1' 去做题页
     结束
@@ -58,6 +61,7 @@
       列表 得分表 绑 scores
         列 label 知识点
         列 value 得分
+        列 delta 变化
         列 at 打分时间
       结束
     结束

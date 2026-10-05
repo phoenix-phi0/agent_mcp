@@ -210,6 +210,15 @@ function openPage(hash) {
                " JOIN item i ON i.code = q.item");
   say(a.length === 1 && a[0].correct === 0 && a[0].point === a[0].want && a[0].item === q.code,
       `库里一条流水，记在结构点 ${a[0] && a[0].point} 上`);
+  // 批改下面一行得分变化：「知识点 得分 a → b」，第一次打分写「（第一次打分）」
+  const scoreLine = qq => {
+    const r = db(`SELECT s.value, n.label FROM score s JOIN item i ON i.point = s.point JOIN node n ON n.code = s.point` +
+                 ` JOIN question q ON q.item = i.code WHERE q.code = '${qq.code}' AND s.learner = 'me' ORDER BY s.id DESC LIMIT 2`);
+    if (!r.length) return "（没有得分）";
+    return r.length === 1 ? `${r[0].label} 得分 ${r[0].value}（第一次打分）` : `${r[0].label} 得分 ${r[1].value} → ${r[0].value}`;
+  };
+  const want1 = scoreLine(q);
+  say(await waitFor(() => p.$$(".card .dyn-v").some(e => e.textContent === want1)), `批改卡上有「${want1}」`);
 
   console.log("三、下一题：翻页、答对");
   const first = q.code;
@@ -219,10 +228,19 @@ function openPage(hash) {
   say(!p.verdict(), "新卡上没有上一道的批改");
   say(p.box().value === "", "输入框是空的（上一道写的清掉了）");
   q = question(state().current);
+  // 这道的点上先记一个分（/score/add 手工记），答完就是「旧分 → 新分」
+  const pt3 = db(`SELECT i.point FROM question q JOIN item i ON i.code = q.item WHERE q.code = '${q.code}'`)[0].point;
+  const added = await (await fetch(BASE + "/score/add", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ form: { point: pt3, value: "1" } }) })).json();
+  say(added.lists && added.lists.scores && added.lists.scores[0].value === 1, "这个点先手工记了 1 分");
   p.type(p.box(), q.answer);
   p.btn("作答").click();
   say(await waitFor(() => p.verdict().startsWith("○")), "判对");
   say(await waitFor(() => p.stat() === "这一轮 1/2"), `成绩接着算：${p.stat()}`);
+  const want2 = scoreLine(q);
+  say(/ 得分 1 → \d+$/.test(want2) &&
+      await waitFor(() => p.$$(".card .dyn-v").some(e => e.textContent === want2)), `答对后卡上的得分：「${want2}」`);
+  say(p.$$(".card .dyn-v").filter(e => e.textContent.includes(" 得分 ")).length === 1, "只有这一道的一行得分（上一道的没留着）");
 
   console.log("四、选择题：选项是卡里的大按钮，点了就交");
   p.pick(p.selects()[1], "挖空");

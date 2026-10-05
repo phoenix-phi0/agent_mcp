@@ -9,6 +9,10 @@
 --
 -- 一道都没答过时写「还没有作答记录」，不列在学、答错（列了也是「无」，
 -- 模型反而容易从「无」里编出东西来）。
+--
+-- 掌握得分：在学的点（有作答的）各取当前分，低的在前，最多 8 个，一行
+-- 「在学知识点的掌握得分」——老师给建议时先顾低分点。一个都没打过分就
+-- 不写这一行（同上，不给「无」）。
 WITH RECURSIVE d(code, depth) AS (
   SELECT code, 0 FROM node WHERE code NOT IN (SELECT dst FROM prereq)
   UNION
@@ -40,6 +44,16 @@ doing AS (
   FROM mastery m JOIN node n ON n.code = m.point
   WHERE m.learner = :learner AND m.total > 0
   ORDER BY m.updated DESC, m.id DESC
+  LIMIT 8
+),
+sc AS (
+  SELECT n.label || ' ' || s.value AS s
+  FROM score s JOIN node n ON n.code = s.point
+  WHERE s.learner = :learner
+    AND s.id = (SELECT max(m.id) FROM score m
+                 WHERE m.learner = s.learner AND m.point = s.point)
+    AND s.point IN (SELECT point FROM mastery WHERE learner = :learner AND total > 0)
+  ORDER BY s.value, s.id DESC
   LIMIT 8
 ),
 wrong AS (
@@ -83,6 +97,8 @@ txt AS (
     || CASE WHEN a.n = 0 THEN '还没有作答记录。' || char(10)
        ELSE '累计答题 ' || a.n || '，答对 ' || a.r || '，正确率 ' || (a.r * 100 / a.n) || '%' || char(10)
          || '在学（答对/答题）：' || coalesce((SELECT group_concat(s, '；') FROM doing), '无') || char(10)
+         || coalesce('在学知识点的掌握得分（0–100，按做题情况算，低的在前）：'
+                     || (SELECT group_concat(s, '；') FROM sc) || char(10), '')
          || '最近答错（知识点·条目）：' || coalesce((SELECT group_concat(s, '；') FROM wrong), '无') || char(10)
        END
     || '各等级已掌握/涉及知识点：'

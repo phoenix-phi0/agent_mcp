@@ -18,7 +18,9 @@
 # 选项是打乱过的（每次出题顺序不同，同一道判题时顺序不变），按钮上的字母
 # 是界面上的位置，不是题库里的原字母。
 #
-# 达标喜报（shared.cheer）显示在批改下面。做题页没有消息流，不走 messages。
+# 批改下面一行是这道题所属知识点的得分变化（shared.score_change，「推量判断
+# 得分 42 → 51」，每答一题自动重算），再下面是达标喜报（shared.cheer）。
+# 做题页没有消息流，两样都不走 messages。
 #
 # 「卡片 翻页 card.code」：换了一道题 code 就变，卡片重建、播一次翻入动画。
 # 判完那一下 code 不变，卡片原地更新（选项变色、出批改），不翻。
@@ -62,6 +64,7 @@
     动作 quiz_answer 提交 远程 清空 当 shared.phase==='ask'&&shared.qtype==='接续' 作答
     显示 card.mine 当 shared.phase==='done'&&shared.qtype==='接续' 你写的
     显示 card.verdict 正文 当 shared.phase==='done'
+    显示 score_change 当 shared.phase==='done'&&shared.score_change
     显示 cheer 正文 当 shared.phase==='done'&&shared.cheer
     # 不标「提交」：卡里只能有一个提交动作，接续题输入框里按 Enter 交的是
     # 「作答」。只在判完后出现：答题时卡上一个大大的「下一题」会被当成交卷
