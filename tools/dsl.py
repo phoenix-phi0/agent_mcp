@@ -4,7 +4,9 @@
 完整语法见 Notion「MCP 服务器」页，或 dsl_help 工具。这里只列速查表。
 
     用包 common quiz           声明动词包，同时开启严格模式
-    模型/系统/温度             配置
+    模型/系统/温度             配置。「模型 快」只管本脚本（含它调起的子脚本），
+                               不改共用的客户端；名字可以是档位（快/平衡/强）、
+                               别名或模型真名，见下面「模型档位」
     设 名 = 值                 变量（右侧是纯变量引用时保留结构）
     设 名.字段 = 值            往结构里写，中间层不存在会自动建
     问 名 = 提示词             调模型
@@ -33,6 +35,74 @@
     带工具 挑题,题目数 最多 3 轮  让模型自己调动词
     重试 3 次 直到 包含 答案     结果不满足就重来
 
+还有一个只管这一次的模型后缀（问/问JSON/流式/对话，必须写在最末尾）：
+
+    问 答 = 提示词 用 快        「快」得是档位、别名、ASCII 的模型名
+                               （glm-4-flash、api:zhipu/glm-5.3）、带通道
+                               前缀的名字或 {变量}；别的词（如「用 中文」）
+                               不认，留在提示词里
+
+模型名的规范写法是「通道:提供方/模型」：
+
+    api:zhipu/glm-5.3          智谱 HTTP API
+    api:anthropic/<模型>        预留，还没接入（调用时报「api:anthropic 还没接入」）
+    cli:claude/haiku           本机 Claude Code（claude -p，haiku/sonnet/opus）；
+                               cli:claude 不带模型 = 它自己的默认
+    cli:zcode                  本机 ZCode（zcode -p）；不能选模型，
+                               写 cli:zcode/xx 报错
+
+    兼容：裸名 glm-5.3 = api:zhipu/glm-5.3；旧写法 claude:sonnet =
+    cli:claude/sonnet，zcode / zcode:xx = cli:zcode（后半忽略）。照旧能用，
+    python -m tools.config 会标「旧写法，建议改成 …」。
+
+API 和 CLI 的差别（能力表在 config.BACKENDS）：
+
+    能力      api（智谱）   cli（claude / zcode）
+    带工具    支持          不支持：报错，说出规范名和能力
+    流式      真流式        降级：等整段生成完一次性返回，不报错
+    温度      支持          忽略
+    对话历史  原样发        拼成一段文字发过去
+
+    CLI 每次起一个进程，慢（claude 十秒上下）；吃 Claude 订阅 / Z.AI 账号
+    的额度；在空的临时目录里纯问答，读不到项目文件。同时最多跑 2 个进程
+    （DSL_CLAUDE_MAX_PROCS / DSL_ZCODE_MAX_PROCS），单次超时 180 秒
+    （DSL_CLAUDE_TIMEOUT / DSL_ZCODE_TIMEOUT）。
+
+    Windows 上的 Python：本机没装 claude / zcode 时自动经 wsl.exe 调 WSL
+    里装的（cli_via_wsl，默认 "auto"；true 强制走 WSL，false 不走）。
+    提示词、系统提示词经标准输入 base64 传过去，不怕中文、换行、引号、
+    $ % ^ & 之类。发行版 wsl_distro、WSL 里的路径 wsl_claude_bin /
+    wsl_zcode_bin 可选；环境变量 DSL_CLI_VIA_WSL / DSL_WSL_DISTRO /
+    DSL_WSL_CLAUDE_BIN / DSL_WSL_ZCODE_BIN 优先于 config.json。
+    python -m tools.config 显示现在是本机调还是经 WSL 调。细节见 llm_router。
+
+模型档位（项目根的 models.json，不含密钥，可以提交 git）：
+
+    {"default": "平衡",
+     "tiers":   {"快": "api:zhipu/glm-5.3-flashx", "平衡": "api:zhipu/glm-5.3-flash",
+                 "强": "api:zhipu/glm-5.3"},
+     "aliases": {"克": "cli:claude/sonnet", "z": "cli:zcode"}}
+
+    模型 快                    之后的问/对话都用「快」档
+    问 答 = 提示词 用 强        只这一次用「强」档
+    问 答 = 提示词 用 克        只这一次走本机 claude -p --model sonnet
+    模型 cli:claude/sonnet     名字直接写规范名也行
+    Agent(model="平衡")         Python 里一样写档位名
+    别名可以指向档位（{"大": "强"}），只解析一层；档位和别名不能重名。
+    config.json 旧的 models 别名表照样认，跟 models.json 重名时 models.json 优先。
+    不写模型：环境变量 ZHIPU_MODEL > config.json 的 model > default 档位 > 内置默认。
+    查看当前的档位表和别名表：python -m tools.config
+
+档位的备用模型（fallback，写了才生效）：
+
+    "tiers": {"强": {"model": "cli:claude/opus", "fallback": "api:zhipu/glm-5.3"}}
+
+    「用 强」平时走 claude；这一句需要主模型没有的能力（带工具）时改用
+    fallback，并记一条 warning 日志（档位、原模型、改用模型、原因）。
+    没写 fallback 就直接报错；fallback 自己也没有那个能力也报错。
+    fallback 要写模型名，不能写档位/别名。别名只能是字符串，不支持
+    fallback，但别名指向档位时继承档位的 fallback。
+
 ## 文件是怎么拆的
 
     dsl_core.py      常量、值处理、条件求值。全是纯函数，不碰状态
@@ -55,7 +125,9 @@ DSLError, RESERVED` 这类老写法不受影响。
 import json
 from pathlib import Path
 
+from .config import resolve_model
 from .zhipu import ZhipuClient
+from .llm_router import wrap as wrap_client
 from .verbs import VerbRegistry, VerbError
 from .dsl_history import HistoryMixin
 from .dsl_model import ModelMixin
@@ -84,7 +156,8 @@ class DSLEngine(ModelMixin, HistoryMixin):
                  verbs: VerbRegistry | None = None,
                  verbs_root: Path | str | None = None,
                  _depth: int = 0):
-        self.client = client or ZhipuClient()
+        # 套一层按模型通道分派的（cli:claude/… / cli:zcode 走本机 CLI），见 llm_router
+        self.client = wrap_client(client or ZhipuClient())
         self.workdir = (Path(workdir) if workdir else Path.cwd()).resolve()
         self.verbose = verbose
         self.verbs = verbs
@@ -97,6 +170,9 @@ class DSLEngine(ModelMixin, HistoryMixin):
         self.vars: dict = {}
         self.system: str | None = None
         self.temperature: float = 0.7
+        # 「模型 X」设在引擎上，不改 client.model：客户端是子脚本、HTTP
+        # 并发请求、agent 共用的，改它会串到别人那里。None = 客户端默认
+        self.model: str | None = None
         self.history: list = []
         self.output: list = []
         # 「返回」交出来的东西：(值, 状态码)。没返回过就是 None——
@@ -243,6 +319,7 @@ class DSLEngine(ModelMixin, HistoryMixin):
                         verbs_root=self.verbs_root, _depth=self._depth + 1)
         sub.system = self.system
         sub.temperature = self.temperature
+        sub.model = self.model
         sub.strict_verbs = self.strict_verbs
         return sub
 
@@ -641,7 +718,7 @@ class DSLEngine(ModelMixin, HistoryMixin):
             self._do_return(rest, lineno)
 
         elif head == "model":
-            self.client.model = rest
+            self.model = resolve_model(self.expand(rest))
 
         elif head == "system":
             rest, files = self._split_attach(rest)

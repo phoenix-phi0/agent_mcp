@@ -80,6 +80,14 @@ def main():
     def state(body):
         return body.get("state") or {}
 
+    def card(body):
+        """题卡：{code, head, stem, options:[{key,text,state}], verdict, mine, ok}"""
+        return state(body).get("card") or {}
+
+    def card_text(c):
+        return "\n".join([c.get("head", ""), c.get("stem", "")]
+                         + [o["key"] + " " + o["text"] for o in c.get("options") or []])
+
     def current(who="me"):
         return one("SELECT * FROM quiz_state WHERE learner = ?", who)
 
@@ -127,11 +135,16 @@ def main():
     q = key(cur.get("current", ""))
     check(st == 200 and q.get("level") == "N4" and q.get("kind") == "接续",
           f"按等级、考点出题：{cur.get('current')}")
-    text = (msgs(body) or [{}])[0].get("text", "")
+    cd = card(body)
+    text = card_text(cd)
     item_label = one("SELECT label FROM item WHERE code = ?", q["item"]).get("label", "")
-    check(q["stem"] in text and "N4" in text, "消息里有题干和等级")
-    check(q["answer"] not in text.replace(q["stem"], ""), "答案没露出来")
+    check(cd.get("code") == q["code"] and (cd.get("stem") or "").strip() == q["stem"].strip()
+          and "N4" in cd.get("head", ""),
+          f"题卡：题号、题干、等级：{cd.get('head')}")
+    check(cd.get("options") == [], "接续题没有选项按钮")
+    check(q["answer"] not in text and "answer" not in cd, "答案没露出来")
     check(item_label not in text.replace(q["stem"], ""), f"条目名（{item_label}）没露出来")
+    check(cd.get("verdict") == "" and not msgs(body), "还没判：没有批改，也不推消息")
     check(state(body).get("phase") == "ask" and state(body).get("qtype") == "接续",
           f"state：{state(body)}")
     st, body = post("/quiz/state")
@@ -145,9 +158,11 @@ def main():
     print("四、接续题")
     code = cur["current"]
     st, body = post("/quiz/answer", given="ぜんぜんちがう")
-    m = msgs(body)
-    check(st == 200 and m and m[0]["kind"] == "no" and q["answer"] in m[0]["text"],
-          f"答错：给正确答案 {m[:1]}")
+    cd = card(body)
+    check(st == 200 and cd.get("ok") == "0" and q["answer"] in cd.get("verdict", ""),
+          f"答错：题卡上给正确答案 {cd.get('verdict', '')[:40]!r}")
+    check(cd.get("code") == code and cd.get("mine") == "ぜんぜんちがう",
+          "题卡原地更新（题号不变、不翻页），记着你写的")
     check(state(body).get("phase") == "done", "判完 phase=done，作答区收起")
     a = rows("SELECT * FROM attempt WHERE learner = 'me'")
     point = one("SELECT point FROM item WHERE code = ?", q["item"])["point"]
@@ -164,9 +179,10 @@ def main():
     check(code2 != code, f"下一题不是刚才那道：{code2}")
     ans = key(code2)["answer"]
     fancy = " ".join(ans) + "。"          # 字间插空格、末尾加句号
+    check(card(body).get("code") == code2, "下一题：题卡换成新的一张（题号变了，界面据此翻页）")
     st, body = post("/quiz/answer", given=fancy)
-    m = msgs(body)
-    check(st == 200 and m and m[0]["kind"] == "ok", f"空格、句号不计，判对：{fancy} → {m[:1]}")
+    check(st == 200 and card(body).get("ok") == "1",
+          f"空格、句号不计，判对：{fancy} → {card(body).get('verdict', '')[:20]!r}")
     check(current()["right"] == 1 and current()["total"] == 2, f"这一轮 1/2：{state(body).get('stat')}")
     check(state(body).get("stat") == "这一轮 1/2", f"顶栏的成绩：{state(body).get('stat')}")
 
@@ -179,7 +195,7 @@ def main():
         con.commit()
         con.close()
         st, body = post("/quiz/answer", given=x["可接受"][0])
-        check(st == 200 and msgs(body)[0]["kind"] == "ok", f"可接受的写法判对：{x['可接受'][0]}")
+        check(st == 200 and card(body).get("ok") == "1", f"可接受的写法判对：{x['可接受'][0]}")
     else:
         check(False, "题库里没有带「可接受」的接续题，测不了")
 
@@ -187,24 +203,38 @@ def main():
     st, body = post("/quiz/start", pick_level="全部", pick_kind="挖空")
     q = key(current()["current"])
     check(state(body).get("qtype") == "选择", f"挖空是选择题：{state(body).get('qtype')}")
+    cd = card(body)
+    opts = cd.get("options") or []
+    check([o["key"] for o in opts] == ["A", "B", "C", "D"] and all(o["text"] for o in opts),
+          f"选项拆成 A–D 四个带内容的按钮：{[o['key'] + ' ' + o['text'] for o in opts]}")
+    check(all(o["state"] == "" for o in opts), "还没答：选项都没标对错（按钮能点）")
+    check("A." not in cd.get("stem", "") and opts[0]["text"] in q["stem"],
+          "选项从题面里拆出去了，题面不再重复列一遍")
     before = n("attempt")
     st, body = post("/quiz/answer", choice="", given="")
     check(st == 400 and "还没作答" in (body.get("error") or ""), f"没作答：{st}")
     check(n("attempt") == before and current()["answered"] == 0, "没作答不记、这道还能答")
     st, body = post("/quiz/answer", choice=q["answer"])
-    m = msgs(body)
-    check(st == 200 and m[0]["kind"] == "ok", f"选对：{q['answer']}")
+    cd = card(body)
+    check(st == 200 and cd.get("ok") == "1", f"选对：{q['answer']}")
+    marks = {o["key"]: o["state"] for o in cd.get("options") or []}
+    check(marks.get(q["answer"]) == "right" and all(v == "dim" for k, v in marks.items() if k != q["answer"]),
+          f"选对：答案那项标 right，其余淡出：{marks}")
     lab = one("SELECT label FROM item WHERE code = ?", q["item"])["label"]
-    check("考的是：" + lab in m[0]["text"], f"批改里说了考的条目：{lab}")
+    check("考的是：" + lab in cd.get("verdict", ""), f"批改里说了考的条目：{lab}")
     if q.get("lesson"):
         title = one("SELECT title FROM lesson WHERE code = ?", q["lesson"]).get("title", "")
-        check(title and f"《{title}》" in m[0]["text"], f"批改里有课文：{title}")
+        check(title and f"《{title}》" in cd.get("verdict", ""), f"批改里有课文：{title}")
     check(current()["choice"] == q["answer"], "选的选项记在进度里")
     post("/quiz/next", pick_level="全部", pick_kind="挖空")
     q = key(current()["current"])
     wrong = next(x for x in "ABCD" if x != q["answer"])
     st, body = post("/quiz/answer", choice=wrong, given="写了也不看")
-    check(st == 200 and msgs(body)[0]["kind"] == "no", "选错；选择题不看输入框")
+    cd = card(body)
+    marks = {o["key"]: o["state"] for o in cd.get("options") or []}
+    check(st == 200 and cd.get("ok") == "0", "选错；选择题不看输入框")
+    check(marks.get(wrong) == "wrong" and marks.get(q["answer"]) == "right",
+          f"选错：选的那项标 wrong、答案标 right：{marks}")
 
     print("六、学习记录")
     tot = rows("SELECT sum(total) t, sum(right) r FROM mastery WHERE learner = 'me'")[0]
@@ -246,6 +276,48 @@ def main():
     post("/quiz/answer", choice=ans or "A", given=q["answer"])
     post("/quiz/next", pick_level="N5", pick_kind="全部")
     check(current()["total"] == 1, "下一题：接着算")
+
+    print("七之二、按课文练（老师讲完课给的链接）")
+    per = {}
+    for x in bank:
+        per.setdefault(x["课文"], []).append(x)
+    lesson, qs = max(per.items(), key=lambda kv: len(kv[1]))
+    lv = qs[0]["课程"][-2:].upper()
+    other = "N5" if lv != "N5" else "N4"
+    title = one("SELECT title FROM lesson WHERE code = ?", lesson)["title"]
+    # 顶栏停在别的等级：按课文进来时不该按它筛，不然一道都没有
+    post("/quiz/start", pick_level=other, pick_kind="全部")
+    st, body = post("/quiz/lesson", lesson=lesson)
+    q = key(current()["current"])
+    check(st == 200 and q.get("lesson") == lesson,
+          f"载入：直接出这一课的题（顶栏停在 {other} 也不影响）：{q.get('code')}")
+    check(title in (state(body).get("scope") or ""), f"顶栏说明只练哪一课：{state(body).get('scope')}")
+    check(current()["total"] == 0, "按课文进来：这一轮清零")
+    check("lesson" not in (body.get("form") or {}),
+          f"lesson 不填回表单（离开那一课后不该还只出它）：{body.get('form')}")
+    seen = {q["code"]}
+    ok_all = True
+    for _ in range(min(6, len(qs) + 2)):
+        st, body = post("/quiz/next", pick_level=other, pick_kind="挖空", lesson=lesson)
+        q = key(current()["current"])
+        seen.add(q["code"])
+        ok_all = ok_all and st == 200 and q["lesson"] == lesson
+    check(ok_all, f"下一题带着 lesson：一直在这一课里（出过 {len(seen)} 道，这课共 {len(qs)} 道）")
+    check(len(seen) > 1 or len(qs) == 1, "不是一直出同一道")
+    st, body = post("/quiz/next", pick_level=other, pick_kind="全部")
+    q = key(current()["current"])
+    check(st == 200 and q["level"] == other and not state(body).get("scope"),
+          f"不带 lesson 就回到按等级出、说明清空：{q['code']}")
+    st, body = post("/quiz/lesson", lesson="hb-no-such")
+    check(st == 404 and "没有这一课" in (body.get("error") or ""), f"没有这一课：{st} {body.get('error')}")
+    st, body = post("/quiz/lesson")
+    check(st == 400, f"不给 lesson：{st}")
+    empty = rows("SELECT code FROM lesson WHERE code NOT IN (SELECT lesson FROM question"
+                 " WHERE lesson IS NOT NULL) LIMIT 1")
+    if empty:
+        st, body = post("/quiz/start", lesson=empty[0]["code"])
+        check(st == 404 and "还没有题" in (body.get("error") or ""),
+              f"没有题的课（{empty[0]['code']}）：{st} {body.get('error')}")
 
     print("八、重导题目不碰学习记录")
     keep = {t: rows(f"SELECT * FROM {t} ORDER BY id") for t in ("attempt", "mastery")}

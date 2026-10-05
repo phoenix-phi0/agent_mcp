@@ -144,6 +144,11 @@ class Node:
                                  # 参数进来、表单里又不是那一条时，调这个接口
                                  # 把记录拉回来
     selects: str = ""            # 「选中 sel」：点中的图节点写进这个共享路径
+    to: str = ""                 # 「选项」的「交给 quiz_answer」：点了哪个选项就
+                                 # 把它写进同名表单字段，然后提交这个动作
+    flip: str = ""               # 卡片的「翻页 card.code」：这个共享值一变，卡片
+                                 # 重建、播一次翻入动画（不用「带」：那个词是给
+                                 # 跳转带参数的，用在这里会被当成写漏了「切到」）
     direction: str = ""          # 「方向 纵向/横向」：图的 dagre rankdir
     popup: str = ""              # 「点开 节点详情」：点中节点时弹出的浮层
     around: str = ""             # 节点图「围绕 sel」
@@ -244,6 +249,15 @@ LINE_PARENT = {
 LINE_KEYWORDS = LINE_KEYWORDS | {"节点图"}
 LINE_PARENT["节点图"] = {"界面", "区域", "分组", "浮层"}
 
+# 「选项」：一组大按钮，内容从共享状态里来（绑 card.options，每项 {key, text,
+# state}），点一个就把它的 key 写进同名表单字段、提交「交给」的那个动作。
+#   选项 choice 绑 card.options 交给 quiz_answer
+# 跟「控件 单选」的区别：单选的选项是编译时从实体枚举里取的、只有值没有说明，
+# 还得另点一个提交按钮；做题这种「选项每道题都不一样、点了就交」的场合用这个。
+# state 由后端给（right / wrong / pick / dim），有值的按钮不能再点——判完了。
+LINE_KEYWORDS = LINE_KEYWORDS | {"选项"}
+LINE_PARENT["选项"] = {"界面", "区域", "分组", "浮层"}
+
 FLAG_MODIFIERS = {
     "竖排", "横排", "网格", "占满",   # layout intent
     "必填",                          # field
@@ -313,6 +327,12 @@ KEYED_MODIFIERS = KEYED_MODIFIERS | {"围绕", "标题", "说明"}
 # 动作「隐藏」：不画按钮，别的照旧——配「进入时」就是进页面自动拉数据、
 # 却不在界面上摆一个没人点的「刷新」。
 FLAG_MODIFIERS = FLAG_MODIFIERS | {"隐藏"}
+
+# 「卡片」：分组画成居中的一张卡（做题的题卡）。配「翻页 <共享路径>」时那个
+# 值一变卡片就整个重建、播一次翻入动画——换题时看得出是新的一张。
+# 「正文」：「显示」按正文排（大字、保留换行），不是顶栏那种小号灰字。
+FLAG_MODIFIERS = FLAG_MODIFIERS | {"卡片", "正文"}
+KEYED_MODIFIERS = KEYED_MODIFIERS | {"交给", "翻页"}
 
 SCREEN_ROLES = {"表单", "列表", "自定义"}
 DEFAULT_ROLE = "自定义"
@@ -407,6 +427,10 @@ def _apply_keyed(node: Node, keyed: dict):
         node.title_f = keyed["标题"]
     if "说明" in keyed:
         node.sub_f = keyed["说明"]
+    if "交给" in keyed:
+        node.to = keyed["交给"]
+    if "翻页" in keyed:
+        node.flip = keyed["翻页"]
     if "点开" in keyed:
         node.popup = keyed["点开"]
     if "绑" in keyed:
@@ -935,6 +959,8 @@ def _shared_defaults(screens):
                 _put_path(shared, n.bind or n.name, [])
             elif n.kind == "显示":
                 _put_path(shared, n.bind or n.name, "")
+            elif n.kind == "选项":
+                _put_path(shared, n.bind or n.name, [])
     # 节点图数据整块放共享状态，后端用 state 换掉整个对象即可。
     for s in screens:
         for n in s.walk():

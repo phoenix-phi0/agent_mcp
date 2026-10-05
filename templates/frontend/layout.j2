@@ -1,4 +1,4 @@
-<% from "widgets.j2" import 字段, 动作, 文案, 消息流, 显示, 当 with context %>
+<% from "widgets.j2" import 字段, 动作, 文案, 消息流, 显示, 选项, 当 with context %>
 <% from "graph.j2" import 节点图 with context %>
 
 {#- 布局类：方向、伸缩、固定位置。
@@ -40,6 +40,8 @@
 <%= 消息流(node) %>
 <% elif node.kind == "显示" %>
 <%= 显示(node) %>
+<% elif node.kind == "选项" %>
+<%= 选项(node) %>
 <% elif node.kind == "列" %>
 {# 有意留空：列由「列表」分支渲染成 th/td。单独走到这里说明它跑到了
    列表外面，那是解析器该拦的事，这里不产出任何东西。 #}
@@ -107,11 +109,13 @@
   <% endfor %>
 </section>
 <% elif node.kind in ("布局", "区域", "分组") %>
-<section class="<%= node.kind == "布局" and "layout" or node.kind == "区域" and "region" or "group" %> <%= 布局类(node) %>"<%= 当(node) %><%= 样式(node) %>>
+{#- 「卡片」：分组画成一张居中的卡。「翻页 <路径>」给它一个 :key——那个值一变
+    （换了一道题），Vue 整个重建这张卡，CSS 的翻入动画就再播一次。 -#}
+<section class="<%= node.kind == "布局" and "layout" or node.kind == "区域" and "region" or "group" %> <%= 布局类(node) %><% if node.has("卡片") %> card<% endif %>"<% if node.flip %> :key="getPath(shared, '<%= node.flip %>')"<% endif %><%= 当(node) %><%= 样式(node) %>>
   {#- 顶栏底栏的名字只是给人看 .ui 时定位用的，不渲染成标题。
       早先靠样式表里 display:none 藏，那是拿 CSS 盖住一个本来就不该
-      产生的东西。 -#}
-  <% if node.kind == "分组" and node.name and not (node.has("顶栏") or node.has("底栏")) %>
+      产生的东西。卡片的名字也不渲染：题卡上方顶一行「题卡」没有意义。 -#}
+  <% if node.kind == "分组" and node.name and not (node.has("顶栏") or node.has("底栏") or node.has("卡片")) %>
   <h3><%= node.name %></h3>
   <% elif node.kind == "区域" and node.name %>
   <header class="region-h"><%= node.name %></header>

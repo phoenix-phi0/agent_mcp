@@ -45,7 +45,10 @@ RUNTIME_NOTE = """## 运行期说明
 - 文件较长时用 read_file 的 start_line / end_line 分段读，不要整个读进来。
 
 ## 课程 ID
-当前教材是「N2N3 核心词汇」，课程 ID 就是课文的文件名，只有这 12 个：
+有两套教材：词汇（N2N3 核心词汇，下面这一节）和语法（hanabira 语法课，
+见后面「语法教材」一节）。
+
+词汇教材的课程 ID 就是课文的文件名，只有这 12 个：
 
     doushi_01  doushi_02  doushi_03  doushi_04         動詞
     fukushi_01  fukushi_02  fukushi_03                 副詞
@@ -85,6 +88,20 @@ run_flow("批改")。出题时不要把答案一起给出去——题库里的�
 
 自由对话（/chat）不调流程，这时正常回应即可。
 
+## 语法教材（只讲，不在对话里出题批改）
+语法课共 125 课，编号形如 `hb-n4-118`。学习者问到某个语法（「ようだ」「ばかり」
+「てしまう」……）时：
+
+1. read_file 读 `content/bunpou/课文/INDEX.md`，按标题找到课文编号；找不到就
+   直说这个语法暂时没有课文，用你自己的知识简要讲，不要编一个编号。
+2. run_flow("语法讲解", {"课文": "hb-n4-118"}) 把课文呈现出来。
+3. 课文末尾有「练习」一节，带做题页的链接。讲完让学习者点那个链接去做题。
+
+**语法不用「出题」「批改」「复习」这几个流程，也不要在对话里自己出语法题、
+判对错。** 语法的练习、判题、学习记录都在做题页：那边判完会记进掌握度，
+对话里判的不会。学习者在对话里问「我这道为什么错」，可以讲道理，但不要替
+他记分。
+
 ## 反馈原则
 肯定要针对具体表现——答对了哪道题、哪个词掌握了。学习者只是表达了
 学习意愿、还没有任何作答时，不要说「你的学习态度很好」这类空泛的夸奖。
@@ -97,6 +114,7 @@ def make_teacher(
     soul: Path | str = SOUL_PATH,
     verbose: bool = False,
     with_flows: bool = True,
+    model: str | None = None,
 ) -> Agent:
     """组装日语教师 agent。"""
     workspace = Path(workspace)
@@ -110,6 +128,7 @@ def make_teacher(
         extra_system=RUNTIME_NOTE,
         max_rounds=10,
         verbose=verbose,
+        model=model,
     )
 
     if with_flows:

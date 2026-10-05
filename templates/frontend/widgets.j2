@@ -149,7 +149,10 @@
 <%- endmacro -%>
 
 {#- 消息流：内容来自 shared，后端返回的 messages 追加进来。
-    m.calls 有值时渲染成折叠面板——那是旧版工具调用面板的等价物。 -#}
+    m.calls 有值时渲染成折叠面板——那是旧版工具调用面板的等价物。
+    m.link 有值时正文下面多一个链接（m.link_text 是链接上的字，不给就显示
+    地址）。只认 # 开头的站内地址（#做题?lesson=…，点了就切界面）和
+    http(s)，别的（javascript: 之类）不渲染。 -#}
 <%- macro 消息流(n) -%>
 <section class="stream"<%= 当(n) %><% if n.ratio %> style="flex:<%= n.ratio %> 1 0%;min-height:0"<% endif %>>
 <% if n.label and n.label != n.name %><header class="region-h"><%= n.label %></header>
@@ -157,6 +160,7 @@
 <div v-for="(m, i) in shared['<%= n.name %>'] || []" :key="i" class="smsg" :class="'smsg-' + (m.kind || 'text')">
 <span class="who">{{ m.who }}</span>
 <div class="body">{{ m.text }}</div>
+<a v-if="m.link && (m.link.startsWith('#') || m.link.startsWith('http://') || m.link.startsWith('https://'))" class="smsg-link" :href="m.link">{{ m.link_text || m.link }}</a>
 <details v-if="m.calls && m.calls.length" class="tools">
 <summary>{{ m.calls.length }} 次工具调用</summary>
 <div v-for="(c, j) in m.calls" :key="j">{{ c.name }}({{ c.arguments }})
@@ -169,7 +173,16 @@
 
 {#- 「显示」没写标签时只出值。顶栏右边那行统计就是纯数字，回退成英文
     字段名会变成「usage 1,280 token」。浮层里的题干、批改结果也用它。 -#}
+{#- 「选项」：内容从共享状态来的一组大按钮，点了就写进同名表单字段、提交
+    「交给」的动作。o.state（right / wrong / pick / dim）由后端给，有值就是
+    判完了，按钮全部锁住，免得判完还能再点一个。 -#}
+<%- macro 选项(n) -%>
+<div class="choices"<%= 当(n) %>>
+<button v-for="o in (getPath(shared, '<%= n.bind or n.name %>') || [])" :key="o.key" type="button" class="choice" :class="o.state ? 'choice-' + o.state : ''" :disabled="busy || !!o.state" @click.prevent="form['<%= n.name %>'] = o.key; submitTo('<%= n.to %>')"><b class="choice-k">{{ o.key }}</b><span class="choice-t">{{ o.text }}</span></button>
+</div>
+<%- endmacro -%>
+
 <%- macro 显示(n) -%>
-<p class="dyn"<%= 当(n) %><%= 尺寸(n) %>><% if n.label and n.label != n.name %><span class="lbl"><%= n.label %></span>
+<p class="dyn<% if n.has("正文") %> prose<% endif %>"<%= 当(n) %><%= 尺寸(n) %>><% if n.label and n.label != n.name %><span class="lbl"><%= n.label %></span>
 <% endif %><span class="dyn-v">{{ getPath(shared, '<%= n.bind or n.name %>') }}</span></p>
 <%- endmacro -%>

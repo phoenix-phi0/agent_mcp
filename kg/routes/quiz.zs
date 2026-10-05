@@ -79,7 +79,16 @@
 结束
 
 
-# 开始：按选的等级、考点出第一道，这一轮的计数清零。
+# 下面三个接口都是出一道题，差别只在清不清零、从哪儿拿范围。出题本身在
+# scripts/quiz_pick.zs，三处共用。
+#
+# 范围：地址里带了课文（#做题?lesson=hb-n4-118，老师讲完课给的链接）就只在
+# 这一课里出，否则按顶栏的等级、考点。地址参数会被前端并进每次提交，所以
+# 「开始」「下一题」也自动留在这一课里；点导航回到不带参数的 #做题 就恢复按
+# 等级出。
+
+
+# 开始：出第一道，这一轮的计数清零。
 接口 POST /quiz/start 动作 quiz_start
   用包 db http
 
@@ -89,40 +98,16 @@
   结束
   设 等级 = {pick_level 或 全部}
   设 考点 = {pick_kind 或 全部}
-
-  设 查.learner = {学习者}
-  设 进度 = 查一行表 app.db quiz_state_one {查}
-  设 抽.learner = {学习者}
-  设 抽.level = {等级}
-  设 抽.kind = {考点}
-  设 抽.last = {进度.current 或}
-  设 题号 = 查一值表 app.db question_pick {抽}
-  如果 {题号} 为空
-    返回 {"error":"这个等级和考点下没有题"} 404
+  设 课文 = {lesson 或}
+  设 结果 = 执行 scripts/quiz_pick.zs 学习者={学习者} 等级={等级} 考点={考点} 课文={课文} 清零=1
+  如果 {结果.error 或} 不为空
+    返回 {"error":"{结果.error}"} 404
   结束
-
-  设 记.learner = {学习者}
-  设 记.level = {等级}
-  设 记.kind = {考点}
-  设 记.code = {题号}
-  设 记.reset = 1
-  设 影响 = 写库表 app.db quiz_state_pick {记}
-
-  设 取.code = {题号}
-  设 题 = 查一行表 app.db question_show {取}
-  设 消息.who = 题目
-  设 消息.text = {题.text}
-  响应 messages {消息}
-  设 进度 = 查一行表 app.db quiz_state_one {查}
-  设 状态.qtype = {题.qtype}
-  设 状态.phase = ask
-  设 状态.stat = {进度.stat}
-  响应 state {状态}
 结束
 
 
-# 下一题：跟「开始」一样出题，只是不清零这一轮的计数。等级、考点用页面上
-# 现在选的——中途换了考点，下一道就按新的出。
+# 下一题：不清零这一轮的计数。等级、考点用页面上现在选的——中途换了考点，
+# 下一道就按新的出。
 接口 POST /quiz/next 动作 quiz_next
   用包 db http
 
@@ -132,35 +117,53 @@
   结束
   设 等级 = {pick_level 或 全部}
   设 考点 = {pick_kind 或 全部}
+  设 课文 = {lesson 或}
+  设 结果 = 执行 scripts/quiz_pick.zs 学习者={学习者} 等级={等级} 考点={考点} 课文={课文} 清零=0
+  如果 {结果.error 或} 不为空
+    返回 {"error":"{结果.error}"} 404
+  结束
+结束
 
+
+# 按课文进来：界面上的「载入」。地址带着 lesson 打开做题页时前端调它，直接
+# 出这一课的第一道，这一轮清零。
+#
+# **lesson 不填回表单。** 填回去的话，之后点导航回到不带参数的 #做题，表单里
+# 还留着 lesson，「开始」「下一题」照样只出那一课——人已经离开那一课了。
+# 课文只认地址：地址里有，前端每次提交都会并进来；地址里没有就是没有。
+#
+# 没有课文、地址带的是等级或考点（#做题?level=N4&kind=接续，问老师找不到
+# 具体课文时给的）：按它出第一道，顶栏填成这个等级考点。参数名特意不叫
+# pick_level / pick_kind——地址参数会盖掉每次提交的同名键，叫那个名字的话
+# 顶栏下拉就改不动了；叫 level / kind，之后「开始」「下一题」照旧看顶栏。
+接口 POST /quiz/lesson 动作 quiz_lesson
+  用包 db http
+
+  设 学习者 = {learner 或}
+  如果 {学习者} 为空
+    设 学习者 = me
+  结束
+  设 课文 = {lesson 或}
   设 查.learner = {学习者}
   设 进度 = 查一行表 app.db quiz_state_one {查}
-  设 抽.learner = {学习者}
-  设 抽.level = {等级}
-  设 抽.kind = {考点}
-  设 抽.last = {进度.current 或}
-  设 题号 = 查一值表 app.db question_pick {抽}
-  如果 {题号} 为空
-    返回 {"error":"这个等级和考点下没有题"} 404
+  设 等级 = {进度.pick_level 或 全部}
+  设 考点 = {进度.pick_kind 或 全部}
+  如果 {课文} 为空
+    如果 {level 或} 为空
+      如果 {kind 或} 为空
+        返回 {"error":"缺 lesson（哪一课），或者 level / kind（按等级、考点）"} 400
+      结束
+    结束
+    设 等级 = {level 或 全部}
+    设 考点 = {kind 或 全部}
   结束
-
-  设 记.learner = {学习者}
-  设 记.level = {等级}
-  设 记.kind = {考点}
-  设 记.code = {题号}
-  设 记.reset = 0
-  设 影响 = 写库表 app.db quiz_state_pick {记}
-
-  设 取.code = {题号}
-  设 题 = 查一行表 app.db question_show {取}
-  设 消息.who = 题目
-  设 消息.text = {题.text}
-  响应 messages {消息}
-  设 进度 = 查一行表 app.db quiz_state_one {查}
-  设 状态.qtype = {题.qtype}
-  设 状态.phase = ask
-  设 状态.stat = {进度.stat}
-  响应 state {状态}
+  设 结果 = 执行 scripts/quiz_pick.zs 学习者={学习者} 等级={等级} 考点={考点} 课文={课文} 清零=1
+  如果 {结果.error 或} 不为空
+    返回 {"error":"{结果.error}"} 404
+  结束
+  设 表.pick_level = {等级}
+  设 表.pick_kind = {考点}
+  响应 form {表}
 结束
 
 
@@ -248,14 +251,24 @@
   设 判后.code = {当前}
   设 判后.correct = {对错}
   设 结果 = 查一行表 app.db question_verdict {判后}
-  # 不能写「判题」：那是 quiz 包的动词名，右边整个是它就会被当成调用
-  设 消息.who = 批改
-  设 消息.text = {结果.text}
-  设 消息.kind = no
-  如果 {对错} 等于 1
-    设 消息.kind = ok
-  结束
-  响应 messages {消息}
+
+  # 判完把题卡重画一遍：选项标出对错（答案那项 right、选错的 wrong、其余
+  # dim，有了 state 的按钮界面上就锁住了），下面是批改和解析。题卡的 code
+  # 不变，界面不会当成新的一张去翻页
+  设 拆.题干 = {键.stem}
+  设 拆.题型 = {键.qtype}
+  设 拆.答案 = {键.answer}
+  设 拆.选了 = {作答}
+  设 卡 = 拆选项 {拆}
+  设 卡片.code = {当前}
+  设 卡片.head = {键.head}
+  设 卡片.stem = {卡.stem}
+  设 卡片.options = {卡.options}
+  设 卡片.verdict = {结果.text}
+  设 卡片.mine = {作答}
+  设 卡片.ok = {对错}
+
+  # 达标的喜报走 messages：做题页没有消息流，前端会把它弹成一条提示
   如果 {刚达标} 等于 是
     设 喜报.who = 进度
     设 喜报.text = 「{键.point_label}」达标了，图上它后面的知识点可能解锁了。
@@ -264,6 +277,7 @@
   结束
 
   设 进度 = 查一行表 app.db quiz_state_one {查}
+  设 状态.card = {卡片}
   设 状态.phase = done
   设 状态.stat = {进度.stat}
   响应 state {状态}

@@ -299,6 +299,47 @@ def register(reg, workspace):
             对, _ = _judge_fill(标准, 作答)
         return "1" if 对 else "0"
 
+    _OPTION_RE = re.compile(r"^\s*([A-DＡ-Ｄ])\s*[.．、:：]\s*(.*)$")
+
+    @reg.verb(
+        "把选择题的题干拆成「题面」和「选项列表」，给界面画成一个个按钮用。"
+        "参数是一个结构：{题干, 题型, 答案, 选了}。返回 {stem, options}，"
+        "options 每项 {key, text, state}。给了答案和选了的话标出对错："
+        "答案那项 right、选错的那项 wrong、其余 dim；没给就都是空（还没答）。"
+        "不是选择题时 options 为空，stem 原样。"
+    )
+    def 拆选项(题) -> dict:
+        """题库沿用旧格式，选项写在题干里（「A. …」一行一个）。
+
+        不改题库格式去存结构化选项：quiz 包的「挑题」「判题」、老师的流程
+        都按现在的格式读，改了要动一串东西。在要画按钮的地方拆一下就够。
+        """
+        if isinstance(题, str):
+            try:
+                题 = json.loads(题)
+            except json.JSONDecodeError:
+                raise ValueError(f"拆选项的参数不是合法 JSON：{题[:80]}")
+        if not isinstance(题, dict):
+            raise ValueError("拆选项的参数要是一个结构：{题干, 题型, 答案, 选了}")
+        stem_all = str(题.get("题干", ""))
+        if str(题.get("题型", "")) != "选择":
+            return {"stem": stem_all, "options": []}
+        答案 = _norm(str(题.get("答案", ""))).upper()
+        选了 = _norm(str(题.get("选了", ""))).upper()
+        stem, options = [], []
+        for line in stem_all.splitlines():
+            m = _OPTION_RE.match(line)
+            if m:
+                key = unicodedata.normalize("NFKC", m.group(1)).upper()
+                options.append({"key": key, "text": m.group(2).strip(), "state": ""})
+            else:
+                stem.append(line)
+        if 答案 and 选了:
+            for o in options:
+                o["state"] = ("right" if o["key"] == 答案
+                              else "wrong" if o["key"] == 选了 else "dim")
+        return {"stem": "\n".join(stem).strip(), "options": options}
+
     # ------------------------------------------------------------------
     # 取题与查询
     # ------------------------------------------------------------------

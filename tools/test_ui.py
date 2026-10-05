@@ -200,6 +200,15 @@ def test_compile():
     check("清空字段登记", "const clears" in js, True)
     check("每界面消息流表", "const screenStream" in js, True)
 
+    # 消息带链接（m.link / m.link_text）：渲染成 <a :href>，只认站内 # 地址
+    # 和 http(s)，javascript: 之类不渲染
+    page = "\n".join(v for v in files.values() if isinstance(v, str))
+    check("消息流渲染消息里的链接", 'class="smsg-link" :href="m.link"' in page, True)
+    check("链接显示 link_text，没有就显示地址", "{{ m.link_text || m.link }}" in page, True)
+    check("链接只认 # 和 http(s)",
+          "m.link.startsWith('#')" in page and "javascript" not in page.split("smsg-link")[0][-300:],
+          True)
+
     # 不给端点时不该生成 fetch 胶水
     r2 = compile_ui(ui, backend="vue")
     check("无端点也能编译", [i.code for i in r2.get("issues", [])], [])

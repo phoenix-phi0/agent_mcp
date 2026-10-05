@@ -5,6 +5,7 @@
     py -m kg setup        只做前三步，不起服务
     py -m kg import       只导入（知识点、条目、对照、单词）
     py -m kg --port 8200  参数透传给 gen run
+    py -m kg --mock       模拟模式（也可设 KG_MOCK=1）；默认是真模型
 
 `gen run` 只管建库、编译、起服务。这个项目多一件事：**导入**。建完库是空的，
 知识点、条目、对照、单词都要导进去。早先只能起服务之后打接口，或者手写一段
@@ -21,6 +22,7 @@ Python——同样的代码写过三遍。
 布局、生成 SVG，那是把引擎该做的事挪进了应用。
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -29,6 +31,85 @@ ROOT = PROJ.parent
 CONTENT = PROJ / "content"
 # 语法题库：每个等级一个 jsonl，沿用旧题库格式（见 verbs/quiz/_verbs.py）
 BANK = ROOT / "workspace" / "japanese" / "content" / "bunpou" / "题库"
+
+
+# 课文导出给日语老师（agents/japanese.py）读：老师的工作目录是 workspace/japanese，
+# 它的「语法讲解」流程读这里的 .md。课文的源头仍是 content/lessons.jsonl，这些
+# 文件每次 setup 重新生成，别手改。
+LESSON_OUT = ROOT / "workspace" / "japanese" / "content" / "bunpou" / "课文"
+# 做题页的地址。老师讲完一课给的「去做题」链接用它；kg 服务的端口见
+# routes/kg.zs 的「服务 8190-8199」，被占了往后挪的话设这个环境变量
+KG_URL = os.environ.get("KG_URL", "http://127.0.0.1:8190")
+
+
+def quiz_link(lesson: str, base: str = None) -> str:
+    """做题页按课文出题的地址：#做题?lesson=…。界面名编码，复制粘贴不出错。"""
+    from urllib.parse import quote
+    return f"{(base or KG_URL).rstrip('/')}/#{quote('做题')}?lesson={quote(lesson)}"
+
+
+def export_lessons(src: Path = None, out: Path = None, bank: list = None,
+                   base: str = None) -> dict:
+    """把课文写成老师能读的 .md，每课一个，外加一个索引。返回 {写了几课, 删了几个}。
+
+    只管 out 目录里的文件：源里已经没有的课，对应的 .md 删掉——不删的话老师
+    会讲一课已经撤掉的内容。
+    """
+    import json
+    src = Path(src) if src else CONTENT / "lessons.jsonl"
+    out = Path(out) if out else LESSON_OUT
+    if not src.is_file():
+        return {"written": 0, "removed": 0}
+    lessons = [json.loads(l) for l in src.read_text(encoding="utf-8").splitlines() if l.strip()]
+    counts = {}
+    for q in (bank if bank is not None else read_bank(BANK)):
+        if q.get("课文"):
+            counts[q["课文"]] = counts.get(q["课文"], 0) + 1
+
+    out.mkdir(parents=True, exist_ok=True)
+    keep = set()
+    rows = []
+    for d in lessons:
+        code = d["code"]
+        n = counts.get(code, 0)
+        try:
+            examples = json.loads(d.get("examples") or "[]")
+        except ValueError:
+            examples = []
+        parts = [f"# {d['title']}（{d['level']}，课文编号 {code}）", "", d.get("summary") or ""]
+        if d.get("formation"):
+            parts += ["", "## 接续", "", d["formation"]]
+        parts += ["", "## 讲解", "", d.get("explanation") or ""]
+        if examples:
+            parts += ["", "## 例句", ""]
+            for e in examples:
+                parts.append(f"- {e.get('jp', '')}")
+                if e.get("zh"):
+                    parts.append(f"  {e['zh']}")
+        parts += ["", "## 练习", ""]
+        if n:
+            parts += [f"这一课有 {n} 道题，在做题页做（判题和学习记录都在那边）：",
+                      quiz_link(code, base)]
+        else:
+            parts += ["这一课还没有题。"]
+        parts += ["", "（课文改写自 hanabira.org 的语法讲解，CC BY 4.0）", ""]
+        (out / f"{code}.md").write_text("\n".join(parts), encoding="utf-8")
+        keep.add(f"{code}.md")
+        rows.append(f"| {code} | {d['level']} | {d['title']} | {d.get('summary') or ''} | {n} |")
+
+    index = ["# 语法课文索引", "",
+             "每课一个文件，文件名就是课文编号。讲解用 run_flow(\"语法讲解\", {\"课文\": \"编号\"})。",
+             "学习者问到某个语法时，在这张表里按标题找编号。", "",
+             "| 课文编号 | 等级 | 标题 | 一句话 | 题数 |", "|---|---|---|---|---|"] + rows + [""]
+    (out / "INDEX.md").write_text("\n".join(index), encoding="utf-8")
+    keep.add("INDEX.md")
+
+    removed = 0
+    for f in out.glob("*.md"):
+        if f.name not in keep:
+            f.unlink()
+            removed += 1
+    return {"written": len(lessons), "removed": removed}
 
 
 def read_bank(bank: Path) -> list:
@@ -188,6 +269,11 @@ def run_import(quiet: bool = False) -> int:
     else:
         say(f"没有题库（{BANK}），跳过题目导入")
 
+    # 课文给老师一份：老师只讲课，讲完给做题页的链接，练习和判题在做题页
+    e = export_lessons(bank=rows)
+    say(f"课文导出给老师 {e['written']} 课（删掉已撤的 {e['removed']} 个），"
+        f"在 {LESSON_OUT.relative_to(ROOT)}，做题链接指向 {KG_URL}")
+
     # 词表可以有多份：words.jsonl 是从题库抽的（中文释义），
     # words_jlpt.jsonl 来自 OpenJLPT（CC BY-SA 4.0，释义是英文）。
     # 来源不同就分开放文件，将来要换掉某一批也不牵连另一批。
@@ -226,6 +312,22 @@ def do_import() -> int:
     return run_import()
 
 
+def mode_line(mock: bool) -> str:
+    """启动时打印的一行：当前是真模型还是模拟。只写模型名，不碰 key。"""
+    if mock:
+        return "模式：模拟（--mock / KG_MOCK）——问老师的回复不是真模型"
+    sys.path.insert(0, str(ROOT))
+    from tools import config
+    parts = []
+    for tier in config.load().get("tiers") or {}:
+        try:
+            spec = config.resolve_spec(tier)
+            parts.append(f"{tier}={spec[0].canonical if spec else config.resolve_model(tier)}")
+        except Exception as e:  # 解析不了照样启动，只是这一行提示出来
+            parts.append(f"{tier}=解析失败（{type(e).__name__}）")
+    return "模式：真模型  " + "  ".join(parts)
+
+
 def main(argv: list[str]) -> int:
     cmd = argv[0] if argv and not argv[0].startswith("-") else "run"
 
@@ -241,8 +343,13 @@ def main(argv: list[str]) -> int:
     from gen.project import main as gen_main
     # 除了开头那个子命令，其余参数（--port 之类）原样交给 gen run
     extra = argv[1:] if (argv and not argv[0].startswith("-")) else argv
+    # 默认真模型（跟 gen run 相反）：问老师要真回答。--mock 或 KG_MOCK=1 切回
+    # 模拟，测试和不想花额度时用
+    mock = "--mock" in extra or os.environ.get("KG_MOCK", "") not in ("", "0")
+    extra = [a for a in extra if a not in ("--mock", "--real")]
+    print(mode_line(mock))
     print()
-    return gen_main(["run", str(PROJ)] + extra)
+    return gen_main(["run", str(PROJ)] + ([] if mock else ["--real"]) + extra)
 
 
 if __name__ == "__main__":

@@ -124,6 +124,8 @@ nav a.active { background:var(--accent); color:#fff; border-color:var(--accent);
 .smsg-ok .body { color:var(--ok); }
 .smsg-no .body { color:var(--no); }
 .smsg-pending .body { color:var(--dim); }
+/* 消息带的链接（老师给的「去做题」）：单独一行，看得出能点 */
+.smsg-link { display:inline-block; margin-top:8px; color:var(--accent, #2563eb); }
 
 /* 工具调用折叠面板 */
 .tools {
@@ -171,6 +173,10 @@ textarea { resize:none; min-height:46px; max-height:180px; border-radius:8px; }
   background:var(--accent); color:#fff; border-color:var(--accent);
   border-radius:8px; padding:0 20px; align-self:stretch;
 }
+/* 主按钮悬停：上面 .btn:hover 把底色换成浅米色，特异性（类+伪类）比
+   .btn-primary 高，主按钮一悬停就成了米底白字，几乎看不见——做题页的
+   「开始」「作答」鼠标一放上去就像没了。真浏览器截图才看出来，jsdom 不悬停。 */
+.btn-primary:hover { background:var(--accent); filter:brightness(1.12); }
 .btn-danger { color:var(--no); }
 
 /* 「显示」节点：.ui 里不写标签就只出值。
@@ -188,6 +194,54 @@ textarea { resize:none; min-height:46px; max-height:180px; border-radius:8px; }
   color:var(--dim); padding:0 20px;
 }
 .bar-bottom .copy { margin:0; padding:0; }
+
+/* 「显示 … 正文」：按正文排，大字、保留换行（题干、批改解析） */
+.dyn.prose {
+  font-size:17px; line-height:1.9; color:var(--ink);
+  white-space:pre-wrap; word-break:break-word;
+}
+
+/* 「分组 … 卡片」：居中的一张卡。.screen 不滚（三段式的中间那段才滚），
+   卡片内容多的时候自己滚，不然解析一长就被截在屏幕外。
+   特异性要压过上面 .group:not(.bar-top):not(.bar-bottom) 的 padding:0 20px。 */
+.group.card:not(.bar-top):not(.bar-bottom) {
+  width:calc(100% - 40px); max-width:720px; margin:28px auto 8px;
+  padding:24px 28px; gap:14px;
+  background:var(--panel); border:1px solid var(--line); border-radius:14px;
+  box-shadow:0 8px 28px rgba(43,40,37,.08);
+  max-height:calc(100vh - 170px); overflow-y:auto;
+  animation:card-in .32s ease-out;
+}
+/* 翻页：「翻页 <路径>」的值一变卡片重建，这段动画就再播一次 */
+@keyframes card-in {
+  from { opacity:0; transform:perspective(900px) translateX(36px) rotateY(-10deg); }
+  to   { opacity:1; transform:none; }
+}
+.card .field { margin:0; }
+.card .btn-primary { align-self:flex-end; padding:8px 24px; }
+
+/* 「选项」：带内容的大按钮，一行一个。判完由后端给 state：
+   right 绿、wrong 红、dim 淡出，有 state 的按钮锁住 */
+.choices { display:flex; flex-direction:column; gap:10px; }
+.choice {
+  display:flex; align-items:center; gap:12px; width:100%;
+  padding:12px 16px; text-align:left; cursor:pointer;
+  border:1.5px solid var(--line); border-radius:10px;
+  background:var(--panel); color:var(--ink); font:inherit; font-size:16px;
+  transition:border-color .12s, background .12s;
+}
+.choice:hover:not(:disabled) { border-color:var(--accent); background:#f6f4fa; }
+.choice:disabled { cursor:default; }
+.choice-k {
+  flex:none; width:28px; height:28px; border-radius:50%;
+  display:inline-flex; align-items:center; justify-content:center;
+  background:var(--tool); font-size:14px;
+}
+.choice-right { border-color:var(--ok); background:#eef6f0; }
+.choice-right .choice-k { background:var(--ok); color:#fff; }
+.choice-wrong { border-color:var(--no); background:#faeeec; }
+.choice-wrong .choice-k { background:var(--no); color:#fff; }
+.choice-dim { opacity:.5; }
 
 table { width:100%; border-collapse:collapse; }
 th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); }
