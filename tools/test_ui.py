@@ -218,6 +218,59 @@ def test_compile():
     check("ir 后端可用", "result" in r3, True)
 
 
+def test_links():
+    print("\n[链接]")
+    ui = ("界面 自定义 课本 载入 lesson_one\n"
+          "  列表 课文 绑 lessons\n"
+          "    列 title 地址 href 标题\n"
+          "    列 level 等级\n"
+          "  结束\n"
+          "  分组 去练 横排\n"
+          "    链接 practice 绑 reading.practice 当 params.lesson 练这一课\n"
+          "    链接 back 绑 reading.back 次要 回到课文表\n"
+          "  结束\n"
+          "结束\n")
+    s = one(ui)
+    col = s.children[0].children[0]
+    check("列的「地址」进了 href", (col.name, col.href, col.label), ("title", "href", "标题"))
+    check("没写「地址」的列 href 是空的", s.children[0].children[1].href, "")
+    link = s.children[1].children[0]
+    check("链接：名字、绑定、条件、标签",
+          (link.kind, link.name, link.bind, link.when, link.label),
+          ("链接", "practice", "reading.practice", "params.lesson", "练这一课"))
+    check("链接的「次要」是旗标，不进标签", (s.children[1].children[1].label,
+          s.children[1].children[1].has("次要")), ("回到课文表", True))
+    check_raises("链接不能写在列表里",
+                 lambda: parse("界面 自定义 甲\n  列表 t\n    链接 a 去\n  结束\n结束"),
+                 "链接")
+
+    r = compile_ui(ui, backend="vue", options={"endpoints": {"lesson_one": "/lesson/one"}})
+    check("带链接的界面编译没有 issue", [i.code for i in r.get("issues", [])], [])
+    page = "\n".join(v for v in r["result"]["files"].values() if isinstance(v, str))
+    js = r["result"]["files"]["app.js"]
+    # 对照：普通列照旧只出文字
+    check("普通列照旧是文字", "<td>{{ row.level }}</td>" in page, True)
+    check("地址列画成链接、地址取这一行的 href",
+          'class="cell-link" :href="row.href">{{ row.title }}</a>' in page, True)
+    check("地址列地址不合格时退回文字", '<template v-else>{{ row.title }}</template>' in page, True)
+    check("链接的地址从共享状态取",
+          ':href="getPath(shared, \'reading.practice\')"' in page, True)
+    check("链接的「当」和地址检查合在一个 v-if 里",
+          'v-if="(params.lesson) && isHref(getPath(shared, \'reading.practice\'))"' in page, True)
+    check("没写「当」的链接只查地址",
+          'v-if="isHref(getPath(shared, \'reading.back\'))"' in page, True)
+    check("次要链接画成文字链接", 'class="link-plain"' in page, True)
+    check("isHref 导出给模板用", "go, isHref, reset" in js, True)
+    check("isHref 只认 # 和 http(s)",
+          's.startsWith("#") || s.startsWith("http://") || s.startsWith("https://")' in js, True)
+    check("链接的共享路径有初值（读不到也不报错）",
+          '"reading": {"practice": "", "back": ""}' in js, True)
+
+    clash = parse("界面 自定义 甲\n  显示 a.b\n  链接 x 绑 a.b 去\n结束")
+    check("链接和显示占同一共享路径报冲突",
+          any(i.code == "path_conflict" for i in validate(clash)), True)
+
+
 # ----------------------------------------------------------------------
 
 
@@ -234,6 +287,7 @@ def main() -> int:
         test_syntax_errors,
         test_validate,
         test_compile,
+        test_links,
     ]:
         try:
             fn()

@@ -1,4 +1,4 @@
-<% from "widgets.j2" import 字段, 动作, 文案, 消息流, 显示, 选项, 当 with context %>
+<% from "widgets.j2" import 字段, 动作, 文案, 消息流, 显示, 选项, 链接, 当 with context %>
 <% from "graph.j2" import 节点图 with context %>
 
 {#- 布局类：方向、伸缩、固定位置。
@@ -42,6 +42,8 @@
 <%= 显示(node) %>
 <% elif node.kind == "选项" %>
 <%= 选项(node) %>
+<% elif node.kind == "链接" %>
+<%= 链接(node) %>
 <% elif node.kind == "列" %>
 {# 有意留空：列由「列表」分支渲染成 th/td。单独走到这里说明它跑到了
    列表外面，那是解析器该拦的事，这里不产出任何东西。 #}
@@ -90,6 +92,10 @@
             整数 1、JSON 往返后可能是 true、表单里可能是字符串 "1"。 -#}
         <% if c.type == "布尔" %>
         <td class="cell-bool">{{ (row.<%= c.bind or c.name %> === 1 || row.<%= c.bind or c.name %> === true || row.<%= c.bind or c.name %> === "1" || row.<%= c.bind or c.name %> === "true") ? "✓" : "" }}</td>
+        {#- 「地址 href」：这一格画成链接，地址取这一行的 href 键。地址不合格
+            （空的、不是 # 和 http(s)）就照常出文字，不画一个点了没反应的链接。 -#}
+        <% elif c.href %>
+        <td><a v-if="isHref(row.<%= c.href %>)" class="cell-link" :href="row.<%= c.href %>">{{ row.<%= c.bind or c.name %> }}</a><template v-else>{{ row.<%= c.bind or c.name %> }}</template></td>
         <% else %>
         <td>{{ row.<%= c.bind or c.name %> }}</td>
         <% endif %>

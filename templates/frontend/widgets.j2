@@ -182,6 +182,15 @@
 </div>
 <%- endmacro -%>
 
+{#- 「链接」：地址从共享状态来，标签是 .ui 里写的字。地址空或者不是站内 #
+    地址和 http(s) 时整个不画（isHref 判断，跟消息里的链接同一条规矩），
+    后端给空地址就等于「这次没有这个链接」。「次要」画成普通文字链接，
+    不带的话画成按钮的样子。 -#}
+<%- macro 链接(n) -%>
+<%- set p = "getPath(shared, '" ~ (n.bind or n.name) ~ "')" -%>
+<a class="<% if n.has("次要") %>link-plain<% else %>btn link-btn<% endif %>" v-if="<% if n.when %>(<%= n.when %>) && <% endif %>isHref(<%= p %>)" :href="<%= p %>"<%= 尺寸(n) %>><%= n.label or n.name %></a>
+<%- endmacro -%>
+
 <%- macro 显示(n) -%>
 <p class="dyn<% if n.has("正文") %> prose<% endif %>"<%= 当(n) %><%= 尺寸(n) %>><% if n.label and n.label != n.name %><span class="lbl"><%= n.label %></span>
 <% endif %><span class="dyn-v">{{ getPath(shared, '<%= n.bind or n.name %>') }}</span></p>

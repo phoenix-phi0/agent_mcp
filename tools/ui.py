@@ -152,6 +152,8 @@ class Node:
     direction: str = ""          # 「方向 纵向/横向」：图的 dagre rankdir
     popup: str = ""              # 「点开 节点详情」：点中节点时弹出的浮层
     around: str = ""             # 节点图「围绕 sel」
+    href: str = ""               # 列的「地址 href」：这一格画成链接，地址取这一行
+                                 # 的 href 键（#教材?lesson=hb-n4-118）
     title_f: str = ""            # 节点图「标题 kanji,kana」
     sub_f: str = ""              # 节点图「说明 kana,meaning」
     required: Optional[bool] = None
@@ -258,6 +260,19 @@ LINE_PARENT["节点图"] = {"界面", "区域", "分组", "浮层"}
 LINE_KEYWORDS = LINE_KEYWORDS | {"选项"}
 LINE_PARENT["选项"] = {"界面", "区域", "分组", "浮层"}
 
+# 「链接」：一个跳转用的链接，地址从共享状态里来（绑 reading.practice），
+# 标签是 .ui 里写的字。地址空、或者不是站内 # 地址和 http(s) 时整个不画——
+# 「这一课没有题就不显示『练这一课』」靠后端给空地址就行，不用另写「当」。
+#   链接 practice 绑 reading.practice 练这一课
+# 跟「切到」的区别：切到只能去一个界面、带不了参数，而且用了它引擎就认为
+# 界面切换已经自己安排好了、不再画导航；链接走地址（#做题?lesson=…），
+# 跟消息里的链接是同一条路，后退键能回来。
+#
+# 表格里的一格要做成链接用列的「地址 <键>」：
+#   列 title 地址 href 标题       这一格显示 title，点了去这一行的 href
+LINE_KEYWORDS = LINE_KEYWORDS | {"链接"}
+LINE_PARENT["链接"] = {"界面", "区域", "分组", "浮层"}
+
 FLAG_MODIFIERS = {
     "竖排", "横排", "网格", "占满",   # layout intent
     "必填",                          # field
@@ -333,6 +348,9 @@ FLAG_MODIFIERS = FLAG_MODIFIERS | {"隐藏"}
 # 「正文」：「显示」按正文排（大字、保留换行），不是顶栏那种小号灰字。
 FLAG_MODIFIERS = FLAG_MODIFIERS | {"卡片", "正文"}
 KEYED_MODIFIERS = KEYED_MODIFIERS | {"交给", "翻页"}
+
+# 列「地址 <键>」：这一格画成链接，见上面「链接」的说明
+KEYED_MODIFIERS = KEYED_MODIFIERS | {"地址"}
 
 SCREEN_ROLES = {"表单", "列表", "自定义"}
 DEFAULT_ROLE = "自定义"
@@ -429,6 +447,8 @@ def _apply_keyed(node: Node, keyed: dict):
         node.sub_f = keyed["说明"]
     if "交给" in keyed:
         node.to = keyed["交给"]
+    if "地址" in keyed:
+        node.href = keyed["地址"]
     if "翻页" in keyed:
         node.flip = keyed["翻页"]
     if "点开" in keyed:
@@ -763,7 +783,7 @@ def _check_state_paths(screens) -> list:
         for node in screen.walk():
             if node.kind == "消息流":
                 streams.append(node)
-            shared_node = (node.kind in ("消息流", "显示")
+            shared_node = (node.kind in ("消息流", "显示", "链接")
                            or (node.kind == "字段" and node.has("共享")))
             if not shared_node:
                 continue
@@ -957,7 +977,7 @@ def _shared_defaults(screens):
                 _put_path(shared, n.bind or n.name, _blank_for(n, widgets))
             elif n.kind == "消息流":
                 _put_path(shared, n.bind or n.name, [])
-            elif n.kind == "显示":
+            elif n.kind in ("显示", "链接"):
                 _put_path(shared, n.bind or n.name, "")
             elif n.kind == "选项":
                 _put_path(shared, n.bind or n.name, [])

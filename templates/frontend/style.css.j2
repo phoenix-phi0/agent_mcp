@@ -178,6 +178,10 @@ textarea { resize:none; min-height:46px; max-height:180px; border-radius:8px; }
    「开始」「作答」鼠标一放上去就像没了。真浏览器截图才看出来，jsdom 不悬停。 */
 .btn-primary:hover { background:var(--accent); filter:brightness(1.12); }
 .btn-danger { color:var(--no); }
+/* 「链接」：按钮样子的链接，和普通文字链接（次要）；表格里的一格链接 */
+.link-btn { display:inline-block; text-decoration:none; align-self:flex-start; }
+.link-plain, .cell-link { color:var(--accent); text-decoration:none; }
+.link-plain:hover, .cell-link:hover { text-decoration:underline; }
 
 /* 「显示」节点：.ui 里不写标签就只出值。
    margin-left:auto 顶替了旧版那个 <span class="sp"> 弹簧。 */

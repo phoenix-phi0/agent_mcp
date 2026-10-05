@@ -222,6 +222,12 @@ const _app = createApp({
       return path.split(".").reduce((o, k) => (o == null ? o : o[k]), obj);
     }
 <% endif %>
+    // 能不能当链接地址：只认站内 # 地址和 http(s)，别的（javascript: 之类、
+    // 空的）不画。「链接」和列的「地址」都用它。
+    function isHref(v) {
+      const s = v == null ? "" : String(v);
+      return s.startsWith("#") || s.startsWith("http://") || s.startsWith("https://");
+    }
     function go(name, p) {
       const q = p && Object.keys(p).length ? "?" + new URLSearchParams(p) : "";
       route.value = name;
@@ -853,7 +859,7 @@ const _app = createApp({
 <% endif %>
     }
 <% endif %>
-    return { route, params, forms, form, rowsOf, lists, notice, nav, AUTH_SCREENS, current, busy, go, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
+    return { route, params, forms, form, rowsOf, lists, notice, nav, AUTH_SCREENS, current, busy, go, isHref, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
   },
   template: `
 {#- 顶部导航。两种来路：
