@@ -19,6 +19,7 @@
     self.client         ZhipuClient（或假客户端）
     self.system         系统提示词
     self.temperature
+    self.model          「模型 X」设的模型，None 用客户端默认
     self.history        对话历史
     self.verbs          动词表
     self.vars           变量表（store 写）
@@ -38,8 +39,10 @@ import inspect
 import json
 from pathlib import Path
 
+from . import config
 from .dsl_core import (ATTACH_RE, DEFAULT_TOOL_ROUNDS, DSLError,
-                       MAX_CALL_DEPTH, RETRY_RE, TOOLS_RE, to_text)
+                       MAX_CALL_DEPTH, MODEL_ID_RE, MODEL_RE, RETRY_RE,
+                       TOOLS_RE, UNEXPANDED_RE, to_text)
 
 
 class ModelMixin:
@@ -66,6 +69,32 @@ class ModelMixin:
             return rest, [], 0
         names = [x.strip() for x in re.split(r"[,，]", m.group(1)) if x.strip()]
         return rest[:m.start()], names, int(m.group(2) or DEFAULT_TOOL_ROUNDS)
+
+    def _split_model(self, rest: str):
+        """把「… 用 快」剥下来，返回 (剩下的, 解析后的模型名或 None)。
+
+        「用」在提示词里很常见（「请 用 中文 回答」），所以名字只认三种：
+        models.json 的档位/别名（含 config.json 旧的 models 别名）、
+        像模型名的 ASCII 串（glm-4-flash、api:zhipu/glm-5.3）或带通道前缀的名字
+        （cli:… / api:… / 旧的 claude:… / zcode:…）、一个 {变量}。都不是就当
+        提示词的一部分，原样留着。名字写得不对（未知通道等）在调用时由路由报错。
+        """
+        m = MODEL_RE.search(rest)
+        if not m:
+            return rest, None
+        name = m.group(1)
+        if UNEXPANDED_RE.match(name):
+            # {变量} 取到空值就是没指定（用默认）；没定义则报错——
+            # 把「{模型名}」这串字当模型名发出去，接口回的错看不出原因
+            name = to_text(self.expand(name)).strip()
+            if UNEXPANDED_RE.match(name):
+                raise DSLError(f"「用 {m.group(1)}」：变量没有定义")
+        elif not (name in config.model_names()
+                  or MODEL_ID_RE.match(name)
+                  # 带通道前缀的后半不限 ASCII（zcode 的后半本来就忽略）
+                  or name.startswith(("api:", "cli:", "claude:", "zcode:"))):
+            return rest, None
+        return rest[:m.start()], config.resolve_model(name)
 
     def _attach(self, prompt: str, files: list) -> str:
         """文件内容拼到提示词前面。
@@ -158,14 +187,15 @@ class ModelMixin:
             return f"[执行失败] {type(e).__name__}: {e}"
 
     def _chat_tools(self, messages: list, names: list,
-                    max_rounds: int) -> str:
+                    max_rounds: int, model: str | None = None) -> str:
         """带工具的对话循环。messages 会被就地追加。"""
         tools = self._tools_schema(names)
 
         for _ in range(max(1, max_rounds)):
             data = self.client.chat_raw(messages, tools=tools,
                                         tool_choice="auto",
-                                        temperature=self.temperature)
+                                        temperature=self.temperature,
+                                        model=model or self.model)
             msg = data["choices"][0]["message"]
             # reasoning_content 不能回传：推理模型返回的思考过程原样发
             # 回去白烧 token，有的接口还会报错
@@ -198,16 +228,19 @@ class ModelMixin:
     # 语句
     # ------------------------------------------------------------------
 
-    def _generate(self, prompt: str) -> str:
+    def _generate(self, prompt: str, model: str | None = None) -> str:
         return self.client.chat(prompt, system=self.system,
-                                temperature=self.temperature)
+                                temperature=self.temperature,
+                                model=model or self.model)
 
     def _do_ask(self, rest: str, lineno: int) -> None:
-        """问 X = 提示词 [附 文件] [带工具 …] [重试 N 次 直到 条件]
+        """问 X = 提示词 [附 文件] [带工具 …] [重试 N 次 直到 条件] [用 模型]
 
-        后缀从外往里剥：重试最外，然后带工具，最后挂载。所以
-        「附 a.md 带工具 X 重试 2 次 直到 …」这个顺序是对的。
+        后缀从外往里剥：「用」最外（只管这一次的模型），然后重试、
+        带工具，最后挂载。所以「附 a.md 带工具 X 重试 2 次 直到 … 用 快」
+        这个顺序是对的。
         """
+        rest, model = self._split_model(rest)
         retry, cond = 0, None
         m = RETRY_RE.search(rest)
         if m:
@@ -219,12 +252,12 @@ class ModelMixin:
 
         def once() -> str:
             if not tool_names:
-                return self._generate(prompt)
+                return self._generate(prompt, model)
             msgs = []
             if self.system:
                 msgs.append({"role": "system", "content": self.system})
             msgs.append({"role": "user", "content": prompt})
-            return self._chat_tools(msgs, tool_names, max_rounds)
+            return self._chat_tools(msgs, tool_names, max_rounds, model)
 
         result = once()
         attempts = 1
@@ -245,10 +278,12 @@ class ModelMixin:
         解析失败抛错而不是给空对象：后面 {决策.意图} 取不到会原样保留成
         字符串，扔进条件判断只会一路走到「否则」，错得很隐蔽。
         """
+        rest, model = self._split_model(rest)
         name, prompt = self._prompt_of(rest, "问JSON")
         try:
             result = self.client.chat_json(
-                prompt, system=self.system, temperature=self.temperature)
+                prompt, system=self.system, temperature=self.temperature,
+                model=model or self.model)
         except ValueError as e:
             raise DSLError(f"第 {lineno + 1} 行：{e}") from e
         self.store(name, result)
@@ -256,10 +291,12 @@ class ModelMixin:
 
     def _do_stream(self, rest: str) -> None:
         """流式 X = 提示词 —— 边生成边打印，最后把整段存进变量。"""
+        rest, model = self._split_model(rest)
         name, prompt = self._prompt_of(rest, "流式")
         parts = []
         for chunk in self.client.stream(prompt, system=self.system,
-                                        temperature=self.temperature):
+                                        temperature=self.temperature,
+                                        model=model or self.model):
             parts.append(chunk)
             if self.verbose:
                 print(chunk, end="", flush=True)
@@ -271,16 +308,19 @@ class ModelMixin:
 
     def _do_chat(self, rest: str) -> None:
         """对话 X = 提示词 [带工具 …] —— 多轮，保留历史。"""
+        rest, model = self._split_model(rest)
         rest, tool_names, max_rounds = self._split_tools(rest)
         name, prompt = self._prompt_of(rest, "对话")
         self._ensure_system()
         self.history.append({"role": "user", "content": prompt})
         if tool_names:
             # _chat_tools 自己会追加 assistant 消息，这里不要再 append
-            reply = self._chat_tools(self.history, tool_names, max_rounds)
+            reply = self._chat_tools(self.history, tool_names, max_rounds,
+                                     model)
         else:
             reply = self.client.chat_messages(
-                self.history, temperature=self.temperature)
+                self.history, temperature=self.temperature,
+                model=model or self.model)
             self.history.append({"role": "assistant", "content": reply})
         self.store(name, reply)
         self._last_result = reply

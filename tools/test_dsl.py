@@ -197,7 +197,9 @@ def test_model_calls():
 
     mock = MockClient()
     out, c = run("模型 glm-4.6\n问 a = x", mock)
-    check("模型被切换", c.model, "glm-4.6")
+    # 「模型」只管本脚本：传给这次调用，不改共用的 client.model
+    check("模型被切换", c.last_model, "glm-4.6")
+    check("共用客户端的模型没被改", c.model, "mock-model")
 
     mock = MockClient()
     run("系统 你是助手\n问 a = x", mock)

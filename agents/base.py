@@ -37,6 +37,7 @@ class Agent:
         max_rounds: int = 8,
         extra_system: str = "",
         verbose: bool = False,
+        model: str | None = None,
     ):
         self.soul_path = Path(soul)
         self.workspace = Path(workspace).resolve()
@@ -52,6 +53,9 @@ class Agent:
         self.extra_system = extra_system
 
         self._client = client
+        # 这个 agent 用的模型（规范名 api:zhipu/… / cli:claude/…、裸名、档位或别名），
+        # 每次调用传给客户端，不改共用客户端的 client.model。None = 默认
+        self.model = model
         self.messages: list[dict] = [{"role": "system", "content": self.system_prompt}]
         self.tool_log: list[dict] = []
         self.usage: dict[str, int] = {"prompt": 0, "completion": 0, "total": 0}
@@ -77,6 +81,11 @@ class Agent:
         if self._client is None:
             from tools import ZhipuClient
             self._client = ZhipuClient()
+        # 按模型的通道分派：cli:claude/… / cli:zcode 走本机 CLI。带工具时
+        # chat_raw 收到 tools，路由据此按能力表检查（cli 不支持，档位有
+        # fallback 就改用 fallback），见 tools/llm_router.py
+        from tools.llm_router import wrap
+        self._client = wrap(self._client)
         return self._client
 
     def _log(self, *args) -> None:
@@ -102,7 +111,7 @@ class Agent:
         schemas = self.tools.schemas()
 
         for round_no in range(self.max_rounds):
-            kwargs = {"temperature": temperature}
+            kwargs = {"temperature": temperature, "model": self.model}
             if schemas:
                 kwargs["tools"] = schemas
                 kwargs["tool_choice"] = "auto"

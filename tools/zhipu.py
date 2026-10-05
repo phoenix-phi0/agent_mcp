@@ -79,6 +79,23 @@ class ZhipuClient:
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self.api_key}"}
 
+    def _model(self, model: str | None) -> str:
+        """这一次用哪个模型：传了就解析档位/别名，没传用默认（默认也可以是档位名）。
+
+        规范名 api:zhipu/glm-5.3 换成接口要的 glm-5.3；裸名原样。别的通道
+        （cli:claude/…）不该走到这里——要经 llm_router 包一层才能分派。
+        """
+        name = config.resolve_model(model) or config.resolve_model(self.model)
+        if not name:
+            return name
+        spec = config.parse_model(name)
+        if (spec.channel, spec.provider) != ("api", "zhipu"):
+            raise config.ModelNameError(
+                f"模型 {spec.canonical} 不是智谱模型，ZhipuClient 发不了；"
+                f"要经 tools.llm_router.wrap 包一层才能分派到 "
+                f"{spec.backend.label}")
+        return spec.model
+
     def _post(self, path: str, payload: dict) -> dict:
         r = requests.post(
             f"{self.base_url}{path}",
@@ -99,6 +116,7 @@ class ZhipuClient:
         prompt: str,
         system: str | None = None,
         temperature: float | None = None,
+        model: str | None = None,
         **kwargs,
     ) -> str:
         """单轮对话，返回回复文本。"""
@@ -106,23 +124,28 @@ class ZhipuClient:
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        return self.chat_messages(messages, temperature=temperature, **kwargs)
+        return self.chat_messages(messages, temperature=temperature,
+                                  model=model, **kwargs)
 
     def chat_messages(
         self,
         messages: list[dict],
         temperature: float | None = None,
+        model: str | None = None,
         **kwargs,
     ) -> str:
         """多轮对话，messages 传完整历史，返回回复文本。
 
         kwargs 原样透传给接口，所以 response_format、tools、thinking
         这类参数直接传就行。
+
+        model 只管这一次：可以是真名、models.json 的档位或别名，
+        不传用 self.model。不改 self.model——客户端是多处共用的。
         """
         data = self._post(
             "/chat/completions",
             {
-                "model": self.model,
+                "model": self._model(model),
                 "messages": messages,
                 "temperature": (
                     self.default_temperature if temperature is None else temperature
@@ -132,11 +155,12 @@ class ZhipuClient:
         )
         return data["choices"][0]["message"]["content"]
 
-    def chat_raw(self, messages: list[dict], **kwargs) -> dict:
+    def chat_raw(self, messages: list[dict], model: str | None = None,
+                 **kwargs) -> dict:
         """返回完整响应体，需要 usage、tool_calls 等字段时用这个。"""
         return self._post(
             "/chat/completions",
-            {"model": self.model, "messages": messages, **kwargs},
+            {"model": self._model(model), "messages": messages, **kwargs},
         )
 
     # ------------------------------------------------------------------
@@ -149,6 +173,7 @@ class ZhipuClient:
         system: str | None = None,
         temperature: float | None = None,
         retries: int = 1,
+        model: str | None = None,
         **kwargs,
     ):
         """要一个 JSON 对象回来，解析好再返回。
@@ -170,13 +195,15 @@ class ZhipuClient:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
         return self.chat_json_messages(
-            messages, temperature=temperature, retries=retries, **kwargs)
+            messages, temperature=temperature, retries=retries, model=model,
+            **kwargs)
 
     def chat_json_messages(
         self,
         messages: list[dict],
         temperature: float | None = None,
         retries: int = 1,
+        model: str | None = None,
         **kwargs,
     ):
         """chat_json 的多轮版本。messages 会被复制，不改调用方的列表。"""
@@ -187,7 +214,8 @@ class ZhipuClient:
         last = ""
         for attempt in range(retries + 1):
             try:
-                last = self.chat_messages(msgs, temperature=temperature, **kwargs)
+                last = self.chat_messages(msgs, temperature=temperature,
+                                          model=model, **kwargs)
             except RuntimeError as e:
                 # 模型不认 response_format 时接口会报错。摘掉它重来一次，
                 # 剩下两层保障还在——总比整个失败强。
@@ -222,6 +250,7 @@ class ZhipuClient:
         prompt: str,
         system: str | None = None,
         temperature: float | None = None,
+        model: str | None = None,
         **kwargs,
     ):
         """流式对话，逐段 yield 文本片段。"""
@@ -229,12 +258,14 @@ class ZhipuClient:
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        yield from self.stream_messages(messages, temperature=temperature, **kwargs)
+        yield from self.stream_messages(messages, temperature=temperature,
+                                        model=model, **kwargs)
 
     def stream_messages(
         self,
         messages: list[dict],
         temperature: float | None = None,
+        model: str | None = None,
         **kwargs,
     ):
         """流式多轮对话，逐段 yield 文本片段。"""
@@ -242,7 +273,7 @@ class ZhipuClient:
             f"{self.base_url}/chat/completions",
             headers=self._headers,
             json={
-                "model": self.model,
+                "model": self._model(model),
                 "messages": messages,
                 "stream": True,
                 "temperature": (

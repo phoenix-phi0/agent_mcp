@@ -84,6 +84,11 @@ RET_STATUS_RE = re.compile(r"\s+([1-5]\d\d)\s*$")
 # 「附录 xxx」这种普通文本行被当成语句
 ATTACH_RE = re.compile(r"\s+附\s+(\S+)$")
 TOOLS_RE = re.compile(r"\s+带工具\s+(\S+)(?:\s+最多\s+(\d+)\s*轮?)?$")
+# 「问 … 用 快」：只管这一次的模型。「用」在提示词里太常见，所以只认
+# 最末尾的「 用 名字」，名字还得是别名表里的、像模型真名的（ASCII，
+# 如 glm-4-flash）或一个 {变量}，见 ModelMixin._split_model
+MODEL_RE = re.compile(r"\s+用\s+(\S+)$")
+MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/\-]*$")
 BRANCH_RE = re.compile(r"(\S+?)\s*(?:→|->)\s*(\S+)")
 CALL_PARAM_RE = re.compile(r"(\S+?)\s*=\s*(.*?)(?=\s+\S+?\s*=|$)")
 PACK_SEP_RE = re.compile(r"[,，\s]+")

@@ -101,6 +101,7 @@ def make_builder(
     soul: Path | str = SOUL_PATH,
     批次名: str = "一",
     verbose: bool = False,
+    model: str | None = None,
 ) -> Agent:
     """组装网页生成 agent。"""
     workspace = Path(workspace)
@@ -119,6 +120,7 @@ def make_builder(
         extra_system=RUNTIME_NOTE,
         max_rounds=10,
         verbose=verbose,
+        model=model,
     )
 
     全部.merge(make_flow_tools(
