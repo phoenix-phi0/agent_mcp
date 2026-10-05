@@ -363,6 +363,10 @@ function openPage(hash) {
   p.btn("下一题").click();
   await waitFor(() => state().current !== before7);
   say(question(state().current).level === other && !state().lesson, "之后的下一题也按等级出");
+  // 库里先变、响应后到：等新题卡画出来（「下一题」收起）再关页面。不等的话
+  // 响应落在关掉的窗口上，运行时 finally 里的 nextTick 去摸 document，整个
+  // 测试台崩掉（机器忙的时候时有时无，run_all 里撞上过）
+  await waitFor(() => !p.btn("下一题") && (p.choices().length || p.box()));
   p.close();
 
   console.log("七之二、达标喜报");

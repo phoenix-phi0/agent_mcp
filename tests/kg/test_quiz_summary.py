@@ -350,7 +350,8 @@ def main():
     con.commit()
     con.close()
     added = ensure_new_columns(old, ws / "entities")
-    check(sorted(added) == ["attempt.answer", "quiz_state.round_from"], f"补了两列：{added}")
+    check(sorted(added) == ["attempt.answer", "quiz_state.mode", "quiz_state.round_from"],
+          f"补了三列（mode 是复习薄弱点加的）：{added}")
     con = sqlite3.connect(old)
     kept = (con.execute("SELECT count(*) FROM attempt").fetchone()[0],
             con.execute("SELECT right, total, round_from FROM quiz_state").fetchone())

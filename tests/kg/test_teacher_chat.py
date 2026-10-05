@@ -38,6 +38,11 @@
       问「有没有讲〜的课」附那一课的读课文
   十四、讲解附「读课文」（指向 lesson_find 命中的课）和「练一练」两个链接；
       links 存进库，/teacher/state 拉回来还在；老库补 links 列，旧链接照样还原
+  十五、出题意图用学情（没指定具体语法时）：没有作答记录 → 按等级（没提 N5）
+      出题并说明；有记录 → 「复习薄弱点」链接（#做题?mode=review），回复里
+      列出得分最低的点和分数，附推荐的一课「练这一课」，只调一次快档；提到
+      等级 → 按等级，这一级有低分点再附复习；指定了语法（てから / ために）
+      照旧找课 / 按等级考点；「进度」意图的链接里也有复习薄弱点
 """
 
 import json
@@ -75,6 +80,11 @@ INTENTS = {
     "给我出几道てから的题": '好的：\n```json\n{"intent":"出题","keywords":["てから"],"level":"","kind":"","grade":"否"}\n```',
     "考考我N4的ために接续": '{"intent":"出题","keywords":["ために"],"level":"N4","kind":"接续","grade":"否"}',
     "随便出点题": '{"intent":"出题","keywords":[],"level":"","kind":"","grade":"否"}',
+    "给我出点题": '{"intent":"出题","keywords":[],"level":"","kind":"","grade":"否"}',
+    "练练我薄弱的": '{"intent":"出题","keywords":[],"level":"","kind":"","grade":"否"}',
+    "考考我N4": '{"intent":"出题","keywords":[],"level":"N4","kind":"","grade":"否"}',
+    "考考我N5": '{"intent":"出题","keywords":[],"level":"N5","kind":"","grade":"否"}',
+    "给我出几道ために的题": '{"intent":"出题","keywords":["ために"],"level":"","kind":"","grade":"否"}',
     "这题我选B对吗：彼は来る（　）だ A.よう B.そう": '{"intent":"出题","keywords":["ようだ"],"level":"","kind":"","grade":"是"}',
     "坏的 JSON 来一个": "这不是 JSON，判定坏了",
     "intent 乱写": '{"intent":"聊天吧","keywords":[]}',
@@ -200,9 +210,10 @@ def main():
           f"顶栏填成 N4・接续：{(r.get_json() or {}).get('form')}")
     st, body = send("随便出点题")
     m = reply(body)
-    check(st == 200 and unquote(m.get("link", "")) == "#做题" and "打开做题页" == m.get("link_text"),
-          f"等级考点都没有：不带参数的做题页 {unquote(m.get('link', ''))}")
-    check("没找到对应的课文" in m.get("text", ""), "并说明了找不到")
+    check(st == 200 and unquote(m.get("link", "")) == "#做题?level=N5" and "去做题：N5（考点不限）" == m.get("link_text"),
+          f"没指定内容、还没有作答记录：按 N5 出题 {unquote(m.get('link', ''))}")
+    check("还没有你的作答记录" in m.get("text", "") and "先做几道我才知道你哪里弱" in m.get("text", ""),
+          f"并说明了还没有记录：{m.get('text')}")
 
     print("四、贴答案求判：引导去做题页")
     n_attempt = rows("SELECT count(*) n FROM attempt")[0]["n"]
@@ -342,8 +353,9 @@ def main():
     check("不要编造进度里没有的数据" in (mid[0]["system"] or ""), "系统提示词说了不编造进度里没有的数据")
     links = m.get("links") or []
     hrefs = [x.get("href", "") for x in links]
-    check(len(links) == 2 and hrefs[0].startswith(READ) and hrefs[1].startswith(QUIZ),
-          f"回复带两个链接：读课文、做题 {[(x.get('text'), unquote(x.get('href', ''))) for x in links]}")
+    check(len(links) == 3 and hrefs[0].startswith(READ) and hrefs[1].startswith(QUIZ)
+          and unquote(hrefs[2]) == "#做题?mode=review" and links[2].get("text") == "复习薄弱点",
+          f"回复带三个链接：读课文、做题、复习薄弱点 {[(x.get('text'), unquote(x.get('href', ''))) for x in links]}")
     pick = hrefs[0][len(READ):] if hrefs and hrefs[0].startswith(READ) else ""
     wrong_lessons = {x["lesson"] for x in rows(
         "SELECT q.lesson FROM attempt a JOIN question q ON q.code = a.item"
@@ -360,6 +372,7 @@ def main():
                  " (SELECT 1 FROM question q WHERE q.lesson = l.code) ORDER BY l.code")[0]["code"]
     check("还没有作答记录" in p and hrefs[:1] == [READ + first],
           f"没答过题的学习者：进度说还没有记录，推荐 N5 有题的第一课 {first}：{hrefs}")
+    check(not any("mode=review" in h for h in hrefs), "没答过题：不给复习薄弱点")
     st, body = send("N4还差什么", learner="p1")
     m = reply(body)
     p = calls("平衡")[0]["prompt"]
@@ -415,6 +428,64 @@ def main():
     pick = ((m.get("links") or [{}])[0].get("href") or "")[len(READ):]
     check(pick == qc["lesson"] and "在学知识点的掌握得分" not in p,
           f"没有得分：退回最近答错的那课 {qc['lesson']}，摘要里不写得分：{pick}")
+
+    print("十五、出题意图用学情")
+    REVIEW = QUIZ + "?mode=review"
+    st, body = send("给我出点题", learner="fresh")
+    m = reply(body)
+    check(st == 200 and unquote(m.get("link", "")) == "#做题?level=N5"
+          and "还没有你的作答记录，先做几道我才知道你哪里弱" in m.get("text", ""),
+          f"无记录：按等级 N5 出题并说明：{unquote(m.get('link', ''))} {m.get('text')}")
+    check(len(mock.calls) == 1 and calls("快"), "只调了一次快档（判意图）")
+    st, body = send("考考我N4", learner="fresh")
+    m = reply(body)
+    check(unquote(m.get("link", "")) == "#做题?level=N4" and "还没有你的作答记录" in m.get("text", ""),
+          f"无记录、提到 N4：按 N4 出：{unquote(m.get('link', ''))}")
+    for said in ("给我出点题", "练练我薄弱的"):
+        st, body = send(said, learner="lowp")
+        m = reply(body)
+        links = m.get("links") or []
+        hrefs = [x.get("href", "") for x in links]
+        check(st == 200 and hrefs[:1] == [REVIEW] and links[0].get("text") == "复习薄弱点"
+              and m.get("link") == REVIEW,
+              f"「{said}」有记录：第一个链接是复习薄弱点：{[(x.get('text'), unquote(x.get('href', ''))) for x in links]}")
+        check(f"得分最低的是 {lb} {sb}、{lc} {sc_}" in m.get("text", ""),
+              f"回复里列出得分最低的点和分数：{m.get('text')}")
+        check(len(mock.calls) == 1 and calls("快") and not calls("平衡"), "不调回答模型（只有快档一次）")
+        check(hrefs[1:] == [f"{QUIZ}?lesson={qb['lesson']}"] and "练这一课" in links[1].get("text", ""),
+              f"附 progress_pick 推荐的那一课「练这一课」：{[unquote(h) for h in hrefs[1:]]}")
+    check(chats("lowp")[-1]["intent"] == "出题" and chats("lowp")[-1]["link"] == REVIEW,
+          "对话记录里意图是出题、链接是复习")
+    lv_pts = {lv: {x["point"] for x in rows(
+        "SELECT DISTINCT i.point FROM question q JOIN item i ON i.code = q.item WHERE q.level = ?", lv)}
+        for lv in ("N4", "N5")}
+    seen_review = False
+    for lv in ("N4", "N5"):
+        st, body = send(f"考考我{lv}", learner="lowp")
+        m = reply(body)
+        hrefs = [x.get("href", "") for x in m.get("links") or []]
+        weak = [f"{n} {v}" for p_, n, v in ((pb, lb, sb), (pc, lc, sc_)) if p_ in lv_pts[lv]]
+        check(unquote(hrefs[0]) == f"#做题?level={lv}" and f"按你说的出 {lv}（考点不限）" in m.get("text", ""),
+              f"有记录、提到 {lv}：按 {lv} 出：{[unquote(h) for h in hrefs]}")
+        if weak:
+            seen_review = True
+            check(hrefs[1:] == [REVIEW] and "、".join(weak) in m.get("text", ""),
+                  f"{lv} 有低分点 {weak}：附复习薄弱点并提了分数：{m.get('text')}")
+        else:
+            check(hrefs[1:] == [] and "复习薄弱点" not in m.get("text", ""),
+                  f"{lv} 没有低分点：只给按等级")
+        check(len(mock.calls) == 1, "只调了一次快档")
+    check(seen_review, "（至少一个等级走到了「附复习」那一支）")
+    st, body = send("给我出几道てから的题", learner="lowp")
+    m = reply(body)
+    check(m.get("link") == link_of(teru["code"]), f"指定了 てから：照旧按课：{unquote(m.get('link', ''))}")
+    st, body = send("给我出几道ために的题", learner="lowp")
+    m = reply(body)
+    check("mode=review" not in m.get("link", "") and "没找到" in m.get("text", ""),
+          f"指定了 ために（没有这课）：照旧退到按等级考点，不给复习：{unquote(m.get('link', ''))}")
+    st, body = send("我学得怎么样", learner="lowp")
+    hrefs = [x.get("href", "") for x in reply(body).get("links") or []]
+    check(REVIEW in hrefs, f"进度意图带复习薄弱点：{[unquote(h) for h in hrefs]}")
 
     print("十三、「教材」意图")
     st, body = send("N4有哪些课", learner="t1")

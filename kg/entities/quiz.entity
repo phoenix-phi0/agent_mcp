@@ -25,6 +25,10 @@
 #           自由练请老师总结完）时记下 attempt 当时最大的 id，这一轮做的题
 #           就是这个人 id 比它大的作答（queries/round_attempts.sql，请老师
 #           总结用）。同样是后加的列。
+#           mode 是做题模式：review = 复习薄弱点（#做题?mode=review，题从
+#           这个人的低分点、错题、久没做的已掌握点里挑，见
+#           queries/question_pick_review.sql），空 = 按等级考点或按课练。
+#           「开始」、按课进来都清掉它。也是后加的列，ensure_new_columns 补。
 #
 # 做题结果记进 attempt / mastery，point 是题目所属条目的**结构点**
 # （item.point）——attempt.point 有外键指向 node，条目编号写不进去。
@@ -62,5 +66,6 @@
   字段 round_n 整数 必填 默认 0 这一轮出了几道
   字段 seq 整数 必填 默认 0 出题序号
   字段 round_from 整数 必填 默认 0 本轮起点
+  字段 mode 文本 做题模式
   主键 learner
 结束

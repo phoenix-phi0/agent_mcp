@@ -1,7 +1,8 @@
 # 学习进度：学到哪了。全是读，数据来自 attempt / mastery / score。
 #
 #   概览        已掌握 x / 总知识点 y、累计答题、正确率；一道都没答过时换成
-#               一句「去做题页做几道」和链接
+#               一句「去做题页做几道」和链接；答过题的有「复习薄弱点」
+#               （#做题?mode=review，题从低分点、错题里挑）
 #   在学        答过的知识点：答对/答题、达不达标（按 80% / 8 题现算）
 #   现在能学    没掌握、前置都掌握了的（跟知识图谱上「可学」的是同一批）
 #   最近作答    20 条：时间、知识点、条目、对错
@@ -28,6 +29,7 @@
       显示 prog.score_text 当 String(shared.prog.empty)==='0'
       文案 当 String(shared.prog.empty)==='1' 还没有作答记录，去做题页做几道，这里就有进度了。
       链接 quiz 绑 prog.quiz_link 当 String(shared.prog.empty)==='1' 去做题页
+      链接 review 绑 prog.review_link 复习薄弱点
     结束
     区域 在学 当 lists.doing&&lists.doing.length
       列表 在学表 绑 doing

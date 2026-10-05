@@ -38,6 +38,14 @@
 # 「去问老师接着聊」；这条总结也进了问老师的对话记录。出新题时 summary 清空。
 # 模型出错时接口回 error，页面底部弹提示条。
 #
+# 复习薄弱点：问老师、学习进度页给的链接是 #做题?mode=review，「载入」带着
+# mode 进来，后端记下复习模式（quiz_state.mode），题从这个人的低分点、错题、
+# 久没做的已掌握点里混着挑；顶栏 scope 是「复习薄弱点：推量判断、授受…」。
+# 一轮 10 道，做完 phase=end，卡上「再来一轮」「请老师总结这一轮」（跟按课练
+# 同一张卡，「换一课」「回教材」地址空就不画）。复习时不出顶栏的「结束并请
+# 老师总结」（shared.round_mode==='review'）。一道都没答过：phase=noreview，
+# 一句「还没有作答记录，先按等级做几道」和「开始」。点「开始」退出复习模式。
+#
 # 「当」的条件里不能有空格（修饰值按空格切），所以写成 a==='x'&&b==='y'。
 
 界面 自定义 做题 载入 quiz_lesson
@@ -49,12 +57,18 @@
     动作 quiz_start 远程 开始
     显示 scope
     显示 stat
-    动作 quiz_summary 远程 当 !shared.round_lesson&&+shared.round_total>=5 次要 结束并请老师总结
+    动作 quiz_summary 远程 当 !shared.round_lesson&&shared.round_mode!=='review'&&+shared.round_total>=5 次要 结束并请老师总结
   结束
 
   # 还没出题时页面一大片空白、只有顶栏一个小按钮，看着像这页什么都做不了
   # （真有人这么说过）
   文案 当 !shared.phase 选好等级和考点，点上面的「开始」出第一道题。老师讲完课给的链接会直接出那一课的题。
+
+  # 复习薄弱点，但一道都没答过
+  分组 没记录 卡片 当 shared.phase==='noreview'
+    文案 还没有作答记录，先按等级做几道，我才知道你哪里薄弱。
+    动作 quiz_start 远程 开始
+  结束
 
   分组 题卡 卡片 翻页 card.code 当 shared.phase==='ask'||shared.phase==='done'
     显示 card.head

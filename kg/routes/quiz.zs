@@ -77,6 +77,7 @@
   设 状态.stat = {进度.stat 或}
   设 状态.round_total = {进度.total 或 0}
   设 状态.round_lesson = {进度.lesson 或}
+  设 状态.round_mode = {进度.mode 或}
   响应 state {状态}
 结束
 
@@ -89,6 +90,9 @@
 #   按课进来（#做题?lesson=hb-n4-118，老师、教材给的链接）  记下这一课
 #   下一题、再来一轮                                    用库里记的那一课
 #   开始（顶栏选等级考点）                              清掉，退出按课模式
+#
+# 复习薄弱点（#做题?mode=review，问老师、学习进度页给的链接）同样记在库里
+# （quiz_state.mode）：载入时记下，下一题、再来一轮看库里的，「开始」清掉。
 # 早先「下一题」靠前端把地址参数并进提交来留在这一课：哪次提交没带上
 # lesson（地址变了、直接调接口），下一道就悄悄换成了别的课的题。
 
@@ -130,7 +134,7 @@
   设 等级 = {pick_level 或 全部}
   设 考点 = {pick_kind 或 全部}
   设 课文 = {进度.lesson 或}
-  设 结果 = 执行 scripts/quiz_pick.zs 学习者={学习者} 等级={等级} 考点={考点} 课文={课文} 清零=0
+  设 结果 = 执行 scripts/quiz_pick.zs 学习者={学习者} 等级={等级} 考点={考点} 课文={课文} 清零=0 模式={进度.mode 或}
   如果 {结果.error 或} 不为空
     返回 {"error":"{结果.error}"} 404
   结束
@@ -138,7 +142,7 @@
 
 
 # 再来一轮：按课练、这一课一轮做完时卡上的按钮。还是库里记的那一课，从头
-# 一轮，计数清零。
+# 一轮，计数清零。复习薄弱点一轮做完时也是这个按钮：重新挑一轮。
 接口 POST /quiz/again 动作 quiz_again
   用包 db http
 
@@ -149,10 +153,13 @@
   设 查.learner = {学习者}
   设 进度 = 查一行表 app.db quiz_state_one {查}
   设 课文 = {进度.lesson 或}
+  设 模式 = {进度.mode 或}
   如果 {课文} 为空
-    返回 {"error":"现在不是按课练，点「开始」出题"} 400
+    如果 {模式 或 无} 不等于 review
+      返回 {"error":"现在不是按课练，点「开始」出题"} 400
+    结束
   结束
-  设 结果 = 执行 scripts/quiz_pick.zs 学习者={学习者} 等级={进度.pick_level} 考点={进度.pick_kind} 课文={课文} 清零=1
+  设 结果 = 执行 scripts/quiz_pick.zs 学习者={学习者} 等级={进度.pick_level} 考点={进度.pick_kind} 课文={课文} 清零=1 模式={模式}
   如果 {结果.error 或} 不为空
     返回 {"error":"{结果.error}"} 404
   结束
@@ -170,6 +177,11 @@
 # 具体课文时给的）：按它出第一道，顶栏填成这个等级考点。参数名特意不叫
 # pick_level / pick_kind——地址参数会盖掉每次提交的同名键，叫那个名字的话
 # 顶栏下拉就改不动了；叫 level / kind，之后「开始」「下一题」照旧看顶栏。
+#
+# 地址带 mode=review（复习薄弱点，问老师、学习进度页给的）：进复习模式出题。
+# 库里已经在复习、这一轮还没出够（刷新、来回切）就接着这一轮，不清零；
+# 不然开新的一轮。一道都没答过的人不报错，界面上说先按等级做几道
+# （phase=noreview），顶栏等级没选过的填成 N5。
 接口 POST /quiz/lesson 动作 quiz_lesson
   用包 db http
 
@@ -182,20 +194,44 @@
   设 进度 = 查一行表 app.db quiz_state_one {查}
   设 等级 = {进度.pick_level 或 全部}
   设 考点 = {进度.pick_kind 或 全部}
+  设 模式 = {mode 或}
+  设 清 = 1
   如果 {课文} 为空
-    如果 {level 或} 为空
-      如果 {kind 或} 为空
-        返回 {"error":"缺 lesson（哪一课），或者 level / kind（按等级、考点）"} 400
+    如果 {模式 或 无} 等于 review
+      # 已经在复习、这一轮没出够：接着这一轮
+      如果 {进度.mode 或 无} 等于 review
+        如果 {进度.round_n 或 0} 小于 10
+          设 清 = 0
+        结束
       结束
+    否则
+      设 模式 = 
+      如果 {level 或} 为空
+        如果 {kind 或} 为空
+          返回 {"error":"缺 lesson（哪一课），或者 level / kind（按等级、考点），或者 mode=review"} 400
+        结束
+      结束
+      设 等级 = {level 或 全部}
+      设 考点 = {kind 或 全部}
     结束
-    设 等级 = {level 或 全部}
-    设 考点 = {kind 或 全部}
+  否则
+    设 模式 = 
   结束
-  设 结果 = 执行 scripts/quiz_pick.zs 学习者={学习者} 等级={等级} 考点={考点} 课文={课文} 清零=1
+  设 结果 = 执行 scripts/quiz_pick.zs 学习者={学习者} 等级={等级} 考点={考点} 课文={课文} 清零={清} 模式={模式}
   如果 {结果.error 或} 不为空
     返回 {"error":"{结果.error}"} 404
   结束
   设 表.pick_level = {等级}
+  # 复习但一道没答过：界面让先按等级做几道，等级没选过就填 N5
+  如果 {结果.empty 或 0} 等于 1
+    如果 {等级} 等于 全部
+      设 表.pick_level = N5
+      # 记进库：之后「进入时」的 /quiz/state 按库里的填顶栏，不记会变回「全部」
+      设 级.learner = {学习者}
+      设 级.level = N5
+      设 影响 = 写库表 app.db quiz_state_level {级}
+    结束
+  结束
   设 表.pick_kind = {考点}
   响应 form {表}
 结束
@@ -343,6 +379,7 @@
   设 状态.stat = {进度.stat}
   设 状态.round_total = {进度.total}
   设 状态.round_lesson = {进度.lesson}
+  设 状态.round_mode = {进度.mode}
   响应 state {状态}
 结束
 
@@ -423,8 +460,8 @@
     设 答话.link_text = {链.text1}
     设 答话.links = {链文}
     设 影响 = 写库表 app.db chat_add {答话}
-    # 自由练：这一轮到此结束
-    如果 {本轮.lesson 或} 为空
+    # 自由练：这一轮到此结束（复习薄弱点跟按课练一样，「再来一轮」才开新的）
+    如果 {本轮.fixed} 等于 0
       设 影响 = 写库表 app.db quiz_state_round_end {查}
     结束
   结束
@@ -441,7 +478,7 @@
     设 总结.practice =
   结束
   设 状态.summary = {总结}
-  如果 {本轮.lesson 或} 为空
+  如果 {本轮.fixed} 等于 0
     # 自由练结束了：题卡收起，计数清零，等着点「开始」
     设 进度 = 查一行表 app.db quiz_state_one {查}
     设 状态.phase =
