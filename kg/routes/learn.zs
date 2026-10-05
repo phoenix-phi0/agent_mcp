@@ -41,6 +41,8 @@
   设 记.point = {point}
   设 记.item = {item 或}
   设 记.correct = {对错}
+  # 作答内容这里没有（只报对错），记空
+  设 记.answer =
 
   事务 app.db
     设 影响 = 写库表 app.db attempt_insert {记}

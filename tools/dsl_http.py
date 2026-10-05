@@ -330,6 +330,18 @@ def pick_port(host: str, lo: int, hi: int):
     return None, hi - lo + 1
 
 
+def _model_failure(exc):
+    """顺着错误链找模型调用抛的那个异常（dsl_model 打了 model_call 标记）。
+    跟 db_errors.find_client_error 一个找法。"""
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        if getattr(exc, "model_call", False):
+            return exc
+        seen.add(id(exc))
+        exc = exc.__cause__ or exc.__context__
+    return None
+
+
 class Router:
     def __init__(self, routes: Path, workspace: Path, sessions: Path,
                  real: bool = True, verbose: bool = False):
@@ -602,6 +614,14 @@ class Router:
             ce = find_client_error(e)
             if ce is not None:
                 return jsonify({"error": ce.message}), ce.status
+            # 模型那头出错（dsl_model 的「问」打的标记）：不是脚本写错了，
+            # 回 502 和一句人话放在 error 里——没有消息流的界面弹提示条，
+            # 有流的进流。原文进日志
+            mc = _model_failure(e)
+            if mc is not None:
+                print(f"[模型出错] {ep.src.name}: {mc}", file=sys.stderr, flush=True)
+                why = (str(mc).strip().splitlines() or [type(mc).__name__])[0][:120]
+                return jsonify({"error": f"模型这次没有回应（{why}），过一会儿再试。"}), 502
             print(f"[接口出错] {ep.src.name}: {e}", file=sys.stderr, flush=True)
             return jsonify({"messages": [
                 {"who": "脚本出错", "text": f"{ep.src.name}: {e}",
@@ -611,6 +631,11 @@ class Router:
             ce = find_client_error(e)
             if ce is not None:
                 return jsonify({"error": ce.message}), ce.status
+            mc = _model_failure(e)
+            if mc is not None:
+                print(f"[模型出错] {ep.src.name}: {mc}", file=sys.stderr, flush=True)
+                why = (str(mc).strip().splitlines() or [type(mc).__name__])[0][:120]
+                return jsonify({"error": f"模型这次没有回应（{why}），过一会儿再试。"}), 502
             print(f"[接口出错] {ep.src.name}:\n{traceback.format_exc(limit=3)}",
                   file=sys.stderr, flush=True)
             return jsonify({"messages": [

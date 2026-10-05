@@ -229,9 +229,16 @@ class ModelMixin:
     # ------------------------------------------------------------------
 
     def _generate(self, prompt: str, model: str | None = None) -> str:
-        return self.client.chat(prompt, system=self.system,
-                                temperature=self.temperature,
-                                model=model or self.model)
+        # 模型那头出错（超时、进程退出、网络）：异常原样抛，只打个标记。
+        # HTTP 接口据此回 502 和一句人话（见 dsl_http 的 dispatch），
+        # 不当成脚本写错了回 500 加一段原文
+        try:
+            return self.client.chat(prompt, system=self.system,
+                                    temperature=self.temperature,
+                                    model=model or self.model)
+        except Exception as e:
+            e.model_call = True
+            raise
 
     def _do_ask(self, rest: str, lineno: int) -> None:
         """问 X = 提示词 [附 文件] [带工具 …] [重试 N 次 直到 条件] [用 模型]

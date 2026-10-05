@@ -21,6 +21,11 @@
 //     是易混对比题）；点「开始」退出按课练，地址回到 #做题
 //   选项打乱：按钮上的字母跟题库里的不一样，判题、标红绿按界面上的位置
 //   达标喜报：在做题页的题卡上看得见；问老师的消息流里没有它
+//   请老师总结：按课做完一轮 → 「请老师总结这一轮」→ 等待的那句话 → 总结卡片
+//     出现在做题页 → 「去问老师接着聊」到问老师页，历史里有这条总结；自由练
+//     答满 5 道顶栏才出「结束并请老师总结」，点了题卡收起、计数清零。
+//     假模型按规则文件回话（DSL_MOCK_SCRIPT）；总结请求在测试这边压 600 毫秒，
+//     模拟模型慢，好看见等待的那句话
 
 const { execFileSync, spawn } = require("child_process");
 const fs = require("fs");
@@ -32,6 +37,8 @@ const PROJ = "/tmp/e2e_quiz";
 const PORT = 8192;
 const BASE = `http://127.0.0.1:${PORT}`;
 const WEB = PROJ + "/web";
+const MOCK = PROJ + "/mock.json";
+const SUMMARY = "E2E老师总结：本轮有两道错在易混的说法上，先回去读课文再练。";
 
 let pass = 0, fail = 0;
 const say = (ok, msg) => { ok ? pass++ : fail++; console.log((ok ? "  ✓ " : "  ✗ ") + msg); };
@@ -63,6 +70,10 @@ function origOptions(q) {
 }
 
 const calls = [];
+// 路径 → 压多少毫秒再发（模拟慢的接口）
+const slow = {};
+// 路径 → 不发请求，直接回这个（状态码, body）——模拟模型出错时路由器回的 502
+const fake = {};
 function openPage(hash) {
   const html = fs.readFileSync(WEB + "/index.html", "utf8")
     .replace(/<script src="[^"]*"><\/script>/g, "");
@@ -70,6 +81,12 @@ function openPage(hash) {
   const w = dom.window;
   w.fetch = async (u, o = {}) => {
     const url = new URL(u, BASE);
+    if (slow[url.pathname]) await sleep(slow[url.pathname]);
+    if (fake[url.pathname]) {
+      const [st, body] = fake[url.pathname];
+      calls.push({ path: url.pathname, status: st, fake: true });
+      return new Response(JSON.stringify(body), { status: st, headers: { "Content-Type": "application/json" } });
+    }
     const r = await fetch(url, o);
     calls.push({ path: url.pathname, status: r.status });
     return r;
@@ -135,9 +152,13 @@ function openPage(hash) {
     "r = c.post('/quiz/import', json={'form': {'rows': read_bank(BANK)}})",
     "assert r.status_code == 200, r.get_json()",
   ].join("\n")], { cwd: MCP, encoding: "utf8" });
+  // 总结的系统提示词里有「总结这一轮」；别的（问老师）回一句默认的
+  fs.writeFileSync(MOCK, JSON.stringify({
+    rules: [{ when: ["总结这一轮"], reply: SUMMARY }], default: "老师的回答" }));
 
   const server = spawn(PY, ["-m", "gen", "run", PROJ, "--port", String(PORT), "--不开浏览器"],
-                       { cwd: MCP, stdio: ["ignore", "pipe", "pipe"] });
+                       { cwd: MCP, stdio: ["ignore", "pipe", "pipe"],
+                         env: Object.assign({}, process.env, { DSL_MOCK_SCRIPT: MOCK }) });
   let log = "";
   server.stdout.on("data", d => { log += d; });
   server.stderr.on("data", d => { log += d; });
@@ -351,9 +372,97 @@ function openPage(hash) {
   say(!p.$$(".stream .smsg").some(e => e.textContent.includes("达标了")), "切到问老师页：消息流里没有喜报");
   p.close();
 
+  console.log("七之三、请老师总结：按课练一轮");
+  // 题少的一课，好做完一轮
+  const S = db("SELECT lesson, count(*) n FROM question WHERE lesson IS NOT NULL GROUP BY lesson" +
+               " HAVING count(*) BETWEEN 3 AND 5 ORDER BY lesson LIMIT 1")[0];
+  const sTitle = db(`SELECT title FROM lesson WHERE code = '${S.lesson}'`)[0].title;
+  db("DELETE FROM chat_message");
+  p = openPage("#" + encodeURIComponent("做题") + "?lesson=" + encodeURIComponent(S.lesson));
+  await waitFor(() => p.card());
+  say(!p.btn("请老师总结这一轮") && !p.btn("结束并请老师总结"), "一轮没做完：没有总结按钮");
+  let rounds = 0;
+  while (rounds < 20 && !p.btn("请老师总结这一轮")) {
+    await p.answerAny();
+    await waitFor(() => p.btn("下一题"));
+    p.btn("下一题").click();
+    await waitFor(() => p.btn("请老师总结这一轮") || (p.card() && !p.btn("下一题")));
+    rounds++;
+  }
+  const ended = state();
+  say(!!p.btn("请老师总结这一轮") && p.btn("再来一轮"),
+      `做了 ${rounds} 道，一轮做完：卡上有「再来一轮」和「请老师总结这一轮」（${ended.right}/${ended.total}）`);
+  say(!p.btn("结束并请老师总结"), "按课练时顶栏没有「结束并请老师总结」");
+  slow["/quiz/summary"] = 600;
+  calls.length = 0;
+  p.btn("请老师总结这一轮").click();
+  say(await waitFor(() => p.$$("p.copy").some(e => e.textContent.includes("老师正在看你的作答")), 500),
+      "点了：出现「老师正在看你的作答…」");
+  say(p.btn("请老师总结这一轮").disabled && p.btn("再来一轮").disabled, "等的时候按钮锁着");
+  const sumCard = () => p.$$(".card").find(e => e.textContent.includes(SUMMARY));
+  say(await waitFor(() => sumCard(), 4000), "总结出现在做题页的一张卡片上");
+  delete slow["/quiz/summary"];
+  say(await waitFor(() => !p.$$("p.copy").some(e => e.textContent.includes("老师正在看你的作答"))),
+      "等待的那句话收起来了");
+  say(calls.some(c => c.path === "/quiz/summary" && c.status === 200), "调了 /quiz/summary");
+  const sumLinks = () => p.$$("a").filter(a => ["去问老师接着聊", "读课文", "再练这一课"].includes(a.textContent.trim()));
+  const sl = sumLinks().map(a => [a.textContent.trim(), decodeURIComponent(a.getAttribute("href"))]);
+  say(sl.some(([t, h]) => t === "去问老师接着聊" && h === "#问老师")
+      && sl.some(([t, h]) => t === "读课文" && h === `#教材?lesson=${S.lesson}`),
+      `链接：${JSON.stringify(sl)}`);
+  say(!!p.btn("再来一轮"), "那张一轮做完的卡还在（再来一轮）");
+  const chatRows = db("SELECT role, intent, content FROM chat_message ORDER BY id");
+  say(chatRows.length === 2 && chatRows[1].content === SUMMARY && chatRows.every(r => r.intent === "总结")
+      && chatRows[0].content.includes(`《${sTitle}》`),
+      `对话记录两条：${chatRows.map(r => r.role + "：" + r.content.slice(0, 30)).join(" / ")}`);
+  sumLinks().find(a => a.textContent.trim() === "去问老师接着聊").click();
+  say(await waitFor(() => p.hash() === "#问老师"), `点「去问老师接着聊」到了 ${p.hash()}`);
+  say(await waitFor(() => p.$$(".stream .smsg").some(e => e.textContent.includes(SUMMARY))),
+      "问老师页的历史里有这条总结");
+  say(p.$$(".stream .smsg").some(e => e.textContent.includes("请老师总结")), "学习者那条（请老师总结）也在");
+  p.close();
+
+  console.log("七之四、自由练：答满 5 道才出「结束并请老师总结」");
+  p = openPage("#" + encodeURIComponent("做题"));
+  await waitFor(() => p.selects().length === 2);
+  p.pick(p.selects()[0], "N5");
+  p.pick(p.selects()[1], "全部");
+  p.btn("开始").click();
+  await waitFor(() => p.card());
+  const seen = [];
+  for (let i = 0; i < 5; i++) {
+    await p.answerAny();
+    await waitFor(() => p.stat() === `这一轮 ${state().right}/${i + 1}`);
+    seen.push(!!p.btn("结束并请老师总结"));
+    if (i < 4) {
+      const b4 = state().current;
+      p.btn("下一题").click();
+      await waitFor(() => state().current !== b4);
+    }
+  }
+  say(seen.slice(0, 4).every(x => !x) && seen[4], `第 5 道答完才出按钮：${seen.join(",")}`);
+  p.btn("结束并请老师总结").click();
+  say(await waitFor(() => p.$$(".card").some(e => e.textContent.includes(SUMMARY))), "总结卡片出来了");
+  say(await waitFor(() => !p.btn("下一题") && p.stat() === "这一轮 0/0" && !p.btn("结束并请老师总结")),
+      `这一轮结束：题卡收起、计数清零（${p.stat()}）、按钮收起`);
+  // 出错时：做题页没有消息流，error 弹成底部的提示条
+  const toast = () => (p.$(".toast-no") || {}).textContent || "";
+  const vm = p.$("#app")._vnode.component.setupState;
+  vm.submitTo("quiz_summary");
+  say(await waitFor(() => toast().includes("这一轮还没有做题")), `这一轮 0 道再请总结：提示条「${toast()}」`);
+  fake["/quiz/summary"] = [502, { error: "模型这次没有回应（claude 超过 180 秒没有返回），过一会儿再试。" }];
+  await waitFor(() => !vm.busy);
+  vm.submitTo("quiz_summary");
+  say(await waitFor(() => toast().includes("模型这次没有回应")), `模型出错（502）：提示条「${toast()}」`);
+  delete fake["/quiz/summary"];
+  p.btn("开始").click();
+  say(await waitFor(() => p.card() && !p.$$(".card").some(e => e.textContent.includes(SUMMARY))),
+      "点开始出新题：总结卡片收起");
+  p.close();
+
   console.log("八、服务端");
   say(!/Traceback/.test(log), "服务日志里没有 Traceback");
-  say(!calls.some(c => c.status >= 500), "没有 5xx");
+  say(!calls.some(c => c.status >= 500 && !c.fake), "没有 5xx（测试自己造的 502 不算）");
 
   console.log(`\n${"=".repeat(50)}\n通过 ${pass}，失败 ${fail}`);
   if (fail) console.log("\n服务日志最后几行：\n" + log.split("\n").slice(-15).join("\n"));

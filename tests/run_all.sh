@@ -61,6 +61,7 @@ run 对账清理    $PY tests/kg/test_prune.py
 run 课文        $PY tests/kg/test_lesson.py
 run 语法题库    $PY tests/quiz/test_bunpou.py
 run 做题        $PY tests/kg/test_quiz.py
+run 做题总结    $PY tests/kg/test_quiz_summary.py
 run 老师讲语法  $PY tests/kg/test_teacher_bunpou.py
 run 问老师      $PY tests/kg/test_teacher_chat.py
 run 教材和进度  $PY tests/kg/test_pages.py

@@ -28,6 +28,14 @@
 # 之后「下一题」看后端记的，一直留在这一课里（每第三道混一道易混对比题）。
 # 点顶栏「开始」退出按课练、地址回到 #做题，按等级、考点出。
 #
+# 请老师总结（/quiz/summary）：按课练一轮做完时卡上的「请老师总结这一轮」；
+# 自由练（不是按课练，shared.round_lesson 空）这一轮答满 5 道后顶栏出现
+# 「结束并请老师总结」。学习者点了才调模型。等的十几秒里按钮都锁着
+# （busy），下面一句「老师正在看你的作答…」（pending 是正在请求的动作名）。
+# 总结回来放在 shared.summary，画成一张总结卡片：正文和「读课文」「再练这一课」
+# 「去问老师接着聊」；这条总结也进了问老师的对话记录。出新题时 summary 清空。
+# 模型出错时接口回 error，页面底部弹提示条。
+#
 # 「当」的条件里不能有空格（修饰值按空格切），所以写成 a==='x'&&b==='y'。
 
 界面 自定义 做题 载入 quiz_lesson
@@ -39,6 +47,7 @@
     动作 quiz_start 远程 开始
     显示 scope
     显示 stat
+    动作 quiz_summary 远程 当 !shared.round_lesson&&+shared.round_total>=5 次要 结束并请老师总结
   结束
 
   # 还没出题时页面一大片空白、只有顶栏一个小按钮，看着像这页什么都做不了
@@ -67,6 +76,18 @@
     动作 quiz_again 远程 再来一轮
     链接 more 绑 round.more 换一课
     链接 back 绑 round.back 次要 回教材看这一课
+    动作 quiz_summary 远程 请老师总结这一轮
+  结束
+
+  文案 当 pending==='quiz_summary' 老师正在看你的作答…（要十几秒）
+
+  分组 总结 卡片 当 shared.summary&&shared.summary.text
+    显示 summary.text 正文
+  结束
+  分组 下一步 横排 间距 12px 对齐 center 当 shared.summary&&shared.summary.text
+    链接 chat 绑 summary.chat 去问老师接着聊
+    链接 read 绑 summary.read 次要 读课文
+    链接 practice 绑 summary.practice 次要 再练这一课
   结束
 
   文案 题目来自 hanabira（CC BY 4.0）改写的语法课。选择题点选项就交，接续题把整段写出来。
