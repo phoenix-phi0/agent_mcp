@@ -33,7 +33,7 @@
 结束
 
 
-# 一个知识点的全貌：直接前置、直接后续、挂着的词。
+# 一个知识点的全貌：直接前置、直接后续、挂着的词，还有自己答对/答题。
 接口 POST /node/one 动作 node_detail
   用包 db http
   设 一条 = 查一行 app.db node_one code={code}
@@ -52,4 +52,16 @@
   设 三组.point_words = {词表}
   响应 form {一条}
   响应 lists {三组}
+
+  # 这个点答对几道、答了几道（mastery 左连接，没做过说「还没做过」）。
+  # 学习者不传就是 me，跟 node_list 同一个默认值
+  设 学习者 = {learner 或}
+  如果 {学习者} 为空
+    设 学习者 = me
+  结束
+  设 这点.learner = {学习者}
+  设 这点.code = {code}
+  设 成绩 = 查一值表 app.db node_tally {这点}
+  设 状态.node_tally = {成绩}
+  响应 state {状态}
 结束

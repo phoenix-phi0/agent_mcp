@@ -63,6 +63,7 @@ run 语法题库    $PY tests/quiz/test_bunpou.py
 run 做题        $PY tests/kg/test_quiz.py
 run 老师讲语法  $PY tests/kg/test_teacher_bunpou.py
 run 问老师      $PY tests/kg/test_teacher_chat.py
+run 教材和进度  $PY tests/kg/test_pages.py
 run 并发用包    $PY tests/dsl/test_use_concurrent.py
 run 假模型脚本  $PY tests/dsl/test_mock_script.py
 run 模型可选    $PY tests/dsl/test_model_select.py
@@ -81,6 +82,7 @@ run 导航路由E2E bash -c "cd $M/tests/e2e && node route_run.js"
 run 显式主键E2E bash -c "cd $M/tests/e2e && node pk_run.js"
 run 做题页E2E   bash -c "cd $M/tests/e2e && node quiz_run.js"
 run 问老师E2E   bash -c "cd $M/tests/e2e && node teacher_run.js"
+run 教材进度E2E bash -c "cd $M/tests/e2e && node pages_run.js"
 run app2编译    bash -c "cd $M/app2 && $PY build.py"
 
 # 上传要先起 dsl/ 的服务
