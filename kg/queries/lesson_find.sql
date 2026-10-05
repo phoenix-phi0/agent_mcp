@@ -13,7 +13,8 @@
 --
 -- body 是给模型看的课文正文（标题、一句话、接续、讲解、例句原文），末尾带
 -- 两个换行，脚本里直接一课接一课拼起来。link 是做题页按课文出题的地址，
--- 写法跟 kg/__main__.py 的 quiz_link 一样（界面名编过码）。
+-- 写法跟 kg/__main__.py 的 quiz_link 一样（界面名编过码）；read 是教材页读
+-- 这一课的地址（跟 lesson_list 的 href 一样），老师回复里的「读课文」用它。
 WITH kw AS (
   SELECT DISTINCT replace(replace(trim(value), '～', ''), '〜', '') AS k
   FROM json_each(CASE WHEN json_valid(:keywords) AND json_type(:keywords) = 'array'
@@ -44,8 +45,9 @@ scored AS (
          (SELECT count(*) FROM question q WHERE q.lesson = l.code) AS n
   FROM lesson l JOIN hit h ON h.code = l.code
 )
-SELECT code, level, title, n, score, strong,
+SELECT code, level, title, summary, n, score, strong,
        '#%E5%81%9A%E9%A2%98?lesson=' || code AS link,
+       '#%E6%95%99%E6%9D%90?lesson=' || code AS read,
        '《' || title || '》（' || level || '，课文 ' || code || '）' || char(10)
          || summary || char(10)
          || CASE WHEN coalesce(formation, '') <> '' THEN '接续：' || formation || char(10) ELSE '' END

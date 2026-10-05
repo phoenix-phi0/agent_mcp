@@ -29,6 +29,13 @@
   八、档位：判意图用「快」，回答用「平衡」
   九、不同学习者的对话互不串
   十、进页面只回 state 不推消息；空消息 400 不记；已有库补建表不碰学习记录
+  十一、进度进上下文：讲解的提示词里有进度摘要——没答过题是「还没有作答记录」；
+      用做题接口答三题（一对两错）后是对的数字和答错的点；别的学习者不串
+  十二、「进度」意图：平衡档，提示词以进度为主，回复带读课文、做题链接
+  十三、「教材」意图：提示词里有课文目录（问 N4 只列 N4，不问等级列全部），
+      问「有没有讲〜的课」附那一课的读课文
+  十四、讲解附「读课文」（指向 lesson_find 命中的课）和「练一练」两个链接；
+      links 存进库，/teacher/state 拉回来还在；老库补 links 列，旧链接照样还原
 """
 
 import json
@@ -42,7 +49,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from tests.kg.helpers import client, import_graph, make_ws    # noqa: E402
-from kg.__main__ import BANK, ensure_new_tables, quiz_link, read_bank  # noqa: E402
+from kg.__main__ import (BANK, ensure_new_columns, ensure_new_tables,  # noqa: E402
+                          quiz_link, read_bank)
 from tools import config                                       # noqa: E402
 from tools.mock import MockClient                              # noqa: E402
 
@@ -69,6 +77,11 @@ INTENTS = {
     "坏的 JSON 来一个": "这不是 JSON，判定坏了",
     "intent 乱写": '{"intent":"聊天吧","keywords":[]}',
     "空回复": "",
+    "我学得怎么样": '{"intent":"进度","keywords":[],"level":"","kind":"","grade":"否"}',
+    "N4还差什么": '{"intent":"进度","keywords":[],"level":"N4","kind":"","grade":"否"}',
+    "N4有哪些课": '{"intent":"教材","keywords":[],"level":"N4","kind":"","grade":"否"}',
+    "教材里有什么": '{"intent":"教材","keywords":[],"level":"","kind":"","grade":"否"}',
+    "有没有讲てから的课": '{"intent":"教材","keywords":["てから"],"level":"","kind":"","grade":"否"}',
 }
 DEFAULT_INTENT = '{"intent":"讲解","keywords":[],"level":"","kind":"","grade":"否"}'
 
@@ -252,12 +265,158 @@ def main():
     check([x["text"] for x in talk] == a and all("乙" not in x["text"] for x in talk),
           "甲进页面只看到自己的")
 
+    READ = "#%E6%95%99%E6%9D%90?lesson="     # 教材页读一课（界面名编过码）
+    QUIZ = "#%E5%81%9A%E9%A2%98"               # 做题页
+
+    def answer(learner, right):
+        """用做题页的接口答当前这道：right=True 交答案，否则交一个错的。答完点下一题。"""
+        cur = rows("SELECT q.code, q.qtype, q.answer FROM quiz_state s"
+                   " JOIN question q ON q.code = s.current WHERE s.learner = ?", learner)[0]
+        val = cur["answer"]
+        if not right:
+            val = next(x for x in "ABCD" if x != val) if cur["qtype"] == "选择" else "わざと間違える"
+        key = "choice" if cur["qtype"] == "选择" else "given"
+        r = c.post("/quiz/answer", json={"form": {"learner": learner, key: val}})
+        assert r.status_code == 200, r.get_json()
+        c.post("/quiz/next", json={"form": {"learner": learner}})
+
+    print("十一、进度进上下文")
+    total = rows("SELECT count(*) n FROM node")[0]["n"]
+    send("てから怎么用", learner="p1")
+    p = calls("平衡")[0]["prompt"]
+    check("还没有作答记录" in p and f"已掌握 0 / 总知识点 {total}" in p,
+          "没答过题：讲解提示词里有「还没有作答记录」和已掌握 0 / 总数")
+    check("累计答题" not in p and "最近答错" not in p, "没答过题时不列答题数、答错（免得模型从「无」里编）")
+    check("现在能学" in p, "列了现在能学的点")
+    r = c.post("/quiz/lesson", json={"form": {"learner": "p1", "lesson": teru["code"]}})
+    check(r.status_code == 200, f"做题页按《{teru['title']}》出题：{r.status_code}")
+    answer("p1", True)
+    answer("p1", False)
+    answer("p1", False)
+    att = rows("SELECT correct FROM attempt WHERE learner = 'p1' ORDER BY id")
+    check([x["correct"] for x in att] == [1, 0, 0], f"学习记录是一对两错：{att}")
+    wrong = rows("SELECT DISTINCT coalesce(n.label, a.point) AS pl, coalesce(i.label, '') AS il"
+                 " FROM attempt a LEFT JOIN node n ON n.code = a.point"
+                 " LEFT JOIN question q ON q.code = a.item LEFT JOIN item i ON i.code = q.item"
+                 " WHERE a.learner = 'p1' AND a.correct = 0")
+    doing = rows("SELECT n.label, m.right, m.total FROM mastery m JOIN node n ON n.code = m.point"
+                 " WHERE m.learner = 'p1'")
+    send("てから怎么用", learner="p1")
+    p = calls("平衡")[0]["prompt"]
+    check("累计答题 3，答对 1，正确率 33%" in p, "提示词里是累计答题 3、答对 1、正确率 33%")
+    check("还没有作答记录" not in p, "有记录了就不再说「还没有作答记录」")
+    check(all(f"{w['pl']}·{w['il']}" in p if w["il"] else w["pl"] in p for w in wrong),
+          f"最近答错的点（知识点·条目）在提示词里：{[(w['pl'], w['il']) for w in wrong]}")
+    check(all(f"{d['label']} {d['right']}/{d['total']}" in p for d in doing),
+          f"在学的点和答对/答题：{[(d['label'], d['right'], d['total']) for d in doing]}")
+    block = p.split("学习进度")[1].split("】")[0]
+    check(len(block) <= 820, f"进度摘要控制在 800 字以内：{len(block)} 字")
+    send("てから怎么用", learner="p2")
+    p = calls("平衡")[0]["prompt"]
+    check("还没有作答记录" in p and "累计答题 3" not in p, "别的学习者（p2）的提示词里没有 p1 的进度")
+    send("坏的 JSON 来一个", learner="p1")
+    p = calls("平衡")[0]["prompt"]
+    check(chats("p1")[-1]["intent"] == "讲解" and "累计答题 3" in p, "意图 JSON 坏了按讲解兜底，进度照样带上")
+
+    print("十二、「进度」意图")
+    st, body = send("我学得怎么样", learner="p1")
+    m = reply(body)
+    check(st == 200 and m.get("text") == REPLY and (body.get("state") or {}).get("intent") == "进度",
+          f"判成进度，回了老师的话：{st} {(body.get('state') or {}).get('intent')}")
+    check(chats("p1")[-1]["intent"] == "进度", "库里意图记成进度")
+    mid = calls("平衡")
+    check(len(calls("快")) == 1 and len(mid) == 1 and mid[0]["model"] == str(config.resolve_model("平衡")),
+          f"判意图快档一次，回答平衡档一次：{[x.get('tier') for x in mock.calls]}")
+    p = mid[0]["prompt"]
+    check(p.startswith("下面是这个学生在网站上的学习进度") and "以学习进度为主" in p,
+          "提示词以进度为主（开头就是进度，要求以进度为主回答）")
+    check("累计答题 3，答对 1，正确率 33%" in p and "按进度推荐的下一课" in p, "提示词里有进度数字和推荐的课")
+    check("例句：" not in p and teru["explanation"] not in p, "不塞课文正文")
+    check("不要编造进度里没有的数据" in (mid[0]["system"] or ""), "系统提示词说了不编造进度里没有的数据")
+    links = m.get("links") or []
+    hrefs = [x.get("href", "") for x in links]
+    check(len(links) == 2 and hrefs[0].startswith(READ) and hrefs[1].startswith(QUIZ),
+          f"回复带两个链接：读课文、做题 {[(x.get('text'), unquote(x.get('href', ''))) for x in links]}")
+    pick = hrefs[0][len(READ):] if hrefs and hrefs[0].startswith(READ) else ""
+    wrong_lessons = {x["lesson"] for x in rows(
+        "SELECT q.lesson FROM attempt a JOIN question q ON q.code = a.item"
+        " WHERE a.learner = 'p1' AND a.correct = 0")}
+    check(pick in wrong_lessons and pick in p, f"推荐的是答错过的那一课（复习），提示词里写了它：{pick}")
+    check(hrefs[1:] and hrefs[1] == f"{QUIZ}?lesson={pick}" and "练这一课" in links[1].get("text", ""),
+          f"「练这一课」指向同一课：{hrefs[1:]}")
+    check(m.get("link") == hrefs[1] if len(hrefs) > 1 else False, "旧的 link 字段给的是做题链接（兼容）")
+    st, body = send("我学得怎么样", learner="p3")
+    m = reply(body)
+    p = calls("平衡")[0]["prompt"]
+    hrefs = [x.get("href", "") for x in m.get("links") or []]
+    first = rows("SELECT l.code FROM lesson l WHERE l.level = 'N5' AND EXISTS"
+                 " (SELECT 1 FROM question q WHERE q.lesson = l.code) ORDER BY l.code")[0]["code"]
+    check("还没有作答记录" in p and hrefs[:1] == [READ + first],
+          f"没答过题的学习者：进度说还没有记录，推荐 N5 有题的第一课 {first}：{hrefs}")
+    st, body = send("N4还差什么", learner="p1")
+    m = reply(body)
+    p = calls("平衡")[0]["prompt"]
+    check("N4 还没掌握的知识点" in p, "问 N4 还差什么：进度摘要里多一行 N4 还没掌握的知识点")
+    lv = rows("SELECT level FROM lesson WHERE code = ?",
+              (m.get("links") or [{}])[0].get("href", "")[len(READ):])
+    check(lv and lv[0]["level"] == "N4", f"推荐的课在 N4 里：{lv}")
+
+    print("十三、「教材」意图")
+    st, body = send("N4有哪些课", learner="t1")
+    m = reply(body)
+    check(st == 200 and chats("t1")[-1]["intent"] == "教材", f"判成教材：{st}")
+    mid = calls("平衡")
+    p = mid[0]["prompt"] if mid else ""
+    n4 = rows("SELECT title FROM lesson WHERE level = 'N4' ORDER BY code")
+    check(len(mid) == 1 and f"N4（{len(n4)} 课）：" in p and all(x["title"] in p for x in n4),
+          f"平衡档；提示词里有 N4 的课文目录（{len(n4)} 课，标题都在）")
+    check("N5（" not in p and "N3（" not in p, "只列了 N4 这一级")
+    check("课文目录" in p and "目录里没有的课不要编" in p, "让老师按目录回答、不编课")
+    check(any(x.get("href") == "#%E6%95%99%E6%9D%90" for x in m.get("links") or []),
+          f"附了「打开教材」：{[x.get('text') for x in m.get('links') or []]}")
+    send("教材里有什么", learner="t1")
+    p = calls("平衡")[0]["prompt"]
+    cat = p.split("课文目录（按等级分组，只有标题）：【")[1].split("】")[0]
+    check(all(f"{lv}（" in cat for lv in ("N5", "N4", "N3", "N2", "N1")) and len(cat) <= 1502,
+          f"不问等级：按等级分组列全部，控制长度（{len(cat)} 字）")
+    check(cat.index("N5（") < cat.index("N4（") < cat.index("N1（"), "N5 在前")
+    st, body = send("有没有讲てから的课", learner="t1")
+    m = reply(body)
+    p = calls("平衡")[0]["prompt"]
+    hrefs = [x.get("href") for x in m.get("links") or []]
+    check(hrefs and hrefs[0] == READ + teru["code"] and f"课文 {teru['code']}" in p,
+          f"问有没有讲 てから 的课：提示词里有那一课，第一个链接读它 {[unquote(h) for h in hrefs]}")
+
+    print("十四、讲解的多个链接、存库、拉回来")
+    st, body = send("てから怎么用", learner="lk")
+    m = reply(body)
+    links = m.get("links") or []
+    check(len(links) == 2 and links[0].get("href") == READ + teru["code"]
+          and links[0].get("text") == f"读课文：《{teru['title']}》",
+          f"第一个链接是读课文，指向 lesson_find 命中的《{teru['title']}》：{links[:1]}")
+    check(links[1:] and links[1].get("href") == link_of(teru["code"]) and "练一练" in links[1].get("text", ""),
+          f"第二个是练一练：{links[1:]}")
+    check(m.get("link") == link_of(teru["code"]), "旧的 link 字段照旧（做题链接）")
+    saved = chats("lk")[-1]
+    check(json.loads(saved["links"] or "[]") == links, f"links 原样存进 chat_message.links：{saved['links']}")
+    check(chats("lk")[0]["links"] is None, "学习者那条不记 links")
+    r = c.post("/teacher/state", json={"form": {"learner": "lk"}}).get_json() or {}
+    talk = (r.get("state") or {}).get("talk") or []
+    check(talk and talk[-1].get("links") == links and talk[0].get("links") == [],
+          f"/teacher/state 拉回来链接还是列表、内容一样：{talk[-1].get('links') if talk else None}")
+    st, body = send("给我出几道てから的题", learner="lk")
+    m = reply(body)
+    hrefs = [x.get("href") for x in m.get("links") or []]
+    check(hrefs == [link_of(teru["code"]), READ + teru["code"]],
+          f"出题：去做题 + 读课文两个链接 {[unquote(h) for h in hrefs]}")
+
     print("十、进页面、空消息、补建表")
     r = c.post("/teacher/state", json={"form": {}}).get_json() or {}
     talk = (r.get("state") or {}).get("talk") or []
     check("messages" not in r, "进页面只回 state，不推消息")
     check((r.get("state") or {}).get("mode") == "mock", "测试用的是模拟模式，state.mode == mock（页面据此显示提示）")
-    check(talk and talk[0] == {"who": "你", "text": "てから怎么用", "kind": "user", "link": "", "link_text": ""},
+    check(talk and talk[0] == {"who": "你", "text": "てから怎么用", "kind": "user", "link": "", "link_text": "",
+                               "links": []},
           f"学习者那条跟前端回显一样（你 / user）：{talk[:1]}")
     check(talk[1]["who"] == "老师" and talk[1]["link"] == link_of(teru["code"]),
           "老师那条带着链接，重新进页面还能点")
@@ -280,6 +439,33 @@ def main():
     check(rows("SELECT count(*) n FROM attempt")[0]["n"] == n_att and n_att > 0,
           f"学习记录没动（attempt {n_att} 条）")
     check(ensure_new_tables(db, ws / "entities") == [], "再跑一次什么都不建")
+
+    # 老库的 chat_message 没有 links 列：补列（ALTER TABLE ADD COLUMN），不重建，
+    # 原有的行还在；只有 link 的旧记录拉回来也是 links 列表
+    con = sqlite3.connect(db)
+    con.execute("DROP TABLE chat_message")
+    con.execute("CREATE TABLE chat_message (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " learner VARCHAR(255) NOT NULL, role VARCHAR(255) NOT NULL,"
+                " content VARCHAR(255) NOT NULL, intent VARCHAR(255), lesson VARCHAR(255),"
+                " link VARCHAR(255), link_text VARCHAR(255),"
+                " created VARCHAR(255) NOT NULL DEFAULT (datetime('now','localtime')))")
+    con.execute("INSERT INTO chat_message(learner, role, content, intent, link, link_text)"
+                " VALUES('old', 'teacher', '旧的一条', '出题', '#x', '旧链接')")
+    con.commit()
+    con.close()
+    check(ensure_new_tables(db, ws / "entities") == [], "老库：表在，不补建")
+    added = ensure_new_columns(db, ws / "entities")
+    check(added == ["chat_message.links"], f"补了 links 列：{added}")
+    check(rows("SELECT content FROM chat_message WHERE learner = 'old'") == [{"content": "旧的一条"}],
+          "原有的行还在（没重建）")
+    check(ensure_new_columns(db, ws / "entities") == [], "再跑一次什么都不补")
+    r = c.post("/teacher/state", json={"form": {"learner": "old"}}).get_json() or {}
+    talk = (r.get("state") or {}).get("talk") or []
+    check(talk and talk[0].get("links") == [{"href": "#x", "text": "旧链接"}] and talk[0].get("link") == "#x",
+          f"旧记录的 link 还原成 links 列表：{talk[:1]}")
+    st, body = send("てから怎么用", learner="old")
+    check(st == 200 and json.loads(chats("old")[-1]["links"] or "[]") == (reply(body).get("links") or [None]),
+          "补列后新对话的 links 照常存")
 
     print(f"\n{'=' * 50}\n通过 {passed}，失败 {failed}")
     return 1 if failed else 0

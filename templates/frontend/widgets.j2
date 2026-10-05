@@ -150,9 +150,10 @@
 
 {#- 消息流：内容来自 shared，后端返回的 messages 追加进来。
     m.calls 有值时渲染成折叠面板——那是旧版工具调用面板的等价物。
-    m.link 有值时正文下面多一个链接（m.link_text 是链接上的字，不给就显示
-    地址）。只认 # 开头的站内地址（#做题?lesson=…，点了就切界面）和
-    http(s)，别的（javascript: 之类）不渲染。 -#}
+    m.links 是链接列表 [{href, text}]，正文下面一排链接（text 不给就显示
+    地址）；没有 links（或是空列表）时退回旧写法：m.link 一个链接，m.link_text
+    是链接上的字。两种都给只画 links，不重复。只认 # 开头的站内地址
+    （#做题?lesson=…，点了就切界面）和 http(s)，别的（javascript: 之类）不渲染。 -#}
 <%- macro 消息流(n) -%>
 <section class="stream"<%= 当(n) %><% if n.ratio %> style="flex:<%= n.ratio %> 1 0%;min-height:0"<% endif %>>
 <% if n.label and n.label != n.name %><header class="region-h"><%= n.label %></header>
@@ -160,7 +161,8 @@
 <div v-for="(m, i) in shared['<%= n.name %>'] || []" :key="i" class="smsg" :class="'smsg-' + (m.kind || 'text')">
 <span class="who">{{ m.who }}</span>
 <div class="body">{{ m.text }}</div>
-<a v-if="m.link && (m.link.startsWith('#') || m.link.startsWith('http://') || m.link.startsWith('https://'))" class="smsg-link" :href="m.link">{{ m.link_text || m.link }}</a>
+<div v-if="Array.isArray(m.links) && m.links.length" class="smsg-links"><template v-for="(k, j) in m.links" :key="j"><a v-if="k && typeof k.href === 'string' && (k.href.startsWith('#') || k.href.startsWith('http://') || k.href.startsWith('https://'))" class="smsg-link" :href="k.href">{{ k.text || k.href }}</a></template></div>
+<a v-else-if="m.link && (m.link.startsWith('#') || m.link.startsWith('http://') || m.link.startsWith('https://'))" class="smsg-link" :href="m.link">{{ m.link_text || m.link }}</a>
 <details v-if="m.calls && m.calls.length" class="tools">
 <summary>{{ m.calls.length }} 次工具调用</summary>
 <div v-for="(c, j) in m.calls" :key="j">{{ c.name }}({{ c.arguments }})

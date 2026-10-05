@@ -209,6 +209,16 @@ def test_compile():
           "m.link.startsWith('#')" in page and "javascript" not in page.split("smsg-link")[0][-300:],
           True)
 
+    # 一条消息多个链接（m.links = [{href, text}]）：一排链接，同样只认 # 和
+    # http(s)；有 links 时不再画旧的 m.link（v-else-if），不重复
+    check("消息流渲染 links 列表", 'v-for="(k, j) in m.links"' in page, True)
+    check("links 每项显示 text，没有就显示地址", "{{ k.text || k.href }}" in page, True)
+    check("links 只认 # 和 http(s)",
+          "k.href.startsWith('#')" in page and "k.href.startsWith('https://')" in page
+          and "k.href.startsWith('http://')" in page, True)
+    check("links 不是数组不画（防字符串被逐字遍历）", "Array.isArray(m.links) && m.links.length" in page, True)
+    check("有 links 时旧的 link 走 v-else-if，不重复画", '<a v-else-if="m.link &&' in page, True)
+
     # 不给端点时不该生成 fetch 胶水
     r2 = compile_ui(ui, backend="vue")
     check("无端点也能编译", [i.code for i in r2.get("issues", [])], [])

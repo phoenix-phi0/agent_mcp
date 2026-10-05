@@ -210,6 +210,59 @@ def ensure_new_tables(db: Path = None, entities: Path = None) -> list:
         con.close()
 
 
+def ensure_new_columns(db: Path = None, entities: Path = None) -> list:
+    """实体里给已有的表加了字段、库里还没有的，用 ALTER TABLE ADD COLUMN 补上。
+    返回这次补了哪些列（「表.列」）。
+
+    跟 ensure_new_tables 一样保守：只加列，不删、不改、不重建（学习记录表
+    绝不能重建）。列定义从实体渲染的建表语句里抄，不手写。SQLite 的 ADD
+    COLUMN 加不了 NOT NULL（没默认值时）和主键，这种列跳过不加，交给人看——
+    已有的行填不出值来。
+
+    db / entities 不给就是本项目的；测试传临时的。
+    """
+    import re
+    import sqlite3
+    sys.path.insert(0, str(ROOT))
+    from tools.entity import render_sql
+
+    db = Path(db) if db else PROJ / "app.db"
+    entities = Path(entities) if entities else PROJ / "entities"
+    if not db.is_file():
+        return []
+    text = "\n\n".join(f.read_text(encoding="utf-8")
+                       for f in sorted(entities.glob("*.entity")))
+
+    con = sqlite3.connect(db)
+    added = []
+    try:
+        have = {r[0] for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        for m in re.finditer(r"CREATE TABLE (\w+) \((.*?)\n\);",
+                             render_sql(text, strict=True), re.S):
+            table = m.group(1)
+            if table not in have:
+                continue        # 整张表没有：ensure_new_tables 的事
+            cols = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+            for line in m.group(2).splitlines():
+                col = line.strip().rstrip(",")
+                name = col.split(" ", 1)[0]
+                if not re.fullmatch(r"\w+", name) or name.upper() in (
+                        "FOREIGN", "UNIQUE", "CHECK", "PRIMARY", "CONSTRAINT"):
+                    continue
+                if name in cols:
+                    continue
+                up = col.upper()
+                if "PRIMARY KEY" in up or ("NOT NULL" in up and "DEFAULT" not in up):
+                    continue
+                con.execute(f"ALTER TABLE {table} ADD COLUMN {col}")
+                added.append(f"{table}.{name}")
+        con.commit()
+        return added
+    finally:
+        con.close()
+
+
 def run_import(quiet: bool = False) -> int:
     """跑导入。**导入逻辑在 .zs 里，不在这儿**——这个函数只是把接口调起来。
 
@@ -300,6 +353,9 @@ def setup(quiet: bool = False) -> int:
     made = ensure_new_tables()
     if made:
         say(f"  已有的库里补建了表：{'、'.join(made)}")
+    cols = ensure_new_columns()
+    if cols:
+        say(f"  已有的表里补了列：{'、'.join(cols)}")
     ensure_learn_index()
     run_import(quiet)
 

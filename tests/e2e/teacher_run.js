@@ -16,6 +16,8 @@
 //   「给我出几道てから的题」：老师回一句话和链接，没有题卡、没有判分；
 //     点链接 → 地址变成 #做题?lesson=…，做题页直接出那一课的题
 //   切回「问老师」：刚才的对话还在，没有叠两份；刷新：从库里拉回来
+//   讲解那条下面有两个链接（读课文、练一练），刷新后也在；点「读课文」→
+//     地址变成 #教材?lesson=…，教材页的阅读视图显示的正是那一课
 
 const { execFileSync, spawn } = require("child_process");
 const fs = require("fs");
@@ -85,6 +87,7 @@ function openPage(hash) {
       who: (m.querySelector(".who") || {}).textContent || "",
       text: (m.querySelector(".body") || {}).textContent || "",
       link: m.querySelector("a.smsg-link"),
+      links: [...m.querySelectorAll("a.smsg-link")],
       kind: m.className,
     })),
     teacher: () => pg.msgs().filter(m => m.who === "老师"),
@@ -128,7 +131,7 @@ function openPage(hash) {
     ],
     default: REPLY,
   }));
-  const lesson = db("SELECT code, title FROM lesson WHERE title LIKE '%てから%'")[0];
+  const lesson = db("SELECT code, title, summary FROM lesson WHERE title LIKE '%てから%'")[0];
 
   const server = spawn(PY, ["-m", "gen", "run", PROJ, "--port", String(PORT), "--不开浏览器"],
                        { cwd: MCP, stdio: ["ignore", "pipe", "pipe"],
@@ -206,9 +209,29 @@ function openPage(hash) {
       "顺序和说话人都对");
   say(m[3].link && decodeURIComponent(m[3].link.getAttribute("href")) === `#做题?lesson=${lesson.code}`,
       "刷新后老师那条的链接还在");
+
+  console.log("五、一条消息多个链接，点「读课文」到教材页读那一课");
+  const ls = (m[1].links || []).map(a => ({ text: a.textContent, href: decodeURIComponent(a.getAttribute("href")) }));
+  say(ls.length === 2, `讲解那条下面有两个链接（刷新后从库里拉回来的）：${JSON.stringify(ls)}`);
+  say(ls[0] && ls[0].text === `读课文：《${lesson.title}》` && ls[0].href === `#教材?lesson=${lesson.code}`,
+      `第一个是读课文：${JSON.stringify(ls[0])}`);
+  say(ls[1] && ls[1].text.startsWith("练一练") && ls[1].href === `#做题?lesson=${lesson.code}`,
+      `第二个是练一练：${JSON.stringify(ls[1])}`);
+  say(p.$$(".smsg-links").length >= 1 && m[1].links.every(a => a.parentElement.classList.contains("smsg-links")),
+      "两个链接排在一行（.smsg-links），旧的单个链接没有重复画");
+  calls.length = 0;
+  m[1].links[0].click();
+  say(await waitFor(() => p.hash() === `#教材?lesson=${lesson.code}`), `点「读课文」，地址变成 ${p.hash()}`);
+  say(await waitFor(() => calls.some(c => c.path === "/lesson/one" && c.status === 200)),
+      `教材页按地址里的课调了载入接口：${JSON.stringify(calls.map(c => c.path))}`);
+  say(await waitFor(() => p.$(".screen") && p.$(".screen").textContent.includes(`《${lesson.title}》`)
+                          && p.$(".screen").textContent.includes(lesson.summary)),
+      `阅读视图显示的是《${lesson.title}》：抬头和一句话都在`);
+  say(!p.$$(".screen table").some(t => t.textContent.includes("一句话") && t.textContent.includes("题数")),
+      "没有显示课文表（是阅读视图，不是列表）");
   p.close();
 
-  console.log("五、服务端");
+  console.log("六、服务端");
   say(!/Traceback/.test(log), "服务日志里没有 Traceback");
   say(!calls.some(c => c.status >= 500), "没有 5xx");
 
