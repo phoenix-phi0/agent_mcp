@@ -1,0 +1,53 @@
+# 单词默写：每个人的默写进度和每一次作答。界面在 ui/quiz_dictation.ui，
+# 接口在 routes/dictation.zs。
+#
+# **跟做题的学习记录分开记**：默写不写 attempt / mastery / score，不影响
+# 知识点的掌握和得分。单词不在图里（见 word.entity），一个词默写错了不该
+# 拉低「名词」这种大节点的分。
+#
+# word_attempt 每次作答一行，只进不改。word 是 word.id，**不写「关联」**：
+#           单词会被 prune 删、导入会改，带外键的话这些操作都会被作答记录
+#           挡住。词删了，查询时连不上就不算。
+#           direction：meaning = 看中文写日语，reading = 看汉字写读音。
+#           hinted = 1 是看了提示（首个假名和字数）之后交的：答对照样记
+#           correct = 1，但不算进「连续答对两次移出错词本」。
+#           错词本不单独存，从这张表现算（queries/dictation_book.sql）：某词在
+#           某方向上最近一次答错就在本里，之后这个方向上不看提示连续答对
+#           2 次就出来。
+#
+# dictation_state 每人一行：上次选的方向、等级、题源，当前那个词、答没答过、
+#           看没看过提示，这一轮出过的词（,1,2, 的样子）、出了几个、答对几个，
+#           这一轮的起点（word_attempt 当时最大的 id，一轮结束时列错词用）。
+#           当前词记在这里不由前端传：判的永远是库里记的那个，同一个交两次
+#           只算一次（queries/dictation_state_answer.sql）。
+#           dict_direction / dict_level / dict_source / dict_answer 也是界面上
+#           顶栏下拉和输入框绑的名字（字段类型从这里来），起不跟做题页撞名的
+#           名字——界面的字段表按裸名合并。
+
+实体 word_attempt 默写作答
+  字段 learner 文本 必填 索引 学习者
+  字段 word 整数 必填 索引 单词
+  字段 direction 枚举 meaning,reading 必填 方向
+  字段 answer 文本 写的
+  字段 correct 布尔 必填 对错
+  字段 hinted 布尔 必填 默认 否 看了提示
+  字段 at 文本 必填 默认 现在 作答时间
+结束
+
+
+实体 dictation_state 默写进度
+  字段 learner 文本 必填 学习者
+  字段 dict_direction 枚举 看中文写日语,看汉字写读音 必填 默认 看中文写日语 方向
+  字段 dict_level 枚举 全部,N5,N4,N3,N2,N1 必填 默认 全部 等级
+  字段 dict_source 枚举 随机,错词复习 必填 默认 随机 题源
+  字段 dict_answer 文本 写的
+  字段 current_word 整数 当前词
+  字段 answered 布尔 必填 默认 否 答过了
+  字段 hinted 布尔 必填 默认 否 看了提示
+  字段 round_seen 文本 这一轮出过的词
+  字段 round_n 整数 必填 默认 0 这一轮出了几个
+  字段 round_right 整数 必填 默认 0 这一轮答对
+  字段 round_total 整数 必填 默认 0 这一轮答了
+  字段 round_from 整数 必填 默认 0 本轮起点
+  主键 learner
+结束

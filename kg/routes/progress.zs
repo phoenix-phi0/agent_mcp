@@ -12,6 +12,8 @@
 #   lists.scores   掌握得分（progress_scores）：当前分、跟上一次比的变化、
 #                  最近打分时间，分低的在前；没有打过分就是空的，界面整块不显示
 #                  概览里另有 score_text「平均得分 x」
+#   state.dictation 单词默写（dictation_stats）：练过几个词、正确率、错词本几个，
+#                  链接到默写页。读的是 word_attempt，跟上面的学习记录分开
 #
 # 学习者不传就是 me，达标线不传就是 80% / 8 题——跟 learn.zs、quiz.zs
 # 开头同一段默认值。
@@ -48,6 +50,9 @@
 
   设 score_text = 查询表 app.db progress_scores {who}
 
+  # 单词默写（word_attempt，跟上面的学习记录分开）：练过几个词、正确率、错词本
+  设 dictation = 查一行表 app.db dictation_stats {who}
+
   设 group.doing = {doing}
   设 group.next = {next_rows}
   设 group.recent = {recent}
@@ -55,5 +60,6 @@
   设 group.scores = {score_text}
   响应 lists {group}
   设 state.prog = {overview}
+  设 state.dictation = {dictation}
   响应 state {state}
 结束

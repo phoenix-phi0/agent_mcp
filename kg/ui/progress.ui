@@ -11,6 +11,9 @@
 #   掌握得分    打过分才有；没有就整块不显示。知识点、当前分、变化（跟上一次
 #               比 +x / −x，只打过一次是「首次」）、最近打分时间；分低的在前，
 #               薄弱的先看到。分是做题时自动打的（见 queries/score_calc.sql）
+#   单词默写    练过几个词、正确率、错词本几个（queries/dictation_stats.sql），
+#               链接到默写页：错词本不空是 #默写?source=review（直接开一轮错词
+#               复习），空就是 #默写。默写单独记，不算进上面的答题和得分
 #
 # 进页面时一次拉齐（progress_page），不推消息。没有表单要填：学习者是 me，
 # 跟别的接口同一个默认值。
@@ -51,6 +54,10 @@
         列 item_label 条目
         列 result 对错
       结束
+    结束
+    区域 单词默写
+      显示 dictation.text
+      链接 dictation 绑 dictation.link 去默写
     结束
     区域 各等级
       列表 等级表 绑 levels

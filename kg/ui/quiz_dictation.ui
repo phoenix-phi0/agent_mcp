@@ -1,0 +1,76 @@
+# 单词默写：一张词卡一个词。写完按 Enter 交，卡上当场出对错、正确写法和
+# 你写的，点「下一个」翻到下一张。一轮 10 个词，一轮里不重复。
+#
+# 文件名叫 quiz_dictation.ui 是为了排序：界面按 ui/*.ui 的文件名排，导航跟着
+# 这个顺序，排在最前的是打开时的首页。叫 dictation.ui 会排到 node.ui 前面，
+# 打开网站先看到默写；跟 quiz.ui 挨着，导航上「默写」就在「做题」后面。
+#
+#   顶栏  方向（看中文写日语 / 看汉字写读音）、等级（全部 / N5..N1，来自意思
+#         开头的 [N4]）、题源（随机 / 错词复习）、开始；右边是这一轮的成绩
+#   词卡  抬头（等级・方向）、题面（意思，或汉字）、看汉字写读音时下面一行
+#         意思、提示（点了才有）、输入框（Enter 交）、「交」「提示」；
+#         判完：对错、正确的「汉字【读音】意思」、你写的、补充的一句
+#         （同义词也算对、写的是同读音的另一个词、这是另一个读法……）、
+#         「下一个」
+#   一轮结束  本轮答对几个、错词表（汉字【读音】意思、你写的）、「再来一轮」
+#         「练错词」
+#
+# 卡按 shared.dphase 显隐：空 = 还没开始（一句提示），ask = 等作答，done =
+# 判完，end = 一轮做完，empty = 错词复习但错词本是空的（一句话和「随机练
+# 一轮」）。键都带 d 前缀：state 合并进全局的 shared，做题页用的是 phase、
+# card，撞名会两边串。
+#
+# 记录单独放在 word_attempt，不影响知识点的掌握和得分。
+#
+# 学习进度页的「单词默写」给的链接是 #默写?source=review：前端调「载入」
+# （dictation_load），直接开一轮错词复习。
+#
+# 「当」的条件里不能有空格（修饰值按空格切）。
+
+界面 自定义 默写 载入 dictation_load
+  动作 dictation_state 远程 进入时 隐藏 刷新
+
+  分组 顶栏 横排 顶栏 间距 12px 对齐 center
+    字段 dict_direction 控件 下拉 宽 140px 方向
+    字段 dict_level 控件 下拉 宽 90px 等级
+    字段 dict_source 控件 下拉 宽 110px 题源
+    动作 dictation_start 远程 开始
+    显示 dstat
+  结束
+
+  文案 当 !shared.dphase 选好方向、等级和题源，点上面的「开始」。一轮 10 个词，不重复；默写的记录单独记，不影响知识点得分。
+
+  分组 没错词 卡片 当 shared.dphase==='empty'
+    显示 dempty 正文
+    动作 dictation_random 远程 随机练一轮
+  结束
+
+  分组 词卡 卡片 翻页 dcard.code 当 shared.dphase==='ask'||shared.dphase==='done'
+    显示 dcard.head
+    显示 dcard.stem 正文
+    显示 dcard.sub 当 shared.dcard&&shared.dcard.sub
+    显示 dcard.hint 当 shared.dcard&&shared.dcard.hint
+    字段 dict_answer 控件 多行 单行高 当 shared.dphase==='ask' 提示 写出来，Enter交（汉字、平假名、片假名都行）
+    动作 dictation_answer 提交 远程 清空 当 shared.dphase==='ask' 交
+    动作 dictation_hint 远程 当 shared.dphase==='ask'&&!shared.dcard.hint 提示
+    显示 dcard.verdict 正文 当 shared.dphase==='done'
+    显示 dcard.right 当 shared.dphase==='done'
+    显示 dcard.mine 当 shared.dphase==='done'
+    显示 dcard.note 当 shared.dphase==='done'&&shared.dcard.note
+    动作 dictation_next 远程 当 shared.dphase==='done' 下一个
+  结束
+
+  分组 一轮 卡片 当 shared.dphase==='end'
+    显示 dround.text 正文
+  结束
+  列表 错词表 绑 round_wrong 当 shared.dphase==='end'&&lists.round_wrong&&lists.round_wrong.length
+    列 label 这一轮错的词
+    列 answer 绑 mine 你写的
+  结束
+  分组 去处 横排 间距 12px 对齐 center 当 shared.dphase==='end'
+    动作 dictation_again 远程 再来一轮
+    动作 dictation_wrong 远程 练错词
+  结束
+
+  文案 看中文写日语：写汉字或假名都算对，意思完全一样的同义词也算对；看汉字写读音：写假名。
+结束
