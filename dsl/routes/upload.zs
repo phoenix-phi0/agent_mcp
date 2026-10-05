@@ -13,8 +13,8 @@
 接口 POST /upload/peek
   用包 http
 
-  设 清单 = 列上传
-  返回 {"带了什么":"{清单}"}
+  设 listing = 列上传
+  返回 {"带了什么":"{listing}"}
 结束
 
 
@@ -22,11 +22,11 @@
 接口 POST /upload/hash 动作 save
   用包 http
 
-  设 路径 = 存文件 file uploads 哈希
-  如果 {路径} 开头是 [
-    返回 {"error":"{路径}"} 400
+  设 path = 存文件 file uploads 哈希
+  如果 {path} 开头是 [
+    返回 {"error":"{path}"} 400
   结束
-  返回 {"ok":true,"path":"{路径}"}
+  返回 {"ok":true,"path":"{path}"}
 结束
 
 
@@ -34,11 +34,11 @@
 接口 POST /upload/time 动作 save
   用包 http
 
-  设 路径 = 存文件 file uploads 时间
-  如果 {路径} 开头是 [
-    返回 {"error":"{路径}"} 400
+  设 path = 存文件 file uploads 时间
+  如果 {path} 开头是 [
+    返回 {"error":"{path}"} 400
   结束
-  返回 {"ok":true,"path":"{路径}"}
+  返回 {"ok":true,"path":"{path}"}
 结束
 
 
@@ -46,11 +46,11 @@
 接口 POST /upload/raw 动作 save
   用包 http
 
-  设 路径 = 存文件 file uploads 原名
-  如果 {路径} 开头是 [
-    返回 {"error":"{路径}"} 400
+  设 path = 存文件 file uploads 原名
+  如果 {path} 开头是 [
+    返回 {"error":"{path}"} 400
   结束
-  返回 {"ok":true,"path":"{路径}"}
+  返回 {"ok":true,"path":"{path}"}
 结束
 
 
@@ -60,8 +60,8 @@
 接口 POST /upload/mixed 动作 save
   用包 http
 
-  设 路径 = 存文件 file uploads 哈希
-  返回 {"path":"{路径}","learner":"{learner}","note":"{note}"}
+  设 path = 存文件 file uploads 哈希
+  返回 {"path":"{path}","learner":"{learner}","note":"{note}"}
 结束
 
 
@@ -70,9 +70,9 @@
 接口 POST /upload/twice 动作 save
   用包 http
 
-  设 第一次 = 存文件 file uploads 哈希
-  设 第二次 = 存文件 file uploads 时间
-  返回 {"first":"{第一次}","second":"{第二次}"}
+  设 first = 存文件 file uploads 哈希
+  设 second = 存文件 file uploads 时间
+  返回 {"first":"{first}","second":"{second}"}
 结束
 
 
@@ -80,6 +80,6 @@
 接口 POST /upload/wrongname 动作 save
   用包 http
 
-  设 路径 = 存文件 不存在的字段 uploads 哈希
-  返回 {"path":"{路径}"}
+  设 path = 存文件 不存在的字段 uploads 哈希
+  返回 {"path":"{path}"}
 结束

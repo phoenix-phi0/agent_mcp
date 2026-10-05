@@ -154,15 +154,15 @@ def check(entity, db: str = DEFAULT_DB,
             notes.append(f"列表里带了长文本字段 {f.name}")
 
     zs = files.get(f"routes/{name}.zs", "")
-    # 主键不从 {会话.xxx} 取：没有任何地方设过它。先前这条自检检查的
+    # 主键不从 {session.xxx} 取：没有任何地方设过它。先前这条自检检查的
     # 正是那个错误写法，于是 bug 被当成了规则。
-    if "{会话." in zs:
-        notes.append("接口里引用了 {会话.xxx}，但没有地方会设它")
-    # 增删改走「写库表 … {请求}」：「写库」按空格切参数，用户输入含空格
+    if "{session." in zs:
+        notes.append("接口里引用了 {session.xxx}，但没有地方会设它")
+    # 增删改走「写库表 … {request}」：「写库」按空格切参数，用户输入含空格
     # 就会错位，而且不报错
     for 动作 in ("insert", "update", "delete"):
-        if f"{name}_{动作} {{请求}}" not in zs:
-            notes.append(f"{动作} 没用「写库表 … {{请求}}」，参数含空格会切错")
+        if f"{name}_{动作} {{request}}" not in zs:
+            notes.append(f"{动作} 没用「写库表 … {{request}}」，参数含空格会切错")
     if zs.count("事务") < 3:
         notes.append("增删改三个写操作该各有一个事务")
 

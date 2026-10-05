@@ -23,4 +23,4 @@ WHERE NOT EXISTS(
                   AND m2.mastered = 1))
 GROUP BY n.code, n.label
 ORDER BY depth, n.code
-LIMIT CAST(:条数 AS INTEGER)
+LIMIT CAST(:limit AS INTEGER)

@@ -4,6 +4,6 @@
 -- 条数用在 LIMIT 上，要数字，所以 CAST——参数从 DSL 过来都是字符串。
 SELECT id, title, views, published, created
 FROM post
-WHERE author = :作者
+WHERE author = :author
 ORDER BY views DESC
-LIMIT CAST(:条数 AS INTEGER)
+LIMIT CAST(:limit AS INTEGER)

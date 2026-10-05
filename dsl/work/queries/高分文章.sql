@@ -12,6 +12,6 @@ SELECT
 FROM post p
 JOIN rating r ON r.post = p.id
 GROUP BY p.id, p.title, p.author
-HAVING count(r.score) >= CAST(:最少评分数 AS INTEGER)
+HAVING count(r.score) >= CAST(:min_ratings AS INTEGER)
 ORDER BY 平均分 DESC
-LIMIT CAST(:条数 AS INTEGER)
+LIMIT CAST(:limit AS INTEGER)

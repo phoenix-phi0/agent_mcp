@@ -107,13 +107,13 @@ def main():
     reg = make_flow_tools(ws, client=MockClient(), flows_dir=ROOT / "flows",
                           verbs_dir=ROOT / "verbs")
     got = reg.call("run_flow", {"name": "语法讲解",
-                                "params": json.dumps({"课文": with_q["code"]}, ensure_ascii=False)})
+                                "params": json.dumps({"lesson": with_q["code"]}, ensure_ascii=False)})
     check(got.startswith(text.splitlines()[0]) and link in got,
           f"读出的是课文原文，链接原样在：{got[:40]!r}")
-    got = reg.call("run_flow", {"name": "语法讲解", "params": json.dumps({"课文": "hb-nope"})})
+    got = reg.call("run_flow", {"name": "语法讲解", "params": json.dumps({"lesson": "hb-nope"})})
     check(got.startswith("[") and "不存在" in got, f"编号不存在：报错，不编内容：{got[:60]!r}")
     got = reg.call("list_flows", {})
-    check("语法讲解" in got and "课文" in got, "老师的流程列表里有它、参数是「课文」")
+    check("语法讲解" in got and "lesson" in got, f"老师的流程列表里有它、参数是 lesson：{got[-200:]!r}")
 
     print("五、给老师的说明")
     from agents.japanese import RUNTIME_NOTE

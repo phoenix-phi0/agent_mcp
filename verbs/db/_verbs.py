@@ -11,34 +11,35 @@
 ```sql
 -- queries/作者文章.sql
 SELECT id, title, views FROM post
-WHERE author = :作者
-LIMIT CAST(:条数 AS INTEGER)
+WHERE author = :author
+LIMIT CAST(:limit AS INTEGER)
 ```
 
 ```
 用包 db
 
-设 文章 = 查询 试验.db 作者文章 作者=a01 条数=3
-遍历 行 于 {文章}
-  打印 {行.title}（{行.views}）
+设 posts = 查询 试验.db 作者文章 author=a01 limit=3
+遍历 row 于 {posts}
+  打印 {row.title}（{row.views}）
 结束
 ```
 
-参数走 `:名字` 占位符绑定，不是字符串拼接——注入不可能发生。
+参数走 `:名字` 占位符绑定，不是字符串拼接——注入不可能发生。参数名跟脚本
+变量一样用英文 snake_case（`:limit`、`:current_user`）。
 
 ## 参数一律是字符串，数值比较要 CAST
 
 **最容易踩的一条。** DSL 里的值全是文本，绑进 SQL 也是文本。
 
 SQLite 有列亲和性：拿字符串跟 INTEGER 列比会自动转，所以
-`WHERE views > :下限` 能工作。但左边一变成表达式——`count(*)`、
+`WHERE views > :min_views` 能工作。但左边一变成表达式——`count(*)`、
 `sum(x)`、`a + b`——亲和性就没了，比较退回纯值比较，而 SQLite 的类型
 序里**文本永远大于数字**。结果恒真或恒假，**而且不报错**。
 
-    HAVING count(r.score) >= :最少评分数                     -- 恒假
-    HAVING count(r.score) >= CAST(:最少评分数 AS INTEGER)    -- 对
+    HAVING count(r.score) >= :min_ratings                    -- 恒假
+    HAVING count(r.score) >= CAST(:min_ratings AS INTEGER)   -- 对
 
-`LIMIT :条数` 同理。
+`LIMIT :limit` 同理。
 
 考虑过在动词里自动转（看着像数字就转），没做——那会变成一条所有查询
 都受影响的隐式规则，而「什么算数字」永远有边界：`007` 转成 `7` 就匹配
@@ -50,8 +51,8 @@ SQLite 有列亲和性：拿字符串跟 INTEGER 列比会自动转，所以
 用包 db
 
 事务 学习.db
-  写库 学习.db 记作答 学习者={who} 题号={q} 对错=1
-  写库 学习.db 加错题 学习者={who} 题号={q}
+  写库 学习.db 记作答 learner={who} code={q} correct=1
+  写库 学习.db 加错题 learner={who} code={q}
 结束
 ```
 
@@ -177,7 +178,7 @@ def register(reg, workspace):
         return f.read_text(encoding="utf-8")
 
     def parse_params(pairs) -> dict:
-        """把 ["条数=3", "作者=a01"] 变成字典。
+        """把 ["limit=3", "author=a01"] 变成字典。
 
         值一律保持字符串，不猜类型。数值比较由 SQL 里的 CAST 负责。
         """
@@ -242,7 +243,7 @@ def register(reg, workspace):
     def as_dict(参数表) -> dict:
         """参数表可能是字典，也可能是 JSON 文本。
 
-        脚本里整个参数就是一个变量引用时（`{请求}`），引擎传的是原对象；
+        脚本里整个参数就是一个变量引用时（`{request}`），引擎传的是原对象；
         夹在文字里时传过来的是 JSON 文本。两种都收。
         """
         if isinstance(参数表, str):
@@ -292,7 +293,7 @@ def register(reg, workspace):
     # ------------------------------------------------------------------
 
     @reg.verb("按名字执行 queries/ 下的查询，返回行列表。"
-              "例如 查询 数据.db 作者文章 作者=a01 条数=3")
+              "例如 查询 数据.db 作者文章 author=a01 limit=3")
     def 查询(库: str, 查询名: str, 参数一: str = "", 参数二: str = "",
              参数三: str = "", 参数四: str = "", 参数五: str = "",
              参数六: str = "", 参数七: str = "", 参数八: str = "") -> list:
@@ -382,18 +383,18 @@ def register(reg, workspace):
             con.close()
 
     @reg.verb("同「查询」，但参数从一个结构里取——值含空格时用这个"
-              "（搜索关键词几乎总是）。例如 查询表 app.db word_search {请求}")
+              "（搜索关键词几乎总是）。例如 查询表 app.db word_search {request}")
     def 查询表(库: str, 查询名: str, 参数表) -> list:
         return query_table(库, 查询名, 参数表)
 
     @reg.verb("同「查一行」，但参数从一个结构里取。"
-              "例如 查一行表 app.db word_one {请求}")
+              "例如 查一行表 app.db word_one {request}")
     def 查一行表(库: str, 查询名: str, 参数表) -> dict:
         rows = query_table(库, 查询名, 参数表)
         return rows[0] if rows else {}
 
     @reg.verb("同「查一值」，但参数从一个结构里取。"
-              "例如 查一值表 app.db word_count {请求}")
+              "例如 查一值表 app.db word_count {request}")
     def 查一值表(库: str, 查询名: str, 参数表) -> str:
         rows = query_table(库, 查询名, 参数表)
         if not rows:

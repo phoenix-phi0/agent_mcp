@@ -2,4 +2,4 @@
 SELECT id, learner, question, course, point, given, correct
 FROM answer
 ORDER BY id DESC
-LIMIT CAST(:条数 AS INTEGER)
+LIMIT CAST(:limit AS INTEGER)

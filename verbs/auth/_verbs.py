@@ -3,7 +3,7 @@
     用包 auth http
 
     接口 POST /auth/login 动作 auth_login 公开
-      设 用户 = 登录 app.db user_by_name {请求}
+      设 user = 登录 app.db user_by_name {request}
       如果 {用户} 为空
         返回 {"error":"用户名或密码不对"} 400
       结束
@@ -12,7 +12,7 @@
 
 ## 为什么是这种形状
 
-**动词收整个 {请求}，不收一个个参数。** 动词参数按空格切，密码里有
+**动词收整个 {request}，不收一个个参数。** 动词参数按空格切，密码里有
 空格就会被切开；而且把密码拆成脚本变量传来传去，它就会出现在日志、
 报错信息里。整个字典交进来，密码只在这个文件的 Python 里出现。
 
@@ -33,7 +33,7 @@ from pathlib import Path
 WORKSPACE = Path(".")
 PACK_DIR = Path(".")
 
-# 用户名不许有空格：它会被当成 {当前用户} 传进「查询 … 当前用户={当前用户}」
+# 用户名不许有空格：它会被当成 {current_user} 传进「查询 … current_user={current_user}」
 # 这类按空格切的动词参数里。
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.@\-\u4e00-\u9fff]{1,40}$")
 MIN_PASSWORD = 6
@@ -73,9 +73,9 @@ def register(reg, workspace):
         con.execute("PRAGMA foreign_keys = ON")
         return con
 
-    @reg.verb("注册一个用户并直接登录。收整个 {请求}，要有 username 和 "
+    @reg.verb("注册一个用户并直接登录。收整个 {request}，要有 username 和 "
               "password。成功返回用户名，失败返回 [出错] 开头的说明。"
-              "例如 注册用户 app.db user_insert {请求}")
+              "例如 注册用户 app.db user_insert {request}")
     def 注册用户(库: str, 语句名: str, 参数表) -> str:
         from tools.auth import hash_password
         from tools.http_ctx import request_auth
@@ -103,9 +103,9 @@ def register(reg, workspace):
         request_auth({"login": name})
         return name
 
-    @reg.verb("核对用户名和密码，对了就登录。收整个 {请求}。成功返回用户名，"
+    @reg.verb("核对用户名和密码，对了就登录。收整个 {request}。成功返回用户名，"
               "失败返回空串（不区分没这个人和密码错）。"
-              "例如 登录 app.db user_by_name {请求}")
+              "例如 登录 app.db user_by_name {request}")
     def 登录(库: str, 语句名: str, 参数表) -> str:
         from tools.auth import dummy_verify, verify_password
         from tools.http_ctx import request_auth

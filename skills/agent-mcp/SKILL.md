@@ -84,8 +84,8 @@ bash /home/ysc/mcp/tests/run_all.sh      # 全部测试，约 90 秒
 **语句和动词是两回事。** `读JSONL` 是语句：
 
 ```
-读JSONL 表 = content/kg.jsonl     ✓
-设 表 = 读JSONL content/kg.jsonl  ✗ 整行被当成文本存进变量
+读JSONL rows = content/kg.jsonl     ✓
+设 rows = 读JSONL content/kg.jsonl  ✗ 整行被当成文本存进变量
 ```
 
 后者现在会报错（专门加的检查），但同类问题要警惕。
@@ -93,7 +93,7 @@ bash /home/ysc/mcp/tests/run_all.sh      # 全部测试，约 90 秒
 **动词参数按空格切**，值里有空格就错位且不报错。收整个字典的版本：
 
 ```
-查询表 / 查一行表 / 查一值表 / 写库表    库 查询名 {请求}
+查询表 / 查一行表 / 查一值表 / 写库表    库 查询名 {request}
 ```
 
 用户输入（标题、搜索词、日语例句）一律用这些，不要用按位置传的。
@@ -118,8 +118,8 @@ bash /home/ysc/mcp/tests/run_all.sh      # 全部测试，约 90 秒
 列表 前置 绑 prereq       显示名「前置」，数据取 prereq
 ```
 ```
-设 组.prereq = {行表}
-响应 lists {组}
+设 group.prereq = {rows}
+响应 lists {group}
 ```
 
 一个界面可以有多张表。响应字段是白名单（`messages` `state` `stream`
@@ -154,8 +154,13 @@ py -m gen run 项目/           建库 + 编译 + 起服务
 
 ## 七、命名规矩
 
-关键字、动词名、参数名、界面名用中文；**文件名、表名、列名、实体名、字段名、
+关键字、动词名、动词参数名、界面名用中文；**文件名、表名、列名、实体名、字段名、
 JSON 的键用英文**。中文显示名统一叫 `label`（`name` 是标识符）。
+
+**脚本里的变量名、脚本参数（`执行 x.zs key=值`）、SQL 参数（`:limit`）也用英文
+snake_case**；路由器注入的是 `{request}` `{current_user}` `{session}` `{run_mode}`。
+传给中文动词的参数字典，键照旧是中文动词参数名（`设 split_args.题干 = …`）。
+`tests/dsl/test_naming.py` 扫 .zs / .sql / gen 模板，出现中文变量名就失败。
 
 违反过多次：`entities/用户.entity`、`templates/完整/`、`kg.json` 里的中文键，
 都是后来返工改的。

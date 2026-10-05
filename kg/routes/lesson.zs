@@ -12,52 +12,52 @@
 接口 POST /lesson/import 动作 lesson_import
   用包 common db http
 
-  读JSONL 课表 = content/lessons.jsonl
-  读JSONL 挂表 = content/item_lessons.jsonl
+  读JSONL lessons = content/lessons.jsonl
+  读JSONL links_rows = content/item_lessons.jsonl
 
-  设 课数 = 0
-  设 挂数 = 0
-  设 没挂上 = 0
-  设 说明 = 
+  设 lesson_n = 0
+  设 link_n = 0
+  设 unlinked = 0
+  设 note = 
 
   事务 app.db
-    设 影响 = 写库 app.db item_lesson_clear
-    设 影响 = 写库 app.db lesson_clear
+    设 affected = 写库 app.db item_lesson_clear
+    设 affected = 写库 app.db lesson_clear
 
-    遍历 项 于 {课表} 序号 行
-      设 课.code = {项.code 或}
-      设 课.level = {项.level 或}
-      设 课.title = {项.title 或}
-      设 课.summary = {项.summary 或}
-      设 课.explanation = {项.explanation 或}
-      设 课.formation = {项.formation 或}
-      设 课.examples = {项.examples 或}
-      设 课.changed = {项.changed 或 0}
-      设 课.source_title = {项.source_title 或}
+    遍历 item 于 {lessons} 序号 row
+      设 lessons_found.code = {item.code 或}
+      设 lessons_found.level = {item.level 或}
+      设 lessons_found.title = {item.title 或}
+      设 lessons_found.summary = {item.summary 或}
+      设 lessons_found.explanation = {item.explanation 或}
+      设 lessons_found.formation = {item.formation 或}
+      设 lessons_found.examples = {item.examples 或}
+      设 lessons_found.changed = {item.changed 或 0}
+      设 lessons_found.source_title = {item.source_title 或}
       # 缺编号不在这里判：插入语句把空编号变成 NULL，撞非空约束抛错，
       # 整个事务回滚——课文文件坏了就一条都不换，库里保持原样。
-      设 影响 = 写库表 app.db lesson_insert {课}
-      设 课数 = 相加 {课数} 1
+      设 affected = 写库表 app.db lesson_insert {lessons_found}
+      设 lesson_n = 相加 {lesson_n} 1
     结束
 
-    遍历 挂 于 {挂表} 序号 行
-      设 对.item = {挂.item 或}
-      设 对.lesson = {挂.lesson 或}
-      设 对.rank = {挂.rank 或 1}
-      设 影响 = 写库表 app.db item_lesson_add {对}
-      如果 {影响} 等于 1
-        设 挂数 = 相加 {挂数} 1
+    遍历 link 于 {links_rows} 序号 row
+      设 pair.item = {link.item 或}
+      设 pair.lesson = {link.lesson 或}
+      设 pair.rank = {link.rank 或 1}
+      设 affected = 写库表 app.db item_lesson_add {pair}
+      如果 {affected} 等于 1
+        设 link_n = 相加 {link_n} 1
       否则
-        设 没挂上 = 相加 {没挂上} 1
-        设 说明 = {说明} 挂接第{行}行{对.item}→{对.lesson}没挂上；
+        设 unlinked = 相加 {unlinked} 1
+        设 note = {note} 挂接第{row}行{pair.item}→{pair.lesson}没挂上；
       结束
     结束
   结束
 
   # 没挂到任何条目上的课：映射文件漏了或拼错了
-  设 孤数 = 查一值 app.db lesson_orphans
+  设 orphan_n = 查一值 app.db lesson_orphans
 
-  返回 {"lessons":"{课数}","links":"{挂数}","failed":"{没挂上}","orphans":"{孤数}","note":"{说明}"}
+  返回 {"lessons":"{lesson_n}","links":"{link_n}","failed":"{unlinked}","orphans":"{orphan_n}","note":"{note}"}
 结束
 
 
@@ -65,19 +65,19 @@
 接口 POST /item/lessons 动作 item_lessons
   用包 db http
 
-  设 条目 = {item 或}
-  如果 {条目} 为空
+  设 item = {item 或}
+  如果 {item} 为空
     返回 {"error":"缺 item（哪个条目）"} 400
   结束
-  设 查.item = {条目}
-  设 有 = 查一值表 app.db item_exists {查}
-  如果 {有} 为空
+  设 query.item = {item}
+  设 exists = 查一值表 app.db item_exists {query}
+  如果 {exists} 为空
     返回 {"error":"没有这个条目"} 404
   结束
 
-  设 课 = 查询表 app.db item_lessons {查}
-  设 组.lessons = {课}
-  响应 lists {组}
+  设 lessons_found = 查询表 app.db item_lessons {query}
+  设 group.lessons = {lessons_found}
+  响应 lists {group}
 结束
 
 
@@ -89,17 +89,17 @@
 接口 POST /lesson/list 动作 lesson_list
   用包 db http data
 
-  设 查.lesson_level = {lesson_level 或 全部}
-  设 查.keyword = {keyword 或}
-  设 课表 = 查询表 app.db lesson_list {查}
-  设 组.lessons = {课表}
-  响应 lists {组}
-  设 数 = 条数 {课表}
-  设 状态.lesson_count = 共{数}课
-  响应 state {状态}
+  设 query.lesson_level = {lesson_level 或 全部}
+  设 query.keyword = {keyword 或}
+  设 lessons = 查询表 app.db lesson_list {query}
+  设 group.lessons = {lessons}
+  响应 lists {group}
+  设 count = 条数 {lessons}
+  设 state.lesson_count = 共{count}课
+  响应 state {state}
   # 把用的条件填回表单：表单的初值是空串（实体的「默认 全部」管不到前端），
   # 不填回去的话进页面时等级下拉是空的，表里却是全部
-  响应 form {查}
+  响应 form {query}
 结束
 
 
@@ -123,35 +123,35 @@
 接口 POST /lesson/one 动作 lesson_one
   用包 db http data
 
-  设 课文 = {lesson 或}
-  如果 {课文} 为空
+  设 lesson = {lesson 或}
+  如果 {lesson} 为空
     返回 {"error":"缺 lesson（哪一课）"} 400
   结束
-  设 查.lesson = {课文}
-  设 课 = 查一行表 app.db lesson_one {查}
-  如果 {课.code 或} 为空
-    设 没有.code = {课文}
-    设 没有.missing = 没有这一课（{课文}），回课文表重新选。
-    设 没有.back = #%E6%95%99%E6%9D%90
-    设 状态.reading = {没有}
-    响应 state {状态}
+  设 query.lesson = {lesson}
+  设 lessons_found = 查一行表 app.db lesson_one {query}
+  如果 {lessons_found.code 或} 为空
+    设 missing.code = {lesson}
+    设 missing.missing = 没有这一课（{lesson}），回课文表重新选。
+    设 missing.back = #%E6%95%99%E6%9D%90
+    设 state.reading = {missing}
+    响应 state {state}
   否则
-    设 课.missing = 
-    设 例句 = 查询表 app.db lesson_examples {查}
-    设 条目 = 查询表 app.db lesson_items {查}
-    设 全部.lesson_level = 全部
-    设 全部.keyword = 
-    设 课表 = 查询表 app.db lesson_list {全部}
-    设 组.examples = {例句}
-    设 组.lesson_items = {条目}
-    设 组.lessons = {课表}
-    响应 lists {组}
-    设 数 = 条数 {课表}
-    设 状态.lesson_count = 共{数}课
-    设 状态.reading = {课}
-    响应 state {状态}
+    设 lessons_found.missing = 
+    设 examples = 查询表 app.db lesson_examples {query}
+    设 item = 查询表 app.db lesson_items {query}
+    设 all_args.lesson_level = 全部
+    设 all_args.keyword = 
+    设 lessons = 查询表 app.db lesson_list {all_args}
+    设 group.examples = {examples}
+    设 group.lesson_items = {item}
+    设 group.lessons = {lessons}
+    响应 lists {group}
+    设 count = 条数 {lessons}
+    设 state.lesson_count = 共{count}课
+    设 state.reading = {lessons_found}
+    响应 state {state}
   结束
-  设 默认.lesson_level = 全部
-  设 默认.keyword = 
-  响应 form {默认}
+  设 defaults.lesson_level = 全部
+  设 defaults.keyword = 
+  响应 form {defaults}
 结束

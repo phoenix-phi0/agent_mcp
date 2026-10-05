@@ -1,5 +1,5 @@
 # 讲解：读出一课的课文内容
-# 参数：课程
+# 参数：course（课程）
 
-读取 课文 = content/n2n3/{课程}.md
-打印 {课文}
+读取 text = content/n2n3/{course}.md
+打印 {text}

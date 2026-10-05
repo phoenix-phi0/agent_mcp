@@ -2,4 +2,4 @@
 SELECT id, kanji, kana, meaning, point
 FROM word
 ORDER BY id DESC
-LIMIT CAST(:条数 AS INTEGER)
+LIMIT CAST(:limit AS INTEGER)

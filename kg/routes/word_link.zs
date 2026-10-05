@@ -8,28 +8,28 @@
 # 批量导入单词。file 不给就导 content/words.jsonl。
 接口 POST /word/import 动作 word_import
   用包 kg http
-  设 文件 = {file}
-  如果 {文件} 为空
-    设 文件 = content/words.jsonl
+  设 file = {file}
+  如果 {file} 为空
+    设 file = content/words.jsonl
   结束
-  设 报告 = 导入单词JSON app.db {文件}
-  返回 {报告}
+  设 report = 导入单词JSON app.db {file}
+  返回 {report}
 结束
 
 
 # 一个知识点下面有哪些词。出题时用这个取。
 接口 POST /point/words 动作 point_words
   用包 db http
-  设 行表 = 查询 app.db word_by_point point={point} 条数=200
-  设 组.words = {行表}
-  响应 lists {组}
+  设 rows = 查询 app.db word_by_point point={point} limit=200
+  设 group.words = {rows}
+  响应 lists {group}
 结束
 
 
 # 还没挂到知识点上的词。批量导入之后先看这个。
 接口 POST /word/orphans 动作 word_orphans
   用包 db http
-  设 行表 = 查询 app.db word_orphans 条数=200
-  设 组.words = {行表}
-  响应 lists {组}
+  设 rows = 查询 app.db word_orphans limit=200
+  设 group.words = {rows}
+  响应 lists {group}
 结束

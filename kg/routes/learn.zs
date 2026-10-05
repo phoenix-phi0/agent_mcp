@@ -17,74 +17,74 @@
 接口 POST /learn/answer 动作 learn_answer
   用包 common db http
 
-  设 学习者 = {learner 或}
-  如果 {学习者} 为空
-    设 学习者 = me
+  设 learner = {learner 或}
+  如果 {learner} 为空
+    设 learner = me
   结束
-  设 正确率 = {rate 或}
-  如果 {正确率} 为空
-    设 正确率 = 80
+  设 rate = {rate 或}
+  如果 {rate} 为空
+    设 rate = 80
   结束
-  设 最少题数 = {min_count 或}
-  如果 {最少题数} 为空
-    设 最少题数 = 8
+  设 min_count = {min_count 或}
+  如果 {min_count} 为空
+    设 min_count = 8
   结束
 
   # 对错必须给：缺了的话 CAST 成 0，记成一道错题，不报错
-  设 对错 = {correct 或}
-  如果 {对错} 为空
+  设 correct = {correct 或}
+  如果 {correct} 为空
     返回 {"error":"缺 correct（1 对 0 错）"} 400
   结束
 
-  # 不直接把 {请求} 交给写库：里面的 learner 可能是空的，要用上面补过默认值的
-  设 记.learner = {学习者}
-  设 记.point = {point}
-  设 记.item = {item 或}
-  设 记.correct = {对错}
+  # 不直接把 {request} 交给写库：里面的 learner 可能是空的，要用上面补过默认值的
+  设 rec.learner = {learner}
+  设 rec.point = {point}
+  设 rec.item = {item 或}
+  设 rec.correct = {correct}
   # 作答内容这里没有（只报对错），记空
-  设 记.answer =
+  设 rec.answer =
 
   事务 app.db
-    设 影响 = 写库表 app.db attempt_insert {记}
-    设 影响 = 写库表 app.db mastery_bump {记}
+    设 affected = 写库表 app.db attempt_insert {rec}
+    设 affected = 写库表 app.db mastery_bump {rec}
 
-    设 条件.learner = {学习者}
-    设 条件.point = {point}
-    设 条件.rate = {正确率}
-    设 条件.min_count = {最少题数}
-    设 现状 = 查一行表 app.db mastery_one {条件}
+    设 cond.learner = {learner}
+    设 cond.point = {point}
+    设 cond.rate = {rate}
+    设 cond.min_count = {min_count}
+    设 status = 查一行表 app.db mastery_one {cond}
 
     # 刚达标：这次答完才够线，之前不够。用来提示「解锁了新知识点」
-    设 刚达标 = 否
-    如果 {现状.ok} 等于 1
-      如果 {现状.mastered} 等于 0
-        设 刚达标 = 是
+    设 just_passed = 否
+    如果 {status.ok} 等于 1
+      如果 {status.mastered} 等于 0
+        设 just_passed = 是
       结束
     结束
 
-    设 标记.learner = {学习者}
-    设 标记.point = {point}
-    设 标记.mastered = {现状.ok}
-    设 影响 = 写库表 app.db mastery_set {标记}
+    设 mark.learner = {learner}
+    设 mark.point = {point}
+    设 mark.mastered = {status.ok}
+    设 affected = 写库表 app.db mastery_set {mark}
 
     # 掌握得分跟着重算（跟做题页同一个脚本、同一套参数），分变了才记一行
-    设 打分 = 执行 scripts/score_update.zs 学习者={学习者} 知识点={point}
+    设 scoring = 执行 scripts/score_update.zs learner={learner} point={point}
   结束
 
-  返回 {"right":"{现状.right}","total":"{现状.total}","rate":"{现状.rate}","mastered":"{现状.ok}","just":"{刚达标}","score":"{打分.after}"}
+  返回 {"right":"{status.right}","total":"{status.total}","rate":"{status.rate}","mastered":"{status.ok}","just":"{just_passed}","score":"{scoring.after}"}
 结束
 
 
 # 现在能学什么：自己没掌握、前置都掌握了的知识点，按依赖深度排。
 接口 POST /learn/next 动作 learn_next
   用包 db http
-  设 学习者 = {learner 或}
-  如果 {学习者} 为空
-    设 学习者 = me
+  设 learner = {learner 或}
+  如果 {learner} 为空
+    设 learner = me
   结束
-  设 行表 = 查询 app.db learn_next learner={学习者} 条数=20
-  设 组.next = {行表}
-  响应 lists {组}
+  设 rows = 查询 app.db learn_next learner={learner} limit=20
+  设 group.next = {rows}
+  响应 lists {group}
 结束
 
 
@@ -92,30 +92,30 @@
 接口 POST /learn/status 动作 learn_status
   用包 db http
 
-  设 学习者 = {learner 或}
-  如果 {学习者} 为空
-    设 学习者 = me
+  设 learner = {learner 或}
+  如果 {learner} 为空
+    设 learner = me
   结束
-  设 正确率 = {rate 或}
-  如果 {正确率} 为空
-    设 正确率 = 80
+  设 rate = {rate 或}
+  如果 {rate} 为空
+    设 rate = 80
   结束
-  设 最少题数 = {min_count 或}
-  如果 {最少题数} 为空
-    设 最少题数 = 8
+  设 min_count = {min_count 或}
+  如果 {min_count} 为空
+    设 min_count = 8
   结束
 
-  设 总览 = 查一行 app.db learn_progress learner={学习者}
-  设 条件.learner = {学习者}
-  设 条件.rate = {正确率}
-  设 条件.min_count = {最少题数}
-  设 条件.条数 = 10
-  设 在学 = 查询表 app.db learn_doing {条件}
+  设 overview = 查一行 app.db learn_progress learner={learner}
+  设 cond.learner = {learner}
+  设 cond.rate = {rate}
+  设 cond.min_count = {min_count}
+  设 cond.limit = 10
+  设 doing = 查询表 app.db learn_doing {cond}
 
   # 不能用「返回」：它一出现脚本就结束，上面「响应」攒的 lists 全作废。
   # 进度用 state 给（它本来就是跨界面的状态），表格用 lists。
-  设 组.doing = {在学}
-  响应 lists {组}
-  设 状态.progress = {总览}
-  响应 state {状态}
+  设 group.doing = {doing}
+  响应 lists {group}
+  设 state.progress = {overview}
+  响应 state {state}
 结束

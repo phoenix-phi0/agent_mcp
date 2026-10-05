@@ -18,42 +18,42 @@
 接口 POST /progress/page 动作 progress_page
   用包 db http
 
-  设 学习者 = {learner 或}
-  如果 {学习者} 为空
-    设 学习者 = me
+  设 learner = {learner 或}
+  如果 {learner} 为空
+    设 learner = me
   结束
-  设 正确率 = {rate 或}
-  如果 {正确率} 为空
-    设 正确率 = 80
+  设 rate = {rate 或}
+  如果 {rate} 为空
+    设 rate = 80
   结束
-  设 最少题数 = {min_count 或}
-  如果 {最少题数} 为空
-    设 最少题数 = 8
+  设 min_count = {min_count 或}
+  如果 {min_count} 为空
+    设 min_count = 8
   结束
 
-  设 谁.learner = {学习者}
-  设 概览 = 查一行表 app.db progress_overview {谁}
+  设 who.learner = {learner}
+  设 overview = 查一行表 app.db progress_overview {who}
 
-  设 线.learner = {学习者}
-  设 线.rate = {正确率}
-  设 线.min_count = {最少题数}
-  设 在学 = 查询表 app.db progress_doing {线}
+  设 line_args.learner = {learner}
+  设 line_args.rate = {rate}
+  设 line_args.min_count = {min_count}
+  设 doing = 查询表 app.db progress_doing {line_args}
 
-  设 下一步.learner = {学习者}
-  设 下一步.条数 = 20
-  设 能学 = 查询表 app.db learn_next {下一步}
+  设 next_args.learner = {learner}
+  设 next_args.limit = 20
+  设 next_rows = 查询表 app.db learn_next {next_args}
 
-  设 最近 = 查询表 app.db progress_recent {谁}
-  设 分级 = 查询表 app.db progress_levels {谁}
+  设 recent = 查询表 app.db progress_recent {who}
+  设 levels = 查询表 app.db progress_levels {who}
 
-  设 得分 = 查询表 app.db progress_scores {谁}
+  设 score_text = 查询表 app.db progress_scores {who}
 
-  设 组.doing = {在学}
-  设 组.next = {能学}
-  设 组.recent = {最近}
-  设 组.levels = {分级}
-  设 组.scores = {得分}
-  响应 lists {组}
-  设 状态.prog = {概览}
-  响应 state {状态}
+  设 group.doing = {doing}
+  设 group.next = {next_rows}
+  设 group.recent = {recent}
+  设 group.levels = {levels}
+  设 group.scores = {score_text}
+  响应 lists {group}
+  设 state.prog = {overview}
+  响应 state {state}
 结束

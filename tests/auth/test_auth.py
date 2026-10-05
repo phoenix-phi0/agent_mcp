@@ -11,7 +11,7 @@
   一、生成：用户表被「私有」跳过；界面能编译，密码框是 password 类型
   二、没登录：受保护的接口 401，公开的能调
   三、注册即登录；cookie 是 HttpOnly + SameSite=Lax；库里存的是哈希
-  四、伪造：请求体里塞 owner、塞「当前用户」，都改不了归属
+  四、伪造：请求体里塞 owner、塞「current_user」，都改不了归属
   五、隔离：换一个人看不到、改不了、删不了前一个人的数据（404）
   六、登录失败：不区分没这个人和密码错，失败不发 cookie
   七、令牌：篡改、过期、换密钥签的，一律当没登录
@@ -104,11 +104,11 @@ def main():
 
     print("四、伪造归属")
     st, body, _ = post(c, "/note/create", title="alice 的 笔记", body="正文",
-                       owner="bob", 当前用户="bob")
+                       owner="bob", current_user="bob")
     check(st == 200, f"建成了：{st}")
     rows = db("SELECT title, owner FROM note")
     check(rows == [("alice 的 笔记", "alice")],
-          f"请求体里塞 owner=bob、当前用户=bob 都没用，归属是 alice：{rows}")
+          f"请求体里塞 owner=bob、current_user=bob 都没用，归属是 alice：{rows}")
     st, body, _ = post(c, "/note/list")
     # 表格数据在 lists 里按数据键给，键就是界面上那张表的名字（notes）
     notes = (body.get("lists") or {}).get("notes", [])

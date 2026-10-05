@@ -17,77 +17,77 @@
 接口 POST /kg/import2 动作 kg_import2
   用包 common db http
 
-  读JSONL 节点表 = content/kg.jsonl
-  读JSONL 条目表 = content/items.jsonl
-  读JSONL 对照表 = content/contrast.jsonl
+  读JSONL node_rows = content/kg.jsonl
+  读JSONL item_rows = content/items.jsonl
+  读JSONL contrast_rows = content/contrast.jsonl
 
-  设 节点数 = 0
-  设 条目数 = 0
-  设 边数 = 0
-  设 已有 = 0
-  设 拒绝 = 0
-  设 对照数 = 0
-  设 说明 = 
+  设 node_n = 0
+  设 item_n = 0
+  设 edge_n = 0
+  设 existing = 0
+  设 rejected = 0
+  设 contrast_n = 0
+  设 note = 
 
   事务 app.db
     # 一、节点。先全部插入，文件里可以先引用后定义
-    遍历 项 于 {节点表} 序号 行
-      设 点.code = {项.id 或}
-      设 点.label = {项.label 或}
-      如果 {点.code} 为空
-        设 说明 = {说明} 第{行}行缺 id；
+    遍历 item 于 {node_rows} 序号 row
+      设 point.code = {item.id 或}
+      设 point.label = {item.label 或}
+      如果 {point.code} 为空
+        设 note = {note} 第{row}行缺 id；
       否则
-        设 影响 = 写库表 app.db kg_node_upsert {点}
-        设 节点数 = 相加 {节点数} 1
+        设 affected = 写库表 app.db kg_node_upsert {point}
+        设 node_n = 相加 {node_n} 1
       结束
     结束
 
     # 二、条目。point 指向节点，所以要在节点之后
-    遍历 条 于 {条目表} 序号 行
-      设 目.code = {条.code 或}
-      设 目.label = {条.label 或}
-      设 目.point = {条.point 或}
-      设 目.form = {条.form 或}
-      设 目.after = {条.after 或}
-      如果 {目.code} 为空
-        设 说明 = {说明} 条目第{行}行缺 code；
+    遍历 entry 于 {item_rows} 序号 row
+      设 catalog_args.code = {entry.code 或}
+      设 catalog_args.label = {entry.label 或}
+      设 catalog_args.point = {entry.point 或}
+      设 catalog_args.form = {entry.form 或}
+      设 catalog_args.after = {entry.after 或}
+      如果 {catalog_args.code} 为空
+        设 note = {note} 条目第{row}行缺 code；
       否则
-        设 影响 = 写库表 app.db item_upsert {目}
-        设 条目数 = 相加 {条目数} 1
+        设 affected = 写库表 app.db item_upsert {catalog_args}
+        设 item_n = 相加 {item_n} 1
       结束
     结束
 
     # 三、前置边。SQL 自带环检查，被拒的逐条问原因
-    遍历 项 于 {节点表} 序号 行
-      遍历 前 于 {项.prereq 或}
-        设 边.src = {前}
-        设 边.dst = {项.id}
-        设 影响 = 写库表 app.db kg_edge_add {边}
-        如果 {影响} 等于 1
-          设 边数 = 相加 {边数} 1
+    遍历 item 于 {node_rows} 序号 row
+      遍历 prev 于 {item.prereq 或}
+        设 edge.src = {prev}
+        设 edge.dst = {item.id}
+        设 affected = 写库表 app.db kg_edge_add {edge}
+        如果 {affected} 等于 1
+          设 edge_n = 相加 {edge_n} 1
         否则
-          设 原因 = 查一值表 app.db kg_edge_why {边}
-          如果 {原因} 等于 已存在
-            设 已有 = 相加 {已有} 1
+          设 reason = 查一值表 app.db kg_edge_why {edge}
+          如果 {reason} 等于 已存在
+            设 existing = 相加 {existing} 1
           否则
-            设 拒绝 = 相加 {拒绝} 1
-            设 查路.from = {项.id}
-            设 查路.to = {前}
-            设 路径 = 查一值表 app.db kg_path {查路}
-            设 说明 = {说明} 第{行}行 {前}→{项.id} {原因}{路径}；
+            设 rejected = 相加 {rejected} 1
+            设 path_args.from = {item.id}
+            设 path_args.to = {prev}
+            设 path = 查一值表 app.db kg_path {path_args}
+            设 note = {note} 第{row}行 {prev}→{item.id} {reason}{path}；
           结束
         结束
       结束
     结束
 
     # 四、对照。两端可以是节点也可以是条目，所以放在最后
-    遍历 对 于 {对照表} 序号 行
-      设 双.x = {对.a 或}
-      设 双.y = {对.b 或}
-      设 影响 = 写库表 app.db kg_contrast_add {双}
-      设 对照数 = 相加 {对照数} {影响}
+    遍历 pair 于 {contrast_rows} 序号 row
+      设 pair_args.x = {pair.a 或}
+      设 pair_args.y = {pair.b 或}
+      设 affected = 写库表 app.db kg_contrast_add {pair_args}
+      设 contrast_n = 相加 {contrast_n} {affected}
     结束
   结束
 
-  返回 {"nodes":"{节点数}","items":"{条目数}","edges":"{边数}","existing":"{已有}","rejected":"{拒绝}","contrast":"{对照数}","note":"{说明}"}
+  返回 {"nodes":"{node_n}","items":"{item_n}","edges":"{edge_n}","existing":"{existing}","rejected":"{rejected}","contrast":"{contrast_n}","note":"{note}"}
 结束

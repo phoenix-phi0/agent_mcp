@@ -253,9 +253,9 @@ SELECT username, password_hash FROM user WHERE username = :username
 # 注册成功直接登录。go 是 @来处：回到被要求登录之前的那个界面。
 接口 POST /auth/register 动作 auth_register 公开
   用包 auth http
-  设 结果 = 注册用户 app.db user_insert {请求}
-  如果 {结果} 开头是 [
-    返回 {"error":"{结果}"} 400
+  设 result = 注册用户 app.db user_insert {request}
+  如果 {result} 开头是 [
+    返回 {"error":"{result}"} 400
   结束
   返回 {"go":"@来处","messages":[{"who":"系统","text":"注册成功","kind":"ok"}]}
 结束
@@ -264,8 +264,8 @@ SELECT username, password_hash FROM user WHERE username = :username
 # 登录失败不区分「没这个人」和「密码错」
 接口 POST /auth/login 动作 auth_login 公开
   用包 auth http
-  设 用户 = 登录 app.db user_by_name {请求}
-  如果 {用户} 为空
+  设 user = 登录 app.db user_by_name {request}
+  如果 {user} 为空
     返回 {"error":"用户名或密码不对"} 400
   结束
   返回 {"go":"@来处","messages":[{"who":"系统","text":"已登录","kind":"ok"}]}
@@ -274,14 +274,14 @@ SELECT username, password_hash FROM user WHERE username = :username
 
 接口 POST /auth/logout 动作 auth_logout 公开
   用包 auth http
-  设 结果 = 退出登录
+  设 result = 退出登录
   返回 {"go":"登录","messages":[{"who":"系统","text":"已退出","kind":"ok"}]}
 结束
 
 
 # 现在是谁。没登录时 user 是空串。
 接口 POST /auth/me 动作 auth_me 公开
-  返回 {"user":"{当前用户}"}
+  返回 {"user":"{current_user}"}
 结束
 """,
     "ui/auth.ui": """\

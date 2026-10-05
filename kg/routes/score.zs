@@ -16,38 +16,38 @@
 接口 POST /score/add 动作 score_add
   用包 common db http
 
-  设 学习者 = {learner 或}
-  如果 {学习者} 为空
-    设 学习者 = me
+  设 learner = {learner 或}
+  如果 {learner} 为空
+    设 learner = me
   结束
 
-  设 分 = {value 或}
-  如果 {分} 为空
+  设 value = {value 或}
+  如果 {value} 为空
     返回 {"error":"缺分数（0–100 的整数）"} 400
   结束
 
-  设 查点.point = {point 或}
-  设 有 = 查一值表 app.db node_exists {查点}
-  如果 {有} 为空
+  设 point_args.point = {point 或}
+  设 exists = 查一值表 app.db node_exists {point_args}
+  如果 {exists} 为空
     返回 {"error":"没有这个知识点"} 404
   结束
 
-  设 记.learner = {学习者}
-  设 记.point = {point}
-  设 记.value = {分}
-  设 影响 = 写库表 app.db score_add {记}
+  设 rec.learner = {learner}
+  设 rec.point = {point}
+  设 rec.value = {value}
+  设 affected = 写库表 app.db score_add {rec}
   # 写入那条 SQL 自己查范围，不合格就影响 0 行
-  如果 {影响} 等于 0
+  如果 {affected} 等于 0
     返回 {"error":"分数要是 0–100 的整数"} 400
   结束
 
-  设 条件.learner = {学习者}
-  设 条件.point = {point}
-  设 当前 = 查询表 app.db score_now {条件}
-  设 组.scores = {当前}
-  响应 lists {组}
+  设 cond.learner = {learner}
+  设 cond.point = {point}
+  设 scores = 查询表 app.db score_now {cond}
+  设 group.scores = {scores}
+  响应 lists {group}
   # 消息按空格切参数，提示里不能有空格
-  消息 系统 记下了：{分}分 ok
+  消息 系统 记下了：{value}分 ok
 结束
 
 
@@ -56,16 +56,16 @@
 接口 POST /score/now 动作 score_now
   用包 db http
 
-  设 学习者 = {learner 或}
-  如果 {学习者} 为空
-    设 学习者 = me
+  设 learner = {learner 或}
+  如果 {learner} 为空
+    设 learner = me
   结束
 
-  设 条件.learner = {学习者}
-  设 条件.point = {point 或}
-  设 当前 = 查询表 app.db score_now {条件}
-  设 组.scores = {当前}
-  响应 lists {组}
+  设 cond.learner = {learner}
+  设 cond.point = {point 或}
+  设 scores = 查询表 app.db score_now {cond}
+  设 group.scores = {scores}
+  响应 lists {group}
 结束
 
 
@@ -73,21 +73,21 @@
 接口 POST /score/history 动作 score_history
   用包 db http
 
-  设 学习者 = {learner 或}
-  如果 {学习者} 为空
-    设 学习者 = me
+  设 learner = {learner 或}
+  如果 {learner} 为空
+    设 learner = me
   结束
 
-  设 点 = {point 或}
-  如果 {点} 为空
+  设 point = {point 或}
+  如果 {point} 为空
     返回 {"error":"缺 point（看哪个知识点的历史）"} 400
   结束
 
-  设 条件.learner = {学习者}
-  设 条件.point = {点}
-  设 历史 = 查询表 app.db score_history {条件}
-  设 组.history = {历史}
-  响应 lists {组}
+  设 cond.learner = {learner}
+  设 cond.point = {point}
+  设 history = 查询表 app.db score_history {cond}
+  设 group.history = {history}
+  响应 lists {group}
 结束
 
 
@@ -100,16 +100,16 @@
 接口 POST /score/rebuild 动作 score_rebuild
   用包 common db http
 
-  设 查.learner = {learner 或}
-  设 缺 = 查询表 app.db score_missing {查}
-  设 补了 = 0
+  设 query.learner = {learner 或}
+  设 missing = 查询表 app.db score_missing {query}
+  设 added = 0
   事务 app.db
-    遍历 项 于 {缺}
-      设 打分 = 执行 scripts/score_update.zs 学习者={项.learner} 知识点={项.point}
-      如果 {打分.changed} 等于 1
-        设 补了 = 相加 {补了} 1
+    遍历 item 于 {missing}
+      设 scoring = 执行 scripts/score_update.zs learner={item.learner} point={item.point}
+      如果 {scoring.changed} 等于 1
+        设 added = 相加 {added} 1
       结束
     结束
   结束
-  返回 {"added":"{补了}"}
+  返回 {"added":"{added}"}
 结束

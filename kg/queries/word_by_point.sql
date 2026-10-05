@@ -3,4 +3,4 @@ SELECT id, kanji, kana, meaning
 FROM word
 WHERE point = :point
 ORDER BY id
-LIMIT CAST(:条数 AS INTEGER)
+LIMIT CAST(:limit AS INTEGER)

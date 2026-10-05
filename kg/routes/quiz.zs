@@ -19,40 +19,40 @@
 接口 POST /quiz/import
   用包 common db http
 
-  设 题表 = {rows 或}
-  如果 {题表} 为空
+  设 rows = {rows 或}
+  如果 {rows} 为空
     返回 {"error":"没有题（rows 是空的）"} 400
   结束
 
-  设 进库 = 0
-  设 没进 = 0
-  设 说明 = 
+  设 imported = 0
+  设 skipped = 0
+  设 note = 
 
   事务 app.db
-    设 影响 = 写库 app.db question_clear
-    遍历 项 于 {题表} 序号 行
-      设 题.code = {项.id 或}
-      设 题.course = {项.课程 或}
-      设 题.kind = {项.考点 或}
-      设 题.difficulty = {项.难度 或}
-      设 题.qtype = {项.题型 或}
-      设 题.stem = {项.题干 或}
-      设 题.answer = {项.答案 或}
-      设 题.accept = {项.可接受 或}
-      设 题.explain = {项.解析 或}
-      设 题.item = {项.条目 或}
-      设 题.lesson = {项.课文 或}
-      设 影响 = 写库表 app.db question_insert {题}
-      如果 {影响} 等于 1
-        设 进库 = 相加 {进库} 1
+    设 affected = 写库 app.db question_clear
+    遍历 item 于 {rows} 序号 row
+      设 question.code = {item.id 或}
+      设 question.course = {item.课程 或}
+      设 question.kind = {item.考点 或}
+      设 question.difficulty = {item.难度 或}
+      设 question.qtype = {item.题型 或}
+      设 question.stem = {item.题干 或}
+      设 question.answer = {item.答案 或}
+      设 question.accept = {item.可接受 或}
+      设 question.explain = {item.解析 或}
+      设 question.item = {item.条目 或}
+      设 question.lesson = {item.课文 或}
+      设 affected = 写库表 app.db question_insert {question}
+      如果 {affected} 等于 1
+        设 imported = 相加 {imported} 1
       否则
-        设 没进 = 相加 {没进} 1
-        设 说明 = {说明}{题.code}的条目「{题.item}」不在库里；
+        设 skipped = 相加 {skipped} 1
+        设 note = {note}{question.code}的条目「{question.item}」不在库里；
       结束
     结束
   结束
 
-  返回 {"questions":"{进库}","skipped":"{没进}","note":"{说明}"}
+  返回 {"questions":"{imported}","skipped":"{skipped}","note":"{note}"}
 结束
 
 
@@ -64,21 +64,21 @@
 接口 POST /quiz/state 动作 quiz_state
   用包 db http
 
-  设 学习者 = {learner 或}
-  如果 {学习者} 为空
-    设 学习者 = me
+  设 learner = {learner 或}
+  如果 {learner} 为空
+    设 learner = me
   结束
-  设 查.learner = {学习者}
-  设 进度 = 查一行表 app.db quiz_state_one {查}
+  设 query.learner = {learner}
+  设 progress = 查一行表 app.db quiz_state_one {query}
 
-  设 表.pick_level = {进度.pick_level 或 全部}
-  设 表.pick_kind = {进度.pick_kind 或 全部}
-  响应 form {表}
-  设 状态.stat = {进度.stat 或}
-  设 状态.round_total = {进度.total 或 0}
-  设 状态.round_lesson = {进度.lesson 或}
-  设 状态.round_mode = {进度.mode 或}
-  响应 state {状态}
+  设 form_vals.pick_level = {progress.pick_level 或 全部}
+  设 form_vals.pick_kind = {progress.pick_kind 或 全部}
+  响应 form {form_vals}
+  设 state.stat = {progress.stat 或}
+  设 state.round_total = {progress.total 或 0}
+  设 state.round_lesson = {progress.lesson 或}
+  设 state.round_mode = {progress.mode 或}
+  响应 state {state}
 结束
 
 
@@ -103,17 +103,17 @@
 接口 POST /quiz/start 动作 quiz_start
   用包 db http
 
-  设 学习者 = {learner 或}
-  如果 {学习者} 为空
-    设 学习者 = me
+  设 learner = {learner 或}
+  如果 {learner} 为空
+    设 learner = me
   结束
-  设 等级 = {pick_level 或 全部}
-  设 考点 = {pick_kind 或 全部}
-  # 课文给空（不能写成「课文= 」：参数按空格切，空值会吞掉后面那个）
-  设 课文 = 
-  设 结果 = 执行 scripts/quiz_pick.zs 学习者={学习者} 等级={等级} 考点={考点} 课文={课文} 清零=1
-  如果 {结果.error 或} 不为空
-    返回 {"error":"{结果.error}"} 404
+  设 chosen_level = {pick_level 或 全部}
+  设 chosen_kind = {pick_kind 或 全部}
+  # lesson 给空（不能写成「lesson= 」：参数按空格切，空值会吞掉后面那个）
+  设 lesson = 
+  设 result = 执行 scripts/quiz_pick.zs learner={learner} level={chosen_level} kind={chosen_kind} lesson={lesson} new_round=1
+  如果 {result.error 或} 不为空
+    返回 {"error":"{result.error}"} 404
   结束
   响应 go 做题
 结束
@@ -125,18 +125,18 @@
 接口 POST /quiz/next 动作 quiz_next
   用包 db http
 
-  设 学习者 = {learner 或}
-  如果 {学习者} 为空
-    设 学习者 = me
+  设 learner = {learner 或}
+  如果 {learner} 为空
+    设 learner = me
   结束
-  设 查.learner = {学习者}
-  设 进度 = 查一行表 app.db quiz_state_one {查}
-  设 等级 = {pick_level 或 全部}
-  设 考点 = {pick_kind 或 全部}
-  设 课文 = {进度.lesson 或}
-  设 结果 = 执行 scripts/quiz_pick.zs 学习者={学习者} 等级={等级} 考点={考点} 课文={课文} 清零=0 模式={进度.mode 或}
-  如果 {结果.error 或} 不为空
-    返回 {"error":"{结果.error}"} 404
+  设 query.learner = {learner}
+  设 progress = 查一行表 app.db quiz_state_one {query}
+  设 chosen_level = {pick_level 或 全部}
+  设 chosen_kind = {pick_kind 或 全部}
+  设 lesson = {progress.lesson 或}
+  设 result = 执行 scripts/quiz_pick.zs learner={learner} level={chosen_level} kind={chosen_kind} lesson={lesson} new_round=0 mode={progress.mode 或}
+  如果 {result.error 或} 不为空
+    返回 {"error":"{result.error}"} 404
   结束
 结束
 
@@ -148,20 +148,20 @@
 接口 POST /quiz/again 动作 quiz_again
   用包 db http
 
-  设 学习者 = {learner 或}
-  如果 {学习者} 为空
-    设 学习者 = me
+  设 learner = {learner 或}
+  如果 {learner} 为空
+    设 learner = me
   结束
-  设 查.learner = {学习者}
-  设 进度 = 查一行表 app.db quiz_state_one {查}
-  设 课文 = {进度.lesson 或}
-  设 模式 = {进度.mode 或}
-  如果 {进度.current 或} 为空
+  设 query.learner = {learner}
+  设 progress = 查一行表 app.db quiz_state_one {query}
+  设 lesson = {progress.lesson 或}
+  设 mode = {progress.mode 或}
+  如果 {progress.current 或} 为空
     返回 {"error":"还没出过题，点「开始」出题"} 400
   结束
-  设 结果 = 执行 scripts/quiz_pick.zs 学习者={学习者} 等级={进度.pick_level} 考点={进度.pick_kind} 课文={课文} 清零=1 模式={模式}
-  如果 {结果.error 或} 不为空
-    返回 {"error":"{结果.error}"} 404
+  设 result = 执行 scripts/quiz_pick.zs learner={learner} level={progress.pick_level} kind={progress.pick_kind} lesson={lesson} new_round=1 mode={mode}
+  如果 {result.error 或} 不为空
+    返回 {"error":"{result.error}"} 404
   结束
 结束
 
@@ -185,55 +185,55 @@
 接口 POST /quiz/lesson 动作 quiz_lesson
   用包 db http
 
-  设 学习者 = {learner 或}
-  如果 {学习者} 为空
-    设 学习者 = me
+  设 learner = {learner 或}
+  如果 {learner} 为空
+    设 learner = me
   结束
-  设 课文 = {lesson 或}
-  设 查.learner = {学习者}
-  设 进度 = 查一行表 app.db quiz_state_one {查}
-  设 等级 = {进度.pick_level 或 全部}
-  设 考点 = {进度.pick_kind 或 全部}
-  设 模式 = {mode 或}
-  设 清 = 1
-  如果 {课文} 为空
-    如果 {模式 或 无} 等于 review
+  设 lesson = {lesson 或}
+  设 query.learner = {learner}
+  设 progress = 查一行表 app.db quiz_state_one {query}
+  设 chosen_level = {progress.pick_level 或 全部}
+  设 chosen_kind = {progress.pick_kind 或 全部}
+  设 mode = {mode 或}
+  设 new_round = 1
+  如果 {lesson} 为空
+    如果 {mode 或 无} 等于 review
       # 已经在复习、这一轮没出够：接着这一轮
-      如果 {进度.mode 或 无} 等于 review
-        如果 {进度.round_n 或 0} 小于 10
-          设 清 = 0
+      如果 {progress.mode 或 无} 等于 review
+        如果 {progress.round_n 或 0} 小于 10
+          设 new_round = 0
         结束
       结束
     否则
-      设 模式 = 
+      设 mode = 
       如果 {level 或} 为空
         如果 {kind 或} 为空
           返回 {"error":"缺 lesson（哪一课），或者 level / kind（按等级、考点），或者 mode=review"} 400
         结束
       结束
-      设 等级 = {level 或 全部}
-      设 考点 = {kind 或 全部}
+      设 chosen_level = {level 或 全部}
+      设 chosen_kind = {kind 或 全部}
     结束
   否则
-    设 模式 = 
+    设 mode = 
   结束
-  设 结果 = 执行 scripts/quiz_pick.zs 学习者={学习者} 等级={等级} 考点={考点} 课文={课文} 清零={清} 模式={模式}
-  如果 {结果.error 或} 不为空
-    返回 {"error":"{结果.error}"} 404
+  设 result = 执行 scripts/quiz_pick.zs learner={learner} level={chosen_level} kind={chosen_kind} lesson={lesson} new_round={new_round} mode={mode}
+  如果 {result.error 或} 不为空
+    返回 {"error":"{result.error}"} 404
   结束
-  设 表.pick_level = {等级}
+  设 form_vals.pick_level = {chosen_level}
   # 复习但一道没答过：界面让先按等级做几道，等级没选过就填 N5
-  如果 {结果.empty 或 0} 等于 1
-    如果 {等级} 等于 全部
-      设 表.pick_level = N5
+  如果 {result.empty 或 0} 等于 1
+    如果 {chosen_level} 等于 全部
+      设 form_vals.pick_level = N5
       # 记进库：之后「进入时」的 /quiz/state 按库里的填顶栏，不记会变回「全部」
-      设 级.learner = {学习者}
-      设 级.level = N5
-      设 影响 = 写库表 app.db quiz_state_level {级}
+      设 level_args.learner = {learner}
+      设 level_args.level = N5
+      设 affected = 写库表 app.db quiz_state_level {level_args}
     结束
   结束
-  设 表.pick_kind = {考点}
-  响应 form {表}
+  设 form_vals.pick_kind = {chosen_kind}
+  响应 form {form_vals}
 结束
 
 
@@ -249,138 +249,138 @@
 接口 POST /quiz/answer 动作 quiz_answer
   用包 common db http quiz
 
-  设 学习者 = {learner 或}
-  如果 {学习者} 为空
-    设 学习者 = me
+  设 learner = {learner 或}
+  如果 {learner} 为空
+    设 learner = me
   结束
-  设 正确率 = {rate 或}
-  如果 {正确率} 为空
-    设 正确率 = 80
+  设 rate = {rate 或}
+  如果 {rate} 为空
+    设 rate = 80
   结束
-  设 最少题数 = {min_count 或}
-  如果 {最少题数} 为空
-    设 最少题数 = 8
+  设 min_count = {min_count 或}
+  如果 {min_count} 为空
+    设 min_count = 8
   结束
 
-  设 查.learner = {学习者}
-  设 进度 = 查一行表 app.db quiz_state_one {查}
-  设 当前 = {进度.current 或}
-  如果 {当前} 为空
+  设 query.learner = {learner}
+  设 progress = 查一行表 app.db quiz_state_one {query}
+  设 current = {progress.current 或}
+  如果 {current} 为空
     返回 {"error":"还没出题，先点「开始」"} 400
   结束
-  如果 {进度.answered} 等于 1
+  如果 {progress.answered} 等于 1
     返回 {"error":"这道已经答过了，点「下一题」"} 400
   结束
 
-  设 键查.code = {当前}
-  设 键 = 查一行表 app.db question_key {键查}
-  设 作答 = {given 或}
-  如果 {键.qtype} 等于 选择
-    设 作答 = {choice 或}
+  设 key_args.code = {current}
+  设 key = 查一行表 app.db question_key {key_args}
+  设 answer = {given 或}
+  如果 {key.qtype} 等于 选择
+    设 answer = {choice 或}
   结束
-  如果 {作答 或} 为空
+  如果 {answer 或} 为空
     返回 {"error":"还没作答"} 400
   结束
 
   # 选择题的选项出题时打乱过：用出题时同一个种子再拆一次，把界面上的字母
   # 换回题库里的原字母再判（picked），批改时标的位置也跟界面上一致
-  设 拆.题干 = {键.stem}
-  设 拆.题型 = {键.qtype}
-  设 拆.答案 = {键.answer}
-  设 拆.选了 = {作答}
-  设 拆.种子 = {学习者}|{当前}|{进度.seq}
-  设 卡 = 拆选项 {拆}
-  设 原作答 = {作答}
-  如果 {键.qtype} 等于 选择
-    设 原作答 = {卡.picked}
+  设 split_args.题干 = {key.stem}
+  设 split_args.题型 = {key.qtype}
+  设 split_args.答案 = {key.answer}
+  设 split_args.选了 = {answer}
+  设 split_args.种子 = {learner}|{current}|{progress.seq}
+  设 split = 拆选项 {split_args}
+  设 orig_answer = {answer}
+  如果 {key.qtype} 等于 选择
+    设 orig_answer = {split.picked}
   结束
 
-  设 判.题型 = {键.qtype}
-  设 判.答案 = {键.answer}
-  设 判.可接受 = {键.accept}
-  设 判.作答 = {原作答}
-  设 对错 = 判对错 {判}
+  设 judge_args.题型 = {key.qtype}
+  设 judge_args.答案 = {key.answer}
+  设 judge_args.可接受 = {key.accept}
+  设 judge_args.作答 = {orig_answer}
+  设 correct = 判对错 {judge_args}
 
-  设 刚达标 = 否
-  设 得分 = 
+  设 just_passed = 否
+  设 score_text = 
   事务 app.db
-    设 交.learner = {学习者}
-    设 交.code = {当前}
-    设 交.choice = {原作答}
-    如果 {键.qtype} 不等于 选择
-      设 交.choice = 
+    设 submit.learner = {learner}
+    设 submit.code = {current}
+    设 submit.choice = {orig_answer}
+    如果 {key.qtype} 不等于 选择
+      设 submit.choice = 
     结束
-    设 交.given = {given 或}
-    设 交.correct = {对错}
-    设 影响 = 写库表 app.db quiz_state_answer {交}
+    设 submit.given = {given 或}
+    设 submit.correct = {correct}
+    设 affected = 写库表 app.db quiz_state_answer {submit}
 
     # 影响 0：同一道刚被交过（两个请求挤在一起）。不再记学习记录
-    如果 {影响} 等于 1
-      设 记.learner = {学习者}
-      设 记.point = {键.point}
-      设 记.item = {当前}
-      设 记.correct = {对错}
+    如果 {affected} 等于 1
+      设 rec.learner = {learner}
+      设 rec.point = {key.point}
+      设 rec.item = {current}
+      设 rec.correct = {correct}
       # 交的是什么也记下（请老师总结时引用）：选择题是题库里的原字母
-      设 记.answer = {原作答}
-      设 影响 = 写库表 app.db attempt_insert {记}
-      设 影响 = 写库表 app.db mastery_bump {记}
+      设 rec.answer = {orig_answer}
+      设 affected = 写库表 app.db attempt_insert {rec}
+      设 affected = 写库表 app.db mastery_bump {rec}
 
-      设 条件.learner = {学习者}
-      设 条件.point = {键.point}
-      设 条件.rate = {正确率}
-      设 条件.min_count = {最少题数}
-      设 现状 = 查一行表 app.db mastery_one {条件}
-      如果 {现状.ok} 等于 1
-        如果 {现状.mastered} 等于 0
-          设 刚达标 = 是
+      设 cond.learner = {learner}
+      设 cond.point = {key.point}
+      设 cond.rate = {rate}
+      设 cond.min_count = {min_count}
+      设 status = 查一行表 app.db mastery_one {cond}
+      如果 {status.ok} 等于 1
+        如果 {status.mastered} 等于 0
+          设 just_passed = 是
         结束
       结束
-      设 标记.learner = {学习者}
-      设 标记.point = {键.point}
-      设 标记.mastered = {现状.ok}
-      设 影响 = 写库表 app.db mastery_set {标记}
+      设 mark.learner = {learner}
+      设 mark.point = {key.point}
+      设 mark.mastered = {status.ok}
+      设 affected = 写库表 app.db mastery_set {mark}
 
-      设 打分 = 执行 scripts/score_update.zs 学习者={学习者} 知识点={键.point}
-      设 得分 = {打分.text 或}
+      设 scoring = 执行 scripts/score_update.zs learner={learner} point={key.point}
+      设 score_text = {scoring.text 或}
     结束
   结束
 
   # 「正确答案是 X」的 X 是界面上的字母（打乱后的），不是题库里的原字母
-  设 判后.code = {当前}
-  设 判后.correct = {对错}
-  设 判后.shown = {卡.answer_key 或}
-  设 结果 = 查一行表 app.db question_verdict {判后}
+  设 verdict_args.code = {current}
+  设 verdict_args.correct = {correct}
+  设 verdict_args.shown = {split.answer_key 或}
+  设 result = 查一行表 app.db question_verdict {verdict_args}
 
   # 判完把题卡重画一遍：选项标出对错（答案那项 right、选错的 wrong、其余
   # dim，有了 state 的按钮界面上就锁住了），下面是批改和解析。题卡的 code
   # 不变，界面不会当成新的一张去翻页。上面拆的那次已经带着答案和作答，
   # 标好了
-  设 卡片.code = {当前}
-  设 卡片.head = {键.head}
-  设 卡片.stem = {卡.stem}
-  设 卡片.options = {卡.options}
-  设 卡片.verdict = {结果.text}
-  设 卡片.mine = {作答}
-  设 卡片.ok = {对错}
+  设 card.code = {current}
+  设 card.head = {key.head}
+  设 card.stem = {split.stem}
+  设 card.options = {split.options}
+  设 card.verdict = {result.text}
+  设 card.mine = {answer}
+  设 card.ok = {correct}
 
   # 达标的喜报放在 state.cheer，题卡上批改下面显示，下一道出题时清掉。
   # 不走 messages：做题页没有消息流，早先前端把它塞进了全局第一条流——
   # 喜报跑到问老师的对话里去了，做题页上什么都看不见
-  设 状态.cheer = 
-  如果 {刚达标} 等于 是
-    设 状态.cheer = 「{键.point_label}」达标了，图上它后面的知识点可能解锁了。
+  设 state.cheer = 
+  如果 {just_passed} 等于 是
+    设 state.cheer = 「{key.point_label}」达标了，图上它后面的知识点可能解锁了。
   结束
 
-  设 状态.score_change = {得分}
+  设 state.score_change = {score_text}
 
-  设 进度 = 查一行表 app.db quiz_state_one {查}
-  设 状态.card = {卡片}
-  设 状态.phase = done
-  设 状态.stat = {进度.stat}
-  设 状态.round_total = {进度.total}
-  设 状态.round_lesson = {进度.lesson}
-  设 状态.round_mode = {进度.mode}
-  响应 state {状态}
+  设 progress = 查一行表 app.db quiz_state_one {query}
+  设 state.card = {card}
+  设 state.phase = done
+  设 state.stat = {progress.stat}
+  设 state.round_total = {progress.total}
+  设 state.round_lesson = {progress.lesson}
+  设 state.round_mode = {progress.mode}
+  响应 state {state}
 结束
 
 
@@ -412,71 +412,71 @@
 接口 POST /quiz/summary 动作 quiz_summary
   用包 common db http
 
-  设 学习者 = {learner 或}
-  如果 {学习者} 为空
-    设 学习者 = me
+  设 learner = {learner 或}
+  如果 {learner} 为空
+    设 learner = me
   结束
-  设 查.learner = {学习者}
-  设 本轮 = 查一行表 app.db round_attempts {查}
-  设 题数 = {本轮.n 或 0}
-  如果 {题数} 等于 0
+  设 query.learner = {learner}
+  设 round_info = 查一行表 app.db round_attempts {query}
+  设 question_n = {round_info.n 或 0}
+  如果 {question_n} 等于 0
     返回 {"error":"这一轮还没有做题，做几道再请老师总结。"} 400
   结束
 
-  设 谁.learner = {学习者}
-  设 谁.rate = 80
-  设 谁.min_count = 8
-  设 谁.level = {本轮.level 或}
-  设 进度 = 查一值表 app.db progress_brief {谁}
+  设 who.learner = {learner}
+  设 who.rate = 80
+  设 who.min_count = 8
+  设 who.level = {round_info.level 或}
+  设 progress = 查一值表 app.db progress_brief {who}
 
   系统 你是一位耐心的日语老师，学生是中国人。用中文讲解，日语例句给出原文和中文意思。回答简洁、讲清重点，不要客套。学生刚在网站的做题页做完一轮题，请你总结这一轮。题目网站已经判过分，对错以网站给的为准：你不出新题、不重新判分。提示词里会给你这一轮的每道题和这个学生的学习进度（网站统计的），不要编造里面没有的数据（没给的数字、没列出的知识点不要说）。课文和做题页的链接由网站附在你的回复下面，你不要自己写网址。
 
-  问 答 = 下面是学生这一轮做的题（{本轮.label}，答对 {本轮.ok_n} 道，共 {题数} 道；对错是网站判的）。选择题的选项在学生的界面上打乱过顺序，所以只给了选项的内容、没给字母，提到学生选了什么时请说内容。【{本轮.text}】这个学生整体的学习进度：【{进度}】请这样写：第一句是总评，写明本轮 {本轮.ok_n}/{题数}；然后按知识点说哪里错了、为什么错（结合解析，引用学生选的或写的内容）；有容易混的说法就说怎么区分；最后给下一步建议（先复习哪一课、练哪些点；进度里有掌握得分的话，得分低的点优先）。全对的话简短肯定，说说接下来可以往哪儿走。不要出新题。全文控制在 600 字以内。 用 平衡
-  如果 {答} 为空
+  问 answer_text = 下面是学生这一轮做的题（{round_info.label}，答对 {round_info.ok_n} 道，共 {question_n} 道；对错是网站判的）。选择题的选项在学生的界面上打乱过顺序，所以只给了选项的内容、没给字母，提到学生选了什么时请说内容。【{round_info.text}】这个学生整体的学习进度：【{progress}】请这样写：第一句是总评，写明本轮 {round_info.ok_n}/{question_n}；然后按知识点说哪里错了、为什么错（结合解析，引用学生选的或写的内容）；有容易混的说法就说怎么区分；最后给下一步建议（先复习哪一课、练哪些点；进度里有掌握得分的话，得分低的点优先）。全对的话简短肯定，说说接下来可以往哪儿走。不要出新题。全文控制在 600 字以内。 用 平衡
+  如果 {answer_text} 为空
     返回 {"error":"老师这次没有给出总结，过一会儿再试。"} 502
   结束
 
   # 链接：错得最多的那课「读课文」「再练这一课」，和「去问老师接着聊」
-  设 链.href1 = {本轮.read 或}
-  设 链.text1 = 读课文：《{本轮.worst_title}》
-  设 链.href2 = {本轮.practice 或}
-  设 链.text2 = 再练这一课：《{本轮.worst_title}》
-  设 链.href3 = #%E9%97%AE%E8%80%81%E5%B8%88
-  设 链.text3 = 去问老师接着聊
-  设 链文 = 查一值表 app.db chat_links {链}
+  设 links.href1 = {round_info.read 或}
+  设 links.text1 = 读课文：《{round_info.worst_title}》
+  设 links.href2 = {round_info.practice 或}
+  设 links.text2 = 再练这一课：《{round_info.worst_title}》
+  设 links.href3 = #%E9%97%AE%E8%80%81%E5%B8%88
+  设 links.text3 = 去问老师接着聊
+  设 links_json = 查一值表 app.db chat_links {links}
 
   事务 app.db
-    设 问话.learner = {学习者}
-    设 问话.role = learner
-    设 问话.content = （做完一轮：{本轮.label}，{本轮.ok_n}/{题数}）请老师总结
-    设 问话.intent = 总结
-    设 问话.lesson = {本轮.worst 或}
-    设 问话.link =
-    设 问话.link_text =
-    设 问话.links =
-    设 影响 = 写库表 app.db chat_add {问话}
-    设 答话.learner = {学习者}
-    设 答话.role = teacher
-    设 答话.content = {答}
-    设 答话.intent = 总结
-    设 答话.lesson = {本轮.worst 或}
-    设 答话.link = {链.href1}
-    设 答话.link_text = {链.text1}
-    设 答话.links = {链文}
-    设 影响 = 写库表 app.db chat_add {答话}
+    设 ask_row.learner = {learner}
+    设 ask_row.role = learner
+    设 ask_row.content = （做完一轮：{round_info.label}，{round_info.ok_n}/{question_n}）请老师总结
+    设 ask_row.intent = 总结
+    设 ask_row.lesson = {round_info.worst 或}
+    设 ask_row.link =
+    设 ask_row.link_text =
+    设 ask_row.links =
+    设 affected = 写库表 app.db chat_add {ask_row}
+    设 reply_row.learner = {learner}
+    设 reply_row.role = teacher
+    设 reply_row.content = {answer_text}
+    设 reply_row.intent = 总结
+    设 reply_row.lesson = {round_info.worst 或}
+    设 reply_row.link = {links.href1}
+    设 reply_row.link_text = {links.text1}
+    设 reply_row.links = {links_json}
+    设 affected = 写库表 app.db chat_add {reply_row}
   结束
 
-  设 总结.text = {答}
-  设 总结.read = {链.href1}
-  设 总结.practice = {链.href2}
-  设 总结.chat = {链.href3}
+  设 summary.text = {answer_text}
+  设 summary.read = {links.href1}
+  设 summary.practice = {links.href2}
+  设 summary.chat = {links.href3}
   # 按课练、错得最多的就是在练的这一课：做题页上不给「再练这一课」——地址
   # 就是现在这个，点了不会重新载入；卡上本来就有「再来一轮」
-  设 最差 = {本轮.worst 或 -}
-  设 在练 = {本轮.lesson 或 无}
-  如果 {最差} 等于 {在练}
-    设 总结.practice =
+  设 worst = {round_info.worst 或 -}
+  设 practicing = {round_info.lesson 或 无}
+  如果 {worst} 等于 {practicing}
+    设 summary.practice =
   结束
-  设 状态.summary = {总结}
-  响应 state {状态}
+  设 state.summary = {summary}
+  响应 state {state}
 结束

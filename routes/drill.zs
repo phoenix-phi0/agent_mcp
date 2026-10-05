@@ -11,7 +11,7 @@
 # URL，不该迁就界面里的变量名。
 #
 # 请求字段直接当变量：{learner}、{answer}、{course} 就是 POST body 里
-# 的同名字段。跨请求的状态在 {会话.xxx}，脚本改完自动存回
+# 的同名字段。跨请求的状态在 {session.xxx}，脚本改完自动存回
 # sessions/<learner>.json。
 #
 # 注意：动词参数里不能有空格，**全角空格也不行**——normalize 会把它转成
@@ -24,26 +24,26 @@
 接口 POST /drill/start
   用包 common quiz http
 
-  设 会话.课程 = {course}
-  设 会话.考点 = {kind}
-  设 会话.对 = 0
-  设 会话.总 = 0
-  设 会话.错题 =
+  设 session.课程 = {course}
+  设 session.考点 = {kind}
+  设 session.对 = 0
+  设 session.总 = 0
+  设 session.错题 =
 
   # 「全部考点」是下拉里的占位项，对动词来说等于不筛选
-  如果 {会话.考点} 等于 全部考点
-    设 会话.考点 =
+  如果 {session.考点} 等于 全部考点
+    设 session.考点 =
   结束
 
-  设 题号 = 挑题号 content/n2n3/题库 1 {会话.课程} {会话.考点}
-  如果 {题号} 为空
-    消息 系统 没有匹配的题目：{会话.课程} no
+  设 code = 挑题号 content/n2n3/题库 1 {session.课程} {session.考点}
+  如果 {code} 为空
+    消息 系统 没有匹配的题目：{session.课程} no
   否则
-    设 会话.题号 = {题号}
-    设 题 = 取题 content/n2n3/题库 {题号}
-    消息 题目 {题}
-    设 进度文本 = {会话.课程}　尚未作答
-    状态 stat {进度文本}
+    设 session.题号 = {code}
+    设 question = 取题 content/n2n3/题库 {code}
+    消息 题目 {question}
+    设 progress_text = {session.课程}　尚未作答
+    状态 stat {progress_text}
   结束
 结束
 
@@ -51,26 +51,26 @@
 接口 POST /drill/answer 动作 submit
   用包 common quiz http
 
-  如果 {会话.题号} 为空
+  如果 {session.题号} 为空
     消息 系统 当前没有待答的题 no
   否则
-    设 结果 = 判题 content/n2n3/题库 {会话.题号} {answer}
-    设 会话.总 = 相加 {会话.总} 1
+    设 result = 判题 content/n2n3/题库 {session.题号} {answer}
+    设 session.总 = 相加 {session.总} 1
 
     # 判题结果以 ○ 开头表示答对。这个约定散在好几处，
     # 等输出结构化之后应该换成显式字段。
-    如果 {结果} 开头是 ○
-      设 会话.对 = 相加 {会话.对} 1
-      消息 批改 {结果} ok
+    如果 {result} 开头是 ○
+      设 session.对 = 相加 {session.对} 1
+      消息 批改 {result} ok
     否则
-      设 会话.错题 = {会话.错题},{会话.题号}
-      消息 批改 {结果} no
+      设 session.错题 = {session.错题},{session.题号}
+      消息 批改 {result} no
     结束
 
-    设 会话.题号 =
-    设 比 = 算比例 {会话.对} {会话.总}
-    设 进度文本 = {会话.课程}　{会话.对}/{会话.总}（{比}%）
-    状态 stat {进度文本}
+    设 session.题号 =
+    设 ratio = 算比例 {session.对} {session.总}
+    设 progress_text = {session.课程}　{session.对}/{session.总}（{ratio}%）
+    状态 stat {progress_text}
   结束
 结束
 
@@ -78,13 +78,13 @@
 接口 POST /drill/next 动作 next
   用包 common quiz http
 
-  设 题号 = 挑题号 content/n2n3/题库 1 {会话.课程} {会话.考点}
-  如果 {题号} 为空
+  设 code = 挑题号 content/n2n3/题库 1 {session.课程} {session.考点}
+  如果 {code} 为空
     消息 系统 这一课的题出完了 no
   否则
-    设 会话.题号 = {题号}
-    设 题 = 取题 content/n2n3/题库 {题号}
-    消息 题目 {题}
+    设 session.题号 = {code}
+    设 question = 取题 content/n2n3/题库 {code}
+    消息 题目 {question}
   结束
 结束
 
@@ -92,16 +92,16 @@
 接口 POST /drill/stop 动作 stop
   用包 common quiz http
 
-  如果 {会话.总} 为空
+  如果 {session.总} 为空
     消息 系统 本来就没在练习
   否则
-    设 比 = 算比例 {会话.对} {会话.总}
-    设 小结 = 练习结束：{会话.对}/{会话.总}（{比}%）\n错题：{会话.错题}
-    消息 系统 {小结} ok
+    设 ratio = 算比例 {session.对} {session.总}
+    设 recap = 练习结束：{session.对}/{session.总}（{ratio}%）\n错题：{session.错题}
+    消息 系统 {recap} ok
   结束
 
-  设 会话.题号 =
-  设 会话.总 =
-  设 会话.对 =
+  设 session.题号 =
+  设 session.总 =
+  设 session.对 =
   状态 stat
 结束

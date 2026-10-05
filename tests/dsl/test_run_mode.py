@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""当前模式：脚本里的 {当前模式}（real / mock），以及 py -m kg 的默认真模型。
+"""运行模式：脚本里的 {run_mode}（real / mock），以及 py -m kg 的默认真模型。
 
     cd /home/ysc/mcp && .venv/bin/python tests/dsl/test_run_mode.py
 
-  一、Router：real=True → real，real=False → mock；请求体伪造「当前模式」盖不掉
+  一、Router：real=True → real，real=False → mock；请求体伪造「run_mode」盖不掉；
+      注入的是英文名，旧的中文名 {当前模式} 不再注入（原样留着）
   三、kg/app.pyw 的 build_app：默认 make_app(real=True)，--mock / KG_MOCK 才是 False；
       窗口标题带模式；脚本抛错时接口回 500 + messages（前端能显示）
   二、py -m kg：默认给 gen run 加 --real；--mock / KG_MOCK=1 不加；
@@ -40,11 +41,12 @@ def mode_of(real, forged=None):
     tmp = Path(tempfile.mkdtemp(prefix="run_mode_"))
     (tmp / "routes").mkdir()
     (tmp / "routes" / "m.zs").write_text(
-        "接口 POST /m 动作 m\n  返回 {\"mode\":\"{当前模式}\",\"req\":\"{请求.当前模式}\"}\n结束\n",
+        "接口 POST /m 动作 m\n  返回 {\"mode\":\"{run_mode}\",\"req\":\"{request.run_mode}\","
+        "\"old\":\"{当前模式}\"}\n结束\n",
         encoding="utf-8")
     r = Router(tmp / "routes", tmp, tmp / "sessions", real=real)
     ep = next(iter(r.table.values()))
-    body, status = r.handle(ep, {"当前模式": forged} if forged else {})
+    body, status = r.handle(ep, {"run_mode": forged} if forged else {})
     return status, body
 
 
@@ -86,10 +88,12 @@ def app_build(argv, env):
 
 
 def main():
-    print("一、脚本里的当前模式")
+    print("一、脚本里的 run_mode")
     for real, want in ((True, "real"), (False, "mock")):
         st, body = mode_of(real)
-        check(st == 200 and body.get("mode") == want, f"real={real} → {body}")
+        check(st == 200 and body.get("mode") == want and body.get("req") == want,
+              f"real={real} → {body}")
+    check(body.get("old") == "{当前模式}", f"旧的中文名不再注入，原样留着：{body}")
     st, body = mode_of(False, forged="real")
     check(body.get("mode") == "mock" and body.get("req") == "mock", f"请求体伪造 real 盖不掉：{body}")
 

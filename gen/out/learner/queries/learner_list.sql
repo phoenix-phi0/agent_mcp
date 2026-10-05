@@ -2,4 +2,4 @@
 SELECT code, name, level, started
 FROM learner
 ORDER BY code DESC
-LIMIT CAST(:条数 AS INTEGER)
+LIMIT CAST(:limit AS INTEGER)

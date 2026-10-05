@@ -11,25 +11,25 @@
   # 早先列表走 node_all（只有编号和名称），行就没有状态色。
   # 学习者不传就是 me，跟 learn.zs、score.zs 同一个默认值。早先这里是空串：
   # 答题记在 me 名下、图按「没有人」去查，图上什么都不变，也不报错。
-  设 学习者 = {learner 或}
-  如果 {学习者} 为空
-    设 学习者 = me
+  设 learner = {learner 或}
+  如果 {learner} 为空
+    设 learner = me
   结束
-  设 谁.learner = {学习者}
-  设 点表 = 查询表 app.db kg_graph_nodes {谁}
-  设 组.nodes = {点表}
-  响应 lists {组}
+  设 who.learner = {learner}
+  设 nodes = 查询表 app.db kg_graph_nodes {who}
+  设 group.nodes = {nodes}
+  响应 lists {group}
 
   # 图的数据。节点带 state（掌握/可学/锁定）和 badge（下游节点数），
   # 引擎按 state 上色、按 badge 画角标；边里对照那些带 kind=对照，画成
   # 虚线且不参与布局——不然同层的一对会被拉成上下两层。
   #
   # 布局交给控件（dagre）：这是「节点图」该管的事，后端只给数据。
-  设 边表 = 查询 app.db kg_graph_edges
-  设 图.nodes = {点表}
-  设 图.edges = {边表}
-  设 状态.graph = {图}
-  响应 state {状态}
+  设 edges = 查询 app.db kg_graph_edges
+  设 graph.nodes = {nodes}
+  设 graph.edges = {edges}
+  设 state.graph = {graph}
+  响应 state {state}
 结束
 
 
@@ -37,35 +37,35 @@
 # 掌握得分。
 接口 POST /node/one 动作 node_detail
   用包 db http
-  设 一条 = 查一行 app.db node_one code={code}
-  如果 {一条.code} 为空
+  设 record = 查一行 app.db node_one code={code}
+  如果 {record.code} 为空
     返回 {"error":"没有这个知识点"} 404
   结束
-  设 前置 = 查询 app.db kg_parents code={code}
-  设 后续 = 查询 app.db kg_children code={code}
-  设 条目 = 查询 app.db item_by_point point={code}
-  设 接续 = 查询 app.db item_by_form code={code}
-  设 词表 = 查询 app.db word_by_point point={code} 条数=200
-  设 三组.prereq = {前置}
-  设 三组.children = {后续}
-  设 三组.items = {条目}
-  设 三组.forms = {接续}
-  设 三组.point_words = {词表}
-  响应 form {一条}
-  响应 lists {三组}
+  设 parents = 查询 app.db kg_parents code={code}
+  设 children = 查询 app.db kg_children code={code}
+  设 items = 查询 app.db item_by_point point={code}
+  设 forms = 查询 app.db item_by_form code={code}
+  设 words = 查询 app.db word_by_point point={code} limit=200
+  设 lists_out.prereq = {parents}
+  设 lists_out.children = {children}
+  设 lists_out.items = {items}
+  设 lists_out.forms = {forms}
+  设 lists_out.point_words = {words}
+  响应 form {record}
+  响应 lists {lists_out}
 
   # 这个点答对几道、答了几道（mastery 左连接，没做过说「还没做过」）。
   # 学习者不传就是 me，跟 node_list 同一个默认值
-  设 学习者 = {learner 或}
-  如果 {学习者} 为空
-    设 学习者 = me
+  设 learner = {learner 或}
+  如果 {learner} 为空
+    设 learner = me
   结束
-  设 这点.learner = {学习者}
-  设 这点.code = {code}
-  设 成绩 = 查一值表 app.db node_tally {这点}
-  设 状态.node_tally = {成绩}
+  设 this_point.learner = {learner}
+  设 this_point.code = {code}
+  设 tally = 查一值表 app.db node_tally {this_point}
+  设 state.node_tally = {tally}
   # 掌握得分（没打过分是空串，浮层上那一格不显示）
-  设 分 = 查一值表 app.db node_score {这点}
-  设 状态.node_score = {分}
-  响应 state {状态}
+  设 score = 查一值表 app.db node_score {this_point}
+  设 state.node_score = {score}
+  响应 state {state}
 结束

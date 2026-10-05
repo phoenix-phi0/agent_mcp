@@ -21,4 +21,4 @@ WHERE m.learner = :learner
   AND NOT (m.total >= CAST(:min_count AS INTEGER)
            AND m.right * 100 / m.total >= CAST(:rate AS INTEGER))
 ORDER BY m.updated DESC
-LIMIT CAST(:条数 AS INTEGER)
+LIMIT CAST(:limit AS INTEGER)

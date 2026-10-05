@@ -11,4 +11,4 @@ SELECT {{ e | 主键 }}{% for f in e.fields %}{% if f.name != (e | 主键) %}, {
 
 FROM {{ e.name }}
 ORDER BY {{ e | 主键 }} DESC
-LIMIT CAST(:条数 AS INTEGER)
+LIMIT CAST(:limit AS INTEGER)

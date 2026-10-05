@@ -98,7 +98,7 @@ def export_lessons(src: Path = None, out: Path = None, bank: list = None,
         rows.append(f"| {code} | {d['level']} | {d['title']} | {d.get('summary') or ''} | {n} |")
 
     index = ["# 语法课文索引", "",
-             "每课一个文件，文件名就是课文编号。讲解用 run_flow(\"语法讲解\", {\"课文\": \"编号\"})。",
+             "每课一个文件，文件名就是课文编号。讲解用 run_flow(\"语法讲解\", {\"lesson\": \"编号\"})。",
              "学习者问到某个语法时，在这张表里按标题找编号。", "",
              "| 课文编号 | 等级 | 标题 | 一句话 | 题数 |", "|---|---|---|---|---|"] + rows + [""]
     (out / "INDEX.md").write_text("\n".join(index), encoding="utf-8")

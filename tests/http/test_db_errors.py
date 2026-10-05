@@ -24,16 +24,16 @@ from tools.dsl_http import Router      # noqa: E402
 ROUTES = """\
 接口 POST /q_missing
   用包 db http
-  设 行表 = 查询 app.db no_such_query
-  设 组.notes = {行表}
-  响应 lists {组}
+  设 rows = 查询 app.db no_such_query
+  设 group.notes = {rows}
+  响应 lists {group}
 结束
 
 
 接口 POST /q_param
   用包 db http
-  设 一条 = 查一行 app.db note_one
-  响应 form {一条}
+  设 record = 查一行 app.db note_one
+  响应 form {record}
 结束
 
 
@@ -46,14 +46,14 @@ ROUTES = """\
 
 接口 POST /save
   用包 db http
-  设 影响 = 写库表 app.db note_insert {请求}
+  设 affected = 写库表 app.db note_insert {request}
   消息 系统 已保存 ok
 结束
 
 
 接口 POST /save_positional
   用包 db http
-  设 影响 = 写库 app.db note_insert title={title}
+  设 affected = 写库 app.db note_insert title={title}
   消息 系统 已保存 ok
 结束
 
@@ -61,7 +61,7 @@ ROUTES = """\
 接口 POST /save_tx
   用包 db http
   事务 app.db
-    设 影响 = 写库表 app.db note_insert {请求}
+    设 affected = 写库表 app.db note_insert {request}
   结束
   消息 系统 已保存 ok
 结束
@@ -69,14 +69,14 @@ ROUTES = """\
 
 接口 POST /save_null
   用包 db http
-  设 影响 = 写库 app.db note_insert_null
+  设 affected = 写库 app.db note_insert_null
   消息 系统 已保存 ok
 结束
 
 
 接口 POST /tag
   用包 db http
-  设 影响 = 写库表 app.db tag_insert {请求}
+  设 affected = 写库表 app.db tag_insert {request}
   消息 系统 已保存 ok
 结束
 """

@@ -2,4 +2,4 @@
 SELECT learner, node, right_count, total, mastered, updated
 FROM mastery
 ORDER BY learner DESC
-LIMIT CAST(:条数 AS INTEGER)
+LIMIT CAST(:limit AS INTEGER)

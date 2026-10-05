@@ -47,13 +47,13 @@
 接口 POST /count
   用包 common http
 
-  如果 {会话.次数} 为空
-    设 会话.次数 = 0
+  如果 {session.次数} 为空
+    设 session.次数 = 0
   结束
 
-  设 会话.次数 = 相加 {会话.次数} 1
-  消息 服务器 这是第 {会话.次数} 次
-  状态 count {会话.次数}
+  设 session.次数 = 相加 {session.次数} 1
+  消息 服务器 这是第 {session.次数} 次
+  状态 count {session.次数}
 结束
 
 
@@ -63,8 +63,8 @@
 接口 POST /authors
   用包 db
 
-  设 名单 = 查询 试验.db 作者统计
-  返回 {"authors":{名单}}
+  设 authors = 查询 试验.db 作者统计
+  返回 {"authors":{authors}}
 结束
 
 
@@ -72,27 +72,27 @@
 接口 POST /authors/add
   用包 db
 
-  如果 {工号} 为空
+  如果 {code} 为空
     返回 {"error":"缺少工号"} 400
   结束
 
   事务 试验.db
-    设 结果 = 写库 试验.db 加作者 工号={工号} 姓名={姓名} 级别=新手
+    设 result = 写库 试验.db 加作者 code={code} name={name} level=新手
   结束
 
-  返回 {"added":{工号}}
+  返回 {"added":{code}}
 结束
 
 
 # ---- 排查 ----
 
 接口 POST /echo
-  返回 {"收到":{"name":"{name}","id":"{id}"},"会话":{会话}}
+  返回 {"收到":{"name":"{name}","id":"{id}"},"会话":{session}}
 结束
 
 
 # 真调一次模型。默认假客户端返回固定内容，加 --real 才走真的。
 接口 POST /ask
-  问 回答 = 用一句话回答：{question}
-  返回 {"answer":"{回答}"}
+  问 answer = 用一句话回答：{question}
+  返回 {"answer":"{answer}"}
 结束

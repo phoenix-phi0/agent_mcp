@@ -4,7 +4,7 @@
     前端按名字替换那一组，所以回到列表时看到的就是改完的样子。列表界面
     标了「进入时」也会刷新，这里再返回一次是兜底——不依赖那个钩子。
 
-    **主键从 {请求} 里来**。列表取全部列，点编辑时前端把整行拷进编辑
+    **主键从 {request} 里来**。列表取全部列，点编辑时前端把整行拷进编辑
     表单，提交时主键就在请求体里。
 
     注意：.zs 里的插值是单层花括号 {变量}，Jinja 的是双层。单层 Jinja
@@ -19,24 +19,24 @@
 
 接口 POST /{{ e.name }}/list 动作 {{ e.name }}_refresh
   用包 db http
-  设 行表 = 查询 {{ db }} {{ e.name }}_list 条数=50
-  设 组.{{ e.name }}s = {行表}
-  响应 lists {组}
+  设 rows = 查询 {{ db }} {{ e.name }}_list limit=50
+  设 group.{{ e.name }}s = {rows}
+  响应 lists {group}
 结束
 
 
 接口 POST /{{ e.name }}/one 动作 {{ e.name }}_open
   用包 db http
-  设 一条 = 查一行 {{ db }} {{ e.name }}_one {{ pk }}={ {{- pk -}} }
-  如果 {一条.{{ pk }}} 为空
+  设 record = 查一行 {{ db }} {{ e.name }}_one {{ pk }}={ {{- pk -}} }
+  如果 {record.{{ pk }}} 为空
     返回 {"error":"没有这条记录"} 404
   结束
   # form：前端填进编辑表单（界面上的「载入」）
-  响应 form {一条}
+  响应 form {record}
 结束
 
 
-{# 新建界面的「保存」。用「写库表 … {请求}」：「写库」按空格切参数，
+{# 新建界面的「保存」。用「写库表 … {request}」：「写库」按空格切参数，
    标题、正文这类用户输入含空格就会错位，而且不报错。
 
    块之间的注释开头不能带减号——会吃掉前面的换行，上一个接口的「结束」
@@ -45,46 +45,46 @@
 接口 POST /{{ e.name }}/create 动作 {{ e.name }}_save
   用包 db http
   事务 {{ db }}
-    设 影响 = 写库表 {{ db }} {{ e.name }}_insert {请求}
+    设 affected = 写库表 {{ db }} {{ e.name }}_insert {request}
   结束
-  设 行表 = 查询 {{ db }} {{ e.name }}_list 条数=50
-  设 组.{{ e.name }}s = {行表}
-  响应 lists {组}
+  设 rows = 查询 {{ db }} {{ e.name }}_list limit=50
+  设 group.{{ e.name }}s = {rows}
+  响应 lists {group}
   消息 系统 已新建 ok
 结束
 
 
-{# 编辑界面的「保存」。主键在 {请求} 里——编辑表单是列表那一行拷过来的。 #}
+{# 编辑界面的「保存」。主键在 {request} 里——编辑表单是列表那一行拷过来的。 #}
 接口 POST /{{ e.name }}/update 动作 {{ e.name }}_update
   用包 db http
   # 没带主键就别进事务：绑定时报「缺少参数」，在事务里会变成 500
-  如果 {请求.{{ pk }}} 为空
+  如果 {request.{{ pk }}} 为空
     返回 {"error":"没有指定要改哪一条"} 400
   结束
   事务 {{ db }}
-    设 影响 = 写库表 {{ db }} {{ e.name }}_update {请求}
+    设 affected = 写库表 {{ db }} {{ e.name }}_update {request}
   结束
   # 影响 0 行说明那条记录没了——可能别人删了，也可能主键没带过来
-  如果 {影响} 等于 0
+  如果 {affected} 等于 0
     返回 {"error":"没有这条记录"} 404
   结束
-  设 行表 = 查询 {{ db }} {{ e.name }}_list 条数=50
-  设 组.{{ e.name }}s = {行表}
-  响应 lists {组}
+  设 rows = 查询 {{ db }} {{ e.name }}_list limit=50
+  设 group.{{ e.name }}s = {rows}
+  响应 lists {group}
   消息 系统 已保存 ok
 结束
 
 
 接口 POST /{{ e.name }}/delete 动作 {{ e.name }}_remove
   用包 db http
-  如果 {请求.{{ pk }}} 为空
+  如果 {request.{{ pk }}} 为空
     返回 {"error":"没有指定要删哪一条"} 400
   结束
   事务 {{ db }}
-    设 影响 = 写库表 {{ db }} {{ e.name }}_delete {请求}
+    设 affected = 写库表 {{ db }} {{ e.name }}_delete {request}
   结束
-  设 行表 = 查询 {{ db }} {{ e.name }}_list 条数=50
-  设 组.{{ e.name }}s = {行表}
-  响应 lists {组}
+  设 rows = 查询 {{ db }} {{ e.name }}_list limit=50
+  设 group.{{ e.name }}s = {rows}
+  响应 lists {group}
   消息 系统 已删除 ok
 结束

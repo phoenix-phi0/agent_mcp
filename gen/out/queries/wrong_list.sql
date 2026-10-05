@@ -2,4 +2,4 @@
 SELECT learner, question, course, point, times, last_at
 FROM wrong
 ORDER BY learner DESC
-LIMIT CAST(:条数 AS INTEGER)
+LIMIT CAST(:limit AS INTEGER)

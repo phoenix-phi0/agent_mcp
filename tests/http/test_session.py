@@ -10,7 +10,7 @@
   二、接口写会话            → 写进 sessions/<learner>.json
   三、下一个请求接着用       → 读到上次写的值
   四、接口只读会话          → 文件不被重写（看修改时间）
-  五、子脚本                → 显式传 会话={会话} 才读得到；不传读不到，
+  五、子脚本                → 显式传 session={session} 才读得到；不传读不到，
                               因为子脚本是独立作用域
 """
 
@@ -32,35 +32,35 @@ ROUTES = """\
 
 接口 POST /count
   用包 common
-  如果 {会话.次数} 为空
-    设 会话.次数 = 1
+  如果 {session.count} 为空
+    设 session.count = 1
   否则
-    设 会话.次数 = 相加 {会话.次数} 1
+    设 session.count = 相加 {session.count} 1
   结束
-  返回 {"n":"{会话.次数}"}
+  返回 {"n":"{session.count}"}
 结束
 
 
 接口 POST /peek
-  返回 {"n":"{会话.次数}"}
+  返回 {"n":"{session.count}"}
 结束
 
 
 接口 POST /viasub
-  设 结果 = 执行 子.zs 会话={会话}
-  返回 {"n":"{结果}"}
+  设 result = 执行 子.zs session={session}
+  返回 {"n":"{result}"}
 结束
 
 
 接口 POST /viasub_nopass
-  设 结果 = 执行 子.zs
-  返回 {"n":"{结果}"}
+  设 result = 执行 子.zs
+  返回 {"n":"{result}"}
 结束
 """
 
 # 子脚本是独立作用域：看不到父脚本的变量，会话要显式传进来。
 # 结果用「返回」交回父脚本（设 x = 执行 …）。
-SUB = "返回 {会话.次数}\n"
+SUB = "返回 {session.count}\n"
 
 passed = failed = 0
 
@@ -112,6 +112,10 @@ def main():
     body, _ = call("/viasub_nopass")
     check("2" not in str(body),
           f"不传就读不到——子脚本是独立作用域，跟会话读没读无关：{body}")
+
+    print("  请求体里伪造 session 字段盖不掉服务器存的会话")
+    body, _ = call("/peek", session={"count": "99"})
+    check("2" in str(body) and "99" not in str(body), f"读到的还是 2：{body}")
 
     print("  另一个 learner 看不到 u1 的会话")
     body, _ = router.handle(ep("/peek"), {"learner": "u2"})

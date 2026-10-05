@@ -4,4 +4,4 @@ SELECT {{ e | 主键 }}{% for f in e.fields | 上列表 %}{% if f.name != (e | �
 
 FROM {{ e.name }}
 ORDER BY {{ e | 主键 }} DESC
-LIMIT CAST(:条数 AS INTEGER)
+LIMIT CAST(:limit AS INTEGER)

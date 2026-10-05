@@ -2,7 +2,7 @@
 #
 # 当初写成 Python 的两个理由现在都没了：
 #   逐条报错要说第几条 → 遍历有「序号 i」
-#   可选字段缺了会留成 {项.kanji} 字面量 → 取值有「{项.kanji 或}」
+#   可选字段缺了会留成 {item.kanji} 字面量 → 取值有「{item.kanji 或}」
 #
 # 按「汉字+假名」认同一个词：光看假名会把同音词当成一个（はし 是桥也是
 # 筷子），光看汉字则漏掉没有汉字的词。所以先查再决定插还是改。
@@ -13,58 +13,58 @@
 接口 POST /word/import2 动作 word_import2
   用包 common db http
 
-  设 文件 = {file 或 content/words.jsonl}
-  读JSONL 词表 = {文件}
+  设 file = {file 或 content/words.jsonl}
+  读JSONL words = {file}
 
-  设 新增 = 0
-  设 更新 = 0
-  设 跳过 = 0
-  设 没挂 = 0
-  设 坏点 = 0
-  设 说明 = 
+  设 added = 0
+  设 updated = 0
+  设 skipped = 0
+  设 no_point = 0
+  设 bad_point = 0
+  设 note = 
 
   事务 app.db
-    遍历 项 于 {词表} 序号 行
-      设 假名 = {项.kana 或}
-      设 中文 = {项.meaning 或}
+    遍历 item 于 {words} 序号 row
+      设 kana = {item.kana 或}
+      设 meaning = {item.meaning 或}
 
-      如果 {假名} 为空
-        设 跳过 = 相加 {跳过} 1
-        设 说明 = {说明} 第{行}条缺假名；
+      如果 {kana} 为空
+        设 skipped = 相加 {skipped} 1
+        设 note = {note} 第{row}条缺假名；
       否则
-        设 词.kanji = {项.kanji 或}
-        设 词.kana = {假名}
-        设 词.meaning = {中文}
-        设 词.point = {项.point 或}
+        设 word.kanji = {item.kanji 或}
+        设 word.kana = {kana}
+        设 word.meaning = {meaning}
+        设 word.point = {item.point 或}
 
         # 知识点填了但库里没有：不挂，词照样导
-        如果 {词.point} 不为空
-          设 有没有 = 查一值表 app.db node_exists {词}
-          如果 {有没有} 为空
-            设 坏点 = 相加 {坏点} 1
-            设 说明 = {说明} 第{行}条的知识点{词.point}不存在；
-            设 词.point = 
+        如果 {word.point} 不为空
+          设 exists = 查一值表 app.db node_exists {word}
+          如果 {exists} 为空
+            设 bad_point = 相加 {bad_point} 1
+            设 note = {note} 第{row}条的知识点{word.point}不存在；
+            设 word.point = 
           结束
         结束
 
         # 没挂知识点的计数放在插入/更新之前：放在插入分支里的话，第二遍
         # 导入（走更新）就数不到，报告里那一项凭空消失。
-        如果 {词.point} 为空
-          设 没挂 = 相加 {没挂} 1
+        如果 {word.point} 为空
+          设 no_point = 相加 {no_point} 1
         结束
 
-        设 旧 = 查一值表 app.db word_find {词}
-        如果 {旧} 为空
-          设 影响 = 写库表 app.db word_insert {词}
-          设 新增 = 相加 {新增} 1
+        设 old = 查一值表 app.db word_find {word}
+        如果 {old} 为空
+          设 affected = 写库表 app.db word_insert {word}
+          设 added = 相加 {added} 1
         否则
-          设 词.id = {旧}
-          设 影响 = 写库表 app.db word_update {词}
-          设 更新 = 相加 {更新} 1
+          设 word.id = {old}
+          设 affected = 写库表 app.db word_update {word}
+          设 updated = 相加 {updated} 1
         结束
       结束
     结束
   结束
 
-  返回 {"new":"{新增}","updated":"{更新}","skipped":"{跳过}","no_point":"{没挂}","bad_point":"{坏点}","note":"{说明}"}
+  返回 {"new":"{added}","updated":"{updated}","skipped":"{skipped}","no_point":"{no_point}","bad_point":"{bad_point}","note":"{note}"}
 结束

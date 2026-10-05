@@ -87,7 +87,7 @@ starlette 是 mcp 自带的——但它是 async，而 **DSL 引擎从头到尾�
 请求字段注入成变量：POST body 里的 `answer` 在脚本里就是 `{answer}`。
 GET 的查询参数也注入。
 
-会话状态注入成 `{会话.xxx}`，脚本跑完自动存回文件，按 `learner` 字段
+会话状态注入成 `{session.xxx}`，脚本跑完自动存回文件，按 `learner` 字段
 分文件。脚本里不写读写语句——不然十个接口各写一遍。
 
 **并发只做了一半**。锁保护读会话和写会话这两个瞬间，中间跑脚本的那
@@ -422,9 +422,16 @@ class Router:
         动词，那时才决定存哪儿、怎么命名。
 
         user 是路由器从 cookie 认出来的当前用户，没登录是空串。它以
-        {当前用户} 交给脚本，并且**强制覆盖** {请求} 里的同名字段——
-        请求体是前端给的，前端塞一个「当前用户: 别人」进来，不能让
-        「写库表 … {请求}」把它绑进 SQL。
+        {current_user} 交给脚本，并且**强制覆盖** {request} 里的同名字段——
+        请求体是前端给的，前端塞一个「current_user: 别人」进来，不能让
+        「写库表 … {request}」把它绑进 SQL。
+
+        路由器注入的变量都是英文名（跟脚本变量的命名约定一致）：
+          request       整个请求体（字典）
+          current_user  登录的用户名，没登录是空串
+          session       会话状态（字典），改了自动存回
+          run_mode      real / mock，当前是不是假客户端
+        它们放在请求字段之后，请求体里伪造的同名字段盖不掉。
         """
         # 会话按谁分：登录了按用户名——那是服务器认出来的。没登录才退回
         # 请求里的 learner 字段；开了认证的项目里，没登录能走到这儿的只有
@@ -434,17 +441,18 @@ class Router:
         elif self.auth_required:
             who = "_匿名"
         else:
-            who = str(form.get("learner") or form.get("会话") or "默认")
+            who = str(form.get("learner") or form.get("session") or "默认")
 
         # 会话只在用得到时才读、变了才写。
         #
         # 早先每个请求都读一次、写一次——增删改查的接口一处会话都不用，
         # 也照样往 sessions/ 里写一个 默认.json，白做一次磁盘写入。
         #
-        # 「用得到」看脚本文本里有没有「会话」。「执行」的子脚本不用另算：
+        # 「用得到」看脚本文本里有没有「session」。「执行」的子脚本不用另算：
         # 子脚本是独立作用域，看不到父脚本的变量，要用会话只能由父脚本显式
-        # 传 `执行 子.zs 会话={会话}`——那一行里本来就有「会话」。
-        needs_session = "会话" in ep.script
+        # 传 `执行 子.zs session={session}`——那一行里本来就有「session」。
+        # 文本里碰巧出现这个词（比如字典键）只是多读一次，不影响对错。
+        needs_session = "session" in ep.script
         session = {}
         if needs_session:
             with self._lock:
@@ -466,14 +474,14 @@ class Router:
             # 请求字段直接当变量：{answer}、{learner} 在脚本里可用
             engine.vars.update(form)
             # 请求体整个给一份，写库表这类动词收字典时用
-            engine.vars["请求"] = dict(form)
+            engine.vars["request"] = dict(form)
             # 当前用户放在请求字段之后，盖掉请求体里可能伪造的同名字段
-            engine.vars["当前用户"] = user
-            engine.vars["请求"]["当前用户"] = user
-            engine.vars["会话"] = session
+            engine.vars["current_user"] = user
+            engine.vars["request"]["current_user"] = user
+            engine.vars["session"] = session
             # 当前是不是假客户端：mock / real。只读，放在最后盖掉请求体里的同名字段
-            engine.vars["当前模式"] = self.mode
-            engine.vars["请求"]["当前模式"] = self.mode
+            engine.vars["run_mode"] = self.mode
+            engine.vars["request"]["run_mode"] = self.mode
 
             text = engine.run(ep.script)
             returned = engine.returned
@@ -483,7 +491,7 @@ class Router:
             #
             # 跟进来时比一下，没变就不写：只读会话的接口（查题号、看进度）
             # 不该每次都重写一遍文件。
-            after = engine.vars.get("会话")
+            after = engine.vars.get("session")
             if isinstance(after, dict) and json.dumps(
                     after, ensure_ascii=False, sort_keys=True, default=str) != before:
                 with self._lock:
@@ -552,7 +560,7 @@ class Router:
     def _identify(self, request) -> str:
         """从 cookie 认出当前用户，认不出是空串。
 
-        没开认证的项目不认人：{当前用户} 一律是空串，也不会去读或生成
+        没开认证的项目不认人：{current_user} 一律是空串，也不会去读或生成
         签名密钥。
         """
         if not self.auth_required:
