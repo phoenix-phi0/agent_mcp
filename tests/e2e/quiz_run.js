@@ -17,13 +17,14 @@
 //   挖空 → 卡里四个带内容的选项按钮，没有「作答」；点错的 → 选的红、答案绿、
 //     全部锁住；下一题 → 选项干净；点对的
 //   切走再切回来：还是那张卡；刷新：没有卡（看不见的题不能交）
-//   老师给的链接：一打开就出那一课的题，答完下一题一直在这一课（每第三道
-//     是易混对比题）；点「开始」退出按课练，地址回到 #做题
+//   老师给的链接：一打开就出那一课的题，顶栏「本课《…》+ 易混对比」；一轮
+//     5 道：本课 1 道在前、其余是别的条目，条目各不相同；卡上「再来一轮」→
+//     本课换一道题；点「开始」退出按课练，地址回到 #做题
 //   选项打乱：按钮上的字母跟题库里的不一样，判题、标红绿按界面上的位置
 //   达标喜报：在做题页的题卡上看得见；问老师的消息流里没有它
 //   请老师总结：按课做完一轮 → 「请老师总结这一轮」→ 等待的那句话 → 总结卡片
 //     出现在做题页 → 「去问老师接着聊」到问老师页，历史里有这条总结；自由练
-//     答满 5 道顶栏才出「结束并请老师总结」，点了题卡收起、计数清零。
+//     一轮 10 道（条目各不相同），做完出结果卡，总结完卡还在，再来一轮清零。
 //     假模型按规则文件回话（DSL_MOCK_SCRIPT）；总结请求在测试这边压 600 毫秒，
 //     模拟模型慢，好看见等待的那句话
 
@@ -314,39 +315,52 @@ function openPage(hash) {
       "带 lesson 打开：调了载入接口");
   say(await waitFor(() => p.card()), "一打开就出了题，不用点开始");
   say(question(state().current).lesson === L.lesson, `是那一课的题：${state().current}`);
-  say(await waitFor(() => p.$$(".bar-top .dyn-v").some(e => e.textContent.includes(title)
-                                                        && e.textContent.includes("易混对比"))),
-      `顶栏写着练这一课《${title}》（本课 + 易混对比）`);
-  // 连做：本课的、或者是对比题（别的课、同等级或易混对比），不会跑到不相干的课
-  const seq = [question(state().current)];
-  const rightPos = [];
-  const stuck = [];
-  for (let i = 0; i < L.n + 1; i++) {
-    const before = state().current;
-    const cq = question(before);
-    if (cq.qtype === "选择") {
-      await waitFor(() => !p.btn("下一题") && p.choiceText(origOptions(cq)[cq.answer]));
-      const rb = p.choiceText(origOptions(cq)[cq.answer]);
-      rightPos.push(rb ? p.keyOf(rb) : "?");
-    }
-    await p.answerAny();
-    await waitFor(() => p.btn("下一题"));
-    p.btn("下一题").click();
-    // 没换题（点击被吞了之类）要单独报出来，别混成「顺序不对」
-    if (!await waitFor(() => state().current !== before)) stuck.push(i);
-    seq.push(question(state().current));
-  }
-  say(!stuck.length, `每次点下一题都换了题${stuck.length ? "：第 " + stuck.join("、") + " 次没换" : ""}`);
+  say(await waitFor(() => p.$$(".bar-top .dyn-v").some(e => e.textContent === `本课《${title}》+ 易混对比`)),
+      `顶栏写着「本课《${title}》+ 易混对比」`);
+  // 一轮 = 本课 1 道 + 别的条目各 1 道，条目各不相同；做到卡上出「再来一轮」
+  const mineItems = new Set(db(`SELECT DISTINCT item FROM question WHERE lesson = '${L.lesson}'`).map(r => r.item));
   const pairItems = new Set(db("SELECT b x FROM contrast WHERE a IN (SELECT item FROM question WHERE lesson = '" + L.lesson +
                                "') UNION SELECT a FROM contrast WHERE b IN (SELECT item FROM question WHERE lesson = '" +
                                L.lesson + "')").map(r => r.x));
-  const shape = seq.map(x => x.lesson === L.lesson ? "L" : "O").join("");
-  say(seq.every((x, i) => (x.lesson === L.lesson) === (i % 3 !== 2)),
-      `答完点下一题：本课两道、对比一道（${shape}）` +
-      (seq.every((x, i) => (x.lesson === L.lesson) === (i % 3 !== 2)) ? "" :
-       " " + seq.map(x => x.code).join(",") + " 调用：" + calls.map(c => c.path).join(",")));
-  say(seq.filter(x => x.lesson !== L.lesson).every(x => pairItems.has(x.item) || x.level === lv),
-      "混进来的都是易混对比或同等级的题");
+  const rightPos = [];
+  const stuck = [];
+  async function playRound() {
+    const seq = [question(state().current)];
+    for (let i = 0; i < 8 && !p.btn("再来一轮"); i++) {
+      const before = state().current;
+      const cq = question(before);
+      if (cq.qtype === "选择") {
+        await waitFor(() => !p.btn("下一题") && p.choiceText(origOptions(cq)[cq.answer]));
+        const rb = p.choiceText(origOptions(cq)[cq.answer]);
+        rightPos.push(rb ? p.keyOf(rb) : "?");
+      }
+      await p.answerAny();
+      await waitFor(() => p.btn("下一题"));
+      p.btn("下一题").click();
+      // 没换题也没出结果卡（点击被吞了之类）要单独报出来，别混成「顺序不对」
+      if (!await waitFor(() => state().current !== before || p.btn("再来一轮"))) stuck.push(i);
+      if (!p.btn("再来一轮")) seq.push(question(state().current));
+    }
+    return seq;
+  }
+  const seq = await playRound();
+  say(!stuck.length, `每次点下一题都换了题或出了结果卡${stuck.length ? "：第 " + stuck.join("、") + " 次没有" : ""}`);
+  const shape = seq.map(x => mineItems.has(x.item) ? "L" : "O").join("");
+  say(seq.length === 5 && shape === "LOOOO", `一轮 5 道：本课 1 道在前，其余 4 道是别的条目（${shape}）`);
+  say(new Set(seq.map(x => x.item)).size === seq.length, `一轮里各题的条目都不同：${seq.map(x => x.item).join(",")}`);
+  say(seq.slice(1).every(x => pairItems.has(x.item) || x.level === lv), "混进来的都是易混对比或同等级的题");
+  say(!!p.btn("再来一轮") && p.$$(".card").some(e => e.textContent.includes("这一轮做完了")),
+      "一轮做完：卡上「这一轮做完了」和「再来一轮」");
+  const lead1 = seq[0].code;
+  p.btn("再来一轮").click();
+  say(await waitFor(() => !p.btn("再来一轮") && (p.choices().length || p.box()) && state().round_n === 1),
+      "再来一轮：出了新的一轮");
+  say(question(state().current).lesson === L.lesson && state().current !== lead1,
+      `再来一轮：本课换了一道题（${lead1} → ${state().current}）`);
+  const seq2 = await playRound();
+  say(seq2.length === 5 && new Set(seq2.map(x => x.item)).size === 5 && mineItems.has(seq2[0].item)
+      && seq2.slice(1).every(x => !mineItems.has(x.item)),
+      `第二轮也是本课 1 + 别的条目 4、条目各不相同：${seq2.map(x => x.item).join(",")}`);
   say(new Set(rightPos).size >= 2, `正确答案在界面上的位置随题变化：${rightPos.join(" ")}`);
   // 点开始：退出按课练，地址回到 #做题
   const other = lv === "N5" ? "N4" : "N5";
@@ -356,8 +370,8 @@ function openPage(hash) {
   say(await waitFor(() => question(state().current).level === other),
       `点开始：按等级出（${state().current}）`);
   say(await waitFor(() => p.hash() === "#做题"), `地址回到不带 lesson 的 #做题：${p.hash()}`);
-  say(await waitFor(() => !p.$$(".bar-top .dyn-v").some(e => e.textContent.includes("练这一课"))),
-      "「练这一课」的说明没了");
+  say(await waitFor(() => !p.$$(".bar-top .dyn-v").some(e => e.textContent.includes("本课《"))),
+      "「本课《…》」的说明没了");
   const before7 = state().current;
   await p.answerAny();
   p.btn("下一题").click();
@@ -402,7 +416,7 @@ function openPage(hash) {
   db("DELETE FROM chat_message");
   p = openPage("#" + encodeURIComponent("做题") + "?lesson=" + encodeURIComponent(S.lesson));
   await waitFor(() => p.card());
-  say(!p.btn("请老师总结这一轮") && !p.btn("结束并请老师总结"), "一轮没做完：没有总结按钮");
+  say(!p.btn("请老师总结这一轮"), "一轮没做完：没有总结按钮");
   let rounds = 0;
   while (rounds < 20 && !p.btn("请老师总结这一轮")) {
     await p.answerAny();
@@ -414,7 +428,6 @@ function openPage(hash) {
   const ended = state();
   say(!!p.btn("请老师总结这一轮") && p.btn("再来一轮"),
       `做了 ${rounds} 道，一轮做完：卡上有「再来一轮」和「请老师总结这一轮」（${ended.right}/${ended.total}）`);
-  say(!p.btn("结束并请老师总结"), "按课练时顶栏没有「结束并请老师总结」");
   slow["/quiz/summary"] = 600;
   calls.length = 0;
   p.btn("请老师总结这一轮").click();
@@ -444,29 +457,41 @@ function openPage(hash) {
   say(p.$$(".stream .smsg").some(e => e.textContent.includes("请老师总结")), "学习者那条（请老师总结）也在");
   p.close();
 
-  console.log("七之四、自由练：答满 5 道才出「结束并请老师总结」");
+  console.log("七之四、自由练：一轮 10 道，做完出结果卡");
   p = openPage("#" + encodeURIComponent("做题"));
   await waitFor(() => p.selects().length === 2);
   p.pick(p.selects()[0], "N5");
   p.pick(p.selects()[1], "全部");
   p.btn("开始").click();
   await waitFor(() => p.card());
-  const seen = [];
-  for (let i = 0; i < 5; i++) {
+  const freeSeq = [state().current];
+  const midBtn = [];
+  for (let i = 0; i < 10; i++) {
     await p.answerAny();
     await waitFor(() => p.stat() === `这一轮 ${state().right}/${i + 1}`);
-    seen.push(!!p.btn("结束并请老师总结"));
-    if (i < 4) {
-      const b4 = state().current;
-      p.btn("下一题").click();
-      await waitFor(() => state().current !== b4);
+    midBtn.push(!!p.btn("请老师总结这一轮") || !!p.btn("结束并请老师总结"));
+    const b4 = state().current;
+    p.btn("下一题").click();
+    await waitFor(() => state().current !== b4 || p.btn("再来一轮"));
+    if (i < 9) {
+      await waitFor(() => !p.btn("下一题") && (p.choices().length || p.box()));
+      freeSeq.push(state().current);
     }
   }
-  say(seen.slice(0, 4).every(x => !x) && seen[4], `第 5 道答完才出按钮：${seen.join(",")}`);
-  p.btn("结束并请老师总结").click();
+  say(midBtn.every(x => !x), `一轮没做完时没有总结按钮：${midBtn.join(",")}`);
+  const freeItems = freeSeq.map(c => question(c).item);
+  say(freeSeq.length === 10 && new Set(freeItems).size === 10, `10 道题的条目各不相同：${freeItems.join(",")}`);
+  say(await waitFor(() => p.btn("再来一轮") && p.btn("请老师总结这一轮")
+                       && p.$$(".card").some(e => e.textContent.includes("这一轮做完了"))),
+      "做满 10 道：结果卡上「这一轮做完了」「再来一轮」「请老师总结这一轮」");
+  say(p.stat().endsWith("/10") && !p.$$("a").some(x => x.textContent.trim() === "换一课") && !p.btn("下一题"), `顶栏 ${p.stat()}，没有「换一课」、没有「下一题」`);
+  p.btn("请老师总结这一轮").click();
   say(await waitFor(() => p.$$(".card").some(e => e.textContent.includes(SUMMARY))), "总结卡片出来了");
-  say(await waitFor(() => !p.btn("下一题") && p.stat() === "这一轮 0/0" && !p.btn("结束并请老师总结")),
-      `这一轮结束：题卡收起、计数清零（${p.stat()}）、按钮收起`);
+  say(!!p.btn("再来一轮") && p.stat().endsWith("/10"), "总结完结果卡还在（再来一轮），这一轮不清");
+  p.btn("再来一轮").click();
+  say(await waitFor(() => p.card() && !p.btn("再来一轮") && p.stat() === "这一轮 0/0"
+                       && !p.$$(".card").some(e => e.textContent.includes(SUMMARY))),
+      `再来一轮：新的一轮（${p.stat()}），总结卡片收起`);
   // 出错时：做题页没有消息流，error 弹成底部的提示条
   const toast = () => (p.$(".toast-no") || {}).textContent || "";
   const vm = p.$("#app")._vnode.component.setupState;
@@ -477,9 +502,9 @@ function openPage(hash) {
   vm.submitTo("quiz_summary");
   say(await waitFor(() => toast().includes("模型这次没有回应")), `模型出错（502）：提示条「${toast()}」`);
   delete fake["/quiz/summary"];
+  await waitFor(() => !vm.busy);
   p.btn("开始").click();
-  say(await waitFor(() => p.card() && !p.$$(".card").some(e => e.textContent.includes(SUMMARY))),
-      "点开始出新题：总结卡片收起");
+  say(await waitFor(() => p.card() && (p.choices().length || p.box())), "点开始出新题");
   p.close();
 
   console.log("八、服务端");

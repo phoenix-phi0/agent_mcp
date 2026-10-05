@@ -5,8 +5,6 @@
 --   label         范围：按课练《标题》/ 复习薄弱点 / 自由练（等级、考点）
 --   level         等级（按课练是那一课的，自由练是顶栏选的，复习不限），给进度摘要用
 --   lesson        在练的课（自由练、复习是空串）
---   fixed         1 = 按课练或复习薄弱点（总结完这一轮不结束，「再来一轮」才开新的），
---                 0 = 自由练
 --   worst / worst_title / read / practice
 --                 错得最多的那一课（一样多先算在练的那课、再算最近做的；
 --                 全对就是做得最多的），读课文和再练这一课的地址
@@ -89,7 +87,6 @@ SELECT
   (SELECT count(*) FROM r) AS n,
   (SELECT coalesce(sum(correct), 0) FROM r) AS ok_n,
   st.lesson,
-  CASE WHEN st.lesson <> '' OR st.mode = 'review' THEN 1 ELSE 0 END AS fixed,
   CASE WHEN st.lesson <> ''
        THEN '按课练《' || coalesce((SELECT title FROM lesson WHERE code = st.lesson), st.lesson) || '》'
        WHEN st.mode = 'review' THEN '复习薄弱点'

@@ -17,8 +17,9 @@
 #           （界面上的选项打乱过，见 queries/question_pick_lesson.sql 和 quiz
 #           包的「拆选项」）。
 #           按课练（#做题?lesson=…）：lesson 是在练的那一课，空就是按等级考点；
-#           round_seen 是这一轮出过的题号（,a,b, 的样子），round_n 是这一轮
-#           出了几道（每第三道混一道对比题）；seq 每出一道加一，选项打乱的
+#           round_seen 是这一轮出过的题号（,a,b, 的样子，三种模式都记——一轮
+#           里每个条目只出一题，靠它跳过出过的条目），round_n 是这一轮
+#           出了几道（一轮够数就结束）；seq 每出一道加一，选项打乱的
 #           种子用它——出题和判题算出同一个顺序。这四列是后加的，老库由
 #           py -m kg 的 ensure_new_columns 用 ALTER TABLE 补，不重建。
 #           round_from 是这一轮的起点：开一轮（开始、按课进来、再来一轮，

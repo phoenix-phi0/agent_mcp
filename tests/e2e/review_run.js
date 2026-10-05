@@ -15,8 +15,8 @@
 //   问老师「给我出点题」：老师回一句话，列出得分最低的点和分数，链接「复习
 //     薄弱点」；点了 → 地址 #做题?mode=review，顶栏「复习薄弱点：A、B」，题来自
 //     这两个低分点，第一道是 A
-//   做完一轮 10 道：卡上「请老师总结这一轮」「再来一轮」，顶栏没有「结束并请
-//     老师总结」；点总结 → 总结卡片
+//   做完一轮 10 道（各题的条目都不同）：卡上「请老师总结这一轮」「再来一轮」，
+//     顶栏没有「结束并请老师总结」；点总结 → 总结卡片
 //   点顶栏「开始」退出复习模式，地址回到 #做题
 //   学习进度页的概览里有「复习薄弱点」链接
 
@@ -170,8 +170,9 @@ function openPage(hash) {
   p.close();
 
   console.log("二、造作答历史：A 错三道、B 一对一错");
+  // 一轮里每个条目只出一题：挑条目多的两个点（各至少 6 个条目），一轮 10 道才凑得够
   const pts = db("SELECT i.point, n.label FROM question q JOIN item i ON i.code = q.item" +
-                 " JOIN node n ON n.code = i.point GROUP BY i.point HAVING count(*) >= 6 ORDER BY i.point LIMIT 2");
+                 " JOIN node n ON n.code = i.point GROUP BY i.point HAVING count(DISTINCT q.item) >= 6 ORDER BY i.point LIMIT 2");
   const [A, B] = pts;
   const qa = db(`SELECT q.code FROM question q JOIN item i ON i.code = q.item WHERE i.point = '${A.point}' ORDER BY q.code LIMIT 3`);
   const qb = db(`SELECT q.code FROM question q JOIN item i ON i.code = q.item WHERE i.point = '${B.point}' ORDER BY q.code LIMIT 2`);
@@ -226,9 +227,12 @@ function openPage(hash) {
     if (!p.btn("请老师总结这一轮")) seen.push(curPoint());
   }
   say(n === 10, `做了 ${n} 道一轮结束`);
+  const its = db("SELECT round_seen FROM quiz_state WHERE learner = 'me'")[0].round_seen.split(",").filter(Boolean)
+    .map(c => db(`SELECT item FROM question WHERE code = '${c}'`)[0].item);
+  say(its.length === 10 && new Set(its).size === 10, `一轮里各题的条目都不同：${its.join(",")}`);
   say(seen.every(x => x === A.point || x === B.point), `题都来自 A、B 两个低分点：${seen.join(",")}`);
   say(!!p.btn("请老师总结这一轮") && !!p.btn("再来一轮"), "卡上有「请老师总结这一轮」「再来一轮」");
-  say(!p.btn("结束并请老师总结"), "顶栏没有「结束并请老师总结」（复习跟按课练一样一轮一轮来）");
+  say(!p.btn("结束并请老师总结"), "顶栏没有「结束并请老师总结」（三种模式都一轮一轮来）");
   say(!p.link("换一课") && !p.link("回教材看这一课"), "没有「换一课」「回教材」");
   say(p.text().includes("这一轮复习做完了"), "卡上一句这一轮复习做完了");
   p.btn("请老师总结这一轮").click();

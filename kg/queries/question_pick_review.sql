@@ -11,16 +11,21 @@
 -- 其余出 a；该出的那种没有就按 a、b、c、d 的顺序往下退。一轮 10 道大约是
 -- a 5、b 3、c 2。
 --
--- 同一个点里挑题：这个人做得少的在前（没做过的最前），这一轮出过的靠后。
+-- 一轮里每个知识点只出一题（硬规矩）：这里的「知识点」是语法条目
+-- （question.item），不是 point 那个大节点。这一轮出过的题的条目，四种来源
+-- 一律不再出——错题重做也一样，那道错题的条目这一轮已经出过就跳过。所以一个
+-- 低分点下会轮到它不同的条目。挑不出来（作答过的条目这一轮都出过了）就不
+-- 返回，调用方据此提前结束这一轮。
+--
+-- 同一个点里挑题：这个人做得少的在前（没做过的最前）。
 -- 低分点之间：得分 + 这一轮已出过的次数 × :spread——最低的先出，出过几道
 -- 后让给下一个低分点，不会一轮全是同一个点。
 --
--- 硬一点的规矩（排序的第一档，挑得出别的就不违反，题太少时才放宽）：
---   同一道题至少隔 :gap 道再出（这一轮最后 :gap 道里出过的不出）；
---   同一个点不连出超过 2 道（最后两道是同一个点，这道就换个点）。
+-- 软一点的规矩（排序的第一档，挑得出别的就不违反）：同一个点不连出超过
+-- 2 道（最后两道是同一个点，这道就换个点）。
 --
 -- :seen 是这一轮出过的题号，按出题顺序「,a,b,」（quiz_state.round_seen）；
--- :n 是这一轮已出了几道；:last 是当前那道。
+-- :n 是这一轮已出了几道。
 WITH RECURSIVE
 sp(pos, code, rest) AS (
   SELECT 0, '', substr(coalesce(:seen, ''), 2)
@@ -29,7 +34,7 @@ sp(pos, code, rest) AS (
   FROM sp WHERE instr(rest, ',') > 0
 ),
 shown AS (
-  SELECT sp.pos, sp.code, i.point
+  SELECT sp.pos, sp.code, q.item, i.point
   FROM sp
   JOIN question q ON q.code = sp.code
   JOIN item i ON i.code = q.item
@@ -42,9 +47,6 @@ top AS (
 run AS (
   SELECT a.point FROM shown a, shown b, top
   WHERE a.pos = top.n AND b.pos = top.n - 1 AND a.point = b.point
-),
-near AS (
-  SELECT shown.code FROM shown, top WHERE shown.pos > top.n - CAST(:gap AS INTEGER)
 ),
 cur AS (
   SELECT s.point, s.value
@@ -73,6 +75,7 @@ qp AS (
   SELECT q.code, i.point,
          (SELECT count(*) FROM shown s WHERE s.point = i.point) AS pin
   FROM question q JOIN item i ON i.code = q.item
+  WHERE q.item NOT IN (SELECT item FROM shown)
 ),
 cand AS (
   SELECT qp.code, qp.point, 'a' AS tier,
@@ -102,12 +105,10 @@ want AS (
 SELECT c.code, c.tier, c.point
 FROM cand c, want
 ORDER BY
-  (c.code = coalesce(:last, '') OR c.code IN (SELECT code FROM near)
-   OR c.point IN (SELECT point FROM run)),
+  c.point IN (SELECT point FROM run),
   c.tier <> want.t,
   c.tier,
   c.ord,
   coalesce((SELECT n FROM qn WHERE qn.item = c.code), 0),
-  instr(coalesce(:seen, ''), ',' || c.code || ',') > 0,
   random()
 LIMIT 1

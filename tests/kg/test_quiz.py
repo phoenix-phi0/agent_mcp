@@ -17,12 +17,17 @@
       是「知识点 得分 a → b」（第一次打分、没变各有说法），不走 messages；
       同一道再交不重算
   七、一轮的计数：开始清零、下一题接着算；没出题就作答 400
-  七之二、按课练：下一题不带 lesson 也留在这一课；每第三道混一道对比题
-      （有易混对比的先出那些）；本课题一轮全出到；一轮做完给提示、不换课；
-      再来一轮；点开始退出按课练、地址回到 #做题
+  七之二、按课练：下一题不带 lesson 也留在这一课；一轮 = 本课 1 道（第一道）
+      + 别的条目各 1 道（易混对比先出，其余同级同考点），共 5 道、条目不重复；
+      一轮做完给提示、不换课；再来一轮本课换题、对比题也换；本课的题一轮轮
+      下来全轮到时提示「这一课的 N 道题都出过了」；点开始退出按课练、地址回到
+      #做题；没出过题时「再来一轮」400
   八、重导题目不碰学习记录
   九、选项打乱：判题时的顺序跟出题时一样；正确答案的位置分散；选对的内容
-      判对、选错判错，批改标在界面上的位置
+      判对、选错判错，批改标在界面上的位置（自由练一轮 10 道，做完再来一轮）
+  十、一轮里每个条目只出一题：自由练几种范围 × 几个人 × 三轮，条目都不重复、
+      一轮 10 道、做完出结果卡、再来一轮换没出过的条目；做满 10 道的那一下；
+      候选条目不够时一轮缩短；按课练多课 × 两轮，本课恰好 1 道、条目不重复
 """
 
 import json
@@ -373,41 +378,52 @@ def main():
     check(st == 200 and q.get("lesson") == lesson,
           f"载入：直接出这一课的题（顶栏停在 {other} 也不影响）：{q.get('code')}")
     scope = state(body).get("scope") or ""
-    check(title in scope and "本课 + 易混对比" in scope, f"顶栏说明练哪一课、混了易混对比：{scope}")
+    check(scope == f"本课《{title}》+ 易混对比", f"顶栏说明练哪一课、混了易混对比：{scope}")
     check(current()["total"] == 0 and current()["lesson"] == lesson, "按课文进来：这一轮清零，库里记下这一课")
     check("lesson" not in (body.get("form") or {}),
           f"lesson 不填回表单（离开那一课后不该还只出它）：{body.get('form')}")
     # 连做下去：「下一题」不带 lesson（地址参数没并进来、直接调接口都一样），
     # 也带着别的等级考点——都不该把人带出这一课
-    picked = [q["code"]]
-    end_body = None
-    for _ in range(nL * 3):
-        post("/quiz/answer", choice="A", given="x")
-        st, body = post("/quiz/next", pick_level=other, pick_kind="挖空")
-        if state(body).get("phase") == "end":
-            end_body = body
-            break
-        picked.append(current()["current"])
+    lesson_qs = {r["code"] for r in rows("SELECT code FROM question WHERE lesson = ?", lesson)}
+    # 这一课能混进来的别的条目（易混对比的、同级同考点的选择题）
+    kinds = {r["kind"] for r in rows("SELECT DISTINCT kind FROM question WHERE lesson = ? AND qtype = '选择'", lesson)}
+    pair_avail = {r["item"] for r in rows("SELECT DISTINCT item FROM question WHERE qtype = '选择'")} & (pair - mine_items)
+    lv_avail = {r["item"] for r in rows("SELECT DISTINCT item, kind FROM question WHERE qtype = '选择' AND level = ?", lv)
+                if r["kind"] in kinds} - mine_items
+    want_n = 1 + min(4, len(pair_avail | lv_avail))
+
+    def lesson_round(who="me"):
+        """接着当前那道做完一轮（每道都交、点下一题），回 (题号列表, phase=end 的响应)"""
+        picked = [current(who)["current"]]
+        for _ in range(20):
+            post("/quiz/answer", learner=who, choice="A", given="x")
+            st, body = post("/quiz/next", learner=who, pick_level=other, pick_kind="挖空")
+            if state(body).get("phase") == "end":
+                return picked, body
+            picked.append(current(who)["current"])
+        return picked, None
+
+    picked, end_body = lesson_round()
     qs = [key(c) for c in picked]
-    own = [x for x in qs if x["lesson"] == lesson]
-    oth = [x for x in qs if x["lesson"] != lesson]
-    check({x["code"] for x in own} == {r["code"] for r in rows("SELECT code FROM question WHERE lesson = ?", lesson)}
-          and len(own) == nL, f"本课的 {nL} 道题这一轮每道出一次：出了 {len(own)} 道")
-    pos_ok = all((i % 3 == 2) == (x["lesson"] != lesson) for i, x in enumerate(qs))
-    check(pos_ok and len(oth) >= 1, f"每第三道是对比题，本课:对比 = {len(own)}:{len(oth)}"
-          f"（顺序 {''.join('O' if x['lesson'] != lesson else 'L' for x in qs)}）")
-    check(all(x["qtype"] == "选择" and x["item"] not in mine_items for x in oth),
-          "对比题都是选择题，考的不是本课的条目")
-    pair_n = n("question", "qtype = '选择' AND COALESCE(lesson, '') <> ? AND item IN (%s)"
-               % ",".join("?" * len(pair)), lesson, *pair) if pair else 0
-    check(all(x["item"] in pair for x in oth[:pair_n]),
-          f"易混对比的题先出：{[x['item'] for x in oth]}，对比条目 {sorted(pair)}")
-    check(end_body is not None, "本课题都出过了：下一题不再出题")
+    own = [x for x in qs if x["item"] in mine_items]
+    oth = [x for x in qs if x["item"] not in mine_items]
+    check(len(qs) == want_n, f"一轮 {want_n} 道（本课 1 + 别的条目 {want_n - 1}）：出了 {len(qs)} 道")
+    check(len(own) == 1 and qs[0]["code"] in lesson_qs,
+          f"每轮恰好 1 道本课的题，在第一道：{[x['code'] for x in own]}")
+    check(len({x["item"] for x in qs}) == len(qs), f"一轮里条目各不相同：{[x['item'] for x in qs]}")
+    check(all(x["qtype"] == "选择" for x in oth), "混进来的都是选择题，考的不是本课的条目")
+    npair = min(len(pair_avail), want_n - 1)
+    check(all(x["item"] in pair for x in oth[:npair])
+          and all(x["item"] in pair or (x["level"] == lv and x["kind"] in kinds) for x in oth),
+          f"易混对比的条目先出、其余是同级同考点：{[x['item'] for x in oth]}，对比条目 {sorted(pair)}")
+    check(end_body is not None, "一轮出够了：下一题不再出题")
     rd = state(end_body or {}).get("round") or {}
-    check(f"这一课的{nL}道题都做过一轮了" in (rd.get("text") or "") and "再来一轮" in rd.get("text", ""),
-          f"一轮做完的提示：{rd.get('text')}")
+    check("这一轮做完了" in (rd.get("text") or "") and "再来一轮" in rd.get("text", "")
+          and "都出过了" not in rd.get("text", ""),
+          f"一轮做完的提示（本课的题还没轮完，不说都出过了）：{rd.get('text')}")
     check(rd.get("back", "").endswith("lesson=" + lesson) and rd.get("more", "").startswith("#"),
           f"提示里给回教材、换一课的地址：{rd}")
+    check(state(end_body or {}).get("round_lesson") == lesson, "round_lesson 还是这一课")
     st, body = post("/quiz/next", pick_level=other, pick_kind="挖空")
     check(state(body).get("phase") == "end" and key(current()["current"])["code"] == picked[-1],
           "再点下一题还是那句提示，不悄悄换课")
@@ -415,17 +431,43 @@ def main():
     check(st == 200 and state(body).get("phase") == "ask" and key(current()["current"])["lesson"] == lesson
           and current()["total"] == 0 and current()["round_n"] == 1,
           f"再来一轮：从这一课重新出、计数清零：{current()['current']}")
+    check(current()["current"] != picked[0] and current()["current"] in lesson_qs,
+          f"再来一轮：本课换了一道没出过的题：{picked[0]} → {current()['current']}")
+    picked2, _ = lesson_round()
+    check({x for x in picked2[1:]} != {x for x in picked[1:]},
+          f"再来一轮：对比的题也换了：{picked[1:]} → {picked2[1:]}")
+
+    # 本课的题一轮轮下来：每轮第一道都是没出过的本课题，最后一轮的卡上说「都出过了」
+    who = "L1"
+    post("/quiz/lesson", learner=who, lesson=lesson)
+    leads, notes = [], []
+    for r in range(len(lesson_qs) + 1):
+        leads.append(current(who)["current"])
+        pk, eb = lesson_round(who)
+        notes.append("都出过了" in ((state(eb or {}).get("round") or {}).get("text") or ""))
+        last_text = (state(eb or {}).get("round") or {}).get("text") or ""
+        if r == len(lesson_qs) - 1:
+            full_text = last_text
+        post("/quiz/again", learner=who)
+    nq = len(lesson_qs)
+    check(set(leads[:nq]) == lesson_qs, f"前 {nq} 轮的本课题各不相同，本课 {nq} 道都轮到：{leads[:nq]}")
+    check(notes[:nq] == [False] * (nq - 1) + [True],
+          f"本课题全轮到的那一轮才提示：{notes[:nq]}")
+    check(f"这一课的{nq}道题都出过了" in full_text, f"提示原文：{full_text}")
+    check(leads[nq] in lesson_qs and not notes[nq], f"再来一轮从头轮：{leads[nq]}，第 {nq + 1} 轮不再提示")
+
     # 点开始退出按课练：地址里的 lesson 前端照样会并进来，后端不管它
     st, body = post("/quiz/start", pick_level=other, pick_kind="全部", lesson=lesson)
     q = key(current()["current"])
     check(st == 200 and q["level"] == other and not state(body).get("scope")
-          and not current()["lesson"] and not current()["round_seen"],
-          f"点开始：退出按课练，按等级出、说明清空：{q['code']} {state(body).get('scope')!r} {current()['lesson']!r}")
+          and not current()["lesson"] and current()["round_seen"] == "," + q["code"] + ","
+          and current()["round_n"] == 1,
+          f"点开始：退出按课练，按等级出、说明清空、新的一轮：{q['code']} {state(body).get('scope')!r} {current()['lesson']!r}")
     check(body.get("go") == "做题", f"点开始：让前端回到不带 lesson 的 #做题：{body.get('go')}")
     st, body = post("/quiz/next", pick_level=other, pick_kind="全部")
     check(key(current()["current"])["level"] == other, "之后的下一题也按等级出")
-    st, body = post("/quiz/again")
-    check(st == 400, f"不在按课练时没有「再来一轮」：{st} {body.get('error')}")
+    st, body = post("/quiz/again", learner="never")
+    check(st == 400, f"没出过题时没有「再来一轮」：{st} {body.get('error')}")
     st, body = post("/quiz/lesson", lesson="hb-no-such")
     check(st == 404 and "没有这一课" in (body.get("error") or ""), f"没有这一课：{st} {body.get('error')}")
     st, body = post("/quiz/lesson")
@@ -467,6 +509,9 @@ def main():
         judged = judged and ad["ok"] == ("1" if pick == rk else "0") and marks[rk] == "right" \
             and (pick == rk or marks[pick] == "wrong")
         st, body = post("/quiz/next", learner="t9", pick_level="全部", pick_kind="挖空")
+        if state(body).get("phase") == "end":
+            # 自由练一轮 10 道，做完再来一轮
+            st, body = post("/quiz/again", learner="t9")
     check(same_order, "判题时选项顺序跟出题时一样（刷新、重拆都是同一个顺序）")
     check(judged, "选正确内容判对、选错判错；批改的 right / wrong 标在界面上的位置")
     dist = {k: shown_pos.count(k) for k in "ABCD"}
@@ -475,6 +520,96 @@ def main():
     check(moved >= 30, f"大多数题的选项顺序跟题库不一样：{moved}/60")
     t9 = rows("SELECT correct FROM attempt WHERE learner = 't9'")
     check(len(t9) == 60 and sum(r["correct"] for r in t9) == 30, f"学习记录 60 道、对 30 道：{len(t9)}")
+
+    print("十、一轮里每个知识点（条目）只出一题")
+
+    def items_of(codes):
+        return [key(x)["item"] for x in codes]
+
+    def free_round(who, lvl, kd, first=None):
+        """自由练做一轮：从当前那道接着做到 phase=end，回 (题号列表, end 的响应)"""
+        codes = [first or current(who)["current"]]
+        for _ in range(30):
+            post("/quiz/answer", learner=who, choice="A", given="x")
+            st, body = post("/quiz/next", learner=who, pick_level=lvl, pick_kind=kd)
+            if state(body).get("phase") == "end":
+                return codes, body
+            codes.append(current(who)["current"])
+        return codes, None
+
+    # 自由练：几种范围、几个学习者、每人三轮
+    dup_rounds, bad_len, ends_ok, total_rounds = [], [], True, 0
+    for who, lvl, kd in (("f1", "全部", "全部"), ("f2", "N5", "挖空"), ("f3", "N4", "全部"), ("f4", "N3", "挖空")):
+        n_items = n("(SELECT DISTINCT item FROM question WHERE (? = '全部' OR level = ?) AND (? = '全部' OR kind = ?))",
+                    "1", lvl, lvl, kd, kd)
+        post("/quiz/start", learner=who, pick_level=lvl, pick_kind=kd)
+        hist = []
+        for r in range(3):
+            codes, eb = free_round(who, lvl, kd)
+            total_rounds += 1
+            its = items_of(codes)
+            if len(set(its)) != len(its):
+                dup_rounds.append((who, r, its))
+            if len(codes) != min(10, n_items):
+                bad_len.append((who, r, len(codes), n_items))
+            s_ = state(eb or {})
+            ends_ok = ends_ok and s_.get("phase") == "end" and s_.get("round_total") == len(codes) \
+                and "这一轮做完了" in ((s_.get("round") or {}).get("text") or "") \
+                and s_.get("round_lesson") == "" and s_.get("round_mode") == "" \
+                and not (s_.get("round") or {}).get("back")
+            hist.append(set(its))
+            st, body = post("/quiz/again", learner=who)
+            if r < 2:
+                ends_ok = ends_ok and st == 200 and state(body).get("phase") == "ask" \
+                    and current(who)["total"] == 0 and current(who)["round_n"] == 1
+        if who == "f2":
+            # N5 挖空有 30 多个条目：再来一轮换没出过的条目，三轮互不重叠
+            check(not (hist[0] & hist[1]) and not (hist[2] & (hist[0] | hist[1])),
+                  f"自由练再来一轮：优先换没出过的条目（{n_items} 个条目，三轮互不重叠）")
+    check(not dup_rounds, f"自由练 {total_rounds} 轮，每轮条目都不重复：{dup_rounds[:2]}")
+    check(not bad_len, f"自由练一轮 10 道（候选条目够时）：{bad_len[:3]}")
+    check(ends_ok, "一轮做完出结果卡：phase=end、round_total、「这一轮做完了」、没有回教材；再来一轮清零")
+    # 一轮 10 道：第 10 道判完时还没结束，下一题才出结果卡
+    post("/quiz/start", learner="f5", pick_level="N5", pick_kind="全部")
+    for i in range(9):
+        post("/quiz/answer", learner="f5", choice="A", given="x")
+        post("/quiz/next", learner="f5", pick_level="N5", pick_kind="全部")
+    st, body = post("/quiz/answer", learner="f5", choice="A", given="x")
+    check(state(body).get("phase") == "done" and state(body).get("round_total") == 10, "第 10 道判完：phase=done")
+    st, body = post("/quiz/next", learner="f5", pick_level="N5", pick_kind="全部")
+    rd = (state(body).get("round") or {}).get("text") or ""
+    check(state(body).get("phase") == "end" and "10道题各考一个不同的知识点" in rd,
+          f"自由练做满 10 道出结果卡：{rd}")
+    # 候选条目不够：N1 意思只有两三个条目，一轮就是那么几道
+    n1 = n("(SELECT DISTINCT item FROM question WHERE level = 'N1' AND kind = '意思')")
+    post("/quiz/start", learner="f6", pick_level="N1", pick_kind="意思")
+    codes, eb = free_round("f6", "N1", "意思")
+    check(len(codes) == n1 < 10 and state(eb or {}).get("phase") == "end"
+          and f"{n1}道题" in ((state(eb or {}).get("round") or {}).get("text") or ""),
+          f"候选条目只有 {n1} 个：一轮 {len(codes)} 道就结束")
+    # 按课练：多课、每课两轮
+    les = [r["lesson"] for r in rows("SELECT lesson FROM question WHERE lesson IS NOT NULL GROUP BY lesson"
+                                     " HAVING count(*) >= 3 ORDER BY lesson LIMIT 12")]
+    lesson_bad, lesson_rounds = [], 0
+    for i, ls in enumerate(les):
+        who = f"lr{i}"
+        mine = {r["item"] for r in rows("SELECT DISTINCT item FROM question WHERE lesson = ?", ls)}
+        post("/quiz/lesson", learner=who, lesson=ls)
+        for r in range(2):
+            codes = [current(who)["current"]]
+            for _ in range(10):
+                post("/quiz/answer", learner=who, choice="A", given="x")
+                st, body = post("/quiz/next", learner=who)
+                if state(body).get("phase") == "end":
+                    break
+                codes.append(current(who)["current"])
+            lesson_rounds += 1
+            its = items_of(codes)
+            own = [x for x in codes if key(x)["lesson"] == ls and key(x)["item"] in mine]
+            if len(set(its)) != len(its) or len(own) != 1 or codes[0] not in own or len(codes) > 5:
+                lesson_bad.append((ls, r, its))
+            post("/quiz/again", learner=who)
+    check(not lesson_bad, f"按课练 {len(les)} 课 × 2 轮：每轮本课恰好 1 道、条目不重复、不超过 5 道：{lesson_bad[:2]}")
 
     print(f"\n{'=' * 50}\n通过 {passed}，失败 {failed}")
     return 1 if failed else 0

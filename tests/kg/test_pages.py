@@ -243,7 +243,9 @@ def main():
     q1, (st1, b1) = answer(True, shown)
     check(st1 == 200 and (b1.get("state") or {}).get("card", {}).get("ok") in (1, "1", True, "是", "对"),
           f"第一道答对：{(b1.get('state') or {}).get('card', {}).get('ok')}")
-    st, shown = post("/quiz/next", lesson=LESSON)
+    # 第二道也要是这一课的：按课练一轮里本课只出 1 道（其余是别的条目的
+    # 对比题），所以用「再来一轮」——新的一轮第一道是本课另一道题
+    st, shown = post("/quiz/again")
     q2, (st2, b2) = answer(False, shown)
     check(st2 == 200 and rows("SELECT count(*) n FROM attempt")[0]["n"] == 2, "第二道答错，流水两行")
 

@@ -18,8 +18,8 @@
       之后在问老师页问「刚才那轮怎么样」，提示词里带着这条总结
   四、本轮范围：再来一轮重置；换一课重置；自由练从「开始」算起、下一题接着
       算；按等级考点进来（level/kind）也算开始；别的学习者不串
-  五、自由练：答满 5 道 round_total>=5（按钮条件）、round_lesson 空；总结完
-      这一轮结束（计数清零、题卡收起、再请总结是 0 道）
+  五、自由练：一轮 10 道做完 phase=end 出结果卡、round_lesson 空；总结的是这
+      10 道，总结完这一轮不清（跟按课练、复习一样）；再来一轮后 0 道
   六、模型出错：502 和一句人话（不是 500、不是 Traceback）；对话记录不写、
       这一轮不清；模型回空也是一句话
   七、attempt.answer 记下作答；老库补 attempt.answer、quiz_state.round_from
@@ -166,7 +166,9 @@ def main():
         if state(body).get("phase") == "end":
             break
         code = state(body)["card"]["code"]
-        right = i % 3 == 0          # 第 1、4、7… 道答对，其余答错
+        # 第 2、5… 道答对，其余答错。第 1 道是本课的题（答错），后面是别的课的
+        # 对比题——错得一样多时算在练的这一课，「错得最多的课」就是这一课
+        right = i % 3 == 1
         st, b, text = answer(body, right)
         done.append((code, right, text))
         st, body = post("/quiz/next")
@@ -281,31 +283,46 @@ def main():
     p = (summary_calls() or [{}])[0].get("prompt", "")
     check(st == 200 and "共 1 道" in p, "other 自己的一轮是 1 道")
 
-    print("五、自由练：答满 5 道出按钮，总结完这一轮结束")
+    print("五、自由练：一轮 10 道做完出结果卡，总结的是这一轮")
     st, body = post("/quiz/start", pick_level="N4", pick_kind="挖空")
-    totals = []
-    for i in range(5):
+    totals, done5 = [], []
+    for i in range(12):
+        if state(body).get("phase") == "end":
+            break
         st, b, text = answer(body, i % 2 == 0)
+        done5.append(state(body)["card"]["code"])
         totals.append(state(b).get("round_total"))
-        if i < 4:
-            st, body = post("/quiz/next", pick_level="N4", pick_kind="挖空")
-    check(state(body).get("round_total") == 4, f"出题时也带着 round_total：{state(body).get('round_total')}")
-    check(totals == [1, 2, 3, 4, 5] and state(b).get("round_lesson") == "",
-          f"判完带回 round_total（界面 >=5 才出「结束并请老师总结」）：{totals}")
+        st, body = post("/quiz/next", pick_level="N4", pick_kind="挖空")
+    check(totals == list(range(1, 11)) and state(b).get("round_lesson") == "",
+          f"判完带回 round_total、round_lesson 空：{totals}")
+    s = state(body)
+    check(s.get("phase") == "end" and s.get("round_total") == 10 and s.get("round_mode") == ""
+          and "这一轮做完了" in ((s.get("round") or {}).get("text") or ""),
+          f"做满 10 道：phase=end 结果卡：{s.get('phase')} {(s.get('round') or {}).get('text')}")
     st, b2 = post("/quiz/state")
-    check(state(b2).get("round_total") == 5 and state(b2).get("round_lesson") == "",
+    check(state(b2).get("round_total") == 10 and state(b2).get("round_lesson") == "",
           "进页面（刷新）也带回 round_total、round_lesson")
     n_chat = len(chats())
     st, body = summarize()
-    check(st == 200 and len(summary_calls()) == 1, "总结：调了一次模型")
+    p = (summary_calls() or [{}])[0].get("prompt", "")
+    check(st == 200 and len(summary_calls()) == 1 and "自由练（等级 N4，考点 挖空）" in p
+          and "答对 5 道，共 10 道" in p and len(re.findall(r"^\d+\. 【", p, re.M)) == 10,
+          f"总结：调了一次模型，提示词里是这一轮的 10 道：{st} {body.get('error')}")
     s = state(body)
-    check(s.get("phase") == "" and s.get("stat") == "这一轮 0/0" and s.get("round_total") == 0,
-          f"自由练总结完这一轮结束：题卡收起、计数清零：{s.get('phase')!r} {s.get('stat')} {s.get('round_total')}")
+    check(s.get("phase") is None and "round_total" not in s,
+          f"总结完这一轮不清（跟按课练、复习一样，那张结果卡还在）：{s.get('phase')!r}")
     check((s.get("summary") or {}).get("text") == SUMMARY and (s.get("summary") or {}).get("practice"),
           "做题页有总结；不是在练的课，「再练这一课」给了")
     check(len(chats()) == n_chat + 2, "对话记录多两条")
     st, b0 = summarize()
-    check(st == 400 and not mock.calls, "再请总结：新的一轮 0 道，不重复总结")
+    check(st == 200 and "共 10 道" in (summary_calls() or [{}])[0].get("prompt", ""),
+          "再请一次总结还是这 10 道")
+    st, body = post("/quiz/again")
+    check(st == 200 and state(body).get("phase") == "ask" and state(body).get("round_total") == 0
+          and state(body).get("summary") == "",
+          f"再来一轮：新的一轮，总结卡片收起：{st} {body.get('error')}")
+    st, b0 = summarize()
+    check(st == 400 and not mock.calls, "再来一轮后还没答：0 道，不调模型")
 
     print("六、模型出错")
     st, body = post("/quiz/start", pick_level="N5", pick_kind="全部")

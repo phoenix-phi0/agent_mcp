@@ -11,15 +11,16 @@
   二、构造作答历史：低分点 A（错三道）、低分点 B（一对一错，分比 A 高）、
       已掌握但 30 天没做的 M、已掌握最近刚做的 G
   三、一轮 10 道（M 的答对，其余答错）：第一道出自得分最低的 A；题只来自 A、B、M；
-      G（掌握了、刚做过）不出；同一道题至少隔 3 题再出、而且错题确实会再出；
-      同一个点不连出超过 2 道；M 少量混入（1–2 道）；中途刷新（state、再载入）
+      G（掌握了、刚做过）不出；一轮里每个条目只出一次（错题重做也一样）、
+      低分点 A 下轮到不同的条目；同一个点不连出超过 2 道；M 少量混入（1–2 道）；中途刷新（state、再载入）
       模式和这一轮都还在；顶栏 scope「复习薄弱点：A、B…」
   四、出够 10 道：phase=end，卡上的提示；round_total 10；顶栏「结束并请老师总结」
       的条件不成立（round_mode=review）；请老师总结：提示词里是「复习薄弱点」
       这 10 道，写进对话记录，这一轮不清；再来一轮：新的一轮从 0 开始，还是复习
   五、打分和学习记录照常：attempt 多了 10 条、answer 都记了，A 的得分有新行
   六、点「开始」退出复习模式（地址里的 mode=review 并进了提交也不管），之后
-      「下一题」按等级考点出
+      「下一题」按等级考点出；自由练的「再来一轮」
+  六之二、复习多轮：四轮，每轮 10 道、条目不重复，错题重做照样出
   七、别的学习者不串；老库补 quiz_state.mode 列，不重建
 """
 
@@ -138,10 +139,11 @@ def main():
     exec_sql("DELETE FROM quiz_state")
 
     print("二、构造作答历史")
-    # 每个点至少 6 道题、互不相同的四个点
+    # 互不相同的四个点，每个点至少 6 个条目（一轮里每个条目只出一题，条目少的
+    # 点一轮就出不了几道）
     pts = [x["point"] for x in rows(
         "SELECT i.point FROM question q JOIN item i ON i.code = q.item"
-        " GROUP BY i.point HAVING count(*) >= 6 ORDER BY i.point")]
+        " GROUP BY i.point HAVING count(DISTINCT q.item) >= 6 ORDER BY i.point")]
     A, B, M, G = pts[:4]
     qs = {p: rows("SELECT q.code, i.point FROM question q JOIN item i ON i.code = q.item"
                   " WHERE i.point = ? ORDER BY q.code", p) for p in (A, B, M, G)}
@@ -200,8 +202,14 @@ def main():
     check(ps[0] == A, f"第一道出自得分最低的 A：{names[0]}")
     check(set(ps) <= {A, B, M}, f"题只来自 A、B、M：{sorted(set(names))}")
     check(G not in ps, "G（掌握了、刚做过）不出")
-    gaps = [j - i for i in range(len(seq)) for j in range(i + 1, len(seq)) if seq[i] == seq[j]]
-    check(gaps and min(gaps) >= 4, f"错题会再出、同一道至少隔 3 题：间距 {gaps}")
+    its = [one("SELECT item FROM question WHERE code = ?", x)["item"] for x in seq]
+    check(len(set(its)) == len(its), f"一轮里每个条目只出一次：{its}")
+    wrong0 = {q["code"] for q in qs[A][:3]} | {qs[B][1]["code"]}
+    redo = [x for x in seq if x in wrong0]
+    check(redo, f"错题重做出了（{redo}），条目也没重复")
+    a_items = [i for i, p in zip(its, ps) if p == A]
+    check(len(a_items) >= 2 and len(set(a_items)) == len(a_items),
+          f"低分点 A 下轮到不同的条目：{a_items}")
     runs = max(len(list(g)) for _, g in groupby(ps))
     check(runs <= 2, f"同一个点不连出超过 2 道：最长连出 {runs}")
     check(1 <= ps.count(M) <= 2 and M not in ps[:4] and ps[4] == M,
@@ -255,7 +263,38 @@ def main():
     check(q == {"level": "N4", "kind": "挖空"} and state(body).get("round_mode") == "",
           f"下一题按等级考点：{q}")
     st, b = post("/quiz/again")
-    check(st == 400, "不在复习也不在按课：再来一轮 400")
+    check(st == 200 and state(b).get("round_mode") == "" and state(b).get("phase") == "ask"
+          and one("SELECT round_n FROM quiz_state WHERE learner = 'me'")["round_n"] == 1,
+          f"自由练也有再来一轮（重新出一轮，不是复习）：{st} {b.get('error')}")
+
+    print("六之二、复习多轮：每轮条目不重复、错题重做也守这条")
+    # rv：A、B 两个低分点各错几道（每道错题的条目都不同），其余全答错，做四轮
+    for q in qs[A][:6]:
+        learn(q, 0, learner="rv")
+    for q in qs[B][:4]:
+        learn(q, 0, learner="rv")
+    st, body = post("/quiz/lesson", learner="rv", mode="review")
+    dup, lens, redo_n = [], [], 0
+    for r in range(4):
+        wrong_before = {x["item"] for x in rows(
+            "SELECT a.item FROM attempt a WHERE a.learner = 'rv' AND a.correct = 0"
+            " AND a.id = (SELECT max(id) FROM attempt b WHERE b.learner = 'rv' AND b.item = a.item)")}
+        codes = []
+        for _ in range(15):
+            if state(body).get("phase") == "end":
+                break
+            codes.append(state(body)["card"]["code"])
+            answer(body, False, learner="rv")
+            st, body = post("/quiz/next", learner="rv")
+        items = [one("SELECT item FROM question WHERE code = ?", x)["item"] for x in codes]
+        if len(set(items)) != len(items):
+            dup.append((r, items))
+        lens.append(len(codes))
+        redo_n += len([x for x in codes if x in wrong_before])
+        st, body = post("/quiz/again", learner="rv")
+    check(not dup, f"四轮复习，每轮条目都不重复（错题会被跳过，不重出同一条目）：{dup[:1]}")
+    check(all(x == 10 for x in lens), f"每轮 10 道：{lens}")
+    check(redo_n >= 4, f"错题重做照样出（四轮共 {redo_n} 道）")
 
     print("七、别的学习者、老库补列")
     st, body = post("/quiz/lesson", learner="other", mode="review")
