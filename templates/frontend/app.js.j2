@@ -6,6 +6,7 @@
 <% set has_to_actions = has_to_actions if has_to_actions is defined else false %>
 <% set has_goto = has_goto if has_goto is defined else false %>
 <% set has_overlays = has_overlays if has_overlays is defined else false %>
+<% set has_enter = has_enter if has_enter is defined else false %>
 <% if shared_json is not defined %><% set shared_json = "{}" %><% endif %>
 <% if endpoints_json is not defined %><% set endpoints_json = "{}" %><% endif %>
 <% if clears_json is not defined %><% set clears_json = "{}" %><% endif %>
@@ -492,6 +493,10 @@ const _app = createApp({
         Vue.nextTick(() => {
           const el = document.querySelector(".screen textarea");
           if (el) el.focus();
+<% if has_enter %>
+          // 没有输入框了（判完、输入框收起），焦点给标了「回车」的按钮
+          else focusEnter();
+<% endif %>
         });
       }
     }
@@ -516,10 +521,51 @@ const _app = createApp({
     // 全局取第一个的话，浮层里按 Enter 会打到顶栏那个动作上，而且不报错。
     function onKey(ev, actionName) {
       if (ev.key !== "Enter" || ev.shiftKey) return;
+      // 输入法正在选字时的 Enter 是「确定这个词」，不是交——写日语时
+      // 敲完假名按 Enter 转汉字，不该把半截的答案交上去
+      if (ev.isComposing) return;
       ev.preventDefault();
       if (actionName && !busy.value) submitTo(actionName);
     }
 
+<% if has_enter %>
+    // 「回车」动作（见 tools/ui.py）：答完出现的「下一题」。
+    // 按钮在 DOM 里就是该响应的时候——什么时候出现由「当」管。
+    function enterButton() {
+      const b = document.querySelector(".screen [data-enter]");
+      return b && !b.disabled ? b : null;
+    }
+    // 答完把焦点给它，并滚到看得见的地方（卡片自己会滚，长了按钮可能在下面）
+    function focusEnter() {
+      const b = enterButton();
+      if (!b) return;
+      b.focus();
+      if (typeof b.scrollIntoView === "function") b.scrollIntoView({ block: "nearest" });
+    }
+    // 按钮上的 Enter：自动重复不算——交答案那一下按住没放，连发的 Enter
+    // 会落到刚出现的这颗按钮上
+    function enterKey(ev) {
+      if (ev.repeat || ev.isComposing) return;
+      const b = ev.currentTarget;
+      if (b && !b.disabled) b.click();
+    }
+    // 焦点不在任何输入框、按钮、链接上时（点完选择题的选项，那颗按钮锁住了），
+    // Enter 也点它。别处已经处理过的（输入框里交答案的 Enter 会
+    // preventDefault）不再处理：一次 keydown 只做一件事。
+    window.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter" || ev.shiftKey || ev.defaultPrevented || ev.repeat || ev.isComposing) return;
+      const t = ev.target;
+      if (t && t.closest && t.closest("input, textarea, select, button, a, [contenteditable]")) return;
+<% if has_overlays %>
+      if (openOverlay.value) return;
+<% endif %>
+      const b = enterButton();
+      if (!b) return;
+      ev.preventDefault();
+      b.click();
+    });
+
+<% endif %>
     // textarea 跟着内容长高，到上限就滚动
     function grow(ev) {
       const el = ev.target;
@@ -870,7 +916,7 @@ const _app = createApp({
 <% endif %>
     }
 <% endif %>
-    return { route, params, forms, form, rowsOf, lists, notice, nav, AUTH_SCREENS, current, busy, pending, go, isHref, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
+    return { route, params, forms, form, rowsOf, lists, notice, nav, AUTH_SCREENS, current, busy, pending, go, isHref, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
   },
   template: `
 {#- 顶部导航。两种来路：

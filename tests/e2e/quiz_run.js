@@ -94,6 +94,9 @@ function openPage(hash) {
   };
   w.console.log = () => {};
   w.console.warn = () => {};
+  // jsdom 没有 scrollIntoView：记下谁被滚到了、传的什么参数
+  const scrolled = [];
+  w.Element.prototype.scrollIntoView = function (o) { scrolled.push({ el: this, opts: o }); };
   w.eval(fs.readFileSync(WEB + "/vue.global.prod.js", "utf8"));
   w.eval(fs.readFileSync(WEB + "/app.js", "utf8"));
   const $ = s => w.document.querySelector(s);
@@ -107,6 +110,14 @@ function openPage(hash) {
     pick: (sel, v) => { sel.value = v; sel.dispatchEvent(new w.Event("change")); },
     type: (el, v) => { el.value = v; el.dispatchEvent(new w.Event("input")); },
     enter: el => el.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Enter", bubbles: true })),
+    // 按住 Enter 的自动重复
+    enterRepeat: el => el.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Enter", bubbles: true, repeat: true })),
+    focused: () => w.document.activeElement,
+    scrolled,
+    // b 在文档里排在 a 后面
+    after: (a, b) => !!(a && b && (a.compareDocumentPosition(b) & w.Node.DOCUMENT_POSITION_FOLLOWING)),
+    // 卡上某段「显示」（按文字认）所在的那个元素
+    line: f => $$(".card .dyn").find(e => f((e.querySelector(".dyn-v") || {}).textContent || "")),
     // 顶栏有两个「显示」：scope（只练哪一课）和 stat（这一轮成绩），按内容认
     stat: () => $$(".bar-top .dyn-v").map(e => e.textContent).find(t => t.startsWith("这一轮")) || "",
     card: () => $(".card"),
@@ -120,8 +131,21 @@ function openPage(hash) {
     shared: () => $("#app")._vnode.component.setupState.shared,
     // 批改：卡上以 ○ / ✗ 开头的那段正文
     verdict: () => $$(".card .dyn.prose .dyn-v").map(e => e.textContent).find(t => /^[○✗]/.test(t)) || "",
+    // 解析：判完卡上「考的是：」那段
+    explain: () => $$(".card .dyn.prose .dyn-v").map(e => e.textContent).find(t => t.includes("考的是：")) || "",
     box: () => $(".card textarea"),
     close: () => w.close(),
+  };
+  // 判完的题卡：「下一题」紧跟对错结论，排在得分、喜报、解析前面
+  pg.nextRightAfterVerdict = () => {
+    const nb = pg.btn("下一题");
+    const v = pg.line(t => /^[○✗]/.test(t));
+    const ex = pg.line(t => t.includes("考的是："));
+    const later = $$(".card .dyn").filter(e => e !== v && pg.after(v, e));
+    return !!(nb && v && ex && pg.after(v, nb) && pg.after(nb, ex)
+              && later.every(e => pg.after(nb, e))
+              // 结论和按钮之间没有别的段落
+              && !$$(".card .dyn").some(e => pg.after(v, e) && pg.after(e, nb)));
   };
   // 不管是哪种题，先交一个答案（按课文练时题型不固定）
   // 先等新题卡出来（「下一题」收起 = phase 回到 ask）：库里的当前题先变、
@@ -201,11 +225,23 @@ function openPage(hash) {
   p.enter(p.box());
   say(await waitFor(() => p.verdict()), "Enter 交了，卡上出了批改");
   say(p.verdict().startsWith("✗") && p.verdict().includes(q.answer), `判错，给了正确答案「${q.answer}」`);
-  say(p.verdict().includes("考的是："), "批改里说了考的是哪个条目");
+  say(!p.verdict().includes("\n"), `对错结论只有一行：${JSON.stringify(p.verdict())}`);
+  say(p.explain(), "解析里说了考的是哪个条目");
   say(p.cardText().includes("わかりません"), "卡上写着你交的是什么");
   say(p.card() === card1, "判完是同一张卡原地更新，没有翻页");
   say(await waitFor(() => !p.box() && !p.btn("作答") && p.btn("下一题")), "判完：输入框收起，出现「下一题」");
   say(p.card().contains(p.btn("下一题")), "「下一题」也在卡里");
+  say(await waitFor(() => p.focused() === p.btn("下一题")), "判完焦点落在「下一题」上");
+  say(p.scrolled.some(x => x.el === p.btn("下一题") && x.opts && x.opts.block === "nearest"),
+      "「下一题」滚进了看得见的地方（scrollIntoView block:nearest）");
+  // 同一次 Enter 不能既交又翻页：交的那次 Enter 之后等一会儿，还是这道、没发「下一题」
+  await sleep(300);
+  say(state().current === q.code && !calls.some(c => c.path === "/quiz/next") && p.verdict(),
+      "交答案的那次 Enter 没有连带翻到下一题");
+  // 按住 Enter 的自动重复落到「下一题」上不算
+  p.enterRepeat(p.btn("下一题"));
+  await sleep(300);
+  say(state().current === q.code && !calls.some(c => c.path === "/quiz/next"), "按住 Enter 的连发不会翻页");
   say(await waitFor(() => p.stat() === "这一轮 0/1"), `顶栏成绩：${p.stat()}`);
   const a = db("SELECT a.*, i.point AS want FROM attempt a JOIN question q ON q.code = a.item" +
                " JOIN item i ON i.code = q.item");
@@ -220,11 +256,16 @@ function openPage(hash) {
   };
   const want1 = scoreLine(q);
   say(await waitFor(() => p.$$(".card .dyn-v").some(e => e.textContent === want1)), `批改卡上有「${want1}」`);
+  say(p.nextRightAfterVerdict(), "「下一题」紧跟对错结论，得分变化、解析都排在它后面");
 
   console.log("三、下一题：翻页、答对");
   const first = q.code;
-  p.btn("下一题").click();
-  say(await waitFor(() => state().current !== first && p.box()), "出了下一道，输入框回来了");
+  // 焦点在「下一题」上，按 Enter 就是下一题
+  const nextCalls = calls.filter(c => c.path === "/quiz/next").length;
+  p.enter(p.focused());
+  say(await waitFor(() => state().current !== first && p.box()), "Enter：出了下一道，输入框回来了");
+  say(calls.filter(c => c.path === "/quiz/next").length === nextCalls + 1, "一次 Enter 只发了一次「下一题」");
+  say(await waitFor(() => p.focused() === p.box()), "新题：焦点回到输入框");
   say(p.card() !== card1, "换了一张新卡（翻页）");
   say(!p.verdict(), "新卡上没有上一道的批改");
   say(p.box().value === "", "输入框是空的（上一道写的清掉了）");
@@ -269,12 +310,25 @@ function openPage(hash) {
       `选的 ${wrong} 标红、答案（界面上的 ${rightKey}，题库里的 ${q.answer}）标绿`);
   say(p.verdict().includes("正确答案是 " + rightKey), `批改说正确答案是界面上的 ${rightKey}`);
   say(p.choices().every(b => b.disabled), "判完选项都锁住，不能再点");
+  say(p.nextRightAfterVerdict(), "选择题判完：「下一题」紧跟对错结论，在解析前面");
+  say(await waitFor(() => p.focused() === p.btn("下一题")), "点完选项，焦点落在「下一题」上");
   say(await waitFor(() => p.stat() === "这一轮 0/1"), `成绩：${p.stat()}`);
   say(opts[state().choice] === wrongText, "库里记着选的是哪个（题库里的原字母）");
-  p.btn("下一题").click();
+  // 焦点不在按钮上（点了别处）时，页面上按 Enter 也是下一题
+  p.focused().blur();
+  const before4 = state().current;
+  const nextCalls4 = calls.filter(c => c.path === "/quiz/next").length;
+  p.enter(p.w.document.body);
   say(await waitFor(() => p.choices().length === 4
                        && p.choices().every(b => !b.disabled && !/choice-(right|wrong|dim)/.test(b.className))),
-      "下一题：新卡上的选项都是干净的、能点");
+      "页面上按 Enter：下一题，新卡上的选项都是干净的、能点");
+  say(state().current !== before4 && calls.filter(c => c.path === "/quiz/next").length === nextCalls4 + 1,
+      "一次 Enter 只翻了一道");
+  // 答题时（还没判）按 Enter 什么都不做：没有「下一题」，不会跳过这道
+  p.enter(p.w.document.body);
+  await sleep(300);
+  say(calls.filter(c => c.path === "/quiz/next").length === nextCalls4 + 1 && !p.verdict(),
+      "还没答时页面上按 Enter 不会跳题");
   q = question(state().current);
   p.choiceText(origOptions(q)[q.answer]).click();
   say(await waitFor(() => p.verdict().startsWith("○")), "选对（按内容找到的那个按钮）");
@@ -417,6 +471,7 @@ function openPage(hash) {
   p = openPage("#" + encodeURIComponent("做题") + "?lesson=" + encodeURIComponent(S.lesson));
   await waitFor(() => p.card());
   say(!p.btn("请老师总结这一轮"), "一轮没做完：没有总结按钮");
+  const attemptMax = (db("SELECT max(id) AS m FROM attempt")[0] || {}).m || 0;
   let rounds = 0;
   while (rounds < 20 && !p.btn("请老师总结这一轮")) {
     await p.answerAny();
@@ -440,11 +495,15 @@ function openPage(hash) {
   say(await waitFor(() => !p.$$("p.copy").some(e => e.textContent.includes("老师正在看你的作答"))),
       "等待的那句话收起来了");
   say(calls.some(c => c.path === "/quiz/summary" && c.status === 200), "调了 /quiz/summary");
+  // 「读课文」给的是这一轮错得最多的那课。answerAny 点第一个选项，选项打乱过，
+  // 对错随机：错在易混对比题上时那课不是本课——早先这里写死本课，时有时无地失败
+  const roundLessons = db("SELECT DISTINCT q.lesson FROM attempt a JOIN question q ON q.code = a.item" +
+                          ` WHERE a.id > ${attemptMax} AND q.lesson IS NOT NULL`).map(r => r.lesson);
   const sumLinks = () => p.$$("a").filter(a => ["去问老师接着聊", "读课文", "再练这一课"].includes(a.textContent.trim()));
   const sl = sumLinks().map(a => [a.textContent.trim(), decodeURIComponent(a.getAttribute("href"))]);
   say(sl.some(([t, h]) => t === "去问老师接着聊" && h === "#问老师")
-      && sl.some(([t, h]) => t === "读课文" && h === `#教材?lesson=${S.lesson}`),
-      `链接：${JSON.stringify(sl)}`);
+      && sl.some(([t, h]) => t === "读课文" && roundLessons.some(l => h === `#教材?lesson=${l}`)),
+      `链接：${JSON.stringify(sl)}（这一轮的课：${roundLessons.join("、")}）`);
   say(!!p.btn("再来一轮"), "那张一轮做完的卡还在（再来一轮）");
   const chatRows = db("SELECT role, intent, content FROM chat_message ORDER BY id");
   say(chatRows.length === 2 && chatRows[1].content === SUMMARY && chatRows.every(r => r.intent === "总结")

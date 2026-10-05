@@ -247,6 +247,12 @@ textarea { resize:none; min-height:46px; max-height:180px; border-radius:8px; }
 .choice-wrong { border-color:var(--no); background:#faeeec; }
 .choice-wrong .choice-k { background:var(--no); color:#fff; }
 .choice-dim { opacity:.5; }
+<% if has_choices is defined and has_choices %>
+/* 判完（按钮带了 state）选项不用再点了，收紧：对错还是一眼看得出（颜色、
+   字母底色），省下的高度让「下一题」不用往下滚 */
+.choices:has(.choice:disabled[class*="choice-"]) { gap:6px; }
+.choice[class*="choice-"] { padding:6px 14px; font-size:15px; }
+<% endif %>
 
 table { width:100%; border-collapse:collapse; }
 th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); }

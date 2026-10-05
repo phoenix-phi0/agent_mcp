@@ -27,7 +27,7 @@
 #                一轮就是候选条目数
 #
 # 成功：往响应的 state 里放一张新题卡（card），返回 {"ok":"1"}。
-# 题卡：{code, head, stem, options:[{key,text,state}], verdict, mine}，界面上
+# 题卡：{code, head, stem, options:[{key,text,state}], verdict, explain, mine}，界面上
 # 「卡片 翻页 card.code」——code 一变就是新的一张。选项是打乱过的（种子
 # 「learner|题号|seq」，判题时 routes/quiz.zs 用同一个种子再拆一次）。
 # 一轮做完：不出题，state 里 phase=end、round 是那句提示和地址（按课练给
@@ -202,6 +202,7 @@
 设 card.stem = {split.stem}
 设 card.options = {split.options}
 设 card.verdict =
+设 card.explain =
 设 card.mine =
 
 设 state.card = {card}

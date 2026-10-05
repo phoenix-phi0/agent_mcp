@@ -352,14 +352,15 @@
   设 result = 查一行表 app.db question_verdict {verdict_args}
 
   # 判完把题卡重画一遍：选项标出对错（答案那项 right、选错的 wrong、其余
-  # dim，有了 state 的按钮界面上就锁住了），下面是批改和解析。题卡的 code
-  # 不变，界面不会当成新的一张去翻页。上面拆的那次已经带着答案和作答，
-  # 标好了
+  # dim，有了 state 的按钮界面上就锁住了），下面是批改（verdict，一行对错）
+  # 和解析（explain）。题卡的 code 不变，界面不会当成新的一张去翻页。
+  # 上面拆的那次已经带着答案和作答，标好了
   设 card.code = {current}
   设 card.head = {key.head}
   设 card.stem = {split.stem}
   设 card.options = {split.options}
   设 card.verdict = {result.text}
+  设 card.explain = {result.explain}
   设 card.mine = {answer}
   设 card.ok = {correct}
 

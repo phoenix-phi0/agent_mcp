@@ -352,6 +352,20 @@ KEYED_MODIFIERS = KEYED_MODIFIERS | {"交给", "翻页"}
 # 列「地址 <键>」：这一格画成链接，见上面「链接」的说明
 KEYED_MODIFIERS = KEYED_MODIFIERS | {"地址"}
 
+# 动作「回车」：答完才出现的那颗「下一题」用。三件事：
+#   1. 一次提交回来、界面上没有输入框可还焦点时，焦点给这颗按钮，并
+#      scrollIntoView({block:'nearest'})——卡片长了按钮不会落在看不见的地方；
+#   2. 焦点在按钮上按 Enter 就是点它；焦点不在任何输入框、按钮、链接上
+#      （比如点完选择题的选项）时，按 Enter 也是点它；
+#   3. 一次 keydown 只做一件事：输入框里的 Enter 交答案时已经 preventDefault，
+#      全局那条看到就不再点；按住 Enter 的自动重复（repeat）一律不算，
+#      免得交完答案那一下的连发直接把下一题也跳过去。
+# 什么时候该响应由「当」管：按钮只在判完（phase==='done'）时存在，答题时
+# 它根本不在 DOM 里，Enter 只会交答案。一个界面同时只该有一颗出现着的
+# 「回车」按钮；有几颗时取文档顺序第一颗。
+#   动作 quiz_next 远程 回车 当 shared.phase==='done' 下一题
+FLAG_MODIFIERS = FLAG_MODIFIERS | {"回车"}
+
 SCREEN_ROLES = {"表单", "列表", "自定义"}
 DEFAULT_ROLE = "自定义"
 
@@ -1198,6 +1212,10 @@ def render_vue(screens, title="UI", options_map=None, rows=None,
         "has_goto": any(a.goto for s in screens for a in s.actions()),
         # 没有浮层的 .ui 一行浮层代码都不生成
         "has_overlays": any(s.overlays() for s in screens),
+        # 标了「回车」的动作：没有的项目一行相关代码都不生成
+        "has_enter": any(a.has("回车") for s in screens for a in s.actions()),
+        # 用了「选项」才生成判完收紧选项的那两条样式
+        "has_choices": any(n.kind == "选项" for s in screens for n in s.walk()),
         # 有图才插 Vue Flow 和 dagre 的 CDN，没有的页面一个外部依赖都不多
         "has_graphs": any(n.kind == "节点图" for s in screens for n in s.walk()),
         # 界面名 -> 该界面的消息流。回显、占位、后端返回三处都按当前界面

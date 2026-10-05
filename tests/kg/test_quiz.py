@@ -95,7 +95,7 @@ def main():
         return body.get("state") or {}
 
     def card(body):
-        """题卡：{code, head, stem, options:[{key,text,state}], verdict, mine, ok}"""
+        """题卡：{code, head, stem, options:[{key,text,state}], verdict, explain, mine, ok}"""
         return state(body).get("card") or {}
 
     def card_text(c):
@@ -172,7 +172,7 @@ def main():
     check(cd.get("options") == [], "接续题没有选项按钮")
     check(q["answer"] not in text and "answer" not in cd, "答案没露出来")
     check(item_label not in text.replace(q["stem"], ""), f"条目名（{item_label}）没露出来")
-    check(cd.get("verdict") == "" and not msgs(body), "还没判：没有批改，也不推消息")
+    check(cd.get("verdict") == "" and cd.get("explain") == "" and not msgs(body), "还没判：没有批改，也不推消息")
     check(state(body).get("phase") == "ask" and state(body).get("qtype") == "接续",
           f"state：{state(body)}")
     st, body = post("/quiz/state")
@@ -250,10 +250,13 @@ def main():
     check(marks.get(rk) == "right" and all(v == "dim" for k, v in marks.items() if k != rk),
           f"选对：答案那项标 right，其余淡出：{marks}")
     lab = one("SELECT label FROM item WHERE code = ?", q["item"])["label"]
-    check("考的是：" + lab in cd.get("verdict", ""), f"批改里说了考的条目：{lab}")
+    # 结论（verdict）只有一行，解析、考的条目、课文在 explain：题卡上「下一题」
+    # 夹在两者中间
+    check(cd.get("verdict") == "○ 答对了", f"结论只有一行：{cd.get('verdict')!r}")
+    check("考的是：" + lab in cd.get("explain", ""), f"解析里说了考的条目：{lab}")
     if q.get("lesson"):
         title = one("SELECT title FROM lesson WHERE code = ?", q["lesson"]).get("title", "")
-        check(title and f"《{title}》" in cd.get("verdict", ""), f"批改里有课文：{title}")
+        check(title and f"《{title}》" in cd.get("explain", ""), f"解析里有课文：{title}")
     check(current()["choice"] == q["answer"], "选的选项记在进度里（记题库里的原字母）")
     st, body = post("/quiz/next", pick_level="全部", pick_kind="挖空")
     q = key(current()["current"])

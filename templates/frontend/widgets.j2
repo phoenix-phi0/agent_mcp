@@ -124,22 +124,28 @@
     None，于是所有远程动作都生成成 type="submit"，点下去走表单提交、只
     console.log，请求根本不发。界面看着完全正常，是端到端点一次发送才
     发现的。 -#}
+{#- 「回车」：data-enter 是给 app.js 找按钮用的（答完把焦点给它、全局 Enter
+    点它）；按钮自己的 Enter 也接过来，preventDefault 掉浏览器原生的「Enter
+    激活按钮」，由 enterKey 统一挡掉自动重复——不然交答案那一下按住没放，
+    连发的 Enter 就落到刚出现的「下一题」上把它也点了。见 tools/ui.py。 -#}
+<%- macro 回车(a) -%><% if a.has("回车") %> data-enter="<%= a.name %>" @keydown.enter.prevent="enterKey($event)"<% endif %><%- endmacro -%>
+
 <%- macro 动作(a) -%>
 <%- if not a.has("隐藏") -%>
 <%- set kind = "危险" if a.has("危险") else "次要" if a.has("次要") else "提交" -%>
 <%- set 色 = "btn-danger" if a.has("危险") else ("btn-ghost" if a.has("次要") else "btn-primary") -%>
 <%- if a.opens -%>
-<button type="button" class="btn <%= 色 %>" @click.prevent="<% if a.has("重置") %>reset(current.name); <% endif %>showOverlay('<%= a.opens %>')"<%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
+<button type="button" class="btn <%= 色 %>" @click.prevent="<% if a.has("重置") %>reset(current.name); <% endif %>showOverlay('<%= a.opens %>')"<%= 回车(a) %><%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
 <%- elif a.has("关闭") and not a.has("远程") -%>
-<button type="button" class="btn <%= 色 %>" @click.prevent="closeOverlay()"<%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
+<button type="button" class="btn <%= 色 %>" @click.prevent="closeOverlay()"<%= 回车(a) %><%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
 <%- elif a.goto -%>
-<button type="button" class="btn" :class="{ 'btn-mode-on': current.name === '<%= a.goto %>' }" @click.prevent="go('<%= a.goto %>')"<%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
+<button type="button" class="btn" :class="{ 'btn-mode-on': current.name === '<%= a.goto %>' }" @click.prevent="go('<%= a.goto %>')"<%= 回车(a) %><%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
 <%- elif kind == "提交" and a.has("远程") -%>
-<button type="button" :disabled="busy" class="btn btn-primary" @click.prevent="submitTo('<%= a.name %>'<% if a.has("关闭") %>, true<% endif %>)"<%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
+<button type="button" :disabled="busy" class="btn btn-primary" @click.prevent="submitTo('<%= a.name %>'<% if a.has("关闭") %>, true<% endif %>)"<%= 回车(a) %><%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
 <%- elif kind == "提交" -%>
-<button type="submit" class="btn btn-primary"<%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
+<button type="submit" class="btn btn-primary"<%= 回车(a) %><%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
 <%- else -%>
-<button type="button" class="btn <%= 色 %>"<% if a.has("远程") %> :disabled="busy"<% endif %> @click.prevent="<% if a.has("远程") %>submitTo<% else %>onAction<% endif %>('<%= a.name %>'<% if a.has("远程") and a.has("关闭") %>, true<% endif %>)"<%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
+<button type="button" class="btn <%= 色 %>"<% if a.has("远程") %> :disabled="busy"<% endif %> @click.prevent="<% if a.has("远程") %>submitTo<% else %>onAction<% endif %>('<%= a.name %>'<% if a.has("远程") and a.has("关闭") %>, true<% endif %>)"<%= 回车(a) %><%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
 <%- endif -%>
 <%- endif -%>
 <%- endmacro -%>

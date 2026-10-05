@@ -9,9 +9,12 @@
 #         开头的 [N4]）、题源（随机 / 错词复习）、开始；右边是这一轮的成绩
 #   词卡  抬头（等级・方向）、题面（意思，或汉字）、看汉字写读音时下面一行
 #         意思、提示（点了才有）、输入框（Enter 交）、「交」「提示」；
-#         判完：对错、正确的「汉字【读音】意思」、你写的、补充的一句
-#         （同义词也算对、写的是同读音的另一个词、这是另一个读法……）、
-#         「下一个」
+#         判完：对错、「下一个」、正确的「汉字【读音】意思」、你写的、补充
+#         的一句（同义词也算对、写的是同读音的另一个词、这是另一个读法……）。
+#         「下一个」紧跟对错（早先在最后一行，要往下滚才点得到），标了「回车」：
+#         判完焦点给它，Enter 交完再按一下 Enter 就是下一个；交答案那一下的
+#         Enter 不会连带翻页（见 tools/ui.py 的「回车」）。判完输入框和提示
+#         那一行都收起，省出高度
 #   一轮结束  本轮答对几个、错词表（汉字【读音】意思、你写的）、「再来一轮」
 #         「练错词」
 #
@@ -49,15 +52,15 @@
     显示 dcard.head
     显示 dcard.stem 正文
     显示 dcard.sub 当 shared.dcard&&shared.dcard.sub
-    显示 dcard.hint 当 shared.dcard&&shared.dcard.hint
+    显示 dcard.hint 当 shared.dphase==='ask'&&shared.dcard&&shared.dcard.hint
     字段 dict_answer 控件 多行 单行高 当 shared.dphase==='ask' 提示 写出来，Enter交（汉字、平假名、片假名都行）
     动作 dictation_answer 提交 远程 清空 当 shared.dphase==='ask' 交
     动作 dictation_hint 远程 当 shared.dphase==='ask'&&!shared.dcard.hint 提示
     显示 dcard.verdict 正文 当 shared.dphase==='done'
+    动作 dictation_next 远程 回车 当 shared.dphase==='done' 下一个
     显示 dcard.right 当 shared.dphase==='done'
     显示 dcard.mine 当 shared.dphase==='done'
     显示 dcard.note 当 shared.dphase==='done'&&shared.dcard.note
-    动作 dictation_next 远程 当 shared.dphase==='done' 下一个
   结束
 
   分组 一轮 卡片 当 shared.dphase==='end'

@@ -74,6 +74,9 @@ function openPage(hash) {
   };
   w.console.log = () => {};
   w.console.warn = () => {};
+  // jsdom 没有 scrollIntoView：记下谁被滚到了、传的什么参数
+  const scrolled = [];
+  w.Element.prototype.scrollIntoView = function (o) { scrolled.push({ el: this, opts: o }); };
   w.eval(fs.readFileSync(WEB + "/vue.global.prod.js", "utf8"));
   w.eval(fs.readFileSync(WEB + "/app.js", "utf8"));
   const $ = s => w.document.querySelector(s);
@@ -88,6 +91,13 @@ function openPage(hash) {
     pick: (sel, v) => { sel.value = v; sel.dispatchEvent(new w.Event("change")); },
     type: (el, v) => { el.value = v; el.dispatchEvent(new w.Event("input")); },
     enter: el => el.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Enter", bubbles: true })),
+    enterRepeat: el => el.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Enter", bubbles: true, repeat: true })),
+    // 输入法选字中的 Enter（确定这个词，不是交）
+    enterComposing: el => el.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Enter", bubbles: true, isComposing: true })),
+    focused: () => w.document.activeElement,
+    scrolled,
+    after: (a, b) => !!(a && b && (a.compareDocumentPosition(b) & w.Node.DOCUMENT_POSITION_FOLLOWING)),
+    line: f => $$(".card .dyn").find(e => f((e.querySelector(".dyn-v") || {}).textContent || "")),
     stat: () => $$(".bar-top .dyn-v").map(e => e.textContent).find(t => t.startsWith("这一轮")) || "",
     card: () => $(".card"),
     cardText: () => $$(".card").map(e => e.textContent).join("\n"),
@@ -168,16 +178,46 @@ function openPage(hash) {
         `批改：正确的写法和你写的（${label(w)}）`);
     say(p.card() === card1, "判完是同一张卡原地更新");
     say(await waitFor(() => !p.box() && p.btn("下一个")), "判完：输入框收起，出现「下一个」");
+    {
+      const nb = p.btn("下一个");
+      const v = p.line(t => /^[○✗]/.test(t));
+      const right = p.line(t => t.startsWith("正确："));
+      const mine = p.line(t => t.startsWith("你写的："));
+      say(p.after(v, nb) && p.after(nb, right) && p.after(nb, mine)
+          && !p.$$(".card .dyn").some(e => p.after(v, e) && p.after(e, nb))
+          && p.$$(".card .dyn").filter(e => p.after(v, e)).every(e => p.after(nb, e)),
+          "「下一个」紧跟对错，正确写法、你写的、补充都排在它后面");
+    }
+    say(await waitFor(() => p.focused() === p.btn("下一个")), "判完焦点落在「下一个」上");
+    say(p.scrolled.some(x => x.el === p.btn("下一个") && x.opts && x.opts.block === "nearest"),
+        "「下一个」滚进了看得见的地方（scrollIntoView block:nearest）");
+    // 交的那次 Enter 不连带翻页；按住 Enter 的连发也不算
+    await sleep(300);
+    say(curWord().id === w.id && !calls.some(c => c.path === "/dictation/next") && p.verdict(),
+        "交答案的那次 Enter 没有连带翻到下一个");
+    p.enterRepeat(p.btn("下一个"));
+    await sleep(300);
+    say(curWord().id === w.id && !calls.some(c => c.path === "/dictation/next"), "按住 Enter 的连发不会翻页");
     say(await waitFor(() => p.stat() === "这一轮 1/1"), `顶栏成绩：${p.stat()}`);
 
     console.log("三、答错");
     const seen = [w.id];
-    p.btn("下一个").click();
-    say(await waitFor(() => p.box() && p.box().value === "" && !p.verdict()), "新卡：输入框是空的，没有上一张的批改");
+    // 焦点在「下一个」上，Enter 就是下一个
+    p.enter(p.focused());
+    say(await waitFor(() => p.box() && p.box().value === "" && !p.verdict()), "Enter：新卡，输入框是空的，没有上一张的批改");
+    say(calls.filter(c => c.path === "/dictation/next").length === 1, "一次 Enter 只发了一次「下一个」");
+    say(await waitFor(() => p.focused() === p.box()), "新卡：焦点回到输入框，接着写");
     say(p.card() !== card1, "换了一张新卡（翻页）");
     w = curWord();
     seen.push(w.id);
     const wrongs = [w];
+    // 输入法选字时的 Enter 不交
+    const answers0 = calls.filter(c => c.path === "/dictation/answer").length;
+    p.type(p.box(), "ちがう");
+    p.enterComposing(p.box());
+    await sleep(300);
+    say(!p.verdict() && calls.filter(c => c.path === "/dictation/answer").length === answers0 && p.box(),
+        "输入法选字时按 Enter 不交");
     await p.answer("ちがう");
     say(p.verdict().startsWith("✗"), `判错：${p.verdict()}`);
     say(p.lines().includes("正确：" + label(w)) && p.lines().includes("你写的：ちがう"), `给了正确的「${label(w)}」和你写的`);
@@ -193,6 +233,7 @@ function openPage(hash) {
     say(!p.btn("提示") && p.box(), "看过提示：「提示」收起，还能写");
     await p.answer(w.kanji);
     say(p.verdict().startsWith("○") && p.verdict().includes("提示"), `写汉字判对，注明看了提示：${p.verdict()}`);
+    say(!p.lines().some(t => t.includes(`一共 ${w.kana.length} 个字`)), "判完提示那一行收起（正确写法里都有了）");
     const last = db("SELECT correct, hinted, direction FROM word_attempt ORDER BY id DESC LIMIT 1")[0];
     say(last.correct === 1 && last.hinted === 1 && last.direction === "meaning", "库里记 correct=1、hinted=1");
 
