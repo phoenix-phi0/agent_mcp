@@ -284,11 +284,18 @@ const ITEM_HEAD = "条目|所属知识点";
   async function answer(right) {
     await waitFor(() => p.choices().length || p.box());
     const q = db(`SELECT * FROM question WHERE code = '${cur()}'`)[0];
+    // 库里的 current 先变，页面晚一拍才换题：等题卡上是这道题、上一道的结论没了再答，
+    // 不然点到的是上一道已经答完（按钮禁用）的题卡，这一道根本没交
+    const body = q.stem.split("\n").filter(l => !/^\s*[A-D]\s*[.．、:：]/.test(l)).join("\n").trim();
+    const shown = await waitFor(() => !p.verdict() && (p.choices().length || p.box()) &&
+      p.$$(".card .dyn-v").some(e => e.textContent.trim() === body));
+    if (!shown) say(false, `题卡没换成 ${q.code}：${p.$$(".card .dyn-v").map(e => e.textContent).join(" / ")}`);
     if (p.choices().length) {
       // 选项打乱过：按内容找正确答案在界面上的那个按钮
       const line = q.stem.split("\n").find(l => new RegExp("^\\s*" + q.answer + "\\s*[.．、:：]").test(l)) || "";
       const want = line.replace(/^\s*[A-D]\s*[.．、:：]\s*/, "").trim();
       const btn = p.choices().find(b => (b.querySelector(".choice-t") || {}).textContent === want);
+      if (!btn) say(false, `界面上找不到正确答案「${want}」：${p.choices().map(b => b.textContent)}`);
       (right ? btn : p.choices().find(b => b !== btn)).click();
     }
     else { p.type(p.box(), right ? q.answer : "ぜんぜんちがう"); p.btn("作答").click(); }
