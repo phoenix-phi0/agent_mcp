@@ -35,10 +35,8 @@ def make_ws(tmp: Path, with_content: bool = True) -> Path:
     text = "\n\n".join(f.read_text(encoding="utf-8")
                        for f in sorted((tmp / "entities").glob("*.entity")))
     con = sqlite3.connect(tmp / "app.db")
+    # mastery 的 (learner, point) 唯一索引在实体里（「唯一 learner point」）
     con.executescript(render_sql(text, strict=True))
-    # .entity 表达不了多列唯一，跟 py -m kg setup 里那步一致
-    con.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_mastery"
-                " ON mastery(learner, point)")
     con.commit()
     con.close()
     return tmp

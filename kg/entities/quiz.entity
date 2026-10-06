@@ -21,7 +21,7 @@
 #           里每个条目只出一题，靠它跳过出过的条目），round_n 是这一轮
 #           出了几道（一轮够数就结束）；seq 每出一道加一，选项打乱的
 #           种子用它——出题和判题算出同一个顺序。这四列是后加的，老库由
-#           py -m kg 的 ensure_new_columns 用 ALTER TABLE 补，不重建。
+#           引擎的「迁移 只加」用 ALTER TABLE 补，不重建。
 #           round_from 是这一轮的起点：开一轮（开始、按课进来、再来一轮，
 #           自由练请老师总结完）时记下 attempt 当时最大的 id，这一轮做的题
 #           就是这个人 id 比它大的作答（queries/round_attempts.sql，请老师
@@ -29,7 +29,7 @@
 #           mode 是做题模式：review = 复习薄弱点（#做题?mode=review，题从
 #           这个人的低分点、错题、久没做的已掌握点里挑，见
 #           queries/question_pick_review.sql），空 = 按等级考点或按课练。
-#           「开始」、按课进来都清掉它。也是后加的列，ensure_new_columns 补。
+#           「开始」、按课进来都清掉它。也是后加的列，「迁移 只加」补。
 #
 # 做题结果记进 attempt / mastery，point 是题目所属条目的**结构点**
 # （item.point）——attempt.point 有外键指向 node，条目编号写不进去。

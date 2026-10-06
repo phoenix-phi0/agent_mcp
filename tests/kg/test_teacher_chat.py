@@ -56,8 +56,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from tests.kg.helpers import choice_key, client, import_graph, make_ws    # noqa: E402
-from kg.__main__ import (BANK, ensure_new_columns, ensure_new_tables,  # noqa: E402
-                          quiz_link, read_bank)
+from kg.__main__ import BANK, quiz_link, read_bank            # noqa: E402
+from tools.migrate import migrate_additive                     # noqa: E402
 from tools import config                                       # noqa: E402
 from tools.mock import MockClient                              # noqa: E402
 
@@ -560,11 +560,11 @@ def main():
     n_att = con.execute("SELECT count(*) FROM attempt").fetchone()[0]
     con.commit()
     con.close()
-    made = ensure_new_tables(db, ws / "entities")
+    made = migrate_additive(db, ws / "entities")["tables"]
     check(made == ["chat_message"], f"补建了 chat_message：{made}")
     check(rows("SELECT count(*) n FROM attempt")[0]["n"] == n_att and n_att > 0,
           f"学习记录没动（attempt {n_att} 条）")
-    check(ensure_new_tables(db, ws / "entities") == [], "再跑一次什么都不建")
+    check(migrate_additive(db, ws / "entities")["tables"] == [], "再跑一次什么都不建")
 
     # 老库的 chat_message 没有 links 列：补列（ALTER TABLE ADD COLUMN），不重建，
     # 原有的行还在；只有 link 的旧记录拉回来也是 links 列表
@@ -579,13 +579,14 @@ def main():
                 " VALUES('old', 'teacher', '旧的一条', '出题', '#x', '旧链接')")
     con.commit()
     con.close()
-    check(ensure_new_tables(db, ws / "entities") == [], "老库：表在，不补建")
-    added = ensure_new_columns(db, ws / "entities")
+    migrated = migrate_additive(db, ws / "entities")
+    check(migrated["tables"] == [], "老库：表在，不补建")
+    added = migrated["columns"]
     check(added == ["chat_message.links", "chat_message.round_key"],
           f"补了 links 列（还有做题总结加的 round_key）：{added}")
     check(rows("SELECT content FROM chat_message WHERE learner = 'old'") == [{"content": "旧的一条"}],
           "原有的行还在（没重建）")
-    check(ensure_new_columns(db, ws / "entities") == [], "再跑一次什么都不补")
+    check(migrate_additive(db, ws / "entities")["columns"] == [], "再跑一次什么都不补")
     r = c.post("/teacher/state", json={"form": {"learner": "old"}}).get_json() or {}
     talk = (r.get("state") or {}).get("talk") or []
     check(talk and talk[0].get("links") == [{"href": "#x", "text": "旧链接"}] and talk[0].get("link") == "#x",

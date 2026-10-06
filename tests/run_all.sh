@@ -52,6 +52,7 @@ run 界面编译    $PY -m tools.test_ui
 run 会话        $PY tests/http/test_session.py
 run 库出错      $PY tests/http/test_db_errors.py
 run 模板命名    $PY tests/gen/test_templates.py
+run 只加迁移    $PY tests/gen/test_migrate.py
 run 知识图谱    $PY tests/kg/test_kg.py
 run 单词        $PY tests/kg/test_word.py
 run 单词导入    $PY tests/kg/test_word_import.py

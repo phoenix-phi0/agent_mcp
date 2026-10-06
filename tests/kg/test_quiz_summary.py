@@ -45,7 +45,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from tests.kg.helpers import client, import_graph, make_ws   # noqa: E402
-from kg.__main__ import BANK, ensure_new_columns, read_bank  # noqa: E402
+from kg.__main__ import BANK, read_bank  # noqa: E402
+from tools.migrate import migrate_additive  # noqa: E402
 from tools import config                                     # noqa: E402
 from tools.mock import MockClient                            # noqa: E402
 
@@ -462,7 +463,7 @@ def main():
     con.execute("INSERT INTO chat_message(learner, role, content) VALUES('me', 'teacher', '老的')")
     con.commit()
     con.close()
-    added = ensure_new_columns(old, ws / "entities")
+    added = migrate_additive(old, ws / "entities")["columns"]
     check(sorted(added) == ["attempt.answer", "chat_message.round_key",
                             "quiz_state.mode", "quiz_state.round_from"],
           f"补了四列（mode 是复习薄弱点加的，round_key 是一轮只总结一次加的）：{added}")
@@ -472,7 +473,7 @@ def main():
             con.execute("SELECT content, round_key FROM chat_message").fetchall())
     con.close()
     check(kept == (1, (3, 4, 0), [("老的", None)]), f"原有的行还在（没重建）：{kept}")
-    check(ensure_new_columns(old, ws / "entities") == [], "再跑一次什么都不补")
+    check(migrate_additive(old, ws / "entities")["columns"] == [], "再跑一次什么都不补")
 
     print(f"\n{'=' * 50}\n通过 {passed}，失败 {failed}")
     return 1 if failed else 0

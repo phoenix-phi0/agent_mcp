@@ -5,6 +5,10 @@
 
 服务 8190-8199
 
+# 已有的库按实体只加不改：后加的表、列、索引补上，学习记录表绝不重建
+# （tools/migrate.py）。py -m kg、gen run、双击 app.pyw 都走这一步
+迁移 只加
+
 
 # 导入在 kg_import.zs 里，用引擎自己写的（读 JSONL、遍历、写库都是 DSL）。
 

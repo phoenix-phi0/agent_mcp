@@ -7,9 +7,10 @@
 跟 gen/app.pyw 同一套：起 Flask 在随机空端口，等它活过来，用 pywebview 开
 一个原生窗口，关窗口就退出（webview.start() 阻塞到关闭，服务线程是 daemon）。
 
-多做的一件事：**开窗之前先把数据准备好**——建库、导入知识点和单词、画图、
-编译界面。命令行那边是 `py -m kg`，这里调的是同一个 setup()，所以双击和
-敲命令的结果一样。第一次跑要几秒。
+多做的一件事：**开窗之前先把数据准备好**——建库（已有的库按实体只加不改，
+引擎的 tools/migrate.py）、导入知识点和单词、编译界面。命令行那边是
+`py -m kg`，这里调的是同一个 setup()，所以双击和敲命令的结果一样。第一次
+跑要几秒。
 
 装依赖：
     pip install flask pywebview
@@ -124,7 +125,7 @@ def main(argv: list = None) -> int:
 
     from kg.__main__ import setup
 
-    # 建库、导入、画图、编译。跟 py -m kg 走的是同一段。
+    # 建库（老库只加不改）、导入、编译。跟 py -m kg 走的是同一段。
     setup(quiet=True)
 
     port = free_port()

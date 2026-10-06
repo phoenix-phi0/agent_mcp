@@ -219,6 +219,15 @@ def auth_required(root: Path) -> bool:
     一个文件写了就对整个项目生效：认证是项目级的开关，不是某个文件的
     事——不然新加一个路由文件忘了写这行，里面的接口就全是公开的。
     """
+    return top_level_flag(root, AUTH_RE)
+
+
+def top_level_flag(root: Path, pattern) -> bool:
+    """路由目录里有没有哪个 .zs 在顶层（接口块外面）写了匹配 pattern 的一行。
+
+    项目级开关都这么写：「认证 必须」，「迁移 只加」（见 tools/migrate.py）。
+    接口块里的同样一行不算——那是脚本内容，不是声明。
+    """
     if not Path(root).is_dir():
         return False
     for f in sorted(Path(root).rglob("*.zs")):
@@ -235,7 +244,7 @@ def auth_required(root: Path) -> bool:
                 elif head in CLOSERS:
                     depth -= 1
                 continue
-            if AUTH_RE.match(s):
+            if pattern.match(s):
                 return True
     return False
 
@@ -755,6 +764,12 @@ def main() -> int:
     print(router.describe())
     if args.list:
         return 0
+
+    # 路由里写了「迁移 只加」：起服务前给工作区的 app.db 补上实体后加的表和列
+    # （tools/migrate.py）。没写的项目这一步什么都不做
+    from .migrate import migrate_project
+    for line in migrate_project(ws, Path(args.routes)):
+        print(line)
     if not router.table:
         return 1
 

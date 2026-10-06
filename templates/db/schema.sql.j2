@@ -47,4 +47,9 @@ CREATE INDEX IF NOT EXISTS idx_{{ entity.name }}_{{ field.name }}
     ON {{ entity.name }}({{ field.name }});
 {% endif %}
 {% endfor %}
+{# 多列唯一（实体里的「唯一 a b」行） #}
+{% for cols in entity.uniques %}
+CREATE UNIQUE INDEX IF NOT EXISTS ux_{{ entity.name }}_{{ cols | join("_") }}
+    ON {{ entity.name }}({{ cols | join(", ") }});
+{% endfor %}
 {% endfor %}

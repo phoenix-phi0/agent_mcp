@@ -35,7 +35,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from tests.kg.helpers import choice_key, client, import_graph, make_ws   # noqa: E402
-from kg.__main__ import BANK, ensure_new_columns, read_bank              # noqa: E402
+from kg.__main__ import BANK, read_bank              # noqa: E402
+from tools.migrate import migrate_additive           # noqa: E402
 from tools.mock import MockClient                                        # noqa: E402
 
 passed = failed = 0
@@ -310,7 +311,7 @@ def main():
     con.execute("INSERT INTO quiz_state(learner, right, total) VALUES('me', 3, 4)")
     con.commit()
     con.close()
-    added = ensure_new_columns(old, ws / "entities")
+    added = migrate_additive(old, ws / "entities")["columns"]
     check(added == ["quiz_state.mode"], f"补了 quiz_state.mode：{added}")
     con = sqlite3.connect(old)
     kept = con.execute("SELECT right, total, mode FROM quiz_state").fetchone()

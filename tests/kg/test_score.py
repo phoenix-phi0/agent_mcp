@@ -244,7 +244,7 @@ def main():
     check(now("many")["hiragana"]["value"] == 119 % 101, "当前分是最后一次")
 
     print("十、补建表")
-    from kg.__main__ import ensure_new_tables
+    from tools.migrate import migrate_additive
     old = Path(tempfile.mkdtemp(prefix="newtab_")) / "app.db"
     shutil.copy(db, old)
     con = sqlite3.connect(old)
@@ -263,7 +263,7 @@ def main():
                 for t in ("node", "item", "prereq", "contrast", "word", "attempt", "mastery")}
 
     s0, n0 = schema(old), counts(old)
-    made = ensure_new_tables(old, ws / "entities")
+    made = migrate_additive(old, ws / "entities")["tables"]
     check(made == ["score"], f"补建了：{made}")
     s1 = schema(old)
     check(all(s1.get(k) == v for k, v in s0.items()), "已有的表和索引，建表语句一个字没变")
@@ -275,7 +275,8 @@ def main():
     check(new_parts == {k: v for k, v in fresh.items()
                         if k == "score" or k.startswith("idx_score_")},
           f"补建的表和索引跟新建的库一模一样：{sorted(new_parts)}")
-    check(ensure_new_tables(old, ws / "entities") == [], "再跑一次什么都不做")
+    check(migrate_additive(old, ws / "entities") == {"tables": [], "columns": [], "indexes": [], "warnings": []},
+          "再跑一次什么都不做")
     con = sqlite3.connect(old)
     con.execute("INSERT INTO score(learner, point, value, at)"
                 " VALUES ('x', 'hiragana', 50, datetime('now','localtime'))")
@@ -283,7 +284,7 @@ def main():
     con.close()
     check(rows_of(old, "SELECT value FROM score") == [{"value": 50}], "补建的表能用")
     missing = Path(tempfile.mkdtemp(prefix="newtab_")) / "none.db"
-    check(ensure_new_tables(missing, ws / "entities") == [] and not missing.exists(),
+    check(migrate_additive(missing, ws / "entities")["tables"] == [] and not missing.exists(),
           "库不存在时不建库、不报错")
 
     auto_scoring(ws, c, db)

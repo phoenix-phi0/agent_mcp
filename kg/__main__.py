@@ -130,139 +130,6 @@ def read_bank(bank: Path) -> list:
     return rows
 
 
-def ensure_learn_index() -> None:
-    """mastery 每人每个知识点只该有一行。
-
-    .entity 表达不了多列唯一，而 mastery_bump 的 ON CONFLICT(learner, point)
-    要靠这个索引才认得出「同一行」——没有它，每答一题都会新增一行，汇总
-    永远是 1/1，而且不报错。边和对照的唯一索引也是这么补的。
-    """
-    import sqlite3
-    db = PROJ / "app.db"
-    if not db.is_file():
-        return
-    con = sqlite3.connect(db)
-    try:
-        if con.execute("SELECT name FROM sqlite_master WHERE type='table'"
-                       " AND name='mastery'").fetchone():
-            con.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_mastery"
-                        " ON mastery(learner, point)")
-            con.commit()
-    finally:
-        con.close()
-
-
-def ensure_new_tables(db: Path = None, entities: Path = None) -> list:
-    """实体里新加了表、库里还没有的，建出来。返回这次建了哪些表。
-
-    ensure_db 只在库不存在时建表——已有的库里不会凭空多出新实体的表，接口
-    一查就是 no such table。重新生成建表语句又会先 DROP 全部表，而 attempt /
-    mastery / score 是真学习记录，不能走那条路。
-
-    所以这里只做最保守的一件事：拿实体渲染出来的建表语句，**只执行库里还
-    没有的那些表**（连同它们的索引）。已有的表一律不碰——不删、不改列、
-    不补列。实体里给已有的表加了字段，这里不管，那得另写 ALTER。
-
-    建表语句从实体渲染，不手抄：手抄的跟新建库渲染出来的哪怕差一点（类型、
-    默认值、外键），一边正常一边出怪问题，很难查。
-
-    db / entities 不给就是本项目的；测试传临时的。
-    """
-    import re
-    import sqlite3
-    sys.path.insert(0, str(ROOT))
-    from tools.entity import render_sql
-
-    db = Path(db) if db else PROJ / "app.db"
-    entities = Path(entities) if entities else PROJ / "entities"
-    if not db.is_file():
-        return []
-    text = "\n\n".join(f.read_text(encoding="utf-8")
-                       for f in sorted(entities.glob("*.entity")))
-
-    # 渲染结果是「DROP 一串 + CREATE TABLE 一串 + CREATE INDEX 一串」，
-    # 按语句切开，只挑 CREATE 的。DROP 一句都不执行。
-    tables, indexes = {}, {}
-    for stmt in re.split(r";\s*\n", render_sql(text, strict=True)):
-        body = "\n".join(l for l in stmt.splitlines()
-                         if l.strip() and not l.strip().startswith("--")).strip()
-        m = re.match(r"CREATE TABLE (\w+)", body)
-        if m:
-            tables[m.group(1)] = body.replace(
-                "CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1)
-            continue
-        m = re.match(r"CREATE INDEX .* ON (\w+)\(", body, re.S)
-        if m:
-            indexes.setdefault(m.group(1), []).append(body)
-
-    con = sqlite3.connect(db)
-    try:
-        have = {r[0] for r in con.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'")}
-        made = [t for t in tables if t not in have]
-        for t in made:
-            con.execute(tables[t])
-            for ix in indexes.get(t, []):
-                con.execute(ix)
-        con.commit()
-        return made
-    finally:
-        con.close()
-
-
-def ensure_new_columns(db: Path = None, entities: Path = None) -> list:
-    """实体里给已有的表加了字段、库里还没有的，用 ALTER TABLE ADD COLUMN 补上。
-    返回这次补了哪些列（「表.列」）。
-
-    跟 ensure_new_tables 一样保守：只加列，不删、不改、不重建（学习记录表
-    绝不能重建）。列定义从实体渲染的建表语句里抄，不手写。SQLite 的 ADD
-    COLUMN 加不了 NOT NULL（没默认值时）和主键，这种列跳过不加，交给人看——
-    已有的行填不出值来。
-
-    db / entities 不给就是本项目的；测试传临时的。
-    """
-    import re
-    import sqlite3
-    sys.path.insert(0, str(ROOT))
-    from tools.entity import render_sql
-
-    db = Path(db) if db else PROJ / "app.db"
-    entities = Path(entities) if entities else PROJ / "entities"
-    if not db.is_file():
-        return []
-    text = "\n\n".join(f.read_text(encoding="utf-8")
-                       for f in sorted(entities.glob("*.entity")))
-
-    con = sqlite3.connect(db)
-    added = []
-    try:
-        have = {r[0] for r in con.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'")}
-        for m in re.finditer(r"CREATE TABLE (\w+) \((.*?)\n\);",
-                             render_sql(text, strict=True), re.S):
-            table = m.group(1)
-            if table not in have:
-                continue        # 整张表没有：ensure_new_tables 的事
-            cols = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
-            for line in m.group(2).splitlines():
-                col = line.strip().rstrip(",")
-                name = col.split(" ", 1)[0]
-                if not re.fullmatch(r"\w+", name) or name.upper() in (
-                        "FOREIGN", "UNIQUE", "CHECK", "PRIMARY", "CONSTRAINT"):
-                    continue
-                if name in cols:
-                    continue
-                up = col.upper()
-                if "PRIMARY KEY" in up or ("NOT NULL" in up and "DEFAULT" not in up):
-                    continue
-                con.execute(f"ALTER TABLE {table} ADD COLUMN {col}")
-                added.append(f"{table}.{name}")
-        con.commit()
-        return added
-    finally:
-        con.close()
-
-
 def run_import(quiet: bool = False) -> int:
     """跑导入。**导入逻辑在 .zs 里，不在这儿**——这个函数只是把接口调起来。
 
@@ -349,14 +216,10 @@ def setup(quiet: bool = False) -> int:
 
     say = (lambda *a: None) if quiet else print
 
+    # 库不存在就建；已有的库按实体只加不改（routes/kg.zs 里的「迁移 只加」，
+    # 引擎做，见 tools/migrate.py）：attempt / mastery / score 是真学习记录，
+    # 后加的表、列、索引补上，已有的表一律不重建
     say(ensure_db(PROJ))
-    made = ensure_new_tables()
-    if made:
-        say(f"  已有的库里补建了表：{'、'.join(made)}")
-    cols = ensure_new_columns()
-    if cols:
-        say(f"  已有的表里补了列：{'、'.join(cols)}")
-    ensure_learn_index()
     run_import(quiet)
 
     for line in build(PROJ):

@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from tests.kg.helpers import client, make_ws          # noqa: E402
-from kg.__main__ import ensure_new_tables              # noqa: E402
+from tools.migrate import migrate_additive             # noqa: E402
 
 passed = failed = 0
 
@@ -327,7 +327,7 @@ def main():
     o.execute("CREATE TABLE attempt (id INTEGER PRIMARY KEY, learner TEXT, point TEXT, correct INTEGER)")
     o.execute("INSERT INTO attempt(learner, point, correct) VALUES('me', 'noun', 1)")
     o.commit()
-    made = ensure_new_tables(old, ws / "entities")
+    made = migrate_additive(old, ws / "entities")["tables"]
     check("word_attempt" in made and "dictation_state" in made and "attempt" not in made, f"补建：{made}")
     check(o.execute("SELECT count(*) FROM attempt").fetchone()[0] == 1, "已有表的数据还在")
     o.close()

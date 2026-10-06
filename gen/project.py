@@ -38,8 +38,12 @@
 
 ## 数据库只建不删
 
-`run` 只在 app.db 不存在时建库。实体改了字段，已有的库**不会**跟着变——
-自动迁移没做，而删表重建会丢数据。要重建就手动删掉 app.db。
+`run` 只在 app.db 不存在时建库。实体改了字段，已有的库默认**不会**跟着变——
+删表重建会丢数据。要重建就手动删掉 app.db。
+
+路由里写一行「迁移 只加」（顶层，接口块外面）的项目，库已存在时按实体补上
+缺的表、列、索引：只 CREATE TABLE IF NOT EXISTS / ADD COLUMN / CREATE INDEX IF
+NOT EXISTS，不 DROP、不改已有的列，对不上的只告警。见 tools/migrate.py。
 """
 
 import argparse
@@ -345,13 +349,19 @@ def add_auth(root: Path) -> list:
 def ensure_db(root: Path) -> str:
     """库不存在就按实体建，存在就不动。
 
-    不删表重建：那会丢数据，而实体改了字段正是最常重跑的时候。自动迁移
-    没做，要按新定义重建就手动删 app.db。
+    不删表重建：那会丢数据，而实体改了字段正是最常重跑的时候。
+
+    路由里写了「迁移 只加」的项目，库已存在时按实体补上缺的表、列、索引，
+    别的不碰（tools/migrate.py）。没写的项目照旧：要按新定义重建就手动删 app.db。
     """
     from tools.entity import render_sql
+    from tools.migrate import migrate_additive, report, switch_on
 
     db = root / DEFAULT_DB
     if db.is_file():
+        if switch_on(root / "routes"):
+            lines = report(migrate_additive(db, root / "entities"))
+            return "\n".join([f"  {DEFAULT_DB} 已存在，按实体只加不改（迁移 只加）"] + lines)
         return f"  {DEFAULT_DB} 已存在，没动（实体改了字段的话要手动删掉重建）"
     sql = render_sql(entities_text(root))
     con = sqlite3.connect(db)

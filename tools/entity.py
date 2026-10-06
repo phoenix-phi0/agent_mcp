@@ -20,6 +20,12 @@
       主键 learner question
     结束
 
+    实体 mastery 掌握
+      字段 learner 文本 必填 学习者
+      字段 point 文本 必填 知识点
+      唯一 learner point
+    结束
+
 One entity per block. The name is the table name; the class name is derived
 (article -> Article, see tools.render.to_class_name). Entities get an
 implicit autoincrement `id` unless 主键 names one explicitly.
@@ -58,6 +64,9 @@ from typing import Optional
 BLOCK = "实体"
 LINE = "字段"
 PK = "主键"
+# 行首的「唯一 a b」是多列唯一（一组列合起来不能重复），渲染成一个唯一索引。
+# 跟字段行里的旗标「唯一」同一个词，位置不同：旗标管一列，这一行管一组。
+UNIQUE = "唯一"
 END = "结束"
 
 # Bare words that may follow the type
@@ -132,6 +141,8 @@ class Entity:
     fields: list = dc_field(default_factory=list)
     # Explicit primary key columns. Empty means the implicit autoincrement id.
     pk: list = dc_field(default_factory=list)
+    # Multi-column unique groups from 「唯一 a b」 lines, each a list of columns.
+    uniques: list = dc_field(default_factory=list)
     label: str = ""
     line: int = 0
 
@@ -159,6 +170,7 @@ class Entity:
     def to_dict(self) -> dict:
         return {
             "name": self.name, "label": self.label, "pk": list(self.pk),
+            "uniques": [list(u) for u in self.uniques],
             "has_implicit_id": self.has_implicit_id,
             "fields": [f.to_dict() for f in self.fields],
         }
@@ -191,6 +203,7 @@ def parse(text: str) -> list:
 
     Field line:  字段 <名> <类型> [选项,逗号分隔] [旗标/键值...] [标签]
     Key line:    主键 <字段> [<字段>...]
+    Unique line: 唯一 <字段> <字段> [...]    多列合起来唯一，可以写多行
 
     The enum options sit right after the type because they are part of it —
     an enum without options is not a usable type, and validate() says so.
@@ -236,6 +249,17 @@ def parse(text: str) -> list:
             current.pk = cols
             continue
 
+        if keyword == UNIQUE:
+            if current is None:
+                raise EntitySyntaxError("「唯一」行要写在「实体」里", lineno)
+            cols = rest.split()
+            if len(cols) < 2:
+                raise EntitySyntaxError(
+                    "「唯一」行管的是一组列，至少两个字段；一列唯一写在字段行里"
+                    "（字段 code 文本 必填 唯一）", lineno)
+            current.uniques.append(cols)
+            continue
+
         if keyword == LINE:
             if current is None:
                 raise EntitySyntaxError("「字段」要写在「实体」里", lineno)
@@ -265,7 +289,7 @@ def parse(text: str) -> list:
             continue
 
         raise EntitySyntaxError(
-            f"不认识「{keyword}」。可用：{BLOCK}、{LINE}、{PK}、{END}", lineno)
+            f"不认识「{keyword}」。可用：{BLOCK}、{LINE}、{PK}、{UNIQUE}、{END}", lineno)
 
     if current is not None:
         raise EntitySyntaxError(f"实体「{current.name}」没有「结束」", current.line)
@@ -352,6 +376,16 @@ def validate(entities) -> list:
                 # NULLs pile up.
                 problems.append(
                     f"第 {f.line} 行：主键字段「{col}」要标「必填」")
+
+        for cols in e.uniques:
+            for col in cols:
+                if e.field(col) is None and not (col == "id" and not e.pk):
+                    problems.append(
+                        f"第 {e.line} 行：「唯一 {' '.join(cols)}」里的「{col}」"
+                        f"不是这个实体的字段")
+            if len(set(cols)) != len(cols):
+                problems.append(
+                    f"第 {e.line} 行：「唯一 {' '.join(cols)}」里有重复的字段")
 
     return problems
 
@@ -445,6 +479,8 @@ def dump(entities) -> str:
             out.append(f"  {f.name}: {' '.join(bits)}{tail}")
         if e.pk:
             out.append(f"  主键: {' '.join(e.pk)}")
+        for cols in e.uniques:
+            out.append(f"  唯一: {' '.join(cols)}")
     return "\n".join(out)
 
 

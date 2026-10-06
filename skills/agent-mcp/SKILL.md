@@ -147,8 +147,11 @@ py -m gen run 项目/           建库 + 编译 + 起服务
 **不要对有特殊约束的表跑生成**：知识图谱的 `prereq` 表必须走带环检查的插入，
 生成的普通 `INSERT` 会绕过环检查。用 `--实体` 限定。
 
-**没有迁移。** 重新生成建表语句会先 `DROP TABLE`。实体加字段要手写
-`ALTER TABLE`，否则数据清空。
+**迁移只有「只加」一种。** 重新生成建表语句会先 `DROP TABLE`，别对有数据
+的库跑。路由顶层写一行 `迁移 只加` 的项目（kg 开着），`gen run` / `ensure_db`
+/ dsl_http 启动时按实体补缺的表、列、索引（`tools/migrate.py` 的
+`migrate_additive`），不 DROP、不改已有列，对不上的只告警。没写这行的项目，
+实体加字段要手写 `ALTER TABLE`。多列唯一写在实体里：`唯一 learner point`。
 
 **`private` 模板**要求实体有 `owner` 列，服务器填，前端伪造无效。
 

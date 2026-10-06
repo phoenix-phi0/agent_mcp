@@ -1,7 +1,7 @@
 # 问老师：学习者和老师的对话记录。界面在 ui/teacher.ui，接口在 routes/teacher.zs。
 #
-# 这是**学习记录**，跟 attempt / mastery / score 一样只进不改：没有迁移，
-# 已有的库靠 py -m kg setup 的 ensure_new_tables 补建这张表，绝不重建。
+# 这是**学习记录**，跟 attempt / mastery / score 一样只进不改：已有的库靠
+# 引擎的「迁移 只加」（tools/migrate.py）补建这张表，绝不重建。
 #
 # role  learner（学习者说的）/ teacher（老师回的）
 # intent  老师那条记判出来的意图：出题 / 讲解 / 其他；学习者那条也记同一个，
@@ -10,7 +10,7 @@
 #         导入整表重灌，带外键的话重灌会被对话记录挡住（跟 question 一个做法）
 # link / link_text  老师那条带的一个链接和链接上的字（老数据只有这两列）
 # links  老师那条带的全部链接，JSON 数组 [{"href":…,"text":…}]（读课文、练
-#        这一课……）。后加的列：已有的库靠 ensure_new_columns 用 ALTER TABLE
+#        这一课……）。后加的列：已有的库靠「迁移 只加」用 ALTER TABLE
 #        ADD COLUMN 补上，不重建表。重新进页面时原样显示
 # round_key  请老师总结的那两条记总结的是哪一轮（round_attempts 的 round_key：
 #        这一轮的起点和最后一道作答的 id）。同一轮再点一次「请老师总结」、
