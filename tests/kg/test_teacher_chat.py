@@ -581,7 +581,8 @@ def main():
     con.close()
     check(ensure_new_tables(db, ws / "entities") == [], "老库：表在，不补建")
     added = ensure_new_columns(db, ws / "entities")
-    check(added == ["chat_message.links"], f"补了 links 列：{added}")
+    check(added == ["chat_message.links", "chat_message.round_key"],
+          f"补了 links 列（还有做题总结加的 round_key）：{added}")
     check(rows("SELECT content FROM chat_message WHERE learner = 'old'") == [{"content": "旧的一条"}],
           "原有的行还在（没重建）")
     check(ensure_new_columns(db, ws / "entities") == [], "再跑一次什么都不补")

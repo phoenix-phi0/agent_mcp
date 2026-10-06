@@ -8,6 +8,8 @@
 --   worst / worst_title / read / practice
 --                 错得最多的那一课（一样多先算在练的那课、再算最近做的；
 --                 全对就是做得最多的），读课文和再练这一课的地址
+--   round_key     这一轮是哪一轮：起点 - 最后一道作答的 id。同一轮没再答题就
+--                 不变，/quiz/summary 用它认「这一轮总结过了」
 --   text          每道题一段：知识点·条目、课文、对错、题干（不含选项）、
 --                 选项、正确答案、学习者的作答、解析。最多最近 30 道，
 --                 前面一行按知识点的对错统计
@@ -86,6 +88,7 @@ w AS (
 SELECT
   (SELECT count(*) FROM r) AS n,
   (SELECT coalesce(sum(correct), 0) FROM r) AS ok_n,
+  st.round_from || '-' || coalesce((SELECT max(id) FROM r), 0) AS round_key,
   st.lesson,
   CASE WHEN st.lesson <> ''
        THEN '按课练《' || coalesce((SELECT title FROM lesson WHERE code = st.lesson), st.lesson) || '》'

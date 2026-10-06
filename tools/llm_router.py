@@ -30,6 +30,12 @@ chat_raw 带 tools → 需要「带工具」；stream / stream_messages → 需�
 时，缺能力就改用 fallback，记一条 warning 日志；fallback 自己也缺就报错。
 别名指向这种档位时一样（resolve_model 返回的 ModelRef 带着档位名）。
 
+主模型走 CLI 时，fallback 还接「这次没跑成」：超时、排队太久没轮到、退出码
+非 0、输出不对（BackendError，不含缺能力的 CapabilityError），同样记一条
+warning 改用 fallback 再问一次。没写 fallback 就照旧报错。做题页「请老师
+总结」用过平衡档（cli:claude/sonnet），claude 卡住时学习者干等三分钟最后
+拿到一个 500——有智谱兜着就不至于。
+
 ## 为什么包在引擎和 Agent 上，而不是各个造客户端的地方
 
 造客户端的地方有六七处（HTTP 路由、flows、fs_server、agent 工具……），
@@ -46,7 +52,13 @@ chat_raw 带 tools → 需要「带工具」；stream / stream_messages → 需�
 - 纯问答：claude 用 --tools "" --strict-mcp-config 并换掉系统提示词，
   zcode 禁掉全部内置工具；都在空的临时目录里跑，读不到项目文件
 
-同时运行的进程数用信号量限住（默认各 2 个），见 _slots。
+同时运行的进程数用信号量限住（默认各 2 个），见 _slots。排队等不到
+（默认 30 秒，DSL_<名字>_QUEUE_WAIT / <名字>_queue_wait）就报 BackendError，
+有 fallback 的档位就改用 fallback，不会一直排下去。
+
+单次超时默认 90 秒（DSL_<名字>_TIMEOUT / <名字>_timeout 可调）：这些调用
+大多是网页上的人在等，sonnet 一次总结实测十秒上下，90 秒还没回多半是卡了，
+早点交给 fallback 比让人干等三分钟强。
 
 ## Windows：经 WSL 调
 
@@ -95,8 +107,9 @@ from .zhipu import strip_json
 
 log = logging.getLogger(__name__)
 
-DEFAULT_TIMEOUT = 180
+DEFAULT_TIMEOUT = 90
 DEFAULT_MAX_PROCS = 2
+DEFAULT_QUEUE_WAIT = 30
 
 # 没给系统提示词时换上这句。不换的话 claude -p 用 Claude Code 自己那段
 # 几千字的编程助手提示词，慢、费额度，回答也带着「我来帮你改代码」的腔调
@@ -409,8 +422,16 @@ class _CLIBackend:
         raise NotImplementedError
 
     def _call(self, prompt, system, model) -> str:
-        with _slots(self.name):
+        slot = _slots(self.name)
+        wait = _setting(f"DSL_{self.name.upper()}_QUEUE_WAIT",
+                        f"{self.name}_queue_wait", DEFAULT_QUEUE_WAIT)
+        if not slot.acquire(timeout=max(0, wait)):
+            raise BackendError(f"{self.name} 同时在跑的进程满了，排队 {wait} 秒"
+                               f"没轮到（可用 DSL_{self.name.upper()}_MAX_PROCS 调大）")
+        try:
             return self.complete(prompt, system, model)
+        finally:
+            slot.release()
 
     def chat(self, prompt, system=None, temperature=None, model="", **kw):
         return self._call(prompt, system, model)
@@ -465,7 +486,7 @@ class ClaudeCLIClient(_CLIBackend):
 
     可执行文件：CBATCH_CLAUDE 环境变量 > PATH 上的 claude > ~/.local/bin/claude
     （Windows 上可以经 WSL 调，见模块文档）
-    超时：DSL_CLAUDE_TIMEOUT 环境变量 > config.json 的 claude_timeout > 180 秒
+    超时：DSL_CLAUDE_TIMEOUT 环境变量 > config.json 的 claude_timeout > 90 秒
     """
 
     name = "claude"
@@ -532,7 +553,7 @@ class ZCodeClient(_CLIBackend):
 
     可执行文件：ZCODE_BIN 环境变量 > PATH 上的 zcode > ~/.local/bin/zcode
     （Windows 上可以经 WSL 调，见模块文档）
-    超时：DSL_ZCODE_TIMEOUT 环境变量 > config.json 的 zcode_timeout > 180 秒
+    超时：DSL_ZCODE_TIMEOUT 环境变量 > config.json 的 zcode_timeout > 90 秒
     """
 
     name = "zcode"
@@ -609,68 +630,132 @@ class RouterClient:
     def __setattr__(self, name, value):
         setattr(self._inner, name, value)
 
-    def _pick(self, model, needs=()):
-        """(CLI 后端或 None, 交给它的模型名)。None 就是交给内层。
+    def _plan(self, model, needs=()):
+        """[(CLI 后端或 None, 交给它的模型名, 显示名), …]，按顺序试。None 就是
+        交给内层。
+
+        第一项是 route 挑的；它走 CLI、档位又写了 fallback（且 fallback 有这次
+        要的能力）时，第二项是 fallback：CLI 这次没跑成就改用它。
 
         内层是离线的假客户端（MockClient(offline=True)，gen run 不带 --real
         时就是它）就什么都不分派、模型名原样交给它：不然「用 快」解析成
         cli:claude/haiku，测试和 mock 模式的服务会真去起 claude -p。
         """
         if getattr(self._inner, "offline", False) is True:
-            return None, model
-        r = route(model, needs, default=getattr(self._inner, "model", None))
-        return r.backend, r.model
+            return [(None, model, model)]
+        default = getattr(self._inner, "model", None)
+        r = route(model, needs, default=default)
+        plan = [(r.backend, r.model, r.spec.canonical if r.spec else model)]
+        if r.backend is None:
+            return plan
+        resolved = config.resolve_spec(
+            model if isinstance(model, str) and model
+            else (default if isinstance(default, str) else None))
+        fb = resolved[2] if resolved else None
+        if (fb is None or fb.canonical == r.spec.canonical
+                or not fb.backend.ready
+                or any(fb.cap(n) == "no" for n in needs)):
+            return plan
+        plan.append((_BACKENDS[fb.provider] if fb.channel == "cli" else None,
+                     fb.model, fb.canonical))
+        return plan
+
+    def _pick(self, model, needs=()):
+        """(CLI 后端或 None, 交给它的模型名)：_plan 的第一项。"""
+        return self._plan(model, needs)[0][:2]
+
+    def _run(self, model, needs, cli, inner):
+        """按 _plan 的顺序试：CLI 报 BackendError（缺能力的除外）且后面还有
+        fallback 就记一条 warning 换下一个。"""
+        plan = self._plan(model, needs)
+        for i, (b, m, label) in enumerate(plan):
+            try:
+                return cli(b, m) if b else inner(m)
+            except CapabilityError:
+                raise
+            except BackendError as e:
+                if i + 1 >= len(plan):
+                    raise
+                log.warning("%s 这次没跑成，改用 fallback %s：%s",
+                            label, plan[i + 1][2], str(e)[:200])
 
     def chat(self, prompt, system=None, temperature=None, model=None, **kw):
-        b, m = self._pick(model)
-        if b:
-            return b.chat(prompt, system=system, model=m)
-        return self._inner.chat(prompt, system=system, temperature=temperature,
-                                model=m, **kw)
+        return self._run(
+            model, (),
+            lambda b, m: b.chat(prompt, system=system, model=m),
+            lambda m: self._inner.chat(prompt, system=system,
+                                       temperature=temperature, model=m, **kw))
 
     def chat_messages(self, messages, temperature=None, model=None, **kw):
-        b, m = self._pick(model)
-        if b:
-            return b.chat_messages(messages, model=m)
-        return self._inner.chat_messages(messages, temperature=temperature,
-                                         model=m, **kw)
+        return self._run(
+            model, (),
+            lambda b, m: b.chat_messages(messages, model=m),
+            lambda m: self._inner.chat_messages(messages, temperature=temperature,
+                                                model=m, **kw))
 
     def chat_raw(self, messages, model=None, **kw):
-        b, m = self._pick(model, ("tools",) if kw.get("tools") else ())
-        if b:
-            return b.chat_raw(messages, model=m, **kw)
-        return self._inner.chat_raw(messages, model=m, **kw)
+        return self._run(
+            model, ("tools",) if kw.get("tools") else (),
+            lambda b, m: b.chat_raw(messages, model=m, **kw),
+            lambda m: self._inner.chat_raw(messages, model=m, **kw))
 
     def chat_json(self, prompt, system=None, temperature=None, model=None,
                   **kw):
-        b, m = self._pick(model)
-        if b:
-            return b.chat_json(prompt, system=system, model=m,
-                               retries=kw.get("retries", 0))
-        return self._inner.chat_json(prompt, system=system,
-                                     temperature=temperature, model=m, **kw)
+        return self._run(
+            model, (),
+            lambda b, m: b.chat_json(prompt, system=system, model=m,
+                                     retries=kw.get("retries", 0)),
+            lambda m: self._inner.chat_json(prompt, system=system,
+                                            temperature=temperature, model=m, **kw))
 
     def chat_json_messages(self, messages, temperature=None, model=None, **kw):
-        b, m = self._pick(model)
-        if b:
-            return b.chat_json_messages(messages, model=m,
-                                        retries=kw.get("retries", 0))
-        return self._inner.chat_json_messages(messages, temperature=temperature,
-                                              model=m, **kw)
+        return self._run(
+            model, (),
+            lambda b, m: b.chat_json_messages(messages, model=m,
+                                              retries=kw.get("retries", 0)),
+            lambda m: self._inner.chat_json_messages(
+                messages, temperature=temperature, model=m, **kw))
+
+    # 流式：主模型是真流式（api）就原样返回内层的生成器。走 CLI 时本来就是
+    # 整段一次性返回，在生成器里先跑完 CLI、出错再换 fallback——错是在迭代
+    # 时才抛的，包在外面的 try 接不住
+    def _stream(self, model, cli, inner):
+        plan = self._plan(model, ("stream",))
+        if plan[0][0] is None:
+            return inner(plan[0][1])
+
+        def gen():
+            for i, (b, m, label) in enumerate(plan):
+                try:
+                    chunks = list(cli(b, m)) if b else None
+                except CapabilityError:
+                    raise
+                except BackendError as e:
+                    if i + 1 >= len(plan):
+                        raise
+                    log.warning("%s 这次没跑成，改用 fallback %s：%s",
+                                label, plan[i + 1][2], str(e)[:200])
+                    continue
+                if chunks is None:
+                    yield from inner(m)
+                else:
+                    yield from chunks
+                return
+        return gen()
 
     def stream(self, prompt, system=None, temperature=None, model=None, **kw):
-        b, m = self._pick(model, ("stream",))
-        if b:
-            return b.stream(prompt, system=system, model=m)
-        return self._inner.stream(prompt, system=system,
-                                  temperature=temperature, model=m, **kw)
+        return self._stream(
+            model,
+            lambda b, m: b.stream(prompt, system=system, model=m),
+            lambda m: self._inner.stream(prompt, system=system,
+                                         temperature=temperature, model=m, **kw))
 
     def stream_messages(self, messages, temperature=None, model=None, **kw):
-        b, m = self._pick(model, ("stream",))
-        if b:
-            return b.stream_messages(messages, model=m)
-        return self._inner.stream_messages(messages, temperature=temperature,
-                                           model=m, **kw)
+        return self._stream(
+            model,
+            lambda b, m: b.stream_messages(messages, model=m),
+            lambda m: self._inner.stream_messages(
+                messages, temperature=temperature, model=m, **kw))
 
 
 def wrap(client):

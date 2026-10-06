@@ -382,6 +382,7 @@
     设 ask_row.link =
     设 ask_row.link_text =
     设 ask_row.links =
+    设 ask_row.round_key =
     设 affected = 写库表 app.db chat_add {ask_row}
     设 reply_row.learner = {learner}
     设 reply_row.role = teacher
@@ -391,6 +392,7 @@
     设 reply_row.link = {reply.link}
     设 reply_row.link_text = {reply.link_text}
     设 reply_row.links = {links_json}
+    设 reply_row.round_key =
     设 affected = 写库表 app.db chat_add {reply_row}
   结束
 

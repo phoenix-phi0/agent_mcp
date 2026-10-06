@@ -25,8 +25,12 @@
 //   请老师总结：按课做完一轮 → 「请老师总结这一轮」→ 等待的那句话 → 总结卡片
 //     出现在做题页 → 「去问老师接着聊」到问老师页，历史里有这条总结；自由练
 //     一轮 10 道（条目各不相同），做完出结果卡，总结完卡还在，再来一轮清零。
-//     假模型按规则文件回话（DSL_MOCK_SCRIPT）；总结请求在测试这边压 600 毫秒，
+//     假模型按规则文件回话（DSL_MOCK_SCRIPT）；总结请求在测试这边压 2.5 秒，
 //     模拟模型慢，好看见等待的那句话
+//   总结等着的时候（用户反馈「教师看答题结果是不是会卡住」）：只锁做题页
+//     自己的按钮——切到问老师，发送按钮能点、能发出去拿到回复，没有那句
+//     等待的话；切回做题页，还在等、按钮还锁着；总结回来照常出卡片。同一轮
+//     再点一次：给回同一段，不再写对话记录
 
 const { execFileSync, spawn } = require("child_process");
 const fs = require("fs");
@@ -75,14 +79,29 @@ const calls = [];
 const slow = {};
 // 路径 → 不发请求，直接回这个（状态码, body）——模拟模型出错时路由器回的 502
 const fake = {};
-function openPage(hash) {
+// fetchTimeout：把页面里一个请求最多等多久（FETCH_TIMEOUT_MS）换小，测「服务器
+// 一直不回」时页面给人话、不一直转圈
+function openPage(hash, fetchTimeout) {
   const html = fs.readFileSync(WEB + "/index.html", "utf8")
     .replace(/<script src="[^"]*"><\/script>/g, "");
   const dom = new JSDOM(html, { url: BASE + "/" + (hash || ""), runScripts: "outside-only" });
   const w = dom.window;
   w.fetch = async (u, o = {}) => {
     const url = new URL(u, BASE);
-    if (slow[url.pathname]) await sleep(slow[url.pathname]);
+    // 页面传的 signal 是 jsdom 的 AbortSignal，Node 的 fetch 不认；这里自己
+    // 照它办：压着的时候被 abort 就抛 AbortError，跟浏览器一样
+    const signal = o.signal;
+    o = { ...o, signal: undefined };
+    if (slow[url.pathname]) {
+      await new Promise((ok, no) => {
+        const t = setTimeout(ok, slow[url.pathname]);
+        if (signal) signal.addEventListener("abort", () => {
+          clearTimeout(t);
+          calls.push({ path: url.pathname, status: 0, aborted: true });
+          no(new w.DOMException("aborted", "AbortError"));
+        });
+      });
+    }
     if (fake[url.pathname]) {
       const [st, body] = fake[url.pathname];
       calls.push({ path: url.pathname, status: st, fake: true });
@@ -98,7 +117,9 @@ function openPage(hash) {
   const scrolled = [];
   w.Element.prototype.scrollIntoView = function (o) { scrolled.push({ el: this, opts: o }); };
   w.eval(fs.readFileSync(WEB + "/vue.global.prod.js", "utf8"));
-  w.eval(fs.readFileSync(WEB + "/app.js", "utf8"));
+  let js = fs.readFileSync(WEB + "/app.js", "utf8");
+  if (fetchTimeout) js = js.replace(/const FETCH_TIMEOUT_MS = \d+;/, `const FETCH_TIMEOUT_MS = ${fetchTimeout};`);
+  w.eval(js);
   const $ = s => w.document.querySelector(s);
   const $$ = s => [...w.document.querySelectorAll(s)];
   const pg = {
@@ -486,14 +507,28 @@ function openPage(hash) {
   const ended = state();
   say(!!p.btn("请老师总结这一轮") && p.btn("再来一轮"),
       `做了 ${rounds} 道，一轮做完：卡上有「再来一轮」和「请老师总结这一轮」（${ended.right}/${ended.total}）`);
-  slow["/quiz/summary"] = 600;
+  slow["/quiz/summary"] = 2500;
   calls.length = 0;
+  const waitingText = () => p.$$("p.copy").some(e => e.textContent.includes("老师正在看你的作答"));
   p.btn("请老师总结这一轮").click();
-  say(await waitFor(() => p.$$("p.copy").some(e => e.textContent.includes("老师正在看你的作答")), 500),
-      "点了：出现「老师正在看你的作答…」");
+  say(await waitFor(waitingText, 500), "点了：出现「老师正在看你的作答…」");
   say(p.btn("请老师总结这一轮").disabled && p.btn("再来一轮").disabled, "等的时候按钮锁着");
+  // 等着的时候切到问老师：那边不该被锁
+  p.nav("问老师").click();
+  say(await waitFor(() => p.hash() === "#问老师" && p.btn("发送")), "总结还在等：切到了问老师");
+  say(!p.btn("发送").disabled && !waitingText(),
+      "问老师的发送按钮能点，也没有「老师正在看你的作答」（早先全站一个 busy，这里是灰的）");
+  p.type(p.$(".screen textarea"), "等总结的时候问一句");
+  p.btn("发送").click();
+  say(await waitFor(() => calls.some(c => c.path === "/teacher/send" && c.status === 200)
+                       && !p.btn("发送").disabled, 2000),
+      "问老师照常发出去、回来了（总结还没回）");
+  say(!calls.some(c => c.path === "/quiz/summary"), "这时总结确实还在等");
+  p.nav("做题").click();
+  say(await waitFor(() => p.hash() === "#做题" && waitingText(), 1000)
+      && p.btn("请老师总结这一轮").disabled, "切回做题页：还在等，那句话和锁都在");
   const sumCard = () => p.$$(".card").find(e => e.textContent.includes(SUMMARY));
-  say(await waitFor(() => sumCard(), 4000), "总结出现在做题页的一张卡片上");
+  say(await waitFor(() => sumCard(), 5000), "总结出现在做题页的一张卡片上");
   delete slow["/quiz/summary"];
   say(await waitFor(() => !p.$$("p.copy").some(e => e.textContent.includes("老师正在看你的作答"))),
       "等待的那句话收起来了");
@@ -508,10 +543,17 @@ function openPage(hash) {
       && sl.some(([t, h]) => t === "读课文" && roundLessons.some(l => h === `#教材?lesson=${l}`)),
       `链接：${JSON.stringify(sl)}（这一轮的课：${roundLessons.join("、")}）`);
   say(!!p.btn("再来一轮"), "那张一轮做完的卡还在（再来一轮）");
-  const chatRows = db("SELECT role, intent, content FROM chat_message ORDER BY id");
-  say(chatRows.length === 2 && chatRows[1].content === SUMMARY && chatRows.every(r => r.intent === "总结")
+  const chatRows = db("SELECT role, intent, content FROM chat_message WHERE intent = '总结' ORDER BY id");
+  say(chatRows.length === 2 && chatRows[1].content === SUMMARY
       && chatRows[0].content.includes(`《${sTitle}》`),
-      `对话记录两条：${chatRows.map(r => r.role + "：" + r.content.slice(0, 30)).join(" / ")}`);
+      `总结的对话记录两条：${chatRows.map(r => r.role + "：" + r.content.slice(0, 30)).join(" / ")}`);
+  // 同一轮再点一次：给回同一段，不再写
+  const nChat = db("SELECT count(*) AS n FROM chat_message")[0].n;
+  calls.length = 0;
+  p.btn("请老师总结这一轮").click();
+  say(await waitFor(() => calls.some(c => c.path === "/quiz/summary" && c.status === 200)) && !!sumCard()
+      && db("SELECT count(*) AS n FROM chat_message")[0].n === nChat,
+      "同一轮再点「请老师总结」：还是那段总结，对话记录没多");
   sumLinks().find(a => a.textContent.trim() === "去问老师接着聊").click();
   say(await waitFor(() => p.hash() === "#问老师"), `点「去问老师接着聊」到了 ${p.hash()}`);
   say(await waitFor(() => p.$$(".stream .smsg").some(e => e.textContent.includes(SUMMARY))),
@@ -567,6 +609,23 @@ function openPage(hash) {
   await waitFor(() => !vm.busy);
   p.btn("开始").click();
   say(await waitFor(() => p.card() && (p.choices().length || p.box())), "点开始出新题");
+  // 请求回来前关掉窗口的话，submitTo 的 finally 晚到、摸已经关掉的 document
+  await waitFor(() => !vm.busy);
+  p.close();
+
+  // 服务器一直不回：页面等满时限就放弃，弹一句人话，按钮解锁（早先一直转圈）
+  p = openPage("#" + encodeURIComponent("做题"), 800);
+  await waitFor(() => p.selects().length === 2);
+  const toast2 = () => (p.$(".toast-no") || {}).textContent || "";
+  const vm2 = p.$("#app")._vnode.component.setupState;
+  slow["/quiz/summary"] = 3000;
+  calls.length = 0;
+  vm2.submitTo("quiz_summary");
+  say(await waitFor(() => vm2.pending === "quiz_summary", 300), "对照：请求发出去了，pending 是 quiz_summary");
+  say(await waitFor(() => toast2().includes("秒服务器还没回应"), 2000),
+      `等满时限：提示条「${toast2()}」`);
+  say(!vm2.busy && vm2.pending === "" && calls.some(c => c.aborted), "按钮解锁、pending 清掉，请求是被页面放弃的");
+  delete slow["/quiz/summary"];
   p.close();
 
   console.log("八、服务端");

@@ -65,7 +65,8 @@ function db(sql) {
   const calls = [];
   w.fetch = async (u, o) => {
     const url = new URL(u, BASE);
-    const r = await fetch(url, o);
+    // 页面传的 signal 是 jsdom 的 AbortSignal，Node 的 fetch 不认（报不是 AbortSignal 的实例），去掉
+    const r = await fetch(url, { ...o, signal: undefined });
     calls.push({ path: url.pathname, status: r.status });
     return r;
   };

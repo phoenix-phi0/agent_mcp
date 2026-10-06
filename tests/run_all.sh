@@ -73,6 +73,7 @@ run 模型可选    $PY tests/dsl/test_model_select.py
 run 模型后端    $PY tests/dsl/test_model_backends.py
 run 模型档位    $PY tests/dsl/test_model_tiers.py
 run 模型通道    $PY tests/dsl/test_model_channels.py
+run 运行时兜底  $PY tests/dsl/test_model_fallback_runtime.py
 run 经WSL调CLI  $PY tests/dsl/test_cli_via_wsl.py
 run 运行模式    $PY tests/dsl/test_run_mode.py
 run 命名约定    $PY tests/dsl/test_naming.py

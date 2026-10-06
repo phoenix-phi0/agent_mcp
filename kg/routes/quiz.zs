@@ -392,6 +392,14 @@
 # 一张总结卡片。做题页没有消息流，不走 messages。本轮 0 题时回 400 和一句话，
 # 不调模型。模型出错时路由器回 502 和一句人话（error），页面弹提示条；对话
 # 记录在模型回来之后才写，出错时不留半截。
+#
+# 一轮只总结一次：两条记录带着 round_key（这一轮的起点和最后一道作答）。同
+# 一轮再点「请老师总结」、刷新后再点，查到总结过就原样给回，不调模型、不再
+# 写；两个请求前后脚都调了模型的，写库前在事务里再查一次，只留先写的那对。
+#
+# 模型慢的时候：平衡档是 cli:claude/sonnet，实测一次十秒上下；claude 卡住
+# 90 秒算超时，排队等不到也一样，改用档位的 fallback（智谱），见
+# tools/llm_router.py。前端只锁做题页自己的按钮，等的时候可以去别的页面。
 接口 POST /quiz/summary 动作 quiz_summary
   用包 common db http
 
@@ -406,19 +414,6 @@
     返回 {"error":"这一轮还没有做题，做几道再请老师总结。"} 400
   结束
 
-  设 who.learner = {learner}
-  设 who.line = 80
-  设 who.keep = 60
-  设 who.level = {round_info.level 或}
-  设 progress = 查一值表 app.db progress_brief {who}
-
-  系统 你是一位耐心的日语老师，学生是中国人。用中文讲解，日语例句给出原文和中文意思。回答简洁、讲清重点，不要客套。学生刚在网站的做题页做完一轮题，请你总结这一轮。题目网站已经判过分，对错以网站给的为准：你不出新题、不重新判分。提示词里会给你这一轮的每道题和这个学生的学习进度（网站统计的），不要编造里面没有的数据（没给的数字、没列出的知识点不要说）。课文和做题页的链接由网站附在你的回复下面，你不要自己写网址。
-
-  问 answer_text = 下面是学生这一轮做的题（{round_info.label}，答对 {round_info.ok_n} 道，共 {question_n} 道；对错是网站判的）。选择题的选项在学生的界面上打乱过顺序，所以只给了选项的内容、没给字母，提到学生选了什么时请说内容。【{round_info.text}】这个学生整体的学习进度：【{progress}】请这样写：第一句是总评，写明本轮 {round_info.ok_n}/{question_n}；然后按知识点说哪里错了、为什么错（结合解析，引用学生选的或写的内容）；有容易混的说法就说怎么区分；最后给下一步建议（先复习哪一课、练哪些点；进度里有掌握得分的话，得分低的点优先）。全对的话简短肯定，说说接下来可以往哪儿走。不要出新题。全文控制在 600 字以内。 用 平衡
-  如果 {answer_text} 为空
-    返回 {"error":"老师这次没有给出总结，过一会儿再试。"} 502
-  结束
-
   # 链接：错得最多的那课「读课文」「再练这一课」，和「去问老师接着聊」
   设 links.href1 = {round_info.read 或}
   设 links.text1 = 读课文：《{round_info.worst_title}》
@@ -428,25 +423,53 @@
   设 links.text3 = 去问老师接着聊
   设 links_json = 查一值表 app.db chat_links {links}
 
-  事务 app.db
-    设 ask_row.learner = {learner}
-    设 ask_row.role = learner
-    设 ask_row.content = （做完一轮：{round_info.label}，{round_info.ok_n}/{question_n}）请老师总结
-    设 ask_row.intent = 总结
-    设 ask_row.lesson = {round_info.worst 或}
-    设 ask_row.link =
-    设 ask_row.link_text =
-    设 ask_row.links =
-    设 affected = 写库表 app.db chat_add {ask_row}
-    设 reply_row.learner = {learner}
-    设 reply_row.role = teacher
-    设 reply_row.content = {answer_text}
-    设 reply_row.intent = 总结
-    设 reply_row.lesson = {round_info.worst 或}
-    设 reply_row.link = {links.href1}
-    设 reply_row.link_text = {links.text1}
-    设 reply_row.links = {links_json}
-    设 affected = 写库表 app.db chat_add {reply_row}
+  # 这一轮总结过了（同一轮再点一次、刷新后再点）：原样给回那条，不再调模型、
+  # 不再写一对。round_key 是这一轮的起点和最后一道作答，见 round_attempts.sql
+  设 key.learner = {learner}
+  设 key.round_key = {round_info.round_key 或}
+  设 answer_text = 查一值表 app.db chat_summary_of {key}
+  如果 {answer_text} 为空
+    设 who.learner = {learner}
+    设 who.line = 80
+    设 who.keep = 60
+    设 who.level = {round_info.level 或}
+    设 progress = 查一值表 app.db progress_brief {who}
+
+    系统 你是一位耐心的日语老师，学生是中国人。用中文讲解，日语例句给出原文和中文意思。回答简洁、讲清重点，不要客套。学生刚在网站的做题页做完一轮题，请你总结这一轮。题目网站已经判过分，对错以网站给的为准：你不出新题、不重新判分。提示词里会给你这一轮的每道题和这个学生的学习进度（网站统计的），不要编造里面没有的数据（没给的数字、没列出的知识点不要说）。课文和做题页的链接由网站附在你的回复下面，你不要自己写网址。
+
+    问 answer_text = 下面是学生这一轮做的题（{round_info.label}，答对 {round_info.ok_n} 道，共 {question_n} 道；对错是网站判的）。选择题的选项在学生的界面上打乱过顺序，所以只给了选项的内容、没给字母，提到学生选了什么时请说内容。【{round_info.text}】这个学生整体的学习进度：【{progress}】请这样写：第一句是总评，写明本轮 {round_info.ok_n}/{question_n}；然后按知识点说哪里错了、为什么错（结合解析，引用学生选的或写的内容）；有容易混的说法就说怎么区分；最后给下一步建议（先复习哪一课、练哪些点；进度里有掌握得分的话，得分低的点优先）。全对的话简短肯定，说说接下来可以往哪儿走。不要出新题。全文控制在 600 字以内。 用 平衡
+    如果 {answer_text} 为空
+      返回 {"error":"老师这次没有给出总结，过一会儿再试。"} 502
+    结束
+
+    事务 app.db
+      # 前后脚的另一个请求先写了：不再写一对（这次模型的回答丢掉，给回先写的那条）
+      设 done_text = 查一值表 app.db chat_summary_of {key}
+      如果 {done_text} 为空
+        设 ask_row.learner = {learner}
+        设 ask_row.role = learner
+        设 ask_row.content = （做完一轮：{round_info.label}，{round_info.ok_n}/{question_n}）请老师总结
+        设 ask_row.intent = 总结
+        设 ask_row.lesson = {round_info.worst 或}
+        设 ask_row.link =
+        设 ask_row.link_text =
+        设 ask_row.links =
+        设 ask_row.round_key = {key.round_key}
+        设 affected = 写库表 app.db chat_add {ask_row}
+        设 reply_row.learner = {learner}
+        设 reply_row.role = teacher
+        设 reply_row.content = {answer_text}
+        设 reply_row.intent = 总结
+        设 reply_row.lesson = {round_info.worst 或}
+        设 reply_row.link = {links.href1}
+        设 reply_row.link_text = {links.text1}
+        设 reply_row.links = {links_json}
+        设 reply_row.round_key = {key.round_key}
+        设 affected = 写库表 app.db chat_add {reply_row}
+      否则
+        设 answer_text = {done_text}
+      结束
+    结束
   结束
 
   设 summary.text = {answer_text}

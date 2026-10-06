@@ -74,7 +74,8 @@ function db(sql) {
     const url = new URL(u, BASE);
     const headers = Object.assign({}, o.headers || {});
     if (jar) headers["Cookie"] = `zs_auth=${jar}`;
-    const r = await fetch(url, { ...o, headers });
+    // 页面传的 signal 是 jsdom 的 AbortSignal，Node 的 fetch 不认（报不是 AbortSignal 的实例），去掉
+    const r = await fetch(url, { ...o, headers, signal: undefined });
     const sets = r.headers.getSetCookie ? r.headers.getSetCookie() : [];
     for (const c of sets) {
       const m = /^zs_auth=([^;]*)/.exec(c);

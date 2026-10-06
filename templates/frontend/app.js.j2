@@ -62,6 +62,8 @@ const fileFields = <%= file_fields_json %>;
 // ReferenceError；submitTo 里当时的 typeof 守卫更糟——不报错，只是永远
 // 走 fallback，看着像"后端没接上"而不是"代码有 bug"。
 const endpoints = <%= endpoints_json %>;
+// 一个请求最多等多久（毫秒），见 postTo
+const FETCH_TIMEOUT_MS = 240000;
 <% endif %>
 
 const _app = createApp({
@@ -101,11 +103,16 @@ const _app = createApp({
       return v || [];
     };
     // 请求期间禁用提交按钮：旧版有 send.disabled，少了它连点会重复发。
-    const busy = ref(false);
+    //
+    // 按界面记（界面名 -> 正在请求的动作名），busy / pending 只看当前界面。
+    // 早先全站一个开关：做题页「请老师总结」要等十几秒，这段时间切到问老师，
+    // 发送按钮是灰的、按 Enter 没反应，整个站看着像卡住了（用户反馈过）。
+    const inflight = ref({});
+    const busy = computed(() => !!inflight.value[current.value.name]);
     // 正在请求的是哪个动作（没有就是空串）。慢的接口（调模型的）在 .ui 里
     // 按它显示等待的话：文案 当 pending==='quiz_summary' 老师正在看…
     // 只看 busy 的话，同一处点别的按钮也会闪出那句话。
-    const pending = ref("");
+    const pending = computed(() => inflight.value[current.value.name] || "");
     // 界面底部的一条提示，几秒后自己消失，点一下也能关。给没有消息流的
     // 界面用：保存成功、后端报错，总得让人看见。出错的留久一点。
     //
@@ -265,10 +272,24 @@ const _app = createApp({
         return afterFetch(r);
       }
 <% endif %>
-      const r = await fetch(url, { method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload) });
-      return afterFetch(r);
+      // 等太久就放弃，给一句人话。早先 fetch 不设时限，服务器那头卡住时
+      // 按钮一直是灰的、页面一直转圈。后端调模型有自己的时限（CLI 90 秒，
+      // 超时换档位的 fallback），这里只兜「服务器整个没回」。带文件的不限：
+      // 上传大文件本来就可能慢
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
+      try {
+        const r = await fetch(url, { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload), signal: ctl.signal });
+        return await afterFetch(r);
+      } catch (e) {
+        if (e && e.name === "AbortError")
+          return { error: `等了 ${FETCH_TIMEOUT_MS / 1000} 秒服务器还没回应，过一会儿再试` };
+        throw e;
+      } finally {
+        clearTimeout(timer);
+      }
     }
     // 所有响应都经过这里：解析 JSON；401 就记住当前地址、跳到「登录」。
     //
@@ -435,9 +456,10 @@ const _app = createApp({
 
     // closeAfter：标了「远程 关闭」的动作传 true，请求成功后关掉浮层。
     async function submitTo(name, closeAfter) {
-      if (busy.value) return;
-      busy.value = true;
-      pending.value = name;
+      // 记下发请求的界面：请求没回来就切走了，回来时清的还是这一个
+      const screen = current.value.name;
+      if (inflight.value[screen]) return;
+      inflight.value = { ...inflight.value, [screen]: name };
       // 顺序照旧版：先本地回显、拷出要发的内容、清空输入框，然后才发请求。
       // 清空必须在拷贝之后——反过来的话后端收到的是空表单。
       // 也必须在请求之前——等回来再清的话，慢接口下那段字会在框里僵几秒。
@@ -487,8 +509,8 @@ const _app = createApp({
         if (stream) pushMessages(stream, [{who: "出错", text: String(e), kind: "no"}]);
         else showNotice(String(e), "no");
       } finally {
-        busy.value = false;
-        pending.value = "";
+        const { [screen]: _done, ...rest } = inflight.value;
+        inflight.value = rest;
         // 焦点还给输入框，接着打字不用再点一下——旧版的 input.focus()
         Vue.nextTick(() => {
           const el = document.querySelector(".screen textarea");

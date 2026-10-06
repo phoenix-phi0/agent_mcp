@@ -22,6 +22,10 @@
       10 道，总结完这一轮不清（跟按课练、复习一样）；再来一轮后 0 道
   六、模型出错：502 和一句人话（不是 500、不是 Traceback）；对话记录不写、
       这一轮不清；模型回空也是一句话
+  八、一轮只总结一次：同一轮再点给回那条、不调模型、不再写；两个请求前后
+      脚（模型慢）只写一对，两边拿到的是同一段；总结等着的时候别的接口照常
+      （多线程服务，用真起的服务测）；答了新题就是新的一轮，照常再总结；
+      老库的 chat_message 补 round_key 列
   七、attempt.answer 记下作答；老库补 attempt.answer、quiz_state.round_from
       两列，不重建、原有的行还在
 """
@@ -31,8 +35,11 @@ import re
 import sqlite3
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 from urllib.parse import unquote
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -61,10 +68,18 @@ INTENT_PROGRESS = '{"intent":"进度","keywords":[],"level":"","kind":"","grade"
 class Brain:
     """假模型：意图判定回「进度」，别的回 SUMMARY；mode 可切成抛错、回空。"""
     mode = "ok"
+    SLOW = 1.5
+    n = 0
 
     def __call__(self, prompt, system):
         if "意图分类器" in (system or ""):
             return INTENT_PROGRESS
+        if self.mode == "slow":
+            # 慢模型：每次回的不一样，看得出留下的是哪一次
+            self.n += 1
+            n = self.n
+            time.sleep(self.SLOW)
+            return f"{SUMMARY}（第 {n} 次）"
         if self.mode == "boom":
             raise RuntimeError("claude 超过 180 秒没有返回\n第二行细节")
         if self.mode == "empty":
@@ -236,8 +251,12 @@ def main():
     tp = [x["prompt"] for x in summary_calls()]
     check(r.status_code == 200 and tp and SUMMARY in tp[0] and "请老师总结" in tp[0],
           "问老师「刚才那轮怎么样」：提示词的最近对话里有这条总结")
+    n_chat = len(chats())
     st, body = summarize()
-    check(st == 200 and len(summary_calls()) == 1, "按课练总结完这一轮不清，可以再请一次")
+    check(st == 200 and not summary_calls() and len(chats()) == n_chat
+          and (state(body).get("summary") or {}).get("text") == SUMMARY
+          and (state(body).get("summary") or {}).get("read"),
+          "同一轮再点「请老师总结」：给回那条总结（带链接），不调模型、不再写对话记录")
 
     print("四、本轮范围")
     st, body = post("/quiz/again")
@@ -315,8 +334,9 @@ def main():
           "做题页有总结；不是在练的课，「再练这一课」给了")
     check(len(chats()) == n_chat + 2, "对话记录多两条")
     st, b0 = summarize()
-    check(st == 200 and "共 10 道" in (summary_calls() or [{}])[0].get("prompt", ""),
-          "再请一次总结还是这 10 道")
+    check(st == 200 and not summary_calls() and len(chats()) == n_chat + 2
+          and (state(b0).get("summary") or {}).get("text") == SUMMARY,
+          "再请一次：还是这 10 道的那条总结，不再调模型、不再写")
     st, body = post("/quiz/again")
     check(st == 200 and state(body).get("phase") == "ask" and state(body).get("round_total") == 0
           and state(body).get("summary") == "",
@@ -344,6 +364,72 @@ def main():
     check(st == 200 and "共 1 道" in (summary_calls() or [{}])[0].get("prompt", ""),
           "出错后这一轮没被清掉，再点一次照常总结")
 
+    print("八、一轮只总结一次、模型慢时")
+    st, body = post("/quiz/start", pick_level="N5", pick_kind="全部")
+    st, b, text = answer(body, False)
+    n_chat = len(chats())
+    brain.mode = "slow"
+    got = {}
+
+    def bg(i):
+        r = app.test_client().post("/quiz/summary", json={"form": {}})
+        got[i] = (r.status_code, ((r.get_json(silent=True) or {}).get("state") or {})
+                  .get("summary", {}).get("text"))
+
+    mock.calls.clear()
+    ths = [threading.Thread(target=bg, args=(i,)) for i in range(2)]
+    for t in ths:
+        t.start()
+        time.sleep(0.2)
+    for t in ths:
+        t.join()
+    new = chats()[n_chat:]
+    check(len(summary_calls()) == 2, f"两个请求前后脚，模型都问了（都还没写）：{len(summary_calls())}")
+    check(len(new) == 2 and [x["role"] for x in new] == ["learner", "teacher"]
+          and new[0]["round_key"] and new[0]["round_key"] == new[1]["round_key"],
+          f"只写了一对，带同一个 round_key：{[(x['role'], x['round_key']) for x in new]}")
+    check(got[0][0] == got[1][0] == 200 and got[0][1] == got[1][1] == new[1]["content"],
+          f"两边拿到的是同一段（先写的那条）：{got}")
+    brain.mode = "ok"
+    st, b, text = answer(post("/quiz/next")[1], True)
+    st, body = summarize()
+    check(st == 200 and len(summary_calls()) == 1 and "共 2 道" in summary_calls()[0]["prompt"]
+          and len(chats()) == n_chat + 4,
+          f"答了新题就是新的一轮：照常再总结、再写一对：{st} {body.get('error')}")
+
+    # 真起服务（多线程）：总结卡在模型上的时候，别的接口不等它
+    import socket
+    from werkzeug.serving import make_server
+    brain.mode = "slow"
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    srv = make_server("127.0.0.1", port, app, threaded=True)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    st, body = post("/quiz/next")
+    answer(body, True)
+
+    def http(path):
+        req = Request(f"http://127.0.0.1:{port}{path}", data=b'{"form":{}}',
+                      headers={"Content-Type": "application/json"})
+        t = time.time()
+        with urlopen(req, timeout=30) as r:
+            return r.status, time.time() - t
+
+    slow = {}
+    th = threading.Thread(target=lambda: slow.update(r=http("/quiz/summary")))
+    th.start()
+    time.sleep(0.3)
+    quick = [http(p) for p in ("/quiz/state", "/teacher/state", "/progress/page")]
+    th.join()
+    srv.shutdown()
+    brain.mode = "ok"
+    check(slow["r"][0] == 200 and slow["r"][1] >= Brain.SLOW * 0.9,
+          f"对照：总结确实等了模型 {slow['r'][1]:.1f}s")
+    check(all(st == 200 and dt < Brain.SLOW / 2 for st, dt in quick),
+          f"总结等着的时候别的接口照常回：{[(st, round(dt, 2)) for st, dt in quick]}")
+
     print("七、attempt.answer、老库补列")
     a = rows("SELECT a.answer, q.qtype, q.answer AS key FROM attempt a JOIN question q ON q.code = a.item")
     check(a and all(x["answer"] for x in a), f"每条作答都记了 answer（{len(a)} 条）")
@@ -364,16 +450,26 @@ def main():
                 " round_seen VARCHAR(255), round_n INTEGER NOT NULL DEFAULT 0, seq INTEGER NOT NULL DEFAULT 0)")
     con.execute("INSERT INTO attempt(learner, point, item, correct) VALUES('me', 'p', 'q', 1)")
     con.execute("INSERT INTO quiz_state(learner, right, total) VALUES('me', 3, 4)")
+    # 加 round_key 之前的 chat_message（真库就是这样）
+    con.execute("CREATE TABLE chat_message (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " learner VARCHAR(255) NOT NULL, role VARCHAR(255) NOT NULL,"
+                " content VARCHAR(255) NOT NULL, intent VARCHAR(255), lesson VARCHAR(255),"
+                " link VARCHAR(255), link_text VARCHAR(255),"
+                " created VARCHAR(255) NOT NULL DEFAULT (datetime('now','localtime')),"
+                " links VARCHAR(255))")
+    con.execute("INSERT INTO chat_message(learner, role, content) VALUES('me', 'teacher', '老的')")
     con.commit()
     con.close()
     added = ensure_new_columns(old, ws / "entities")
-    check(sorted(added) == ["attempt.answer", "quiz_state.mode", "quiz_state.round_from"],
-          f"补了三列（mode 是复习薄弱点加的）：{added}")
+    check(sorted(added) == ["attempt.answer", "chat_message.round_key",
+                            "quiz_state.mode", "quiz_state.round_from"],
+          f"补了四列（mode 是复习薄弱点加的，round_key 是一轮只总结一次加的）：{added}")
     con = sqlite3.connect(old)
     kept = (con.execute("SELECT count(*) FROM attempt").fetchone()[0],
-            con.execute("SELECT right, total, round_from FROM quiz_state").fetchone())
+            con.execute("SELECT right, total, round_from FROM quiz_state").fetchone(),
+            con.execute("SELECT content, round_key FROM chat_message").fetchall())
     con.close()
-    check(kept == (1, (3, 4, 0)), f"原有的行还在（没重建）：{kept}")
+    check(kept == (1, (3, 4, 0), [("老的", None)]), f"原有的行还在（没重建）：{kept}")
     check(ensure_new_columns(old, ws / "entities") == [], "再跑一次什么都不补")
 
     print(f"\n{'=' * 50}\n通过 {passed}，失败 {failed}")
