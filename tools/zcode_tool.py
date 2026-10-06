@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import platform
+import posixpath
 import shlex
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Iterator, Mapping, Optional, Sequence, Union
 
 
 Command = Union[str, Sequence[str]]
+PathArg = Union[str, os.PathLike[str]]
 
 
 class ZCodeError(RuntimeError):
@@ -22,6 +26,136 @@ class ZCodeError(RuntimeError):
 
 class ZCodeJSONError(ZCodeError):
     """Raised when zcode claims to return JSON but emits invalid JSON."""
+
+
+class UnsafeWorkdirError(ValueError):
+    """Raised when an agent CLI would run in a directory exposing credentials."""
+
+
+# An agent CLI (zcode, claude) can read -- and may upload -- everything under
+# its working directory. The home directory and ``/`` hold ~/.ssh,
+# ~/.git-credentials and CLI login tokens, so they are never used. Without an
+# explicit cwd every call runs in a fresh empty temporary directory.
+#
+# Reject a workdir that is, or is inside, a directory with one of these names.
+SENSITIVE_DIR_NAMES = frozenset({".ssh", ".gnupg", ".aws", ".kube", ".azure"})
+# Reject a workdir that directly contains one of these (a home-like parent).
+# Project-level .claude/ and .zcode/ settings are common, so only the
+# credential files inside them count.
+SENSITIVE_ENTRIES = (
+    ".ssh", ".gnupg", ".aws", ".kube", ".azure",
+    ".git-credentials", ".netrc", ".npmrc", ".pypirc",
+    ".docker/config.json", ".config/gh",
+    ".claude.json", ".claude/.credentials.json", ".zcode/cli",
+)
+WORKDIR_PREFIX = "zcode_"
+
+
+def _is_home_like(p: PurePosixPath) -> bool:
+    """``/``, ``/home``, ``/home/<user>``, ``/root``, ``/Users/<user>``."""
+    parts = p.parts
+    return (
+        len(parts) <= 1
+        or (parts[1] in ("home", "Users") and len(parts) <= 3)
+        or (parts[1] == "root" and len(parts) == 2)
+    )
+
+
+def check_workdir(path: PathArg) -> str:
+    """Validate an explicitly chosen working directory on this machine.
+
+    Rejects ``~``-style paths, ``/``, the home directory and its parents,
+    any ``/home/<user>`` or ``/root``, directories inside ``.ssh`` and the
+    like, and directories that directly contain credentials (see
+    ``SENSITIVE_ENTRIES``). A project subdirectory such as
+    ``/home/alice/project`` is allowed, but the agent can then read every file
+    under it, including local config files that hold API keys; only pass one
+    when the task really needs the code.
+
+    Returns the resolved absolute path.
+    """
+    raw = os.fspath(path).strip()
+    if not raw:
+        raise UnsafeWorkdirError("工作目录不能是空串；不传就用临时空目录")
+    if raw.startswith("~"):
+        raise UnsafeWorkdirError(
+            f"工作目录不能用 ~（{raw}）：家目录下有 .ssh 等凭证；"
+            "不传就用临时空目录，或传项目子目录的绝对路径")
+    resolved = Path(raw).resolve()
+    if not resolved.is_dir():
+        raise UnsafeWorkdirError(f"工作目录不是目录：{resolved}")
+
+    home = Path.home().resolve()
+    if resolved == home or resolved in home.parents:
+        raise UnsafeWorkdirError(
+            f"工作目录不能是家目录或它的上级（{resolved}）：代理能读到 "
+            "~/.ssh、~/.git-credentials 等凭证。不传就用临时空目录")
+    if os.name != "nt" and _is_home_like(PurePosixPath(resolved.as_posix())):
+        raise UnsafeWorkdirError(
+            f"工作目录不能是 / 或某个用户的家目录（{resolved}）")
+    inside = SENSITIVE_DIR_NAMES.intersection(resolved.parts)
+    if inside:
+        raise UnsafeWorkdirError(
+            f"工作目录在敏感目录 {'、'.join(sorted(inside))} 里面（{resolved}）")
+    found = [name for name in SENSITIVE_ENTRIES if (resolved / name).exists()]
+    if found:
+        raise UnsafeWorkdirError(
+            f"工作目录 {resolved} 下面有 {'、'.join(found)}，像是家目录一类的"
+            "父目录，代理能读到凭证。换成具体的项目子目录")
+    return str(resolved)
+
+
+def check_wsl_workdir(path: str) -> str:
+    """Validate a Linux path chosen from Windows for ``wsl.exe --cd``.
+
+    The WSL filesystem cannot be inspected from here, so only the path itself
+    is checked: it must be absolute, and must not be ``/``, ``/home``,
+    ``/home/<user>``, ``/root`` or inside ``.ssh`` and the like. A project
+    subdirectory is allowed with the same risk as in ``check_workdir``.
+    """
+    raw = (path or "").strip()
+    if not raw:
+        raise UnsafeWorkdirError("wsl_cwd 不能是空串；不传就用临时空目录")
+    if raw.startswith("~"):
+        raise UnsafeWorkdirError(
+            f"wsl_cwd 不能用 ~（{raw}）：家目录下有 .ssh 等凭证；"
+            "不传就用临时空目录，或传项目子目录的绝对路径")
+    if not raw.startswith("/"):
+        raise UnsafeWorkdirError(f"wsl_cwd 必须是 WSL 绝对路径：{raw}")
+    normalized = PurePosixPath(posixpath.normpath(raw))
+    if _is_home_like(normalized):
+        raise UnsafeWorkdirError(
+            f"wsl_cwd 不能是 / 或某个用户的家目录（{normalized}）：代理能读到 "
+            "~/.ssh 等凭证。不传就用临时空目录")
+    inside = SENSITIVE_DIR_NAMES.intersection(normalized.parts)
+    if inside:
+        raise UnsafeWorkdirError(
+            f"wsl_cwd 在敏感目录 {'、'.join(sorted(inside))} 里面（{normalized}）")
+    return str(normalized)
+
+
+@contextlib.contextmanager
+def agent_workdir(cwd: Optional[PathArg] = None) -> Iterator[str]:
+    """Yield the directory an agent CLI should run in.
+
+    ``None`` creates a fresh empty temporary directory and removes it on exit;
+    anything else goes through ``check_workdir``.
+    """
+    if cwd is not None:
+        yield check_workdir(cwd)
+        return
+    with tempfile.TemporaryDirectory(prefix=WORKDIR_PREFIX) as tmp:
+        yield tmp
+
+
+# Without wsl_cwd, run inside a fresh ``mktemp -d`` directory in WSL and
+# remove it afterwards. No ``exec``: the EXIT trap must run after zcode exits.
+_WSL_TMP_SCRIPT = (
+    'd=$(mktemp -d "${TMPDIR:-/tmp}/zcode_XXXXXX") || exit 92; '
+    "trap 'rm -rf \"$d\"' EXIT; "
+    'cd "$d" || exit 92; '
+    '"$@"'
+)
 
 
 @dataclass(frozen=True)
@@ -40,7 +174,9 @@ class ZCodeTool:
             ``["zcode", "run"]``.
         prompt_arg: Option placed before the prompt, for example ``"--prompt"``.
             Keep it as ``None`` when zcode accepts the prompt positionally.
-        cwd: Default working directory for calls.
+        cwd: Default working directory for calls, checked by
+            ``check_workdir``. ``None`` runs every call in a fresh empty
+            temporary directory that is removed afterwards.
         env: Environment variables added to the current process environment.
         timeout: Default timeout in seconds. ``None`` disables it.
     """
@@ -74,7 +210,7 @@ class ZCodeTool:
             command if command is not None else self._default_command()
         )
         self.prompt_arg = prompt_arg
-        self.cwd = Path(cwd).resolve() if cwd is not None else None
+        self.cwd = Path(check_workdir(cwd)) if cwd is not None else None
         self.env = dict(env or {})
         self.timeout = timeout
 
@@ -129,19 +265,20 @@ class ZCodeTool:
         """Run zcode once and return its captured output."""
         args = self.build_command(prompt, extra_args)
         try:
-            completed = subprocess.run(
-                args,
-                input=input_text,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                capture_output=True,
-                cwd=self._resolve_cwd(cwd),
-                env=self._build_env(),
-                timeout=self.timeout if timeout is None else timeout,
-                shell=False,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
+            with self._workdir(cwd) as workdir:
+                completed = subprocess.run(
+                    args,
+                    input=input_text,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    capture_output=True,
+                    cwd=workdir,
+                    env=self._build_env(),
+                    timeout=self.timeout if timeout is None else timeout,
+                    shell=False,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
         except FileNotFoundError as exc:
             raise ZCodeError(f"zcode executable not found: {args[0]}") from exc
         except subprocess.TimeoutExpired as exc:
@@ -226,11 +363,9 @@ class ZCodeTool:
         if mode not in {"build", "edit", "plan", "yolo"}:
             raise ValueError("mode must be one of: build, edit, plan, yolo")
 
-        selected_cwd = Path(cwd).resolve() if cwd is not None else self.cwd
+        selected_cwd = check_workdir(cwd) if cwd is not None else self.cwd
         if selected_cwd is None:
             raise ValueError("cwd is required for write_code_json")
-        if not selected_cwd.is_dir():
-            raise ValueError(f"cwd is not a directory: {selected_cwd}")
 
         extra_args = ["--mode", mode]
         denied = [name for name in disallowed_tools if name]
@@ -292,7 +427,7 @@ class ZCodeTool:
         self,
         task: str,
         *,
-        wsl_cwd: str = "~",
+        wsl_cwd: Optional[str] = None,
         distribution: Optional[str] = None,
         user: Optional[str] = None,
         zcode_command: str = "zcode",
@@ -304,10 +439,16 @@ class ZCodeTool:
     ) -> str:
         """Call ZCode installed in WSL from Windows and return code text.
 
-        ``wsl_cwd`` defaults to ``~`` (the selected WSL user's home directory),
-        or it can be an absolute Linux project path such as
-        ``/home/alice/project``. A project-level ``.zcode/config.json`` under
-        that directory is loaded normally, including its MCP configuration.
+        Without ``wsl_cwd`` ZCode runs in a fresh empty ``mktemp -d``
+        directory inside WSL that is removed when it exits. The home directory
+        is never used: ZCode can read and upload everything under its working
+        directory, and ``~`` holds ``.ssh``, ``.git-credentials`` and login
+        tokens. ``wsl_cwd`` may be an absolute Linux project path such as
+        ``/home/alice/project`` when the task needs to read the code (checked
+        by ``check_wsl_workdir``); ZCode can then read every file under it,
+        including local config files with API keys. A project-level
+        ``.zcode/config.json`` under that directory is loaded normally,
+        including its MCP configuration.
 
         ``allowed_tools=None`` enables every known builtin tool. An empty
         iterable or empty string disables all builtins; otherwise pass tool
@@ -319,9 +460,8 @@ class ZCodeTool:
         """
         if not task.strip():
             raise ValueError("task must not be empty")
-        wsl_cwd = (wsl_cwd or "").strip() or "~"
-        if wsl_cwd != "~" and not wsl_cwd.startswith("/"):
-            raise ValueError("wsl_cwd must be ~ or an absolute Linux path")
+        if wsl_cwd is not None:
+            wsl_cwd = check_wsl_workdir(wsl_cwd)
         if not zcode_command.strip():
             raise ValueError("zcode_command must not be empty")
         if mode not in {"build", "edit", "plan", "yolo"}:
@@ -344,24 +484,19 @@ class ZCodeTool:
         # forward every ZCode argument through "$@". The command string is
         # constant; prompts remain separate argv entries and cannot become
         # shell syntax.
-        command.extend(
-            [
-                "--cd",
-                wsl_cwd,
-                "--exec",
-                "bash",
-                "-ic",
-                'exec "$@"',
-                "zcode",
-                zcode_command.strip(),
-            ]
-        )
+        if wsl_cwd is None:
+            command.extend(["--cd", "/tmp", "--exec", "bash", "-ic", _WSL_TMP_SCRIPT])
+        else:
+            command.extend(["--cd", wsl_cwd, "--exec", "bash", "-ic", 'exec "$@"'])
+        command.extend(["zcode", zcode_command.strip()])
 
         wsl_tool = ZCodeTool(
             command=command,
             prompt_arg="-p",
             timeout=self.timeout if timeout is None else timeout,
         )
+        # The Windows-side cwd of wsl.exe is irrelevant (--cd decides), so the
+        # local default temporary directory is fine.
         response = wsl_tool.run_json(
             self._code_generation_prompt(task, language, context),
             extra_args=extra_args,
@@ -478,46 +613,45 @@ class ZCodeTool:
     ) -> Iterator[str]:
         """Yield combined stdout/stderr lines as zcode produces them."""
         args = self.build_command(prompt, extra_args)
-        try:
-            process = subprocess.Popen(
-                args,
-                stdin=subprocess.PIPE if input_text is not None else None,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                bufsize=1,
-                cwd=self._resolve_cwd(cwd),
-                env=self._build_env(),
-                shell=False,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except FileNotFoundError as exc:
-            raise ZCodeError(f"zcode executable not found: {args[0]}") from exc
+        with self._workdir(cwd) as workdir:
+            try:
+                process = subprocess.Popen(
+                    args,
+                    stdin=subprocess.PIPE if input_text is not None else None,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    bufsize=1,
+                    cwd=workdir,
+                    env=self._build_env(),
+                    shell=False,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            except FileNotFoundError as exc:
+                raise ZCodeError(f"zcode executable not found: {args[0]}") from exc
 
-        assert process.stdout is not None
-        if input_text is not None:
-            assert process.stdin is not None
-            process.stdin.write(input_text)
-            process.stdin.close()
+            assert process.stdout is not None
+            if input_text is not None:
+                assert process.stdin is not None
+                process.stdin.write(input_text)
+                process.stdin.close()
 
-        try:
-            yield from process.stdout
-        finally:
-            process.stdout.close()
-            if process.poll() is None:
-                process.terminate()
-            returncode = process.wait()
+            try:
+                yield from process.stdout
+            finally:
+                process.stdout.close()
+                if process.poll() is None:
+                    process.terminate()
+                returncode = process.wait()
 
         if check and returncode != 0:
             raise ZCodeError(f"zcode exited with code {returncode}")
 
-    def _resolve_cwd(
-        self, cwd: Optional[Union[str, os.PathLike[str]]]
-    ) -> Optional[str]:
-        selected = Path(cwd).resolve() if cwd is not None else self.cwd
-        return str(selected) if selected is not None else None
+    def _workdir(self, cwd: Optional[PathArg]) -> contextlib.AbstractContextManager[str]:
+        """Working directory for one call: explicit, default, or a fresh temp dir."""
+        return agent_workdir(cwd if cwd is not None else self.cwd)
 
     def _build_env(self) -> dict[str, str]:
         return {**os.environ, **self.env}

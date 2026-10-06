@@ -57,6 +57,8 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from .zcode_tool import UnsafeWorkdirError, check_workdir
+
 ROOT = Path(__file__).resolve().parents[1]
 
 # 任务目录。环境变量可以改，测试用临时目录。
@@ -204,6 +206,7 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
     mode="share"：后一条用 --resume 接前一条的会话，适合「先读、再改」。
         前一条失败了，后一条就从头开新会话，不接一个坏掉的上下文。
     cwd：claude 在哪个目录跑，决定它能看到哪些文件和项目设置。默认当前目录。
+        不收 ~、/、家目录和含 .ssh 等凭证的父目录（当前目录是这些也不行）。
     model：默认 sonnet（DEFAULT_MODEL）。传 None 或空串就不带 --model，
         用 Claude Code 自己的默认。传 "auto" 就先让 haiku 按难度给每条分
         haiku / sonnet / opus，见 AUTO_PROMPT；分到的模型和理由记在每条
@@ -239,9 +242,12 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
     if shutil.which(CLAUDE_BIN) is None:
         raise CBatchError(f"找不到 {CLAUDE_BIN}，Claude Code 装了吗？")
 
-    cwd = str(Path(cwd).resolve()) if cwd else os.getcwd()
-    if not Path(cwd).is_dir():
-        raise CBatchError(f"cwd 不是目录：{cwd}")
+    # 家目录、/ 不行：claude 能读工作目录下的一切，那里有 .ssh、
+    # .git-credentials 和各 CLI 的登录凭证。规则同 zcode_tool.check_workdir
+    try:
+        cwd = check_workdir(cwd or os.getcwd())
+    except UnsafeWorkdirError as e:
+        raise CBatchError(f"cwd 不能用：{e}") from None
 
     # 编号带毫秒：jobs() 按编号排新旧，只到秒的话同一秒提交的几批顺序是
     # 随机的（后面那段是随机串）。测试连着提交时撞上的。

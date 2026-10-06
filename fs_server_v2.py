@@ -338,7 +338,7 @@ def zcode_generate(
     context: str = "",
     allowed_tools: str = "*",
     mode: str = "yolo",
-    wsl_cwd: str = "~",
+    wsl_cwd: str = "",
     distribution: str = "",
     wsl_user: str = "",
     timeout: int = 300,
@@ -354,8 +354,11 @@ def zcode_generate(
         build / edit / plan / yolo
 
     wsl_cwd:
-        "~"                    当前 WSL 用户的主目录
-        "/home/ysc/project"    指定 WSL 项目目录
+        ""                     （默认）每次新建一个空临时目录，跑完删掉
+        "/home/ysc/project"    指定项目子目录，ZCode 才能读里面的代码；
+                               它能读到该目录下所有文件（含存 API key 的
+                               配置），确实要读代码时才传。不收 ~、/、
+                               家目录和含 .ssh 等凭证的父目录
     """
     check(key)
 
@@ -367,11 +370,8 @@ def zcode_generate(
     if mode not in {"build", "edit", "plan", "yolo"}:
         raise ValueError("mode 只能是 build、edit、plan 或 yolo")
 
-    if not wsl_cwd:
-        wsl_cwd = "~"
-
-    if wsl_cwd != "~" and not wsl_cwd.startswith("/"):
-        raise ValueError("wsl_cwd 必须是 ~ 或 WSL 绝对路径")
+    # 不传就是 None：zcode_tool 在空临时目录里跑；传了的由它查是否安全
+    selected_cwd = wsl_cwd.strip() or None
 
     if not 1 <= timeout <= 1800:
         raise ValueError("timeout 必须在 1 到 1800 秒之间")
@@ -411,13 +411,13 @@ def zcode_generate(
             language=language.strip() or None,
             context=context.strip() or None,
             allowed_tools=selected_tools,
-            cwd=None if wsl_cwd == "~" else wsl_cwd,
+            cwd=selected_cwd,
             timeout=timeout,
         )
 
     return tool.generate_code_text_wsl(
         task=task.strip(),
-        wsl_cwd=wsl_cwd,
+        wsl_cwd=selected_cwd,
         distribution=distribution.strip() or None,
         user=wsl_user.strip() or None,
         language=language.strip() or None,

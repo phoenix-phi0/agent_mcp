@@ -40,10 +40,14 @@ ZBatch 是跑在 Windows 上的一个小服务（`~/.zcode/batchsvc/`），把�
 """
 
 import json
+import shutil
+import tempfile
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+from .zcode_tool import check_workdir
 
 HOME = Path.home()
 BASE = HOME / ".zcode" / "batchsvc"
@@ -88,6 +92,12 @@ PREAMBLE = """【环境交代，先读这一段】
 ---
 
 """
+
+# 不传 cwd 时每批一个空临时目录，前缀和保留时长见 _sweep_workdirs
+WORKDIR_PREFIX = "zbatch_"
+WORKDIR_TTL = 24 * 3600
+# job_id → 本模块替它建的临时目录，wait() 看到跑完时删
+_workdirs = {}
 
 # 上次找到的端口。服务不会换端口，除非重启过。
 _cached_port = None
@@ -197,14 +207,42 @@ def _base_url() -> str:
 # ----------------------------------------------------------------------
 
 
+def _sweep_workdirs():
+    """删掉超过 WORKDIR_TTL 的本模块临时工作目录。
+
+    提交时不知道任务什么时候跑完（服务端不回调），wait() 看到跑完会删
+    自己那个；没人 wait 的就靠这里兜底。一批最多 10 条×600 秒，一天远
+    够它跑完。"""
+    cutoff = time.time() - WORKDIR_TTL
+    for d in Path(tempfile.gettempdir()).glob(WORKDIR_PREFIX + "*"):
+        try:
+            if d.is_dir() and d.stat().st_mtime < cutoff:
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            pass
+
+
+def _cleanup_workdir(job_id: str):
+    d = _workdirs.pop(job_id, None)
+    if d:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def submit(tasks, name: str = "", mode: str = "share",
-           cwd: str = "/home/ysc", preamble: bool = True) -> dict:
+           cwd: str = None, preamble: bool = True) -> dict:
     """提交一批任务。tasks 是提示词列表，或 {prompt, outfile} 字典列表。
 
     mode="share"：后续任务用 -c 续接同一个 zcode 会话，前一条的上下文
     还在，适合「先读文件，再基于它改」这种。代价是前一条跑偏会带歪
     后面的。
     mode="isolated"：每条独立，互不影响。
+
+    cwd：zcode 在哪个目录跑。不传就给这一批新建一个空临时目录
+    （/tmp/zbatch_xxxx，wait() 看到跑完时删，没删的一天后下次提交时清掉）。
+    以前默认是 /home/ysc——zcode 能读、能打包工作目录下的一切，家目录下有
+    .ssh、.git-credentials 和各 CLI 的登录凭证。确实要读项目代码才传项目
+    子目录（如 /home/ysc/mcp），它能读到下面所有文件，含存 API key 的
+    config.json；~、/、家目录、含 .ssh 等的父目录直接拒绝。
 
     返回 {"job_id": ..., "status": ..., "tasks": N}。
     """
@@ -232,8 +270,21 @@ def submit(tasks, name: str = "", mode: str = "share",
     if preamble:
         items[0]["prompt"] = PREAMBLE + items[0]["prompt"]
 
-    return _post(f"{_base_url()}/api/jobs",
-                 {"name": name, "tasks": items, "mode": mode, "cwd": cwd})
+    if cwd is not None:
+        cwd, own = check_workdir(cwd), None
+    else:
+        _sweep_workdirs()
+        cwd = own = tempfile.mkdtemp(prefix=WORKDIR_PREFIX)
+    try:
+        r = _post(f"{_base_url()}/api/jobs",
+                  {"name": name, "tasks": items, "mode": mode, "cwd": cwd})
+    except BaseException:
+        if own:
+            shutil.rmtree(own, ignore_errors=True)
+        raise
+    if own and isinstance(r, dict) and r.get("job_id"):
+        _workdirs[r["job_id"]] = own
+    return r
 
 
 def status(job_id: str, full: bool = False) -> dict:
@@ -271,6 +322,7 @@ def wait(job_id: str, timeout: int = 300, every: int = 10) -> dict:
     while True:
         d = status(job_id)
         if d.get("status") != "running":
+            _cleanup_workdir(job_id)
             return d
         if time.time() >= deadline:
             d["_note"] = f"等了 {timeout} 秒还在跑，这是中途状态"
