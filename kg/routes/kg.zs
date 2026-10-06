@@ -15,7 +15,7 @@
 
 # 导出。file 不给就写到 content/export.jsonl；扩展名是 .json 就导成 JSON 数组。
 # 不默认写回 content/kg.jsonl：那是手写的源文件，覆盖它该是人明确要的。
-接口 POST /kg/export 动作 kg_export
+接口 POST /kg/export 动作 kg_export 角色 teacher
   用包 kg http
   设 file = {file}
   如果 {file} 为空

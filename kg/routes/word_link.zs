@@ -6,7 +6,7 @@
 
 
 # 批量导入单词。file 不给就导 content/words.jsonl。
-接口 POST /word/import 动作 word_import
+接口 POST /word/import 动作 word_import 角色 teacher
   用包 kg http
   设 file = {file}
   如果 {file} 为空

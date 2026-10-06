@@ -1,0 +1,34 @@
+# 账号：多人模式（py -m kg --登录）下的登录用户。由 py -m gen auth 生成的 user
+# 实体扩出来：多了 role、display_name、disabled 三列。已有的库靠「迁移 只加」
+# 补建这张表、补这几列，不重建。单人模式（默认）不用这张表，learner 固定是 me。
+#
+# password_hash 存的是 scrypt 哈希，不是密码本身。建号、重置、改密码、登录都在
+# auth 包的 Python 里哈希和核对（verbs/auth），密码不进数据库、不经过前端回显。
+#
+# role      student（学生，默认）/ teacher（教师）。教师只能用命令行建：
+#           py -m kg 建教师 <用户名>；学生由教师在「学生管理」页建，学生不能自己注册
+# disabled  1 = 停用：登录不上；已经登录的，下一个请求就被当成没登录
+#           （routes/auth.zs 的「认证 核对」每个请求查一次）
+# username  同时是学习记录里的 learner：多人模式下 learner = 登录的用户名
+
+实体 user 用户
+  字段 username 文本 必填 唯一 用户名
+  字段 password_hash 文本 必填 密码
+  字段 display_name 文本 显示名
+  字段 role 文本 必填 默认 student 角色
+  字段 disabled 整数 必填 默认 0 停用
+  字段 created_at 文本 必填 默认 现在 建于
+结束
+
+
+# 只撑账号相关界面的字段（同 page_view），表里不存东西：学生管理页的几列、
+# 重置密码框，改密码页的三个密码框。
+实体 account_view 账号页面
+  字段 account_state 文本 状态
+  字段 attempt_n 整数 作答数
+  字段 last_active 文本 最近学习
+  字段 reset_user 文本 学生用户名
+  字段 old_password 文本 旧密码
+  字段 new_password 文本 新密码
+  字段 new_password2 文本 再输一次新密码
+结束

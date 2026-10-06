@@ -93,6 +93,41 @@ GET 的查询参数也注入。
 **并发只做了一半**。锁保护读会话和写会话这两个瞬间，中间跑脚本的那
 几秒没锁——同一个学习者的两个请求仍然会后写覆盖先写。单人本地用无
 所谓；真要给别人用，得按会话 ID 加锁并持有整个请求周期。
+
+## 认证
+
+路由目录里任何一个 .zs 的顶层（接口块外面）写这些行，对整个项目生效：
+
+    认证 必须                     一直要登录，只有标了「公开」的接口例外
+    认证 可选                     默认不要登录（跟没写一样）；启动时开了登录
+                                  （Router(login=True)、gen run --登录、
+                                  dsl_http --登录）才等同「认证 必须」
+    认证 核对 app.db user_auth    每个请求认出 cookie 里的人之后，再用这条查询
+                                  （queries/user_auth.sql，参数 :username）查一次：
+                                  查不到（停用了、删了）就当没登录——令牌本身
+                                  无状态，靠这一步让停用立即生效。查到的行里
+                                  role 列注入成 {current_role}
+    认证 身份 learner 默认 me     注入「这个请求是谁的数据」：开着登录时是
+                                  {current_user}，请求体里同名的字段一律盖掉
+                                  （{learner} 和 {request.learner} 都是），前端
+                                  伪造无效；没开登录时是请求体里的 learner，
+                                  没给或空串就是 me（单人用，跟以前每个接口开头
+                                  「{learner 或} 空了补 me」那段一样）
+    认证 角色 teacher 教师        角色的中文名，拒绝时说「需要教师权限」
+
+接口行上的「角色 teacher」：开着登录时只许 {current_role} 是 teacher 的人调，
+别人回 403。没开登录时不查（单人用，管理侧照常可用）。
+
+    接口 POST /import/home 动作 import_home 角色 teacher
+
+注入的变量（都放在请求字段之后，请求体里的同名字段盖不掉）：
+
+    current_user   登录的用户名；没开登录或没登录是空串
+    current_role   核对查询返回的 role；没有是空串
+    auth_mode      on（这次启动要求登录）/ off
+
+令牌是无状态的签名串（tools/auth.py）：退出只删 cookie，偷走的令牌过期前
+都有效。「认证 核对」挡住的是停用和删号；改密码不会让旧令牌失效。
 """
 
 import argparse
@@ -109,15 +144,27 @@ from .dsl import DSLEngine, DSLError
 from .http_ctx import set_bucket, take_auth, take_bucket
 from . import packs
 
-# 接口 POST /chat 动作 send 公开  ——  方法、动作、公开都可省
+# 接口 POST /chat 动作 send 公开  ——  方法、动作、公开、角色都可省
+# 接口 POST /import/home 动作 import_home 角色 teacher
 API_RE = re.compile(
     r"^接口\s+(?:(GET|POST|PUT|DELETE)\s+)?(/\S*)"
-    r"(?:\s+动作\s+(\S+))?(\s+公开)?\s*$", re.I)
+    r"(?:\s+动作\s+(\S+))?(\s+公开)?(?:\s+角色\s+(\S+))?\s*$", re.I)
 # 服务 8091  或  服务 8091-8099
 SERVICE_RE = re.compile(r"^服务\s+(\d{2,5})(?:\s*-\s*(\d{2,5}))?\s*$")
 # 认证 必须 —— 路由目录里任何一个文件写了这行，所有接口都要求登录，
 # 只有标了「公开」的例外。不写这行的项目行为完全不变。
 AUTH_RE = re.compile(r"^认证\s+必须\s*$")
+# 认证 可选 —— 平时不要登录，启动时开了登录（--登录）才等同「认证 必须」。
+# 单人本机用和多人用同一份路由，不用两套文件。见文件开头「认证」一节
+AUTH_OPTIONAL_RE = re.compile(r"^认证\s+可选\s*$")
+# 认证 核对 app.db user_auth —— 每个请求按用户名再查一次（停用立即生效、拿角色）
+AUTH_CHECK_RE = re.compile(r"^认证\s+核对\s+(\S+)\s+(\S+)\s*$")
+# 认证 身份 learner 默认 me —— 注入「这是谁的数据」
+AUTH_IDENTITY_RE = re.compile(r"^认证\s+身份\s+([A-Za-z_]\w*)\s+默认\s+(\S+)\s*$")
+# 认证 角色 teacher 教师 —— 角色的中文名，403 的说明里用
+AUTH_ROLE_RE = re.compile(r"^认证\s+角色\s+(\S+)\s+(\S+)\s*$")
+# 开了登录、监听的又不是本机时，cookie 走明文 http 会被同网段的人截走
+LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 
 # 块内这些关键字会开一层，它们的「结束」不能被当成接口的收尾
 INNER_OPENERS = {"如果", "若", "if", "遍历", "循环", "每个",
@@ -141,10 +188,13 @@ class Endpoint:
 
     public 为真表示标了「公开」：项目开了「认证 必须」时，只有这种接口
     不登录也能调（登录、注册本身）。
+
+    role 是「角色 teacher」：开着登录时只许这个角色调，别人 403。
     """
 
     def __init__(self, method: str, path: str, body: list,
-                 src: Path, line: int, action: str = "", public: bool = False):
+                 src: Path, line: int, action: str = "", public: bool = False,
+                 role: str = ""):
         self.method = method.upper()
         self.path = path
         self.body = body
@@ -152,6 +202,7 @@ class Endpoint:
         self.line = line
         self.action = action
         self.public = public
+        self.role = role
 
     @property
     def script(self) -> str:
@@ -160,6 +211,7 @@ class Endpoint:
     def __repr__(self) -> str:
         tail = f" 动作 {self.action}" if self.action else ""
         tail += " 公开" if self.public else ""
+        tail += f" 角色 {self.role}" if self.role else ""
         return f"<{self.method} {self.path}{tail} @{self.src.name}:{self.line}>"
 
 
@@ -208,7 +260,7 @@ def split_endpoints(text: str, src: Path):
 
         out.append(Endpoint(m.group(1) or "POST", m.group(2), body,
                             src, i + 1, action=m.group(3) or "",
-                            public=bool(m.group(4))))
+                            public=bool(m.group(4)), role=m.group(5) or ""))
         i = j + 1
     return out, ports
 
@@ -228,8 +280,14 @@ def top_level_flag(root: Path, pattern) -> bool:
     项目级开关都这么写：「认证 必须」，「迁移 只加」（见 tools/migrate.py）。
     接口块里的同样一行不算——那是脚本内容，不是声明。
     """
+    return bool(top_level_matches(root, pattern))
+
+
+def top_level_matches(root: Path, pattern) -> list:
+    """顶层匹配 pattern 的行，返回 match 对象的列表（按文件名、行号）。"""
+    out = []
     if not Path(root).is_dir():
-        return False
+        return out
     for f in sorted(Path(root).rglob("*.zs")):
         depth = 0
         for line in f.read_text(encoding="utf-8").splitlines():
@@ -244,9 +302,48 @@ def top_level_flag(root: Path, pattern) -> bool:
                 elif head in CLOSERS:
                     depth -= 1
                 continue
-            if pattern.match(s):
-                return True
-    return False
+            m = pattern.match(s)
+            if m:
+                out.append(m)
+    return out
+
+
+def auth_config(root: Path) -> dict:
+    """读路由目录里的认证声明。见文件开头「认证」一节。
+
+    返回 {"mandatory", "optional", "check": (库, 查询名) 或 None,
+          "identity": (变量名, 单人默认值) 或 None, "roles": {角色: 中文名}}
+    同一种声明写了两次不一样的，报错——哪个算数全看扫描顺序的话，查起来很难。
+    """
+    def one(pattern, what):
+        ms = top_level_matches(root, pattern)
+        vals = {m.groups() for m in ms}
+        if len(vals) > 1:
+            raise DSLError(f"「认证 {what}」写了不一样的几行：{sorted(vals)}")
+        return ms[0].groups() if ms else None
+
+    return {
+        "mandatory": top_level_flag(root, AUTH_RE),
+        "optional": top_level_flag(root, AUTH_OPTIONAL_RE),
+        "check": one(AUTH_CHECK_RE, "核对"),
+        "identity": one(AUTH_IDENTITY_RE, "身份"),
+        "roles": {m.group(1): m.group(2) for m in top_level_matches(root, AUTH_ROLE_RE)},
+    }
+
+
+def listen_warning(host: str, login: bool) -> str:
+    """监听的不是本机时，启动日志里醒目地提醒一句。返回空串表示不用提醒。"""
+    if host in LOCAL_HOSTS:
+        return ""
+    bar = "!" * 64
+    lines = [bar, f"!! 监听 {host}：同一网络里的其他机器都能连上来。"]
+    if login:
+        lines += ["!! 开着登录：这是明文 http，密码和登录 cookie 可能被同网段的人截走。",
+                  "!! 对外请放在 https 反向代理后面，并加 --安全cookie（cookie 只走 https）。"]
+    else:
+        lines += ["!! 没开登录：谁连上来都能用，管理页也一样。多人用请加 --登录。"]
+    lines.append(bar)
+    return "\n".join(lines)
 
 
 def scan_routes(root: Path):
@@ -353,14 +450,27 @@ def _model_failure(exc):
 
 class Router:
     def __init__(self, routes: Path, workspace: Path, sessions: Path,
-                 real: bool = True, verbose: bool = False):
+                 real: bool = True, verbose: bool = False, login: bool = False,
+                 secure_cookie: bool = False):
         self.routes_dir = Path(routes)
         self.workspace = Path(workspace)
         self.sessions_dir = Path(sessions)
         self.real = real
         self.verbose = verbose
         self.table, self.ports, self.warnings = scan_routes(self.routes_dir)
-        self.auth_required = auth_required(self.routes_dir)
+        # 「认证 必须」一直开；「认证 可选」看启动时给没给 login。两样都没写的
+        # 项目给了 login 是报错而不是悄悄不认人——以为开了登录、其实谁都能进
+        cfg = auth_config(self.routes_dir)
+        if login and not (cfg["mandatory"] or cfg["optional"]):
+            raise DSLError("开登录要路由里有「认证 可选」或「认证 必须」这一行"
+                           "（这个项目没有登录功能，先 py -m gen auth 项目/）")
+        self.auth_required = cfg["mandatory"] or (cfg["optional"] and bool(login))
+        self.auth_check = cfg["check"]
+        self.identity = cfg["identity"]
+        self.role_labels = cfg["roles"]
+        # cookie 只走 https。本机 http 不能开（浏览器就不发了），对外部署到
+        # https 后面时开
+        self.secure_cookie = bool(secure_cookie)
         self._key = None
         self._lock = threading.Lock()
         self.client_factory = None
@@ -424,7 +534,7 @@ class Router:
         return body, status
 
     def run(self, ep: Endpoint, form: dict, uploads: dict = None,
-            user: str = ""):
+            user: str = "", info: dict = None, remote: str = ""):
         """跑一个接口，返回 (响应体, 状态码, 登录/退出要求)。
 
         uploads 是这次请求带的文件。它们不进 form——脚本要用就调「存文件」
@@ -440,7 +550,12 @@ class Router:
           current_user  登录的用户名，没登录是空串
           session       会话状态（字典），改了自动存回
           run_mode      real / mock，当前是不是假客户端
+          current_role  「认证 核对」查出的 role，没有是空串
+          auth_mode     on / off，这次启动要不要登录
+          以及「认证 身份」声明的那个变量（kg 是 learner）
         它们放在请求字段之后，请求体里伪造的同名字段盖不掉。
+
+        info 是「认证 核对」查出的那一行（字典），没有是 None。
         """
         # 会话按谁分：登录了按用户名——那是服务器认出来的。没登录才退回
         # 请求里的 learner 字段；开了认证的项目里，没登录能走到这儿的只有
@@ -468,7 +583,7 @@ class Router:
                 session = self.load_session(who)
         before = json.dumps(session, ensure_ascii=False, sort_keys=True)
 
-        set_bucket({}, uploads, user)
+        set_bucket({}, uploads, user, remote)
         text = ""
         returned = None
         auth = None
@@ -487,6 +602,23 @@ class Router:
             # 当前用户放在请求字段之后，盖掉请求体里可能伪造的同名字段
             engine.vars["current_user"] = user
             engine.vars["request"]["current_user"] = user
+            role = str((info or {}).get("role") or "") if user else ""
+            engine.vars["current_role"] = role
+            engine.vars["request"]["current_role"] = role
+            auth_mode = "on" if self.auth_required else "off"
+            engine.vars["auth_mode"] = auth_mode
+            engine.vars["request"]["auth_mode"] = auth_mode
+            # 「认证 身份 learner 默认 me」：开着登录时就是登录的人，请求体里
+            # 的 learner 连 {request} 里的一起盖掉——前端塞别人的名字进来，
+            # 读写的仍是自己的数据。没开登录是单人用：照旧认请求体，没给
+            # 是 me（那时没什么要防的，测试也靠它分开不同的学习者）
+            if self.identity:
+                var, default = self.identity
+                if self.auth_required:
+                    engine.vars[var] = user
+                    engine.vars["request"][var] = user
+                else:
+                    engine.vars[var] = str(form.get(var) or "") or default
             engine.vars["session"] = session
             # 当前是不是假客户端：mock / real。只读，放在最后盖掉请求体里的同名字段
             engine.vars["run_mode"] = self.mode
@@ -596,6 +728,37 @@ class Router:
         from .auth import COOKIE, read_token
         return read_token(request.cookies.get(COOKIE), self._secret())
 
+    def check_user(self, user: str):
+        """「认证 核对」：按用户名查一次，返回那一行（字典），查不到 None。
+
+        令牌只证明「签发时这个人登录过」。停用、删号要立刻生效，就得每个
+        请求回库里看一眼——一条按唯一键的查询，代价很小。没写「核对」的
+        项目照旧只认令牌。
+        """
+        if not user:
+            return None
+        if not self.auth_check:
+            return {}
+        import sqlite3
+        db, name = self.auth_check
+        ws = self.workspace.resolve()
+        qdir = ws / "queries"
+        if not qdir.is_dir():
+            qdir = Path(__file__).resolve().parent.parent / "queries"
+        f = (qdir / f"{name}.sql").resolve()
+        dbp = (ws / db).resolve()
+        if qdir.resolve() not in f.parents or ws not in dbp.parents:
+            raise DSLError(f"「认证 核对」的库或查询越界：{db} {name}")
+        if not f.is_file():
+            raise DSLError(f"「认证 核对」的查询不在：{f}")
+        con = sqlite3.connect(dbp)
+        con.row_factory = sqlite3.Row
+        try:
+            row = con.execute(f.read_text(encoding="utf-8"), {"username": user}).fetchone()
+        finally:
+            con.close()
+        return dict(row) if row is not None else None
+
     def _apply_auth(self, resp, auth) -> None:
         """按动词的要求设或删登录 cookie。
 
@@ -609,9 +772,11 @@ class Router:
         from .auth import COOKIE, TTL, make_token
         if auth.get("login"):
             resp.set_cookie(COOKIE, make_token(auth["login"], self._secret()),
-                            max_age=TTL, httponly=True, samesite="Lax", path="/")
+                            max_age=TTL, httponly=True, samesite="Lax", path="/",
+                            secure=self.secure_cookie)
         elif auth.get("logout"):
-            resp.delete_cookie(COOKIE, path="/", samesite="Lax")
+            resp.delete_cookie(COOKIE, path="/", samesite="Lax",
+                               secure=self.secure_cookie)
 
     def dispatch(self):
         from flask import jsonify, make_response, request
@@ -624,11 +789,25 @@ class Router:
                  "kind": "no"}]}), 404
 
         user = self._identify(request)
+        info = None
+        stale = False
+        if user:
+            info = self.check_user(user)
+            if info is None:
+                # 令牌是真的，但人停用了或删了：当没登录，顺手把 cookie 删掉
+                user, stale = "", True
         # 默认拒绝：开了认证的项目，没标「公开」的接口一律要登录。检查在
         # 路由器里而不是在每个接口的脚本里——手写的接口忘了写那一行，就是
         # 一个不设防的口子，而且不报错。
         if self.auth_required and not ep.public and not user:
-            return jsonify({"error": "请先登录"}), 401
+            resp = make_response(jsonify({"error": "请先登录"}), 401)
+            if stale:
+                self._apply_auth(resp, {"logout": True})
+            return resp
+        # 「角色 teacher」：开着登录时查角色。没开登录是单人用，不查
+        if self.auth_required and ep.role and str((info or {}).get("role") or "") != ep.role:
+            label = self.role_labels.get(ep.role, ep.role)
+            return jsonify({"error": f"需要{label}权限"}), 403
 
         form, uploads = self._read_request()
         # GET 的查询参数也注入，跟 body 字段并列
@@ -636,11 +815,12 @@ class Router:
             form.setdefault(k, v)
 
         try:
-            body, status, auth = self.run(ep, form, uploads, user)
+            body, status, auth = self.run(ep, form, uploads, user, info,
+                                          request.remote_addr or "")
             # 纯文本返回不包 JSON——「返回 ok」就该是 ok
             resp = make_response(body if isinstance(body, str) else jsonify(body),
                                  status)
-            self._apply_auth(resp, auth)
+            self._apply_auth(resp, auth or ({"logout": True} if stale else None))
             return resp
         except DSLError as e:
             # 用户造成的错（重名、必填为空……）：引擎一层层包成 DSLError，
@@ -705,12 +885,16 @@ class Router:
         lines = [f"路由目录 {self.routes_dir}",
                  f"工作目录 {self.workspace}",
                  f"会话目录 {self.sessions_dir}"]
+        if self.auth_required:
+            lines.append("登录     要求登录（多人模式）"
+                         + ("，cookie 只走 https" if self.secure_cookie else ""))
         if self.ports:
             lo, hi = self.ports
             lines.append(f"脚本端口 {lo}" + (f"-{hi}" if hi != lo else ""))
         lines.append("")
         for (m, p), ep in sorted(self.table.items()):
             动作 = f"  动作 {ep.action}" if ep.action else ""
+            动作 += f"  角色 {ep.role}" if ep.role else ""
             lines.append(f"  {m:6} {p:24} {ep.src.name}:{ep.line}{动作}")
         for w in self.warnings:
             lines.append(f"\n  [警告] {w}")
@@ -766,6 +950,10 @@ def main() -> int:
     p.add_argument("--port", type=int, default=None,
                    help="精确指定端口，不做自动查找")
     p.add_argument("--mock", action="store_true", help="用假客户端，不消耗额度")
+    p.add_argument("--登录", dest="login", action="store_true",
+                   help="路由写了「认证 可选」的项目：这次启动要求登录")
+    p.add_argument("--安全cookie", dest="secure_cookie", action="store_true",
+                   help="登录 cookie 只走 https（放在 https 反向代理后面时开）")
     p.add_argument("-v", "--verbose", action="store_true")
     p.add_argument("--list", action="store_true", help="只列接口，不启动")
     args = p.parse_args()
@@ -775,7 +963,8 @@ def main() -> int:
 
     try:
         router = Router(Path(args.routes), ws, sessions,
-                        real=not args.mock, verbose=args.verbose)
+                        real=not args.mock, verbose=args.verbose,
+                        login=args.login, secure_cookie=args.secure_cookie)
     except DSLError as e:
         print(f"路由加载失败：{e}")
         return 1
@@ -805,6 +994,9 @@ def main() -> int:
 
     print(f"\n监听 http://{args.host}:{port}（{来源}）"
           + ("" if not args.mock else "，假客户端"))
+    warn = listen_warning(args.host, router.auth_required)
+    if warn:
+        print(warn, flush=True)
     # threaded=True 是重点：模型调用要等几秒，单线程的话第二个请求只能
     # 干等。debug 关掉——自动重载会把路由表读两遍。
     app.run(host=args.host, port=port, threaded=True, debug=False)

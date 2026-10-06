@@ -326,8 +326,12 @@ SELECT username, password_hash FROM user WHERE username = :username
 }
 
 
-def add_auth(root: Path) -> list:
-    """给项目加上用户表和登录注册。已存在的文件跳过，不覆盖。"""
+def add_auth(root: Path, optional: bool = False) -> list:
+    """给项目加上用户表和登录注册。已存在的文件跳过，不覆盖。
+
+    optional：写「认证 可选」而不是「认证 必须」——平时照旧不用登录，
+    启动时加 --登录 才要求（单人本机用、多人用同一份路由）。
+    """
     _check_root(root)
     out = []
     for rel, text in AUTH_FILES.items():
@@ -336,6 +340,12 @@ def add_auth(root: Path) -> list:
         if p.exists():
             out.append(f"  跳过 {rel}（已存在）")
             continue
+        if optional and rel == "routes/auth.zs":
+            text = text.replace(
+                "# 下面这行打开认证：整个项目的接口都要求登录，只有标了「公开」的例外。",
+                "# 下面这行：平时不要登录；启动时加 --登录（gen run 项目/ --登录）才要求，\n"
+                "# 那时整个项目的接口都要登录，只有标了「公开」的例外。").replace(
+                "认证 必须", "认证 可选")
         p.write_text(text, encoding="utf-8")
         out.append(f"  写入 {rel}")
     return out
@@ -378,7 +388,8 @@ def ensure_db(root: Path) -> str:
 # ----------------------------------------------------------------------
 
 
-AUTH_SCREENS = ("登录", "注册")
+# 「改密码」也算：登录之后才用得上的账号页，不进导航、不当入口
+AUTH_SCREENS = ("登录", "注册", "改密码")
 
 # 同属一个实体的界面：「笔记列表」这一项在「笔记编辑」「笔记新建」上也
 # 高亮。只认这几个后缀，不用 startswith——不然「笔记」会把别的实体的
@@ -435,7 +446,7 @@ def build(root: Path, entry: str = "", title: str = "") -> list:
         # 不跳的话已经登录的人每次打开都先看到登录页。打开的是应用界面，
         # 没登录的话它进入时的刷新会拿到 401，前端再跳去登录、登录完回来。
         idx = next((i for i, s in enumerate(screens)
-                    if s.name not in ("登录", "注册")), 0)
+                    if s.name not in AUTH_SCREENS), 0)
         screens.insert(0, screens.pop(idx))
 
     issues = list(ui_entity.expand(screens, entities))
@@ -482,17 +493,22 @@ def build(root: Path, entry: str = "", title: str = "") -> list:
 # ----------------------------------------------------------------------
 
 
-def make_app(root: Path, real: bool = False):
+def make_app(root: Path, real: bool = False, login: bool = False,
+             secure_cookie: bool = False):
     """后端接口 + 前端页面，同一个 Flask 应用。
 
     同一个进程同一个端口：前端发请求用的是相对路径，分两个端口就要处理
     跨域，而这是本地单人用的工具，没必要。
+
+    login：路由写了「认证 可选」的项目，这次要求登录（见 tools/dsl_http.py
+    「认证」一节）。secure_cookie：登录 cookie 只走 https。
     """
     from flask import abort, send_from_directory
 
     from tools.dsl_http import Router
 
-    router = Router(root / "routes", root, root / "sessions", real=real)
+    router = Router(root / "routes", root, root / "sessions", real=real,
+                    login=login, secure_cookie=secure_cookie)
     app = router.app()
     web = (root / "web").resolve()
 
@@ -512,8 +528,9 @@ def make_app(root: Path, real: bool = False):
 
 
 def run(root: Path, host: str = "127.0.0.1", port=None, real: bool = False,
-        entry: str = "", open_browser: bool = True) -> int:
-    from tools.dsl_http import resolve_port
+        entry: str = "", open_browser: bool = True, login: bool = False,
+        secure_cookie: bool = False) -> int:
+    from tools.dsl_http import listen_warning, resolve_port
 
     _check_root(root)
     print("数据库：")
@@ -526,7 +543,11 @@ def run(root: Path, host: str = "127.0.0.1", port=None, real: bool = False,
         for line in build(root, entry):
             print(line)
 
-    app, router = make_app(root, real)
+    from tools.dsl import DSLError
+    try:
+        app, router = make_app(root, real, login=login, secure_cookie=secure_cookie)
+    except DSLError as e:
+        raise ProjectError(str(e)) from e
     print("接口：")
     print(router.describe())
 
@@ -538,6 +559,11 @@ def run(root: Path, host: str = "127.0.0.1", port=None, real: bool = False,
     url = f"http://{host}:{chosen}/"
     print(f"\n打开 {url}（{source}）"
           + ("" if real else "，假模型客户端——增删改查用不到模型"))
+    print("登录：要求登录（多人模式）" if router.auth_required
+          else "登录：不用登录（单人模式）", flush=True)
+    warn = listen_warning(host, router.auth_required)
+    if warn:
+        print(warn, flush=True)
     if open_browser:
         # WSL 里通常打不开 Windows 的浏览器，失败了也没关系，地址已经打印了
         try:
@@ -575,6 +601,8 @@ def main(argv=None) -> int:
 
     s = sub.add_parser("auth", help="加上用户表、登录注册，并打开认证")
     s.add_argument("dir")
+    s.add_argument("--可选", dest="optional", action="store_true",
+                   help="写「认证 可选」：平时不要登录，gen run --登录 时才要求")
 
     s = sub.add_parser("run", help="建库 + 编译 + 起服务")
     s.add_argument("dir")
@@ -583,6 +611,10 @@ def main(argv=None) -> int:
     s.add_argument("--port", type=int, default=None)
     s.add_argument("--real", action="store_true", help="用真模型客户端")
     s.add_argument("--不开浏览器", dest="no_browser", action="store_true")
+    s.add_argument("--登录", dest="login", action="store_true",
+                   help="路由写了「认证 可选」的项目：这次要求登录（多人用）")
+    s.add_argument("--安全cookie", dest="secure_cookie", action="store_true",
+                   help="登录 cookie 只走 https（放在 https 反向代理后面时开）")
 
     args = p.parse_args(argv)
     root = Path(args.dir).resolve()
@@ -608,7 +640,7 @@ def main(argv=None) -> int:
             return 0
         if args.cmd == "auth":
             print("认证：")
-            for line in add_auth(root):
+            for line in add_auth(root, optional=args.optional):
                 print(line)
             print(f"\n整个项目的接口现在都要求登录（routes/auth.zs 里的「认证 必须」）。"
                   f"\n要每人只看自己的数据：实体加一行 `字段 owner 文本 必填 索引`，"
@@ -616,7 +648,8 @@ def main(argv=None) -> int:
             return 0
         if args.cmd == "run":
             return run(root, args.host, args.port, args.real, args.entry,
-                       open_browser=not args.no_browser)
+                       open_browser=not args.no_browser, login=args.login,
+                       secure_cookie=args.secure_cookie)
     except ProjectError as e:
         print(f"\n[出错] {e}")
         return 1

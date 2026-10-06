@@ -32,16 +32,16 @@
 #                           表单里有个 series 字段，「载入」看到地址参数跟表单
 #                           里的值一样就不拉了
 #
-# 这是管理功能。kg 现在单人用、没开认证（没有「认证」那一行），页面只是在导航
-# 上跟学习者的页面分开（.ui 的「侧 管理」）。以后要加口令：py -m gen auth kg/
-# 开认证，再给这几个接口加角色检查（{current_user} 对一张管理员表）。
+# 这是管理功能，接口都标了「角色 teacher」：多人模式（py -m kg --登录）下只许
+# 教师调，学生 403「需要教师权限」；单人模式（默认）不查，照常可用。导航上它在
+# 「侧 管理」那一组，学生登录时前端按 /auth/me 的 hide 把这组藏掉。
 
 # 上传的文件：存到项目的 uploads/（.gitignore 里有，不进 git），按内容哈希命名
 # 同一个文件传两次只存一份。
 
 
 # 进页面：任务表、系列表；新建表单的初值（等级范围全部、改写默认勾上）。
-接口 POST /import/home 动作 import_home
+接口 POST /import/home 动作 import_home 角色 teacher
   用包 db http
 
   执行 scripts/import_home_view.zs
@@ -53,7 +53,7 @@
 
 
 # 新建导入、开始解析。
-接口 POST /import/create 动作 import_create
+接口 POST /import/create 动作 import_create 角色 teacher
   用包 common db http data doc text
 
   设 series = {series 或}
@@ -171,7 +171,7 @@
 
 
 # 「载入」：按地址参数拉回审阅页 / 编辑页 / 系列页。
-接口 POST /import/load 动作 import_load
+接口 POST /import/load 动作 import_load 角色 teacher
   用包 db http common data
 
   设 job = {job 或}
@@ -201,7 +201,7 @@
 
 
 # 审阅页轮询（「每隔 2」，还有块在解析时）：进度、块表、草稿课表。
-接口 POST /import/poll 动作 import_poll
+接口 POST /import/poll 动作 import_poll 角色 teacher
   用包 db http common data
 
   设 job = {job 或}
@@ -212,7 +212,7 @@
 
 
 # 重试一块（块表行上的「重试」，带 chunk_id）：回到待解析，再交给后台。
-接口 POST /import/chunk_retry 动作 import_chunk_retry
+接口 POST /import/chunk_retry 动作 import_chunk_retry 角色 teacher
   用包 db http common data
 
   设 chunk_id = {chunk_id 或}
@@ -234,7 +234,7 @@
 
 # 一课草稿通过 / 驳回 / 回到待审。审阅页的行上带 draft（地址里有 job，回刷审阅
 # 页）；编辑页地址里是 draft（回刷编辑页）。
-接口 POST /import/draft_pass 动作 import_draft_pass
+接口 POST /import/draft_pass 动作 import_draft_pass 角色 teacher
   用包 db http common data
   设 draft = {draft 或}
   # 空值不能当脚本参数传（「job= review=…」会把后面整段吞进 job），没有就传 -
@@ -242,7 +242,7 @@
   执行 scripts/import_draft_review.zs draft={draft} job={job} review=通过
 结束
 
-接口 POST /import/draft_reject 动作 import_draft_reject
+接口 POST /import/draft_reject 动作 import_draft_reject 角色 teacher
   用包 db http common data
   设 draft = {draft 或}
   # 空值不能当脚本参数传（「job= review=…」会把后面整段吞进 job），没有就传 -
@@ -253,7 +253,7 @@
 
 # 「全部通过有映射的课」：还待审、映射到了至少一个条目或知识点的课一律通过。
 # 孤课、驳回过的不动。
-接口 POST /import/pass_mapped 动作 import_pass_mapped
+接口 POST /import/pass_mapped 动作 import_pass_mapped 角色 teacher
   用包 db http common data
 
   设 job = {job 或}
@@ -270,7 +270,7 @@
 
 
 # 编辑页「保存」：改字段。例句要是 JSON 数组（[{"jp":…,"zh":…}]）。
-接口 POST /import/draft_save 动作 import_draft_save
+接口 POST /import/draft_save 动作 import_draft_save 角色 teacher
   用包 db http common data
 
   设 draft = {draft 或}
@@ -298,7 +298,7 @@
 
 # 编辑页「加映射」：从下拉里选（map_add），或者直接输入编号（map_typed，优先）。
 # 只能挑库里已有的条目、知识点。
-接口 POST /import/map_add 动作 import_map_add
+接口 POST /import/map_add 动作 import_map_add 角色 teacher
   用包 db http common data
 
   设 draft = {draft 或}
@@ -330,7 +330,7 @@
 
 
 # 编辑页映射表行上的「去掉」（带 map_code）。
-接口 POST /import/map_remove 动作 import_map_remove
+接口 POST /import/map_remove 动作 import_map_remove 角色 teacher
   用包 db http common data
 
   设 draft = {draft 或}
@@ -355,7 +355,7 @@
 #
 # 系列已经有了、又没勾「覆盖已有系列」的拦下——除非就是这个任务上次导进去的
 # （审阅后再导一次是常事）。hanabira 永远不让覆盖。
-接口 POST /import/confirm 动作 import_confirm
+接口 POST /import/confirm 动作 import_confirm 角色 teacher
   用包 common db http data text
 
   设 job = {job 或}
@@ -468,7 +468,7 @@
 
 
 # 删除一个导入任务（审阅页「删除这个任务」，浮层里再确认一次）：只删草稿。
-接口 POST /import/job_delete 动作 import_job_delete
+接口 POST /import/job_delete 动作 import_job_delete 角色 teacher
   用包 db http
 
   设 job = {job 或}
@@ -492,7 +492,7 @@
 #         否则下次 py -m kg 启动导入时课又回来了
 # 学习记录、学习者的偏好一行不动：选过这个系列的学习者回到 hanabira
 # （series_current 只认 sort ≥ 0 的）。hanabira 不能撤。
-接口 POST /import/series_withdraw 动作 import_series_withdraw
+接口 POST /import/series_withdraw 动作 import_series_withdraw 角色 teacher
   用包 common db http data text
 
   设 series = {manage 或}

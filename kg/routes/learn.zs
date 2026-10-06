@@ -6,12 +6,10 @@
 # 不是语言结构，所以既不在图里也不写死在这儿——严格模式、考前冲刺都可以
 # 传不同的线。
 #
-# **学习者不传就是 me。** 这个项目没开认证（没跑过 gen auth），是一个人
-# 自己用的。但每个接口都得用同一个默认值（score.zs、node.zs 也是）：
-# 早先 /node/list 的默认是空串，那样记在 me 名下的东西图上看不到——
-# 写的按 me、读的按「没有人」，而且两边都不报错。所以每个接口开头都是
-# 同一段：先取 {learner 或}（缺了不会留成 {learner} 字面量），再判空补
-# me——空串和没传一样处理。
+# **学习者**：{learner} 由路由器注入（routes/auth.zs 的「认证 身份 learner 默认 me」）：单人
+# 模式是请求里的 learner、没给就是 me；多人模式是登录的人，请求体里的不算。
+# 早先每个接口开头各写一段「{learner 或} 空了补 me」，/node/list 有一阵默认
+# 是空串，记在 me 名下的东西图上看不到、两边都不报错——现在只有引擎一处。
 
 
 # 记一次作答：写流水、更新汇总、重算掌握标记、重算掌握得分。一个事务——
@@ -19,18 +17,13 @@
 接口 POST /learn/answer 动作 learn_answer
   用包 common db http
 
-  设 learner = {learner 或}
-  如果 {learner} 为空
-    设 learner = me
-  结束
-
   # 对错必须给：缺了的话 CAST 成 0，记成一道错题，不报错
   设 correct = {correct 或}
   如果 {correct} 为空
     返回 {"error":"缺 correct（1 对 0 错）"} 400
   结束
 
-  # 不直接把 {request} 交给写库：里面的 learner 可能是空的，要用上面补过默认值的
+  # 不直接把 {request} 交给写库：单人模式下里面的 learner 可能是空的，用注入的 {learner}
   设 rec.learner = {learner}
   设 rec.point = {point}
   设 rec.item = {item 或}
@@ -54,10 +47,6 @@
 # 现在能学什么：自己没掌握、前置都掌握了的知识点，按依赖深度排。
 接口 POST /learn/next 动作 learn_next
   用包 db http
-  设 learner = {learner 或}
-  如果 {learner} 为空
-    设 learner = me
-  结束
   设 rows = 查询 app.db learn_next learner={learner} limit=20
   设 group.next = {rows}
   响应 lists {group}
@@ -68,10 +57,6 @@
 接口 POST /learn/status 动作 learn_status
   用包 db http
 
-  设 learner = {learner 或}
-  如果 {learner} 为空
-    设 learner = me
-  结束
   设 line = {line 或}
   如果 {line} 为空
     设 line = 80

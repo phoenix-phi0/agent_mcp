@@ -11,13 +11,13 @@
 # 判题用 quiz 包的「判对错」，跟「判题」同一套规则：选择题抓选项字母，
 # 接续题整段比对（只认标准答案和「可接受」里列的写法）。
 #
-# 学习者不传就是 me，跟 learn.zs 同一个默认值。掌握看得分（达标线 80、
+# {learner} 由路由器注入（见 learn.zs 开头）。掌握看得分（达标线 80、
 # 回落线 60），判定在 scripts/mastery_update.zs，跟 /learn/answer 同一份。
 
 
 # 整批导入。整表清空重灌，在一个事务里：有坏题（缺题号、缺答案、题号重复）
 # 就全部回滚，库里保持原样。条目对不上的题不进库、只计数，报告里说是哪道。
-接口 POST /quiz/import
+接口 POST /quiz/import 角色 teacher
   用包 common db http
 
   设 rows = {rows 或}
@@ -65,10 +65,6 @@
 接口 POST /quiz/state 动作 quiz_state
   用包 db http
 
-  设 learner = {learner 或}
-  如果 {learner} 为空
-    设 learner = me
-  结束
   设 query.learner = {learner}
   设 progress = 查一行表 app.db quiz_state_one {query}
 
@@ -104,10 +100,6 @@
 接口 POST /quiz/start 动作 quiz_start
   用包 db http
 
-  设 learner = {learner 或}
-  如果 {learner} 为空
-    设 learner = me
-  结束
   设 chosen_level = {pick_level 或 全部}
   设 chosen_kind = {pick_kind 或 全部}
   # lesson 给空（不能写成「lesson= 」：参数按空格切，空值会吞掉后面那个）
@@ -126,10 +118,6 @@
 接口 POST /quiz/next 动作 quiz_next
   用包 db http
 
-  设 learner = {learner 或}
-  如果 {learner} 为空
-    设 learner = me
-  结束
   设 query.learner = {learner}
   设 progress = 查一行表 app.db quiz_state_one {query}
   设 chosen_level = {pick_level 或 全部}
@@ -149,10 +137,6 @@
 接口 POST /quiz/again 动作 quiz_again
   用包 db http
 
-  设 learner = {learner 或}
-  如果 {learner} 为空
-    设 learner = me
-  结束
   设 query.learner = {learner}
   设 progress = 查一行表 app.db quiz_state_one {query}
   设 lesson = {progress.lesson 或}
@@ -186,10 +170,6 @@
 接口 POST /quiz/lesson 动作 quiz_lesson
   用包 db http
 
-  设 learner = {learner 或}
-  如果 {learner} 为空
-    设 learner = me
-  结束
   设 lesson = {lesson 或}
   设 query.learner = {learner}
   设 progress = 查一行表 app.db quiz_state_one {query}
@@ -250,11 +230,6 @@
 # （「推量判断 得分 42 → 51」），批改下面显示；不走 messages。
 接口 POST /quiz/answer 动作 quiz_answer
   用包 common db http quiz
-
-  设 learner = {learner 或}
-  如果 {learner} 为空
-    设 learner = me
-  结束
 
   设 query.learner = {learner}
   设 progress = 查一行表 app.db quiz_state_one {query}
@@ -403,10 +378,6 @@
 接口 POST /quiz/summary 动作 quiz_summary
   用包 common db http
 
-  设 learner = {learner 或}
-  如果 {learner} 为空
-    设 learner = me
-  结束
   设 query.learner = {learner}
   设 round_info = 查一行表 app.db round_attempts {query}
   设 question_n = {round_info.n 或 0}

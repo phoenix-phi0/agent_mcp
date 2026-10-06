@@ -6,6 +6,26 @@
     py -m kg import       只导入（知识点、条目、对照、单词）
     py -m kg --port 8200  参数透传给 gen run
     py -m kg --mock       模拟模式（也可设 KG_MOCK=1）；默认是真模型
+    py -m kg --登录       多人模式（也可设 KG_LOGIN=1）：要登录，学习记录按账号分开
+    py -m kg 建教师 <用户名> [--显示名 X]   建教师账号（交互输密码，不回显）
+    py -m kg 改密 <用户名>                   改任何账号的密码（交互输入）
+    py -m kg 并入 me <用户名>                把单人模式 me 的学习记录归到这个账号
+                          （这三个命令都能加 --库 别的库.db，测试用临时库）
+
+## 单人模式和多人模式
+
+默认单人：不用登录，learner 是 me（app.pyw、py -m kg、gen run kg 都是）。
+`--登录` / KG_LOGIN=1 开多人：除了登录接口都要登录，learner 是登录的用户名，
+管理侧（教材导入、学生管理、各种导入）只许教师。怎么做到的见 routes/auth.zs
+和 tools/dsl_http.py 的「认证」一节。
+
+账号：教师只能在这里用命令行建（建教师），学生由教师在「学生管理」页建，学生
+不能自己注册。密码交互输入、不回显；测试和脚本用 `--密码环境变量 变量名`，从
+那个环境变量读（不在命令行上写密码，免得进 shell 历史和进程列表）。
+
+多人模式默认也只监听 127.0.0.1；`--host 0.0.0.0` 时启动日志醒目提示：明文 http
+下密码和 cookie 能被同网段的人截走，对外要放在 https 反向代理后面并加
+`--安全cookie`（或 KG_SECURE_COOKIE=1）。
 
 `gen run` 只管建库、编译、起服务。这个项目多一件事：**导入**。建完库是空的，
 知识点、条目、对照、单词都要导进去。早先只能起服务之后打接口，或者手写一段
@@ -248,6 +268,24 @@ def do_import() -> int:
     return run_import()
 
 
+def parse_login(argv: list, environ=None) -> tuple:
+    """多人模式：(login, secure_cookie, 去掉 --登录/--安全cookie 之后的参数)。
+    `py -m kg` 和 app.pyw 共用。默认单人（不登录）；--登录 或 KG_LOGIN 非空且不是 0
+    才要求登录。--安全cookie / KG_SECURE_COOKIE 让登录 cookie 只走 https。
+    """
+    environ = os.environ if environ is None else environ
+    on = lambda k: environ.get(k, "") not in ("", "0")
+    login = "--登录" in argv or on("KG_LOGIN")
+    secure = "--安全cookie" in argv or on("KG_SECURE_COOKIE")
+    return login, secure, [a for a in argv if a not in ("--登录", "--安全cookie")]
+
+
+def login_line(login: bool) -> str:
+    if login:
+        return "登录：多人模式（--登录 / KG_LOGIN）——要登录，学习记录按账号分开，管理侧只许教师"
+    return "登录：单人模式——不用登录，学习记录都记在 me 名下"
+
+
 def parse_mode(argv: list, environ=None) -> tuple:
     """是否模拟：(mock, 去掉 --mock/--real 之后的参数)。`py -m kg` 和 app.pyw 共用。
 
@@ -281,6 +319,183 @@ def mode_line(mock: bool) -> str:
     return "模式：" + mode_label(mock)
 
 
+# ----------------------------------------------------------------------
+# 账号：建教师、改密、并入 me
+# ----------------------------------------------------------------------
+
+
+def _db_path(argv: list) -> Path:
+    """--库 别的库（测试用临时库）；不给是 kg/app.db。"""
+    other = _opt(argv, "--库")
+    return Path(other) if other else PROJ / "app.db"
+
+
+def _db(path: Path):
+    import sqlite3
+    sys.path.insert(0, str(ROOT))
+    if Path(path) == PROJ / "app.db":
+        # 库不存在就建、已有的只加不改：user 表是后加的，老库靠这一步补上
+        from gen.project import ensure_db
+        ensure_db(PROJ)
+    elif not Path(path).is_file():
+        raise SystemExit(f"没有这个库：{path}")
+    con = sqlite3.connect(path)
+    con.execute("PRAGMA foreign_keys = ON")
+    return con
+
+
+def _opt(argv: list, name: str) -> str:
+    if name in argv:
+        i = argv.index(name)
+        if i + 1 < len(argv):
+            return argv[i + 1]
+        raise SystemExit(f"{name} 后面要跟一个值")
+    return ""
+
+
+def _positional(argv: list) -> list:
+    """去掉 --选项 和它们的值之后剩下的参数。"""
+    out, skip = [], False
+    for a in argv:
+        if skip:
+            skip = False
+        elif a in ("--显示名", "--密码环境变量", "--库"):
+            skip = True
+        elif not a.startswith("--"):
+            out.append(a)
+    return out
+
+
+def _ask_password(argv: list, environ=None) -> str:
+    """新密码：--密码环境变量 X 就从环境变量 X 读（测试用），否则交互输两次、不回显。"""
+    import getpass
+    from tools.auth import MIN_PASSWORD
+    environ = os.environ if environ is None else environ
+    var = _opt(argv, "--密码环境变量")
+    if var:
+        pw = environ.get(var, "")
+        if not pw:
+            raise SystemExit(f"环境变量 {var} 是空的")
+    else:
+        pw = getpass.getpass("密码：")
+        if getpass.getpass("再输一次：") != pw:
+            raise SystemExit("两次输入不一样，没改")
+    if len(pw) < MIN_PASSWORD:
+        raise SystemExit(f"密码至少 {MIN_PASSWORD} 位")
+    return pw
+
+
+def make_teacher(argv: list, environ=None) -> int:
+    """py -m kg 建教师 <用户名> [--显示名 X] [--密码环境变量 X]"""
+    sys.path.insert(0, str(ROOT))
+    from tools.auth import USERNAME_RE, hash_password
+    args = _positional(argv)
+    name = args[0].strip() if args else ""
+    if not USERNAME_RE.match(name):
+        print("用法：py -m kg 建教师 <用户名> [--显示名 X]（用户名只能用字母、数字、汉字和 _ . @ -）")
+        return 2
+    label = _opt(argv, "--显示名")
+    con = _db(_db_path(argv))
+    try:
+        if con.execute("SELECT 1 FROM user WHERE username = ?", (name,)).fetchone():
+            print(f"{name} 已经有了（要改密码用：py -m kg 改密 {name}）")
+            return 1
+        pw = _ask_password(argv, environ)
+        con.execute("INSERT INTO user(username, password_hash, display_name, role, disabled)"
+                    " VALUES (?, ?, ?, 'teacher', 0)", (name, hash_password(pw), label or None))
+        con.commit()
+    finally:
+        con.close()
+    print(f"建好了教师 {name}。多人模式启动：py -m kg --登录")
+    return 0
+
+
+def change_password(argv: list, environ=None) -> int:
+    """py -m kg 改密 <用户名> [--密码环境变量 X]：教师、学生都能改（本机管理员用）。"""
+    sys.path.insert(0, str(ROOT))
+    from tools.auth import hash_password
+    args = _positional(argv)
+    name = args[0].strip() if args else ""
+    if not name:
+        print("用法：py -m kg 改密 <用户名>")
+        return 2
+    con = _db(_db_path(argv))
+    try:
+        if not con.execute("SELECT 1 FROM user WHERE username = ?", (name,)).fetchone():
+            print(f"没有 {name} 这个账号")
+            return 1
+        pw = _ask_password(argv, environ)
+        con.execute("UPDATE user SET password_hash = ? WHERE username = ?",
+                    (hash_password(pw), name))
+        con.commit()
+    finally:
+        con.close()
+    print(f"{name} 的密码改好了（已经登录着的不会被踢下线，令牌到期前仍有效）")
+    return 0
+
+
+def learner_tables(con) -> list:
+    """库里所有带 learner 列的表：学习记录、偏好、对话、做题进度……按表名排。"""
+    names = [r[0] for r in con.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        " ORDER BY name")]
+    return [t for t in names
+            if any(c[1] == "learner" for c in con.execute(f'PRAGMA table_info("{t}")'))]
+
+
+def merge_me(argv: list) -> int:
+    """py -m kg 并入 me <用户名>：把单人模式下 me 的学习记录归到一个账号。
+
+    以后从单人转多人用。先整库备份（app.db.merge_时间.bak，*.bak 不进 git），
+    再在一个事务里把所有带 learner 列的表里 learner = 'me' 的行改成这个用户名。
+    这个账号已经有任何学习记录就不做：quiz_state、learner_pref 每人一行、
+    mastery 每人每点一行，两边都有的话合不到一起，得人来定留哪份。
+    """
+    import sqlite3
+    import time
+    args = _positional(argv)
+    if len(args) != 2 or args[0] != "me":
+        print("用法：py -m kg 并入 me <用户名>")
+        return 2
+    name = args[1].strip()
+    db = _db_path(argv)
+    con = _db(db)
+    try:
+        if not con.execute("SELECT 1 FROM user WHERE username = ?", (name,)).fetchone():
+            print(f"没有 {name} 这个账号（先在学生管理页建，或 py -m kg 建教师）")
+            return 1
+        tables = learner_tables(con)
+        mine = {t: con.execute(f'SELECT count(*) FROM "{t}" WHERE learner = ?', ("me",)).fetchone()[0]
+                for t in tables}
+        theirs = {t: con.execute(f'SELECT count(*) FROM "{t}" WHERE learner = ?', (name,)).fetchone()[0]
+                  for t in tables}
+        if not any(mine.values()):
+            print("me 名下没有学习记录，不用合并")
+            return 0
+        if any(theirs.values()):
+            busy = "、".join(f"{t} {n} 行" for t, n in theirs.items() if n)
+            print(f"{name} 已经有学习记录（{busy}），没合并：两边的进度合不到一起，要人来定")
+            return 1
+        bak = db.with_name(f"{db.name}.merge_{time.strftime('%Y%m%d_%H%M%S')}.bak")
+        dst = sqlite3.connect(bak)
+        try:
+            con.backup(dst)
+        finally:
+            dst.close()
+        print(f"已备份：{bak}")
+        with con:
+            for t in tables:
+                if mine[t]:
+                    con.execute(f'UPDATE "{t}" SET learner = ? WHERE learner = ?', (name, "me"))
+        for t in tables:
+            if mine[t]:
+                print(f"  {t}：{mine[t]} 行")
+    finally:
+        con.close()
+    print(f"me 的学习记录归到了 {name}。单人模式下 me 从头开始。")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     cmd = argv[0] if argv and not argv[0].startswith("-") else "run"
 
@@ -288,6 +503,12 @@ def main(argv: list[str]) -> int:
         return do_import()
     if cmd == "setup":
         return setup()
+    if cmd == "建教师":
+        return make_teacher(argv[1:])
+    if cmd == "改密":
+        return change_password(argv[1:])
+    if cmd == "并入":
+        return merge_me(argv[1:])
 
     code = setup()
     if code:
@@ -299,9 +520,13 @@ def main(argv: list[str]) -> int:
     # 默认真模型（跟 gen run 相反）：问老师要真回答。--mock 或 KG_MOCK=1 切回
     # 模拟，测试和不想花额度时用
     mock, extra = parse_mode(extra)
+    login, secure, extra = parse_login(extra)
     print(mode_line(mock))
+    print(login_line(login))
     print()
-    return gen_main(["run", str(PROJ)] + ([] if mock else ["--real"]) + extra)
+    return gen_main(["run", str(PROJ)] + ([] if mock else ["--real"])
+                    + (["--登录"] if login else []) + (["--安全cookie"] if secure else [])
+                    + extra)
 
 
 if __name__ == "__main__":

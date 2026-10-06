@@ -14,7 +14,7 @@
 # 整个导入在一个事务里：文件中途坏掉全部回滚，不会导一半。被拒的边不算
 # 意外，照常提交。
 
-接口 POST /kg/import2 动作 kg_import2
+接口 POST /kg/import2 动作 kg_import2 角色 teacher
   用包 common db http
 
   读JSONL node_rows = content/kg.jsonl

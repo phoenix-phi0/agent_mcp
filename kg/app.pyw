@@ -97,15 +97,21 @@ def build_app(argv: list, environ=None):
     """按命令行和环境变量决定真模型还是模拟，造出 Flask 应用。
 
     返回 (app, mock, title)。不开窗口、不起服务，测试直接调它。
-    --mock / KG_MOCK 的判断跟 py -m kg 是同一个函数（kg.__main__.parse_mode）。
+    --mock / KG_MOCK 的判断跟 py -m kg 是同一个函数（kg.__main__.parse_mode），
+    --登录 / KG_LOGIN（多人模式，要登录）也是（parse_login）。默认单人、不登录。
     """
     from gen.project import make_app
-    from kg.__main__ import mode_label, mode_line, parse_mode
+    from kg.__main__ import login_line, mode_label, mode_line, parse_login, parse_mode
 
     mock, _ = parse_mode(argv, environ)
+    login, secure, _ = parse_login(argv, environ)
     print(mode_line(mock))
-    app, _ = make_app(PROJ, real=not mock)
-    return app, mock, f"{TITLE}（{mode_label(mock)}）"
+    print(login_line(login))
+    # 单人模式照旧只传 real：跟改之前一模一样的调用
+    extra = {"login": True, "secure_cookie": secure} if login else {}
+    app, _ = make_app(PROJ, real=not mock, **extra)
+    title = f"{TITLE}（{mode_label(mock)}{'，多人登录' if login else ''}）"
+    return app, mock, title
 
 
 def main(argv: list = None) -> int:

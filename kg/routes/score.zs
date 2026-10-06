@@ -8,19 +8,13 @@
 # 「掌握」和解锁跟着得分走：答完一题由 scripts/mastery_update.zs 按得分改
 # mastery 的掌握标记（达标线 80、回落线 60），解锁看那个标记。
 #
-# 学习者不传就是 me，跟 learn.zs、node.zs 同一个默认值（这个项目没开
-# 认证，是一个人自己用的）。每个接口开头都是同一段：先取 {learner 或}
-# （缺了不会留成 {learner} 字面量），再判空补 me——空串和没传一样处理。
+# {learner} 由路由器注入（routes/auth.zs 的「认证 身份 learner 默认 me」）：单人
+# 模式是请求里的 learner、没给就是 me；多人模式是登录的人，请求体里的不算。
 
 
 # 记一次打分。分值 0–100 的整数。返回这个点打完之后的当前分。
-接口 POST /score/add 动作 score_add
+接口 POST /score/add 动作 score_add 角色 teacher
   用包 common db http
-
-  设 learner = {learner 或}
-  如果 {learner} 为空
-    设 learner = me
-  结束
 
   设 value = {value 或}
   如果 {value} 为空
@@ -57,11 +51,6 @@
 接口 POST /score/now 动作 score_now
   用包 db http
 
-  设 learner = {learner 或}
-  如果 {learner} 为空
-    设 learner = me
-  结束
-
   设 cond.learner = {learner}
   设 cond.point = {point 或}
   设 scores = 查询表 app.db score_now {cond}
@@ -73,11 +62,6 @@
 # 一个知识点的全部打分，从早到晚。
 接口 POST /score/history 动作 score_history
   用包 db http
-
-  设 learner = {learner 或}
-  如果 {learner} 为空
-    设 learner = me
-  结束
 
   设 point = {point 或}
   如果 {point} 为空
@@ -97,11 +81,16 @@
 # 一律不碰——不改旧行，也不因为算法变了重打。再调一次什么都不做。
 #
 # 给 learner 只补这个人，不给是所有人（这里不补 me：回填是维护动作，补的
-# 是库里所有人的缺口）。返回补了几行。
-接口 POST /score/rebuild 动作 score_rebuild
+# 是库里所有人的缺口）。所以读的是请求体原样的 {request.learner}，不是注入的
+# {learner}（单人模式那个没给也是 me）。多人模式下只许教师调，一律补所有人。
+# 返回补了几行。
+接口 POST /score/rebuild 动作 score_rebuild 角色 teacher
   用包 common db http
 
-  设 query.learner = {learner 或}
+  设 query.learner = {request.learner 或}
+  如果 {auth_mode} 等于 on
+    设 query.learner =
+  结束
   设 missing = 查询表 app.db score_missing {query}
   设 added = 0
   事务 app.db

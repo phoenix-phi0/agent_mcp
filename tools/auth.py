@@ -18,6 +18,14 @@
 
 scrypt（标准库 hashlib），存成 `scrypt$n$r$p$盐$哈希`。参数写进串里，
 以后调强度不影响旧密码。核对用 hmac.compare_digest，不按字节短路比较。
+
+## 登录限流
+
+同一个用户名、或同一个来源地址，连续失败 5 次就锁 5 分钟（LIMIT_FAILS、
+LIMIT_SECONDS）。计数在内存里，重启就清；多进程部署各算各的。用户名不管
+存不存在都计数、锁住时回同一句话，看不出哪个名字是真的。成功一次清掉
+这个用户名和这个来源的计数。按来源计数的代价：一个教室共用一个出口地址
+时，五次输错会把整间教室锁 5 分钟。
 """
 
 import base64
@@ -25,11 +33,17 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
+import threading
 import time
 from pathlib import Path
 
 COOKIE = "zs_auth"
+# 用户名不许有空格：它会被当成 {current_user} 传进「查询 … current_user={current_user}」
+# 这类按空格切的动词参数里。auth 包的注册、建号和 kg 的命令行建教师共用
+USERNAME_RE = re.compile(r"^[A-Za-z0-9_.@\-\u4e00-\u9fff]{1,40}$")
+MIN_PASSWORD = 6
 TTL = 7 * 24 * 3600            # 令牌有效期：一周
 SECRET_FILE = ".auth_secret"
 
@@ -133,3 +147,56 @@ def dummy_verify(password: str) -> None:
     if _DUMMY is None:
         _DUMMY = hash_password(secrets.token_hex(8))
     verify_password(password, _DUMMY)
+
+
+# ----------------------------------------------------------------------
+# 登录限流
+# ----------------------------------------------------------------------
+
+LIMIT_FAILS = 5                # 连续失败几次锁住
+LIMIT_SECONDS = 5 * 60         # 锁多久
+
+
+class LoginLimiter:
+    """按键（用户名、来源地址）记连续失败。内存里，线程安全。
+
+    键带上项目目录：同一个进程里起了几个项目（测试就是这样）互不牵连。
+    """
+
+    def __init__(self, fails: int = LIMIT_FAILS, seconds: int = LIMIT_SECONDS):
+        self.fails = fails
+        self.seconds = seconds
+        self._lock = threading.Lock()
+        self._data = {}         # 键 -> [连续失败次数, 锁到什么时候]
+
+    def locked(self, keys, now: float = None) -> bool:
+        now = time.time() if now is None else now
+        with self._lock:
+            for k in keys:
+                rec = self._data.get(k)
+                if rec and rec[1] > now:
+                    return True
+        return False
+
+    def fail(self, keys, now: float = None) -> None:
+        now = time.time() if now is None else now
+        with self._lock:
+            for k in keys:
+                rec = self._data.setdefault(k, [0, 0.0])
+                if rec[1] and rec[1] <= now:
+                    rec[0], rec[1] = 0, 0.0      # 锁过期了，重新数
+                rec[0] += 1
+                if rec[0] >= self.fails:
+                    rec[1] = now + self.seconds
+
+    def ok(self, keys) -> None:
+        with self._lock:
+            for k in keys:
+                self._data.pop(k, None)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._data.clear()
+
+
+LIMITER = LoginLimiter()

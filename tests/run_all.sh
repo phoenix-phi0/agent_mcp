@@ -72,6 +72,7 @@ run 老师讲语法  $PY tests/kg/test_teacher_bunpou.py
 run 问老师      $PY tests/kg/test_teacher_chat.py
 run 请老师讲课  $PY tests/kg/test_teacher_lesson.py
 run 教材和进度  $PY tests/kg/test_pages.py
+run 多人模式    $PY tests/kg/test_multiuser.py
 run 并发用包    $PY tests/dsl/test_use_concurrent.py
 run 假模型脚本  $PY tests/dsl/test_mock_script.py
 run 模型可选    $PY tests/dsl/test_model_select.py
@@ -98,6 +99,7 @@ run 默写E2E     bash -c "cd $M/tests/e2e && node dictation_run.js"
 run 教材进度E2E bash -c "cd $M/tests/e2e && node pages_run.js"
 run 教材系列E2E bash -c "cd $M/tests/e2e && node series_run.js"
 run 教材导入E2E bash -c "cd $M/tests/e2e && node textbook_import_run.js"
+run 多人E2E     bash -c "cd $M/tests/e2e && node multiuser_run.js"
 run app2编译    bash -c "cd $M/app2 && $PY build.py"
 
 # 上传要先起 dsl/ 的服务

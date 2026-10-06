@@ -1,0 +1,37 @@
+# 学生管理（管理侧）：教师建学生账号、重置密码、停用 / 启用。接口在
+# routes/student.zs，全部「角色 teacher」：多人模式下学生调了 403，前端也按
+# /auth/me 的 hide 把「管理」这一组藏起来。
+#
+# 账号只在多人模式（py -m kg --登录）用得上；单人模式下这页也能开、能建号，
+# 留着以后切多人模式用。学生不能自己注册。
+#
+# 列表行上的「停用」「启用」带 username；重置密码输用户名和新密码。
+
+界面 自定义 学生管理 侧 管理
+  动作 student_home 远程 进入时 隐藏 刷新
+
+  分组 说明
+    文案 学生账号由老师建，学生不能自己注册。账号在多人模式（启动时加 --登录）下用：学生登录后做题、默写、问老师的记录各归各的。
+  结束
+  分组 建账号 横排 间距 12px 对齐 flex-end
+    字段 username 宽 160px 提示 字母数字或汉字，不能有空格 用户名
+    字段 display_name 宽 160px 显示名
+    字段 password_hash 绑 password 控件 密码 宽 160px 初始密码（至少6位）
+    动作 student_create 远程 清空 建账号
+  结束
+  分组 重置密码 横排 间距 12px 对齐 flex-end
+    字段 reset_user 宽 160px 学生用户名
+    字段 new_password 控件 密码 宽 160px 新密码（至少6位）
+    动作 student_reset 远程 清空 重置密码
+  结束
+
+  列表 学生表 绑 students
+    列 username 用户名
+    列 display_name 显示名
+    列 account_state 状态
+    列 attempt_n 作答数
+    列 last_active 最近学习
+    动作 student_disable 远程 带 username 当 row.account_state==='正常' 停用
+    动作 student_enable 远程 带 username 当 row.account_state==='已停用' 启用
+  结束
+结束

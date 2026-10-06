@@ -1268,6 +1268,10 @@ def render_vue(screens, title="UI", options_map=None, rows=None,
         "nav_json": json.dumps(nav or [], ensure_ascii=False),
         # 导航里的「退出登录」：只有真有这个接口时才放，不然点了没反应
         "nav_logout": bool(nav) and "auth_logout" in (endpoints or {}),
+        # 有 auth_me 就在页面打开、登录、退出时问一次「现在是谁」：顶栏显示名字，
+        # 按它给的 hide 藏掉某些「侧」（kg 的学生看不到「管理」）
+        "has_me": "auth_me" in (endpoints or {}),
+        "has_logout": "auth_logout" in (endpoints or {}),
         "has_shared_state": bool(shared),
         "shared_json": json.dumps(shared, ensure_ascii=False),
         "has_endpoints": bool(endpoints),

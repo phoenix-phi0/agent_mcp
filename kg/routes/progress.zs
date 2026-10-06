@@ -15,15 +15,11 @@
 #   state.dictation 单词默写（dictation_stats）：练过几个词、正确率、错词本几个，
 #                  链接到默写页。读的是 word_attempt，跟上面的学习记录分开
 #
-# 学习者不传就是 me，达标线不传就是得分 80、回落线 60——跟
+# {learner} 由路由器注入（单人模式没给是 me，多人模式是登录的人），达标线不传就是得分 80、回落线 60——跟
 # scripts/mastery_update.zs 同一套默认值。
 接口 POST /progress/page 动作 progress_page
   用包 db http
 
-  设 learner = {learner 或}
-  如果 {learner} 为空
-    设 learner = me
-  结束
   设 line = {line 或}
   如果 {line} 为空
     设 line = 80

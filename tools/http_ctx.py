@@ -59,7 +59,7 @@ RESPONSE_FIELDS = ("messages", "state", "stream", "form", "lists", "go")
 
 
 def set_bucket(bucket: dict | None = None, uploads: dict | None = None,
-               user: str = "") -> dict:
+               user: str = "", remote: str = "") -> dict:
     """建立本次请求的响应上下文。路由器在跑脚本前调。
 
     uploads 是这次请求带上来的文件（字段名 -> Flask 的 FileStorage）。
@@ -67,10 +67,13 @@ def set_bucket(bucket: dict | None = None, uploads: dict | None = None,
     「存文件」动词从这儿取。
 
     user 是路由器从 cookie 认出来的当前用户，没登录是空串。
+
+    remote 是请求的来源地址（Flask 的 remote_addr），登录限流按它计数。
     """
     _ctx.bucket = {} if bucket is None else bucket
     _ctx.uploads = uploads or {}
     _ctx.user = user or ""
+    _ctx.remote = remote or ""
     _ctx.auth = None
     return _ctx.bucket
 
@@ -78,6 +81,11 @@ def set_bucket(bucket: dict | None = None, uploads: dict | None = None,
 def current_user() -> str:
     """当前登录的用户，没登录或不在请求里是空串。"""
     return getattr(_ctx, "user", "") or ""
+
+
+def current_remote() -> str:
+    """当前请求的来源地址，不在请求里是空串。"""
+    return getattr(_ctx, "remote", "") or ""
 
 
 def request_auth(action) -> bool:
@@ -123,4 +131,5 @@ def take_bucket() -> dict:
     # 当前用户同理：留着的话，下一个请求在认人之前调到的动词会以为是
     # 上一个人。登录/退出要求不在这儿清，路由器组完响应后用 take_auth 取
     _ctx.user = ""
+    _ctx.remote = ""
     return out

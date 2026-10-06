@@ -9,12 +9,8 @@
   # 左边的列表和右边的图用同一份数据：都带 state（掌握/可学/锁定），
   # 引擎按它给列表行加 row-done / row-open / row-locked，跟图上的颜色一致。
   # 早先列表走 node_all（只有编号和名称），行就没有状态色。
-  # 学习者不传就是 me，跟 learn.zs、score.zs 同一个默认值。早先这里是空串：
-  # 答题记在 me 名下、图按「没有人」去查，图上什么都不变，也不报错。
-  设 learner = {learner 或}
-  如果 {learner} 为空
-    设 learner = me
-  结束
+  # {learner} 由路由器注入（单人模式没给是 me，多人模式是登录的人）。早先这里
+  # 默认是空串：答题记在 me 名下、图按「没有人」去查，图上什么都不变，也不报错。
   设 who.learner = {learner}
   设 nodes = 查询表 app.db kg_graph_nodes {who}
   设 group.nodes = {nodes}
@@ -55,11 +51,7 @@
   响应 lists {lists_out}
 
   # 这个点答对几道、答了几道（mastery 左连接，没做过说「还没做过」）。
-  # 学习者不传就是 me，跟 node_list 同一个默认值
-  设 learner = {learner 或}
-  如果 {learner} 为空
-    设 learner = me
-  结束
+  # {learner} 由路由器注入，跟 node_list 同一个
   设 this_point.learner = {learner}
   设 this_point.code = {code}
   设 tally = 查一值表 app.db node_tally {this_point}

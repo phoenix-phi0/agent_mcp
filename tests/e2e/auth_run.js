@@ -17,7 +17,9 @@ const { JSDOM } = require("jsdom");
 const MCP = "/home/ysc/mcp";
 const PY = MCP + "/.venv/bin/python";
 const PROJ = "/tmp/e2e_auth";
-const PORT = 8197;
+// 端口可配：8197 常年跑着 kg 的常驻服务，早先写死 8197 时这一组总是起不来。
+// 默认 8187（别的 e2e 用 8188-8199），AUTH_E2E_PORT 能改
+const PORT = Number(process.env.AUTH_E2E_PORT || 8187);
 const BASE = `http://127.0.0.1:${PORT}`;
 
 let pass = 0, fail = 0;

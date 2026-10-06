@@ -24,6 +24,8 @@
 <% set has_poll = has_poll if has_poll is defined else false %>
 <% set has_row_remote = has_row_remote if has_row_remote is defined else false %>
 <% set nav_logout = nav_logout if nav_logout is defined else false %>
+<% set has_me = has_me if has_me is defined else false %>
+<% set has_logout = has_logout if has_logout is defined else false %>
 <% set has_files = file_fields_json != "{}" %>
 <% set has_graphs = has_graphs if has_graphs is defined else false %>
 const { createApp, ref, computed } = Vue;
@@ -135,7 +137,8 @@ const _app = createApp({
     // 登录。界面名「登录」「注册」是约定（gen auth 生成的就叫这两个）：
     // 收到 401 时跳到「登录」，登录成功后回到被打断的那个界面。
     const LOGIN = "登录";
-    const AUTH_SCREENS = [LOGIN, "注册"];
+    // 「改密码」也算：登录之后才用得上的账号页，不进导航、不当首页
+    const AUTH_SCREENS = [LOGIN, "注册", "改密码"];
     let afterLogin = "";
     const firstAppScreen = () =>
       (screens.find(s => !AUTH_SCREENS.includes(s.name)) || screens[0]).name;
@@ -318,6 +321,9 @@ const _app = createApp({
       } catch (e) {
         data = { error: `服务器返回的不是 JSON（${r.status}）` };
       }
+<% if has_me %>
+      if (r.status === 401) me.value = { user: "", label: "", hide: [] };
+<% endif %>
       if (r.status === 401 && current.value.name !== LOGIN
           && screens.some(s => s.name === LOGIN)) {
         if (!AUTH_SCREENS.includes(current.value.name)) {
@@ -379,6 +385,10 @@ const _app = createApp({
           showNotice(text, "no");
         }
       }
+<% if has_me %>
+      // 登录、退出都带 go 回来：换了人，顶栏的名字和能看的「侧」跟着换
+      if (resp.go) refreshMe();
+<% endif %>
       // go：后端让前端换到哪个界面。「@来处」是登录前被打断的那个地址。
       if (resp.go === "@来处") {
         const back = afterLogin;
@@ -398,6 +408,38 @@ const _app = createApp({
         }
       }
     }
+<% endif %>
+<% if has_me %>
+    // 现在是谁（auth_me）：{user, label, hide}。开着登录时顶栏显示名字、「改密码」
+    // 和「退出」；hide 里的「侧」（学生的是「管理」）不进导航，地址直接打过去也
+    // 退回首页。这只是界面上藏起来——真正把关的是后端接口的「角色」（403）。
+    // 没开登录时 user 是空串，顶栏什么都不多。
+    const me = ref({ user: "", label: "", hide: [] });
+    async function refreshMe() {
+      try {
+        const r = await fetch(endpoints.auth_me, { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "auth_me", form: {} }) });
+        const d = await r.json();
+        me.value = { user: d.user || "", label: d.label || d.user || "",
+                     hide: Array.isArray(d.hide) ? d.hide : [] };
+      } catch (e) {
+        me.value = { user: "", label: "", hide: [] };
+      }
+      guardSide();
+    }
+    function hiddenScreen(name) {
+      const s = screens.find(x => x.name === name);
+      return !!(s && s.side && me.value.hide.includes(s.side));
+    }
+    function guardSide() {
+      if (hiddenScreen(route.value)) {
+        showNotice("没有权限打开这个页面", "no");
+        go(firstAppScreen());
+      }
+    }
+    window.addEventListener("hashchange", guardSide);
+    refreshMe();
 <% endif %>
     function onSubmit() { console.log("submit", current.value.name, form.value); }
 <% if has_endpoints %>
@@ -1060,7 +1102,7 @@ const _app = createApp({
 <% endif %>
     }
 <% endif %>
-    return { route, params, forms, form, rowsOf, lists, notice, nav, AUTH_SCREENS, current, busy, pending, go, isHref, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_row_remote %>, onRowRemote<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
+    return { route, params, forms, form, rowsOf, lists, notice, nav, AUTH_SCREENS, current<% if has_me %>, me<% endif %>, busy, pending, go, isHref, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_row_remote %>, onRowRemote<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
   },
   template: `
 {#- 顶部导航。两种来路：
@@ -1082,24 +1124,37 @@ const _app = createApp({
 <% if nav_logout %>
 {#- 退出登录是个动作，不是跳转，所以用 button 而不是 a：键盘和读屏软件
     认得出区别，测试里按文字找按钮也才找得到。样式上跟导航项一致。 -#}
+<% if has_me %>
+      <span v-if="me.user" class="nav-user-name">{{ me.label }}</span>
+<% endif %>
       <button type="button" class="nav-logout" @click.prevent="submitTo('auth_logout')">退出登录</button>
 <% endif %>
     </nav>
 <% elif not has_goto and screens|length > 1 %>
 {#- 「侧 管理」的界面不跟学习者的页面混排：左边是没写「侧」的，写了的按
     组名归到右边一组，前面一个组名（「管理」）。只是位置分开，不是权限。 -#}
-    <nav>
-      <a v-for="s in screens.filter(s => !s.side)" :key="s.name"
+    <nav v-if="current.name !== '登录' && current.name !== '注册'">
+      <a v-for="s in screens.filter(s => !s.side).filter(s => !AUTH_SCREENS.includes(s.name))" :key="s.name"
          :class="{ active: current.name === s.name }"
          href="#" @click.prevent="go(s.name)">{{ s.name }}</a>
 <% for side in nav_sides %>
-      <span class="nav-side"<% if loop.first %> style="margin-left:auto"<% endif %>>
+      <span class="nav-side"<% if loop.first %> style="margin-left:auto"<% endif %><% if has_me %> v-if="!me.hide.includes('<%= side %>')"<% endif %>>
         <span class="nav-side-h"><%= side %></span>
         <a v-for="s in screens.filter(s => s.side === '<%= side %>')" :key="s.name"
            :class="{ active: current.name === s.name }"
            href="#" @click.prevent="go(s.name)">{{ s.name }}</a>
       </span>
 <% endfor %>
+<% if has_me %>
+{#- 开着登录时：谁登录着、改密码、退出。没开登录（单人用）user 是空串，不显示 -#}
+      <span v-if="me.user" class="nav-user">
+        <span class="nav-user-name">{{ me.label }}</span>
+        <a v-if="screens.some(s => s.name === '改密码')" href="#" @click.prevent="go('改密码')">改密码</a>
+<% if has_logout %>
+        <button type="button" class="nav-logout" @click.prevent="submitTo('auth_logout')">退出</button>
+<% endif %>
+      </span>
+<% endif %>
     </nav>
 <% endif %>
     <% for screen_node in screens %>

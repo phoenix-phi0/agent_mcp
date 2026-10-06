@@ -42,13 +42,30 @@ end、reset、verdict… 见 dsl_core.KEYWORDS）和 in。
 HTTP 接口里路由器注入的变量（英文名，放在请求字段之后，请求体伪造不了）：
 
     {request}        整个请求体（字典），写库表这类动词收它
-    {current_user}   登录的用户名，没登录是空串
+    {current_user}   登录的用户名，没登录（或没开登录）是空串
+    {current_role}   「认证 核对」查出的角色（teacher / student…），没有是空串
+    {auth_mode}      on / off：这次启动要不要登录
     {session.xxx}    会话状态，改了自动存回
     {run_mode}       real / mock，当前是不是假客户端
 
 请求的表单字段、地址参数直接就是变量（{learner}、{lesson}）。局部变量跟
-它们同名时含义要一样（设 learner = {learner 或} 补默认值可以），别用一个
-同名的局部变量盖掉后面还要读的请求字段。
+它们同名时含义要一样，别用一个同名的局部变量盖掉后面还要读的请求字段。
+
+认证（路由文件顶层的声明，详见 tools/dsl_http.py 的「认证」一节）：
+
+    认证 必须                     一直要登录，标「公开」的接口例外
+    认证 可选                     平时不要登录；启动时 --登录（gen run / dsl_http，
+                                  Router(login=True)）才等同「认证 必须」。
+                                  不开时跟没写这行完全一样
+    认证 核对 app.db user_auth    每个请求按用户名再查一次：查不到（停用）当没登录，
+                                  查到的 role 注入成 {current_role}
+    认证 身份 learner 默认 me     注入「这是谁的数据」：开着登录时是登录的人，请求体
+                                  里的 learner（含 {request.learner}）盖掉；没开时
+                                  是请求体的 learner，没给是 me。接口里不用再写
+                                  「{learner 或} 空了补 me」
+    认证 角色 teacher 教师        角色的中文名（403 说明「需要教师权限」）
+    接口 POST /x 动作 y 角色 teacher   开着登录时只许这个角色，别人 403；
+                                  没开登录时不查
 
 三个后缀（挂在 问/问JSON/流式/对话/系统 末尾）：
 

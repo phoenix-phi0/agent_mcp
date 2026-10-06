@@ -72,7 +72,7 @@
 # 模型回来之后一起写，一个事务：模型调用出错时这一轮整个不记，不会留下
 # 一句没有回答的问话。老师那条的 links 原文记在 links 列。
 #
-# 学习者不传就是 me，跟做题、学习记录同一个默认值；达标线（得分 80，
+# {learner} 由路由器注入（见 learn.zs 开头），对话记录按它分开；达标线（得分 80，
 # 回落线 60）跟学习进度页一样。
 #
 # 教材系列：老师知道学习者当前用哪套教材（series_current，教材页的「系列」
@@ -91,10 +91,6 @@
 接口 POST /teacher/state 动作 teacher_state
   用包 common db http
 
-  设 learner = {learner 或}
-  如果 {learner} 为空
-    设 learner = me
-  结束
   设 query.learner = {learner}
   设 history_rows = 查询表 app.db chat_history {query}
   遍历 row 于 {history_rows}
@@ -109,10 +105,6 @@
 接口 POST /teacher/send 动作 teacher_send
   用包 common db http
 
-  设 learner = {learner 或}
-  如果 {learner} 为空
-    设 learner = me
-  结束
   设 message = {content 或}
   设 lesson_pick = {lesson 或}
   # 前端回显过的问话不用再回；lesson 参数进来、问话是这里拼的，要回给前端

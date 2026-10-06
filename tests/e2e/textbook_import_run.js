@@ -187,8 +187,9 @@ let server = null;
   await waitFor(() => p.nav("教材导入"));
   const side = p.$("nav .nav-side");
   say(!!side && side.querySelector(".nav-side-h").textContent.trim() === "管理"
-      && [...side.querySelectorAll("a")].map(a => a.textContent.trim()).join("|") === "教材导入",
-      "「教材导入」在右边「管理」那一组");
+      // 管理组里还有「学生管理」（多人模式的账号页，ui/student.ui），按 .ui 文件名排在前面
+      && [...side.querySelectorAll("a")].map(a => a.textContent.trim()).join("|") === "学生管理|教材导入",
+      "「教材导入」在右边「管理」那一组（同组还有「学生管理」）");
   const left = p.$$("nav > a").map(a => a.textContent.trim());
   say(left.includes("教材") && left.includes("问老师") && !left.includes("教材导入"),
       `学习者的页面在左边，不含教材导入：${left.join("、")}`);

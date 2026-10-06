@@ -23,7 +23,7 @@
 #
 # 条目、知识点要先导进来（kg/import2），所以 run_import 里这个排在它后面。
 
-接口 POST /lesson/import 动作 lesson_import
+接口 POST /lesson/import 动作 lesson_import 角色 teacher
   用包 common db http data text
 
   # 导入本身在 scripts/lesson_import.zs（教材导入页的「确认导入」也调它）
@@ -74,7 +74,7 @@
 接口 POST /lesson/list 动作 lesson_list
   用包 db http data
 
-  设 pref.learner = {learner 或 me}
+  设 pref.learner = {learner}
   设 pref.series = {series 或}
   如果 {pref.series} 不为空
     设 affected = 写库表 app.db learner_pref_set {pref}
@@ -123,7 +123,7 @@
 接口 POST /lesson/one 动作 lesson_one
   用包 db http data
 
-  设 pref.learner = {learner 或 me}
+  设 pref.learner = {learner}
   设 current = 查一行表 app.db series_current {pref}
   设 lesson = {lesson 或}
   如果 {lesson} 为空

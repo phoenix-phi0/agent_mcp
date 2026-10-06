@@ -10,7 +10,7 @@
 # 知识点不存在时词照样导，只是不挂——一个拼错的编号不该让整批词都进不去，
 # 而挂错知识点比没挂更难发现。
 
-接口 POST /word/import2 动作 word_import2
+接口 POST /word/import2 动作 word_import2 角色 teacher
   用包 common db http
 
   设 file = {file 或 content/words.jsonl}

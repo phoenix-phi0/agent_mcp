@@ -24,7 +24,7 @@
 结束
 
 
-接口 POST /word/create 动作 word_save
+接口 POST /word/create 动作 word_save 角色 teacher
   用包 db http
   事务 app.db
     设 affected = 写库表 app.db word_insert {request}
@@ -36,7 +36,7 @@
 结束
 
 
-接口 POST /word/update 动作 word_update
+接口 POST /word/update 动作 word_update 角色 teacher
   用包 db http
   # 没带主键就别进事务：绑定时报「缺少参数」，在事务里会变成 500
   如果 {request.id} 为空
@@ -56,7 +56,7 @@
 结束
 
 
-接口 POST /word/delete 动作 word_remove
+接口 POST /word/delete 动作 word_remove 角色 teacher
   用包 db http
   如果 {request.id} 为空
     返回 {"error":"没有指定要删哪一条"} 400
