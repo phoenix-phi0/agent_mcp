@@ -418,10 +418,74 @@ def compute_nav(screens, has_auth: bool) -> list:
     return out
 
 
+# 按「端」拆出来的页面：地址 -> 文件，起服务时照它把 /teacher 送到 teacher.html
+PAGES_FILE = "pages.json"
+
+
+def split_pages(screens, roles: dict) -> list:
+    """按界面的「端」把一个应用拆成几个页面，每个页面一个入口地址。
+
+    主页面（地址 /）是入口界面（screens 里第一个不是登录页的）所在的端，没写
+    「端」的界面也归它；别的端各一个页面，地址取「认证 角色 teacher 教师」里
+    的角色代号（/teacher），没有对得上的代号用 end1、end2。登录、改密码这些
+    账号页每个页面都有。只有一端（或都没写「端」）时就一个页面，跟原来一样。
+
+    roles 是 {角色代号: 中文名}（tools/dsl_http.py 的 auth_config）。返回
+    [{end, slug, main, screens}]，主页面在最前、slug 是空串。
+    """
+    app = [s for s in screens if s.name not in AUTH_SCREENS]
+    auth = [s for s in screens if s.name in AUTH_SCREENS]
+    main = app[0].audience if app else ""
+    ends = []
+    for s in app:
+        if s.audience and s.audience != main and s.audience not in ends:
+            ends.append(s.audience)
+    pages = [{"end": main, "slug": "", "main": True,
+              "screens": [s for s in screens if s.name in AUTH_SCREENS
+                          or not s.audience or s.audience == main]}]
+    code_of = {label: code for code, label in roles.items()}
+    for i, end in enumerate(ends, 1):
+        slug = end if end in roles else code_of.get(end, "")
+        if not (slug.isascii() and slug.isidentifier()):
+            slug = f"end{i}"
+        pages.append({"end": end, "slug": slug, "main": False,
+                      "screens": [s for s in app if s.audience == end] + auth})
+    return pages
+
+
+def page_options(pages: list, page: dict, roles: dict) -> dict:
+    """render_vue 的 page（见 tools/ui.py）：这一页是哪一端、别的端在哪个地址。"""
+    if len(pages) == 1:
+        return {}
+    code_of = {label: code for code, label in roles.items()}
+    ends = {}
+    for pg in pages:
+        path = "/" + pg["slug"]
+        for key in (pg["end"], code_of.get(pg["end"], "")):
+            if key:
+                ends[key] = path
+    main_end = pages[0]["end"]
+    mine = {s.name for s in page["screens"]}
+    return {"end": page["end"], "main": page["main"], "role": page["slug"],
+            "badge": "" if page["main"] else f"{page['end']}端",
+            "ends": ends,
+            "home": None if page["main"] else
+            {"path": "/", "label": f"打开{main_end}端" if main_end else "打开主页"},
+            "elsewhere": {s.name: (pg["end"] or "主页")
+                          for pg in pages if pg is not page
+                          for s in pg["screens"] if s.name not in mine}}
+
+
 def build(root: Path, entry: str = "", title: str = "") -> list:
-    """把 ui/*.ui 合并、展开、编译到 web/。有挡路的问题就抛。"""
+    """把 ui/*.ui 合并、展开、编译到 web/。有挡路的问题就抛。
+
+    界面写了不同的「端」（kg 的「端 学生」「端 教师」）时拆成几个页面：主页面
+    照旧是 index.html（地址 /），别的端是 <代号>.html（地址 /<代号>，比如
+    /teacher），见 split_pages。各页只有自己那一端的界面，标题后面带端名
+    （「日语学习·教师端」）。
+    """
     from tools import ui_entity, ui_site
-    from tools.dsl_http import endpoints_of
+    from tools.dsl_http import auth_config, endpoints_of
     from tools.entity import field_table, options_map
     from tools.ui import compile_ui
 
@@ -455,14 +519,26 @@ def build(root: Path, entry: str = "", title: str = "") -> list:
     except Exception as e:
         raise ProjectError(f"读接口失败：{e}") from e
 
-    r = compile_ui(screens, backend="vue", fields=field_table(entities),
-                   require_bind=True,
-                   options={"title": title or root.name,
-                            "options_map": options_map(entities),
-                            "endpoints": endpoints,
-                            "content_root": str(root / "ui"),
-                            "nav": compute_nav(screens, "auth_logout" in endpoints)})
-    issues += r["issues"]
+    try:
+        roles = auth_config(root / "routes")["roles"] if (root / "routes").is_dir() else {}
+    except Exception:
+        roles = {}
+    title = title or root.name
+    pages = split_pages(screens, roles)
+    results = []
+    for page in pages:
+        r = compile_ui(page["screens"], backend="vue", fields=field_table(entities),
+                       require_bind=True,
+                       options={"title": title if page["main"] else f"{title}·{page['end']}端",
+                                "options_map": options_map(entities),
+                                "endpoints": endpoints,
+                                "content_root": str(root / "ui"),
+                                "nav": compute_nav(page["screens"], "auth_logout" in endpoints),
+                                "page": page_options(pages, page, roles)})
+        # 各页面的问题合在一起报，同一条（共用的登录页上的）只报一次
+        seen = {(i.code, str(i)) for i in issues}
+        issues += [i for i in r["issues"] if (i.code, str(i)) not in seen]
+        results.append((page, r))
 
     blocking = [i for i in issues if getattr(i, "code", "") in BLOCKING]
     lines = [f"  {len(ui_files)} 个 .ui，{len(screens)} 个界面，"
@@ -475,16 +551,44 @@ def build(root: Path, entry: str = "", title: str = "") -> list:
 
     web = root / "web"
     web.mkdir(exist_ok=True)
-    files = dict(r["result"]["files"])
+    files = {}
+    routes = {}
+    for page, r in results:
+        got = dict(r["result"]["files"])
+        if VUE_LOCAL.is_file():
+            got["index.html"] = got["index.html"].replace(VUE_CDN, f"./{VUE_LOCAL.name}")
+        if page["main"]:
+            files.update(got)
+            continue
+        # 非主页面：<代号>.html 引自己的 <代号>.js / <代号>.css
+        slug = page["slug"]
+        html = got["index.html"]
+        for old, new in (('href="./style.css"', f'href="./{slug}.css"'),
+                         ('src="./app.js"', f'src="./{slug}.js"')):
+            assert html.count(old) == 1, f"index.html 里的 {old} 不是正好一处"
+            html = html.replace(old, new)
+        files[f"{slug}.html"] = html
+        files[f"{slug}.js"] = got["app.js"]
+        files[f"{slug}.css"] = got["style.css"]
+        routes[slug] = f"{slug}.html"
+        # 端名本身也能当地址（/教师）
+        routes[page["end"]] = f"{slug}.html"
     if VUE_LOCAL.is_file():
         shutil.copy2(VUE_LOCAL, web / VUE_LOCAL.name)
-        files["index.html"] = files["index.html"].replace(
-            VUE_CDN, f"./{VUE_LOCAL.name}")
     else:
         lines.append("  [提示] 没有本地 Vue，页面从 CDN 加载，断网会白屏")
+    import json
+    if routes:
+        files[PAGES_FILE] = json.dumps(routes, ensure_ascii=False, indent=1) + "\n"
+    else:
+        # 原来拆过、现在不拆了：留着旧的 pages.json，/teacher 还会打开过时的页面
+        (web / PAGES_FILE).unlink(missing_ok=True)
     for name, text in files.items():
         (web / name).write_text(text, encoding="utf-8")
     lines.append(f"  编译到 web/（{', '.join(sorted(files))}）")
+    for page in pages[1:]:
+        lines.append(f"  {page['end']}端：/{page['slug']}（{len(page['screens']) - len([s for s in page['screens'] if s.name in AUTH_SCREENS])} 个界面），"
+                     f"其余在 /")
     return lines
 
 
@@ -516,9 +620,28 @@ def make_app(root: Path, real: bool = False, login: bool = False,
     def _index():
         return send_from_directory(web, "index.html")
 
+    def page_of(name: str) -> str:
+        """按「端」拆出来的页面（/teacher、/教师）对到哪个 html，不是就空串。
+        每次现读 pages.json：服务开着时重新 build 过也对得上。"""
+        f = web / PAGES_FILE
+        if not f.is_file():
+            return ""
+        import json
+        try:
+            return str(json.loads(f.read_text(encoding="utf-8")).get(name) or "")
+        except ValueError:
+            return ""
+
     # 只服务 web/ 下真实存在的文件。接口是 POST，跟这条 GET 不冲突。
     @app.get("/<path:name>")
     def _static(name):
+        page = page_of(name.rstrip("/"))
+        if page:
+            if name.endswith("/"):
+                # /teacher/ 下面的 ./teacher.js 会解析成 /teacher/teacher.js
+                from flask import redirect
+                return redirect("/" + name.rstrip("/"))
+            return send_from_directory(web, page)
         p = (web / name).resolve()
         if web not in p.parents or not p.is_file():
             abort(404)
@@ -529,7 +652,7 @@ def make_app(root: Path, real: bool = False, login: bool = False,
 
 def run(root: Path, host: str = "127.0.0.1", port=None, real: bool = False,
         entry: str = "", open_browser: bool = True, login: bool = False,
-        secure_cookie: bool = False) -> int:
+        secure_cookie: bool = False, title: str = "") -> int:
     from tools.dsl_http import listen_warning, resolve_port
 
     _check_root(root)
@@ -540,7 +663,7 @@ def run(root: Path, host: str = "127.0.0.1", port=None, real: bool = False,
         # 只有接口的项目（比如知识图谱的导入和查询）也该能跑起来
         print("  没有 .ui，只起接口")
     else:
-        for line in build(root, entry):
+        for line in build(root, entry, title):
             print(line)
 
     from tools.dsl import DSLError
@@ -598,6 +721,7 @@ def main(argv=None) -> int:
     s = sub.add_parser("build", help="编译界面到 web/")
     s.add_argument("dir")
     s.add_argument("--入口", dest="entry", default="")
+    s.add_argument("--标题", dest="title", default="", help="页面标题，默认是目录名")
 
     s = sub.add_parser("auth", help="加上用户表、登录注册，并打开认证")
     s.add_argument("dir")
@@ -607,6 +731,7 @@ def main(argv=None) -> int:
     s = sub.add_parser("run", help="建库 + 编译 + 起服务")
     s.add_argument("dir")
     s.add_argument("--入口", dest="entry", default="")
+    s.add_argument("--标题", dest="title", default="", help="页面标题，默认是目录名")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=None)
     s.add_argument("--real", action="store_true", help="用真模型客户端")
@@ -635,7 +760,7 @@ def main(argv=None) -> int:
             print(f"\n下一步：py -m gen run {args.dir}")
             return 0
         if args.cmd == "build":
-            for line in build(root, args.entry):
+            for line in build(root, args.entry, args.title):
                 print(line)
             return 0
         if args.cmd == "auth":
@@ -649,7 +774,7 @@ def main(argv=None) -> int:
         if args.cmd == "run":
             return run(root, args.host, args.port, args.real, args.entry,
                        open_browser=not args.no_browser, login=args.login,
-                       secure_cookie=args.secure_cookie)
+                       secure_cookie=args.secure_cookie, title=args.title)
     except ProjectError as e:
         print(f"\n[出错] {e}")
         return 1

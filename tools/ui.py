@@ -945,7 +945,8 @@ def vue_backend(screens, options=None):
                        inline=options.get("inline", False),
                        vue_source=options.get("vue_source"),
                        vue_path=options.get("vue_path"),
-                       nav=options.get("nav"))
+                       nav=options.get("nav"),
+                       page=options.get("page"))
     return _envelope(screens, files, "vue")
 
 
@@ -1208,9 +1209,17 @@ def _walk_nodes(node):
         yield from _walk_nodes(c)
 
 
+def _page_info(page) -> dict:
+    """render_vue 的 page 补齐默认值：没拆页面时是一个不分端的主页面。"""
+    page = page or {}
+    return {"end": page.get("end", ""), "main": page.get("main", True), "role": page.get("role", ""),
+            "badge": page.get("badge", ""), "ends": page.get("ends") or {},
+            "home": page.get("home") or None, "elsewhere": page.get("elsewhere") or {}}
+
+
 def render_vue(screens, title="UI", options_map=None, rows=None,
                endpoints=None, inline=False, vue_source=None, vue_path=None,
-               template_dir=None, nav=None):
+               template_dir=None, nav=None, page=None):
     """Render the frontend. Jinja is imported here, not at module scope.
 
     inline=False  index.html + style.css + app.js, Vue from a CDN tag.
@@ -1225,6 +1234,17 @@ def render_vue(screens, title="UI", options_map=None, rows=None,
 
     Both paths render the same shell template — a second template for the
     inline case would duplicate the shell, and duplicates diverge.
+
+    page：按「端」拆成几个页面时，这一页是哪一端（gen/project.py 的
+    split_pages 算好传进来）。不给就是只有一个页面，跟原来一样：
+        end        这一页的端（「教师」），主页面是入口界面的端
+        main       是不是主页面（地址 /）
+        badge      顶栏最前面的标识（「教师端」），主页面是空的
+        role       页面的代号（teacher），顶栏加 class nav-role-<代号>
+        ends       {端名或角色代号: 地址}，登录的人不是这一端时往哪儿送
+        home       非主页面顶栏上「打开学生端」的地址和文字
+        elsewhere  {界面名: 端名}，别的页面上的界面：地址里打了它就提示「在
+                   教师端」，不进
     """
     import json
     from .render import frontend_renderer
@@ -1284,6 +1304,7 @@ def render_vue(screens, title="UI", options_map=None, rows=None,
         # 传了就用它，不管有没有「切到」；没传照旧按 has_goto 决定。
         "nav": bool(nav),
         "nav_json": json.dumps(nav or [], ensure_ascii=False),
+        "page_json": json.dumps(_page_info(page), ensure_ascii=False),
         # 导航里的「退出登录」：只有真有这个接口时才放，不然点了没反应
         "nav_logout": bool(nav) and "auth_logout" in (endpoints or {}),
         # 有 auth_me 就在页面打开、登录、退出时问一次「现在是谁」：顶栏显示名字，

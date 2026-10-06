@@ -64,6 +64,12 @@ nav a.active { background:var(--accent); color:#fff; border-color:var(--accent);
 }
 nav.nav-role-teacher { background:#fbf3e6; border-bottom:2px solid #b4690e; padding-bottom:10px; }
 nav.nav-role-teacher .nav-badge { background:#b4690e; }
+/* 非主页面（教师端）顶栏右边的「打开学生端」：没登录时它推到最右，有账号区时跟在后面 */
+.nav-home { margin-left:auto; padding-left:12px; font-size:12px; }
+.nav-user + .nav-home { margin-left:0; }
+.nav-home a { color:var(--muted); }
+/* 登录页上方：这是哪一端 */
+.page-end { max-width:360px; margin:24px auto 0; font-size:15px; font-weight:600; color:#b4690e; text-align:center; }
 nav.nav-role-teacher a.active { background:#b4690e; border-color:#b4690e; }
 .nav-user .nav-logout {
   background:none; border:1px solid transparent; color:var(--muted); cursor:pointer;

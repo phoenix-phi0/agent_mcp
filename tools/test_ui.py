@@ -203,7 +203,7 @@ def test_compile():
     # 消息带链接（m.link / m.link_text）：渲染成 <a :href>，只认站内 # 地址
     # 和 http(s)，javascript: 之类不渲染
     page = "\n".join(v for v in files.values() if isinstance(v, str))
-    check("消息流渲染消息里的链接", 'class="smsg-link" :href="m.link"' in page, True)
+    check("消息流渲染消息里的链接", 'class="smsg-link" :href="hrefOf(m.link)"' in page, True)
     check("链接显示 link_text，没有就显示地址", "{{ m.link_text || m.link }}" in page, True)
     check("链接只认 # 和 http(s)",
           "m.link.startsWith('#')" in page and "javascript" not in page.split("smsg-link")[0][-300:],
@@ -275,16 +275,16 @@ def test_links():
     # 对照：普通列照旧只出文字
     check("普通列照旧是文字", "<td>{{ row.level }}</td>" in page, True)
     check("地址列画成链接、地址取这一行的 href",
-          'class="cell-link" :href="row.href">{{ row.title }}</a>' in page, True)
+          'class="cell-link" :href="hrefOf(row.href)" :target="targetOf(row.href)">{{ row.title }}</a>' in page, True)
     check("地址列地址不合格时退回文字", '<template v-else>{{ row.title }}</template>' in page, True)
     check("链接的地址从共享状态取",
-          ':href="getPath(shared, \'reading.practice\')"' in page, True)
+          ':href="hrefOf(getPath(shared, \'reading.practice\'))"' in page, True)
     check("链接的「当」和地址检查合在一个 v-if 里",
           'v-if="(params.lesson) && isHref(getPath(shared, \'reading.practice\'))"' in page, True)
     check("没写「当」的链接只查地址",
           'v-if="isHref(getPath(shared, \'reading.back\'))"' in page, True)
     check("次要链接画成文字链接", 'class="link-plain"' in page, True)
-    check("isHref 导出给模板用", "go, isHref, reset" in js, True)
+    check("isHref 导出给模板用", "go, isHref, hrefOf, targetOf, reset" in js, True)
     check("isHref 只认 # 和 http(s)",
           's.startsWith("#") || s.startsWith("http://") || s.startsWith("https://")' in js, True)
     check("链接的共享路径有初值（读不到也不报错）",
@@ -389,14 +389,36 @@ def test_audience():
           and "screens.some(s => s.side === '管理' && visible(s))" in js, True)
     check("visible 认 role / role_label；首页、直接打地址都按它；先认人再进第一个界面",
           "s.audience !== m.role && s.audience !== m.roleLabel" in js
-          and "!hiddenScreen(s.name)" in js and "meReady.then(onRoute)" in js, True)
+          and "!hiddenScreen(s.name)" in js and "meReady.then(() => { if (!leaving) onRoute(); })" in js, True)
     check("顶栏的标识和按角色的 class", 'class="nav-badge"' in js and "'nav-role-' + me.role" in js, True)
     # 没有 auth_me 的项目：visible 恒真，照旧直接进第一个界面
     r2 = compile_ui(ui, backend="vue", fields={"username": "文本"},
                     options={"endpoints": {"report_one": "/report/one"}})
     js2 = r2["result"]["files"]["app.js"]
     check("没有 auth_me：visible 恒真、不等认人", "const visible = () => true;" in js2
-          and "meReady" not in js2 and "nav-badge" not in js2, True)
+          and "meReady" not in js2 and "me.badge" not in js2, True)
+    check("没拆页面：PAGE 是不分端的主页面", 'const PAGE = {"end": "", "main": true, "role": "", "badge": "", '
+          '"ends": {}, "home": null, "elsewhere": {}};' in js2, True)
+    # 按端拆出来的页面（gen/project.py 的 split_pages 传进来的 page）
+    page = {"end": "教师", "main": False, "role": "teacher", "badge": "教师端",
+            "ends": {"学生": "/", "教师": "/teacher"}, "home": {"path": "/", "label": "打开学生端"},
+            "elsewhere": {"做题": "学生"}}
+    r3 = compile_ui(ui, backend="vue", fields={"username": "文本"},
+                    options={"endpoints": eps, "page": page, "title": "日语学习·教师端"})
+    js3 = r3["result"]["files"]["app.js"]
+    check("page 进了 PAGE", '"elsewhere": {"做题": "学生"}' in js3 and '"badge": "教师端"' in js3, True)
+    check("别的端的界面：地址打了不进（hiddenScreen 认 elsewhere），登录的人不是这一端就送走或拒",
+          "s ? !visible(s) : elsewhere(name)" in js3 and "checkEnd(fresh)" in js3
+          and "leaveTo(there)" in js3 and "这里打不开，已回到首页" in js3, True)
+    check("顶栏：页面的标识、代号 class、「打开学生端」；登录页上方标出是哪一端",
+          "PAGE.badge || me.badge" in js3 and "'nav-role-' + PAGE.role" in js3
+          and 'class="nav-home"' in js3 and 'class="page-end"' in js3, True)
+    check("标题", "<title>日语学习·教师端</title>" in r3["result"]["files"]["index.html"], True)
+    r4 = compile_ui(ui, backend="vue", fields={"username": "文本"},
+                    options={"endpoints": {"report_one": "/report/one"}, "page": page})
+    js4 = r4["result"]["files"]["app.js"]
+    check("没有 auth_me 也守地址：一打开就 guardSide", "\n    guardSide();\n" in js4
+          and "elsewhere(name)" in js4 and "checkEnd" not in js4, True)
 
 def test_side_poll_row_remote():
     print("\n[侧、每隔、列表行上的远程动作、打开浮层留着参数]")

@@ -95,7 +95,7 @@
         {#- 「地址 href」：这一格画成链接，地址取这一行的 href 键。地址不合格
             （空的、不是 # 和 http(s)）就照常出文字，不画一个点了没反应的链接。 -#}
         <% elif c.href %>
-        <td><a v-if="isHref(row.<%= c.href %>)" class="cell-link" :href="row.<%= c.href %>">{{ row.<%= c.bind or c.name %> }}</a><template v-else>{{ row.<%= c.bind or c.name %> }}</template></td>
+        <td><a v-if="isHref(row.<%= c.href %>)" class="cell-link" :href="hrefOf(row.<%= c.href %>)" :target="targetOf(row.<%= c.href %>)">{{ row.<%= c.bind or c.name %> }}</a><template v-else>{{ row.<%= c.bind or c.name %> }}</template></td>
         <% else %>
         <td>{{ row.<%= c.bind or c.name %> }}</td>
         <% endif %>

@@ -1,4 +1,4 @@
-// 教材导入（管理侧）的端到端测试：真服务 + kg 项目真实生成的页面。
+// 教材导入（教师端 /teacher）的端到端测试：真服务 + kg 项目真实生成的页面。
 //
 //     cd tests/e2e && node textbook_import_run.js
 //
@@ -10,7 +10,9 @@
 // 起服务前先看端口空不空，被占了直接报出来，不去连别人的服务。
 //
 // 按人的操作顺序：
-//   导航：「教材导入」在右边「管理」那组，不跟学习者的页面混排
+//   导航：「教材导入」在教师端（/teacher，web/teacher.html），跟学情、学生管理一起；
+//         学生端（/）上没有它
+//   （下面「去教材页看看」链到学生端，地址换成 /#教材…、新标签页打开）
 //   进去：新建表单，改写默认勾着；填系列代号、显示名，选 md 文件，「开始解析」
 //   跳到审阅页：看到「正在解析」，页面自己轮询，跑完变「解析完了」，草稿课表 3 课
 //   点一课的标题进编辑页：改标题、保存；回审阅页
@@ -77,10 +79,13 @@ function portFree(port) {
 }
 
 const calls = [];
-function openPage(hash) {
-  const html = fs.readFileSync(WEB + "/index.html", "utf8")
+// path 是页面地址：/ 是学生端（index.html + app.js），/teacher 是教师端
+// （teacher.html + teacher.js），引擎按界面的「端」拆的（gen/project.py 的 split_pages）
+function openPage(hash, path = "/") {
+  const name = path === "/" ? "index" : path.slice(1);
+  const html = fs.readFileSync(WEB + `/${name}.html`, "utf8")
     .replace(/<script src="[^"]*"><\/script>/g, "");
-  const dom = new JSDOM(html, { url: BASE + "/" + (hash || ""), runScripts: "outside-only" });
+  const dom = new JSDOM(html, { url: BASE + path + (hash || ""), runScripts: "outside-only" });
   const w = dom.window;
   // 上传走 FormData：用 Node 自己的 FormData / File，Node 的 fetch 才会把它
   // 编成 multipart（jsdom 的 FormData Node 不认）
@@ -98,7 +103,7 @@ function openPage(hash) {
   w.console.log = () => {};
   w.console.warn = () => {};
   w.eval(fs.readFileSync(WEB + "/vue.global.prod.js", "utf8"));
-  w.eval(fs.readFileSync(WEB + "/app.js", "utf8"));
+  w.eval(fs.readFileSync(WEB + (path === "/" ? "/app.js" : `/${name}.js`), "utf8"));
   const $ = s => w.document.querySelector(s);
   const $$ = s => [...w.document.querySelectorAll(s)];
   const field = lbl => $$(".screen label.field").find(l => (l.querySelector(".lbl") || {}).textContent
@@ -182,18 +187,18 @@ let server = null;
   if (!up) { console.log("服务没起来：\n" + log); stop(1); }
   const hbLessons = db("SELECT count(*) n FROM lesson WHERE series = 'hanabira'")[0].n;
 
-  console.log("一、导航：管理侧");
+  console.log("一、导航：教师端");
   let p = openPage("");
+  await waitFor(() => p.nav("问老师"));
+  const left = p.$$("nav a").map(a => a.textContent.trim());
+  say(left.includes("教材") && left.includes("问老师") && !left.includes("教材导入") && !p.$("nav .nav-side"),
+      `学生端（/）只有学习的页面，没有「管理」那组：${left.join("、")}`);
+  p.close();
+  p = openPage("", "/teacher");
   await waitFor(() => p.nav("教材导入"));
-  const side = p.$("nav .nav-side");
-  say(!!side && side.querySelector(".nav-side-h").textContent.trim() === "管理"
-      // 管理组里还有「学情」「学生管理」（教师端的页，ui/report.ui、student.ui），按 .ui
-      // 文件名排在前面。单人模式不分端，这一组照常都在
-      && [...side.querySelectorAll("a")].map(a => a.textContent.trim()).join("|") === "学情|学生管理|教材导入",
-      "「教材导入」在右边「管理」那一组（同组还有「学情」「学生管理」）");
-  const left = p.$$("nav > a").map(a => a.textContent.trim());
-  say(left.includes("教材") && left.includes("问老师") && !left.includes("教材导入"),
-      `学习者的页面在左边，不含教材导入：${left.join("、")}`);
+  say(p.$$("nav > a").map(a => a.textContent.trim()).join("|") === "学情|学生管理|教材导入" && !p.$("nav .nav-side"),
+      // ui/report.ui、student.ui 按文件名排在前面
+      `教师端（/teacher）：${p.$$("nav > a").map(a => a.textContent.trim()).join("|")}`);
 
   console.log("二、新建导入");
   p.nav("教材导入").click();
@@ -267,7 +272,12 @@ let server = null;
   say(fs.existsSync(PROJ + "/content/series/minna/lessons.jsonl"), "写了 content/series/minna/lessons.jsonl");
 
   console.log("五、教材页");
-  p.link("去教材页看看").click();
+  // 教材页在学生端：链接换成 /#教材…，新标签页打开。这里照它的地址开学生端
+  const toBook = p.link("去教材页看看");
+  say(toBook.getAttribute("href").startsWith("/#") && toBook.getAttribute("target") === "_blank",
+      `「去教材页看看」链到学生端、新标签页：${toBook.getAttribute("href")} ${toBook.getAttribute("target")}`);
+  const teacherPage = p;
+  p = openPage(toBook.getAttribute("href").slice(1));
   say(await waitFor(() => p.hash() === "#教材"), "到了教材页");
   const sel = () => p.$$(".bar-top select")[0];
   say(await waitFor(() => sel() && [...sel().options].some(o => o.value === "minna" && o.textContent === "小测试教材")),
@@ -289,6 +299,11 @@ let server = null;
   say(sent.body && sent.body.form.lesson === "minna-001", "请求带着这一课的课号");
 
   console.log("六、撤下系列");
+  // 回教师端（教材那一页是新标签页开的，关掉；原来那页还停在审阅页，重开一页）
+  p.close();
+  teacherPage.close();
+  p = openPage("", "/teacher");
+  await waitFor(() => p.nav("教材导入"));
   p.nav("教材导入").click();
   const seriesRows = () => p.table("代号|名称|课数|状态") || [];
   say(await waitFor(() => seriesRows().length === 1 && seriesRows()[0][3].textContent.trim() === "在用"),

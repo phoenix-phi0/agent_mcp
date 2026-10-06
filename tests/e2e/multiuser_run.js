@@ -10,26 +10,33 @@
 // Node 的 fetch 不存 cookie，这里自己当浏览器：收到 Set-Cookie 就记下，之后的
 // 请求带上；Max-Age=0 就删掉（跟 auth_run.js 一样）。
 //
+// 学生端、教师端是两个页面（引擎按界面的「端」拆的，gen/project.py 的 split_pages）：
+// 学生端 /（web/index.html + app.js），教师端 /teacher（web/teacher.html + teacher.js）。
+//
 // 按人的操作顺序：
-//   一、打开页面没登录 → 被弹到登录页；没有注册的入口
-//   二、教师登录 → 落在「学情」（原来要去的 #做题 是学生端的）；顶栏「教师端」标识、
-//       「王老师」「退出」；导航只有教师页（学情、学生管理、教材导入）
+//   一、打开学生端没登录 → 被弹到登录页；没有注册的入口。打开教师端没登录 → 也是
+//       登录页，上面标着「教师端」，标题「…·教师端」
+//   二、教师在学生端登录 → 提示去教师端、跳到 /teacher；打开 /teacher 已经登着，落在
+//       「学情」；顶栏「教师端」标识、「王老师」「退出」「打开学生端」；导航只有教师页
 //   三、学生管理：建 s1、s2，表里出现；退出 → 回登录页、cookie 删了
-//   四、s1 登录：落在学生端首页；顶栏「小一」；学习页都在，看不到教师页
+//   四、s1 在教师端登录：被拒（「这是教师端」），cookie 删了；到学生端登录：落在学生端
+//       首页；顶栏「小一」；学习页都在，看不到教师页
 //   五、s1 做题一轮、默写一个（写错）：库里记在 s1
 //   六、s1 问老师：老师回答出现，库里对话记在 s1
-//   七、s1 直接打 #教材导入、#学情：退回首页并提示没有权限；接口 403「需要教师权限」
+//   七、s1 在学生端直接打 #教材导入、#学情：退回首页并提示在教师端；接口 403「需要教师
+//       权限」。登着学生打开 /teacher：回登录页说清楚，不退出、一个 403 都没有
 //   八、s1 改密码；退出 → s2 登录：问老师是空的、做题统计是空的；库里 s2 一条都没有
-//   九、教师再登录 → 学情里看到小一的数据（作答、正确率、错词本）→ 点进小一：最近
-//       作答、错词本、问老师记录 → 请 AI 写学情总结（假模型）：等待提示、出结果、存库
-//   十、教师直接打 #做题：退回学情并提示，没去调做题接口；接口 403「教师账号不参与
-//       学习」；新开一页打 #默写：先认人再进页面，一个 403 都没有；库里没有教师的学习记录
+//   九、教师在教师端再登录 → 学情里看到小一的数据（作答、正确率、错词本）→ 点进小一：
+//       最近作答、错词本、问老师记录 → 请 AI 写学情总结（假模型）：等待提示、出结果、存库
+//   十、教师在教师端直接打 #做题：退回学情并提示在学生端，没去调做题接口；接口 403
+//       「教师账号不参与学习」；登着教师打开学生端 #默写：送去 /teacher，一个 403 都没有；
+//       库里没有教师的学习记录
 //   十一、服务端没有 5xx、没有 Traceback
 
 const { execFileSync, spawn } = require("child_process");
 const fs = require("fs");
 const net = require("net");
-const { JSDOM } = require("jsdom");
+const { JSDOM, VirtualConsole } = require("jsdom");
 
 const MCP = "/home/ysc/mcp";
 const PY = MCP + "/.venv/bin/python";
@@ -85,21 +92,28 @@ async function browserFetch(u, o = {}) {
   return r;
 }
 
-function openPage(hash) {
-  const html = fs.readFileSync(WEB + "/index.html", "utf8")
+// path：/ 是学生端，/teacher 是教师端。页面要换到别的地址（location.href = "/teacher"）
+// 时 jsdom 不真的跳，只报一条「Not implemented: navigation」：记在 pg.left 里
+function openPage(hash, path = "/") {
+  const name = path === "/" ? "index" : path.slice(1);
+  const html = fs.readFileSync(WEB + `/${name}.html`, "utf8")
     .replace(/<script src="[^"]*"><\/script>/g, "");
-  const dom = new JSDOM(html, { url: BASE + "/" + (hash || ""), runScripts: "outside-only" });
+  const left = [];
+  const vc = new VirtualConsole();
+  vc.on("jsdomError", e => { if (/navigation/i.test(e.message)) left.push(e.message); });
+  const dom = new JSDOM(html, { url: BASE + path + (hash || ""), runScripts: "outside-only", virtualConsole: vc });
   const w = dom.window;
   w.fetch = browserFetch;
   w.console.log = () => {};
   w.console.warn = () => {};
   w.Element.prototype.scrollIntoView = function () {};
   w.eval(fs.readFileSync(WEB + "/vue.global.prod.js", "utf8"));
-  w.eval(fs.readFileSync(WEB + "/app.js", "utf8"));
+  w.eval(fs.readFileSync(WEB + (path === "/" ? "/app.js" : `/${name}.js`), "utf8"));
   const $ = s => w.document.querySelector(s);
   const $$ = s => [...w.document.querySelectorAll(s)];
   const pg = {
-    w, $, $$,
+    w, $, $$, left,
+    title: () => w.document.title,
     btn: t => $$("button").find(b => b.textContent.trim() === t),
     nav: t => $$("nav a").find(a => a.textContent.trim() === t),
     navText: () => ($("nav") || {}).textContent || "",
@@ -126,11 +140,14 @@ function openPage(hash) {
   return pg;
 }
 
-async function login(p, user, pw) {
+async function typeLogin(p, user, pw) {
   await waitFor(() => p.hash() === "#登录" && p.field("用户名"));
   p.type(p.field("用户名"), user);
   p.type(p.$('input[type=password]'), pw);
   p.btn("登录").click();
+}
+async function login(p, user, pw) {
+  await typeLogin(p, user, pw);
   return waitFor(() => p.hash() !== "#登录" && jar);
 }
 
@@ -188,10 +205,25 @@ async function login(p, user, pw) {
     say(!p.btn("没有账号？注册") && !p.$$("button, a").some(e => e.textContent.includes("注册")),
         "登录页上没有注册的入口");
     say(!p.$("nav"), "登录页上不显示导航");
+    say(p.title() === "e2e_multiuser" && !p.$(".page-end"), `学生端：标题 ${p.title()}，登录框上没有端的标识`);
+    let t = openPage("", "/teacher");
+    say(await waitFor(() => t.hash() === "#登录"), `教师端没登录：也到登录页：${t.hash()}`);
+    say(await waitFor(() => t.$(".page-end") && t.$(".page-end").textContent.trim() === "教师端")
+        && t.title() === "e2e_multiuser·教师端", `登录框上标着「教师端」，标题 ${t.title()}`);
+    t.close();
 
-    console.log("二、教师登录：落在教师端的学情");
-    say(await login(p, "t1", TEACHER_PW), "教师登录成功");
-    say(await waitFor(() => p.hash() === "#学情"), `落地「学情」（原来要去的 #做题 是学生端的，不去）：${p.hash()}`);
+    console.log("二、教师在学生端登录：送去教师端");
+    await typeLogin(p, "t1", TEACHER_PW);
+    say(await waitFor(() => p.left.length && p.toast().includes("正在打开 /teacher")),
+        `提示去教师端、跳了一次：「${p.toast()}」 ${p.left.length}`);
+    say(!!jar, "登录本身成功了（cookie 在，到教师端不用再登）");
+    say(!calls.some(c => c.status === 403), `没有 403：${JSON.stringify(calls.filter(c => c.status === 403))}`);
+    p.close();
+    p = openPage("", "/teacher");
+    // 空地址落在第一个界面（学情）上，地址栏不改；看导航里亮的是哪一个
+    const active = () => (p.$("nav a.active") || {}).textContent || "";
+    say(await waitFor(() => active().trim() === "学情" && p.hash() === ""),
+        `打开 /teacher：已经登着，落地「学情」：${active()} ${p.hash()}`);
     say(await waitFor(() => p.navText().includes("王老师") && p.btn("退出")), "顶栏有「王老师」和「退出」");
     say(await waitFor(() => p.$("nav .nav-badge") && p.$("nav .nav-badge").textContent.trim() === "教师端"
                           && p.$("nav").classList.contains("nav-role-teacher")),
@@ -199,8 +231,11 @@ async function login(p, user, pw) {
     const teacherPages = () => p.$$("nav > a, nav .nav-side a").map(a => a.textContent.trim());
     say(await waitFor(() => teacherPages().join("|") === "学情|学生管理|教材导入"),
         `导航只有教师页：${teacherPages().join("|")}`);
-    say(!["知识图谱", "做题", "默写", "问老师", "教材", "学习进度"].some(t => p.nav(t)),
-        "没有学生的学习页");
+    say(!["知识图谱", "做题", "默写", "问老师", "教材", "学习进度"].some(t => p.nav(t)) && !p.$("nav .nav-side"),
+        "没有学生的学习页、没有「管理」那组");
+    const home = p.$("nav .nav-home a");
+    say(home && home.textContent.trim() === "打开学生端" && home.getAttribute("href") === "/"
+        && home.getAttribute("target") === "_blank", "顶栏有「打开学生端」（新标签页开 /）");
     say(p.$$("nav .nav-user a").some(a => a.textContent.trim() === "改密码"), "改密码在顶栏账号区");
     say(await waitFor(() => p.$$(".screen").some(e => e.textContent.includes("还没有学生"))),
         "学情页：还没有学生");
@@ -223,9 +258,16 @@ async function login(p, user, pw) {
     p.btn("退出").click();
     say(await waitFor(() => p.hash() === "#登录" && jar === ""), "退出：回到登录页，cookie 删了");
 
-    console.log("四、学生 s1 登录：学生端");
+    console.log("四、学生 s1：教师端登录被拒，学生端登录");
     calls.length = 0;
-    say(await login(p, "s1", "s1-pass"), "s1 登录成功");
+    await typeLogin(p, "s1", "s1-pass");
+    say(await waitFor(() => p.toast().includes("这是教师端") && jar === "" && p.hash() === "#登录" && !p.$("nav")),
+        `在教师端登录被拒：「${p.toast()}」，cookie 删了，还在登录页`);
+    say(!calls.some(c => c.status === 403 || c.path.startsWith("/report/")), "没进学情、没有 403");
+    p.close();
+    p = openPage("");
+    calls.length = 0;
+    say(await login(p, "s1", "s1-pass"), "s1 在学生端登录成功");
     say(await waitFor(() => p.navText().includes("小一")), "顶栏是「小一」");
     say(await waitFor(() => p.hash() === "#知识图谱"), `落在学生端首页：${p.hash()}`);
     say(await waitFor(() => ["知识图谱", "做题", "默写", "问老师", "教材", "学习进度"].every(t => p.nav(t))),
@@ -267,7 +309,7 @@ async function login(p, user, pw) {
     for (const page of ["教材导入", "学情"]) {
       calls.length = 0;
       p.w.location.hash = "#" + encodeURIComponent(page);
-      say(await waitFor(() => p.hash() === "#知识图谱" && p.toast().includes("没有权限")),
+      say(await waitFor(() => p.hash() === "#知识图谱" && p.toast().includes(`「${page}」在教师端（/teacher）`)),
           `#${page}：退回了 ${p.hash()}，提示「${p.toast()}」`);
       say(!calls.some(c => c.path.startsWith("/import/") || c.path.startsWith("/report/")),
           "没去调教师端的接口");
@@ -278,6 +320,14 @@ async function login(p, user, pw) {
       const body = await r.json();
       say(r.status === 403 && body.error === "需要教师权限", `接口本身也拒 ${path}：${r.status} ${body.error}`);
     }
+    calls.length = 0;
+    t = openPage("", "/teacher");
+    say(await waitFor(() => t.hash() === "#登录" && t.toast().includes("现在登录的是学生账号（小一）")),
+        `登着学生打开 /teacher：回登录页「${t.toast()}」`);
+    await sleep(200);
+    say(!!jar && !calls.some(c => c.status === 403 || c.path.startsWith("/report/")),
+        `没把学生退出（别的标签页还在用），没调学情、没有 403：${JSON.stringify(calls)}`);
+    t.close();
 
     console.log("八、改密码、换 s2");
     p.$$("nav a").find(a => a.textContent.trim() === "改密码").click();
@@ -309,10 +359,12 @@ async function login(p, user, pw) {
     say(await lg("s1", "s1-pass") === 400 && await lg("s1", "s1-new-pass") === 200, "s1 旧密码登不上，新的能登");
     p.btn("退出").click();
     say(await waitFor(() => p.hash() === "#登录" && jar === ""), "s2 退出");
+    p.close();
 
     console.log("九、教师看学情");
     calls.length = 0;
-    say(await login(p, "t1", TEACHER_PW), "教师再登录");
+    p = openPage("", "/teacher");
+    say(await login(p, "t1", TEACHER_PW), "教师在教师端再登录");
     say(await waitFor(() => p.hash() === "#学情"), `落地学情：${p.hash()}`);
     const rowOf = name => p.rows().find(r => r[0] === name);
     say(await waitFor(() => rowOf("小一") && rowOf("小二")), `全班表有小一、小二：${JSON.stringify(p.rows().slice(0, 3))}`);
@@ -347,7 +399,7 @@ async function login(p, user, pw) {
     console.log("十、教师直接打学生页");
     calls.length = 0;
     p.w.location.hash = "#" + encodeURIComponent("做题");
-    say(await waitFor(() => p.hash() === "#学情" && p.toast().includes("没有权限")),
+    say(await waitFor(() => p.hash() === "#学情" && p.toast().includes("「做题」在学生端（/）")),
         `退回了 ${p.hash()}，提示「${p.toast()}」`);
     await sleep(200);
     say(!calls.some(c => c.path.startsWith("/quiz/")), `没去调做题的接口：${JSON.stringify(calls)}`);
@@ -356,11 +408,11 @@ async function login(p, user, pw) {
     const bq = await rq.json();
     say(rq.status === 403 && bq.error === "教师账号不参与学习，请用学生账号", `接口本身也拒：${rq.status} ${bq.error}`);
     p.close();
-    // 新开一页直接打 #默写（已登录）：先认出是教师，再进页面——不会先进默写页收 403
+    // 登着教师打开学生端 #默写：先认出是教师，送去 /teacher——不会先进默写页收 403
     calls.length = 0;
     p = openPage("#" + encodeURIComponent("默写"));
-    say(await waitFor(() => p.hash() === "#学情" && p.toast().includes("没有权限")),
-        `新开 #默写：退回 ${p.hash()}，提示「${p.toast()}」`);
+    say(await waitFor(() => p.left.length && p.toast().includes("正在打开 /teacher")),
+        `学生端 #默写：送去教师端「${p.toast()}」`);
     await sleep(300);
     say(!calls.some(c => c.status === 403), `没有一个 403：${JSON.stringify(calls.filter(c => c.status === 403))}`);
     const tdata = db("SELECT (SELECT count(*) FROM attempt WHERE learner='t1') + (SELECT count(*) FROM word_attempt WHERE learner='t1')" +

@@ -53,6 +53,9 @@ CONTENT = PROJ / "content"
 BANK = ROOT / "workspace" / "japanese" / "content" / "bunpou" / "题库"
 
 
+# 页面标题。教师端（「端 教师」的界面，拆到 /teacher）是「日语学习·教师端」
+TITLE = "日语学习"
+
 # 课文导出给日语老师（agents/japanese.py）读：老师的工作目录是 workspace/japanese，
 # 它的「语法讲解」流程读这里的 .md。课文的源头仍是 content/lessons.jsonl，这些
 # 文件每次 setup 重新生成，别手改。
@@ -259,7 +262,7 @@ def setup(quiet: bool = False) -> int:
     say(ensure_db(PROJ))
     run_import(quiet)
 
-    for line in build(PROJ):
+    for line in build(PROJ, title=TITLE):
         say(line)
     return 0
 
@@ -526,6 +529,7 @@ def main(argv: list[str]) -> int:
     print()
     return gen_main(["run", str(PROJ)] + ([] if mock else ["--real"])
                     + (["--登录"] if login else []) + (["--安全cookie"] if secure else [])
+                    + ([] if "--标题" in extra else ["--标题", TITLE])
                     + extra)
 
 

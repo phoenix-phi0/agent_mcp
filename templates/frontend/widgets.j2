@@ -181,8 +181,8 @@
 <div v-for="(m, i) in shared['<%= n.name %>'] || []" :key="i" class="smsg" :class="'smsg-' + (m.kind || 'text')">
 <span class="who">{{ m.who }}</span>
 <div class="body">{{ m.text }}</div>
-<div v-if="Array.isArray(m.links) && m.links.length" class="smsg-links"><template v-for="(k, j) in m.links" :key="j"><a v-if="k && typeof k.href === 'string' && (k.href.startsWith('#') || k.href.startsWith('http://') || k.href.startsWith('https://'))" class="smsg-link" :href="k.href">{{ k.text || k.href }}</a></template></div>
-<a v-else-if="m.link && (m.link.startsWith('#') || m.link.startsWith('http://') || m.link.startsWith('https://'))" class="smsg-link" :href="m.link">{{ m.link_text || m.link }}</a>
+<div v-if="Array.isArray(m.links) && m.links.length" class="smsg-links"><template v-for="(k, j) in m.links" :key="j"><a v-if="k && typeof k.href === 'string' && (k.href.startsWith('#') || k.href.startsWith('http://') || k.href.startsWith('https://'))" class="smsg-link" :href="hrefOf(k.href)" :target="targetOf(k.href)">{{ k.text || k.href }}</a></template></div>
+<a v-else-if="m.link && (m.link.startsWith('#') || m.link.startsWith('http://') || m.link.startsWith('https://'))" class="smsg-link" :href="hrefOf(m.link)" :target="targetOf(m.link)">{{ m.link_text || m.link }}</a>
 <details v-if="m.calls && m.calls.length" class="tools">
 <summary>{{ m.calls.length }} 次工具调用</summary>
 <div v-for="(c, j) in m.calls" :key="j">{{ c.name }}({{ c.arguments }})
@@ -210,7 +210,7 @@
     不带的话画成按钮的样子。 -#}
 <%- macro 链接(n) -%>
 <%- set p = "getPath(shared, '" ~ (n.bind or n.name) ~ "')" -%>
-<a class="<% if n.has("次要") %>link-plain<% else %>btn link-btn<% endif %>" v-if="<% if n.when %>(<%= n.when %>) && <% endif %>isHref(<%= p %>)" :href="<%= p %>"<%= 尺寸(n) %>><%= n.label or n.name %></a>
+<a class="<% if n.has("次要") %>link-plain<% else %>btn link-btn<% endif %>" v-if="<% if n.when %>(<%= n.when %>) && <% endif %>isHref(<%= p %>)" :href="hrefOf(<%= p %>)" :target="targetOf(<%= p %>)"<%= 尺寸(n) %>><%= n.label or n.name %></a>
 <%- endmacro -%>
 
 <%- macro 显示(n) -%>

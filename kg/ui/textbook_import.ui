@@ -1,9 +1,9 @@
-# 教材导入（管理侧）：上传一本教材，后台解析成课，逐课审阅，确认后导入成一个
+# 教材导入（教师端 /teacher）：上传一本教材，后台解析成课，逐课审阅，确认后导入成一个
 # 新的教材系列。接口在 routes/textbook_import.zs，草稿表在
 # entities/textbook_import.entity，课文格式见 content/series/README.md。
 #
-# 「侧 管理」：导航上不跟学习者的页面排在一起，归到右边「管理」那组。权限在
-# 接口上（「角色 teacher」，多人模式下学生 403），学生登录时这组也不显示。
+# 「端 教师」：只在教师端（/teacher），学生端（/）上没有这一页。权限在接口上
+# （「角色 teacher」，多人模式下学生 403）。
 #
 # 同一个界面按地址切四块（跟教材页一样，「当」看 params）：
 #
@@ -25,7 +25,7 @@
 # 「当」的条件里不能有空格；「提示」里不能有双引号（会截断输入框的 placeholder 属性，
 # 整个编辑页画不出来）。
 
-界面 自定义 教材导入 侧 管理 端 教师 载入 import_load
+界面 自定义 教材导入 端 教师 载入 import_load
   动作 import_home 远程 进入时 隐藏 刷新
   动作 import_poll 远程 隐藏 每隔 2 当 params.job&&shared.job&&shared.job.running 轮询
 

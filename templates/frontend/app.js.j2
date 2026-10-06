@@ -19,6 +19,7 @@
 <% if triggers_json is not defined %><% set triggers_json = "{}" %><% endif %>
 <% if enter_json is not defined %><% set enter_json = "{}" %><% endif %>
 <% if nav_json is not defined %><% set nav_json = "[]" %><% endif %>
+<% if page_json is not defined %><% set page_json = '{"end": "", "main": true, "role": "", "badge": "", "ends": {}, "home": null, "elsewhere": {}}' %><% endif %>
 <% set nav = nav if nav is defined else false %>
 <% set nav_sides = nav_sides if nav_sides is defined else [] %>
 <% set has_poll = has_poll if has_poll is defined else false %>
@@ -58,6 +59,16 @@ const loaders = <%= loaders_json %>;
 const overlayLoaders = <%= overlay_loaders_json %>;
 // 界面名 -> 带着地址参数进来时跑一次的动作（.ui 里的「触发」）
 const triggers = <%= triggers_json %>;
+// 这一页是哪一端。界面写了不同的「端」时，引擎按端拆成几个页面、各一个地址
+// （学生 /、教师 /teacher，见 gen/project.py 的 split_pages），每页只有自己那
+// 一端的界面：
+//   end        这一页的端；main 是不是主页面（/）
+//   badge      顶栏最前面的标识（「教师端」），role 是页面代号（nav-role-<代号>）
+//   ends       {端名或角色代号: 地址}：登录的人是别的端的，往哪儿送
+//   home       非主页面顶栏上「打开学生端」的链接
+//   elsewhere  {界面名: 端名}：别的页面上的界面，地址里打了它不进、提示在哪一端
+// 没拆的应用 end 是空串、ends 是空的，下面这些一概不起作用。
+const PAGE = <%= page_json %>;
 // 顶部导航：[{label, target, group}]。group 是同属一个实体的几个界面名，
 // 在其中任何一个上时那一项高亮。由项目编译时算好传进来。
 const nav = <%= nav_json %>;
@@ -141,9 +152,11 @@ const _app = createApp({
     const AUTH_SCREENS = [LOGIN, "注册", "改密码"];
     let afterLogin = "";
     // 首页：第一个不是登录页、这个人又看得到的界面（多人模式下教师落在教师端
-    // 的第一页，见下面的 visible）
+    // 的第一页，见下面的 visible）。一个都看不到（学生的账号打开了教师端）就是
+    // 登录页——退回「第一个界面」的话它也看不到，guardSide 会来回跳
     const firstAppScreen = () =>
       (screens.find(s => !AUTH_SCREENS.includes(s.name) && !hiddenScreen(s.name))
+       || screens.find(s => s.name === LOGIN)
        || screens.find(s => !AUTH_SCREENS.includes(s.name)) || screens[0]).name;
     // 把一条记录填进某个界面的表单。列表点「编辑」、按地址参数「载入」
     // 都走这里，类型转换只写一处。
@@ -265,6 +278,21 @@ const _app = createApp({
       const s = v == null ? "" : String(v);
       return s.startsWith("#") || s.startsWith("http://") || s.startsWith("https://");
     }
+    // 链接真正的地址：「#教材?lesson=…」指的界面在别的页面上（教师端的导入报告
+    // 链到学生端的教材页）时，换成那个页面的地址（/#教材?lesson=…），新标签页
+    // 打开（targetOf）——不换的话这一页没有那个界面，点了被 guardSide 退回首页
+    function hrefOf(v) {
+      const s = v == null ? "" : String(v);
+      if (!s.startsWith("#")) return s;
+      const raw = s.slice(1);
+      const cut = raw.indexOf("?");
+      let name;
+      try { name = decodeURIComponent(cut < 0 ? raw : raw.slice(0, cut)); } catch (e) { return s; }
+      if (screens.some(x => x.name === name) || !elsewhere(name)) return s;
+      const there = PAGE.ends[PAGE.elsewhere[name]];
+      return there ? there + s : s;
+    }
+    const targetOf = v => (hrefOf(v) !== (v == null ? "" : String(v)) ? "_blank" : null);
     function go(name, p) {
       const q = p && Object.keys(p).length ? "?" + new URLSearchParams(p) : "";
       route.value = name;
@@ -392,8 +420,9 @@ const _app = createApp({
       // 登录、退出都带 go 回来：换了人，顶栏的名字、能看的「侧」和「端」跟着换。
       // 登录（「@来处」）先问清是谁再跳——不然教师登录后先进了学生的页面、发出
       // 一串 403。别的 go（做题页换题、退出回登录页）照旧马上跳，顺手刷新一次
+      // 登进来的不是这一端的人：refreshMe 已经送走（去他那一端）或拒了，不再跳
       if (resp.go === "@来处") {
-        refreshMe().then(() => followGo(resp.go)).catch(() => {});
+        refreshMe(true).then(off => { if (!off) followGo(resp.go); }).catch(() => {});
         return;
       }
       if (resp.go) refreshMe().catch(() => {});
@@ -441,7 +470,9 @@ const _app = createApp({
     // 没开登录时 user 是空串：什么都不藏、不分端，顶栏什么都不多。
     const NOBODY = { user: "", label: "", hide: [], role: "", roleLabel: "", badge: "" };
     const me = ref({ ...NOBODY });
-    async function refreshMe() {
+    // fresh：刚在这一页登录（登录接口回来的 @来处）。返回 true 表示这个人不是
+    // 这一页的端，已经送走或拒了（见 checkEnd）
+    async function refreshMe(fresh) {
       try {
         const r = await fetch(endpoints.auth_me, { method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -453,8 +484,47 @@ const _app = createApp({
       } catch (e) {
         me.value = { ...NOBODY };
       }
+      if (await checkEnd(fresh)) return true;
       guardSide();
+      return false;
     }
+    // 登录的人是别的端的（拆成几个页面时，见 PAGE）：
+    //   他那一端不是主页面（教师在 / 上）  送到他那一端（/teacher），先提示一句
+    //   他那一端是主页面（学生在 /teacher 上）  这一页不收：刚在这儿登录的退出、
+    //       回登录页说「这是教师端」；之前就登着的（别的标签页登的）不退，只回
+    //       登录页说清楚，换教师账号登就行
+    // 角色对不上任何一端的不管，照旧按 visible 藏界面。接口照样有「只许」把关。
+    async function checkEnd(fresh) {
+      const m = me.value;
+      if (!m.user || !PAGE.end) return false;
+      if (m.role === PAGE.end || m.roleLabel === PAGE.end) return false;
+      const there = PAGE.ends[m.roleLabel] || PAGE.ends[m.role];
+      if (!there) return false;
+      const theirs = m.roleLabel || m.role;
+      if (there !== "/") {
+        showNotice(`这是${PAGE.end || "主"}页面，${theirs}请用${theirs}端，正在打开 ${there}`, "no");
+        leaving = true;
+        leaveTo(there);
+        return true;
+      }
+      if (fresh) {
+        try {
+          await fetch(endpoints.auth_logout, { method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "auth_logout", form: {} }) });
+        } catch (e) { /* 退不掉也得拒：下面照样回登录页 */ }
+        me.value = { ...NOBODY };
+        go(LOGIN);
+        showNotice(`这是${PAGE.end}端，${theirs}账号不能在这里登录。请用${PAGE.end}账号；${theirs}请打开 ${there}`, "no");
+      } else {
+        go(LOGIN);
+        showNotice(`这是${PAGE.end}端，现在登录的是${theirs}账号（${m.label}）。请用${PAGE.end}账号登录；${theirs}请打开 ${there}`, "no");
+      }
+      return true;
+    }
+    // 要换页面了：这一页的第一个界面不再进（进了就是一串 403）
+    let leaving = false;
+    function leaveTo(url) { location.href = url; }
     function visible(s) {
       const m = me.value;
       if (!m.user) return true;
@@ -464,25 +534,34 @@ const _app = createApp({
     }
     function hiddenScreen(name) {
       const s = screens.find(x => x.name === name);
-      return !!(s && !visible(s));
+      return s ? !visible(s) : elsewhere(name);
     }
+<% else %>
+    const visible = () => true;
+    function hiddenScreen(name) { return !screens.some(x => x.name === name) && elsewhere(name); }
+<% endif %>
+    // 别的页面（别的端）的界面：这一页根本没有它。地址里手打了也不进
+    function elsewhere(name) { return !!name && Object.prototype.hasOwnProperty.call(PAGE.elsewhere, name); }
     function guardSide() {
       if (!hiddenScreen(route.value)) return;
       // 地址里明说了要这一页（直接打的、点的链接）才提示；空地址落在默认的
       // 第一个界面上不算，悄悄换到本端首页
       if (location.hash.replace(/^#\/?/, "")) {
-        const s = screens.find(x => x.name === route.value) || {};
-        showNotice(s.audience ? `没有权限打开这个页面（${s.audience}端的），已回到首页`
-                              : "没有权限打开这个页面", "no");
+        const s = screens.find(x => x.name === route.value);
+        const end = s ? s.audience : PAGE.elsewhere[route.value];
+        const there = s ? "" : PAGE.ends[end];
+        showNotice(!s ? `「${route.value}」在${end}端${there ? `（${there}）` : ""}，这里打不开，已回到首页`
+                   : end ? `没有权限打开这个页面（${end}端的），已回到首页`
+                   : "没有权限打开这个页面", "no");
       }
       go(firstAppScreen());
     }
     window.addEventListener("hashchange", guardSide);
+<% if has_me %>
     // 先知道是谁，再跑第一个界面的「进入时」（见文件末尾的 onRoute）
     const meReady = refreshMe();
 <% else %>
-    const visible = () => true;
-    function hiddenScreen() { return false; }
+    guardSide();
 <% endif %>
     function onSubmit() { console.log("submit", current.value.name, form.value); }
 <% if has_endpoints %>
@@ -892,7 +971,7 @@ const _app = createApp({
 <% if has_me %>
     // 开着 auth_me 时等它回来再进第一个界面：教师打开首页时默认的第一个界面
     // 是学生的，先跑它的「进入时」会白白收一串 403
-    meReady.then(onRoute);
+    meReady.then(() => { if (!leaving) onRoute(); });
 <% else %>
     onRoute();
 <% endif %>
@@ -1151,7 +1230,7 @@ const _app = createApp({
 <% endif %>
     }
 <% endif %>
-    return { route, params, forms, form, rowsOf, lists, notice, nav, AUTH_SCREENS, current<% if has_me %>, me<% endif %>, visible, busy, pending, go, isHref, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_row_remote %>, onRowRemote<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
+    return { route, params, forms, form, rowsOf, lists, notice, nav, PAGE, AUTH_SCREENS, current<% if has_me %>, me<% endif %>, visible, busy, pending, go, isHref, hrefOf, targetOf, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_row_remote %>, onRowRemote<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
   },
   template: `
 {#- 顶部导航。两种来路：
@@ -1182,10 +1261,13 @@ const _app = createApp({
 <% elif not has_goto and screens|length > 1 %>
 {#- 「侧 管理」的界面不跟学习者的页面混排：左边是没写「侧」的，写了的按
     组名归到右边一组，前面一个组名（「管理」）。只是位置分开，不是权限。 -#}
-    <nav v-if="current.name !== '登录' && current.name !== '注册'"<% if has_me %> :class="me.role ? 'nav-role-' + me.role : ''"<% endif %>>
+    <nav v-if="current.name !== '登录' && current.name !== '注册'" :class="[PAGE.role ? 'nav-role-' + PAGE.role : ''<% if has_me %>, me.role ? 'nav-role-' + me.role : ''<% endif %>]">
+{#- 这是哪一端（「教师端」）：按端拆出来的页面（/teacher）一直显示；多人模式下
+    没拆页面时看登录的人（auth_me 的 badge） -#}
 <% if has_me %>
-{#- 多人模式下这是哪一端（「教师端」），没开登录或这个角色没有标识时不显示 -#}
-      <span v-if="me.user && me.badge" class="nav-badge">{{ me.badge }}</span>
+      <span v-if="PAGE.badge || (me.user && me.badge)" class="nav-badge">{{ PAGE.badge || me.badge }}</span>
+<% else %>
+      <span v-if="PAGE.badge" class="nav-badge">{{ PAGE.badge }}</span>
 <% endif %>
       <a v-for="s in screens.filter(s => !s.side).filter(s => !AUTH_SCREENS.includes(s.name)).filter(visible)" :key="s.name"
          :class="{ active: current.name === s.name }"
@@ -1208,8 +1290,12 @@ const _app = createApp({
 <% endif %>
       </span>
 <% endif %>
+{#- 非主页面（教师端）上一个小链接，新标签页打开主页面（学生端）看看 -#}
+      <span v-if="PAGE.home" class="nav-home"><a :href="PAGE.home.path" target="_blank" rel="noopener">{{ PAGE.home.label }}</a></span>
     </nav>
 <% endif %>
+{#- 登录页上没有顶栏：按端拆出来的页面在登录框上面标一句是哪一端 -#}
+    <div v-if="PAGE.badge && (current.name === '登录' || current.name === '注册')" class="page-end">{{ PAGE.badge }}</div>
     <% for screen_node in screens %>
     <form v-if="current.name === '<%= screen_node.name %>'" class="screen" @submit.prevent="onSubmit">
       <% for c in screen_node.body() %><%= 节点(c) %><% endfor %>

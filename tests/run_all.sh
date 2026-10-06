@@ -52,6 +52,7 @@ run 界面编译    $PY -m tools.test_ui
 run 会话        $PY tests/http/test_session.py
 run 库出错      $PY tests/http/test_db_errors.py
 run 模板命名    $PY tests/gen/test_templates.py
+run 按端拆页面  $PY tests/gen/test_ends.py
 run 只加迁移    $PY tests/gen/test_migrate.py
 run 知识图谱    $PY tests/kg/test_kg.py
 run 单词        $PY tests/kg/test_word.py
@@ -104,6 +105,7 @@ run 教材进度E2E bash -c "cd $M/tests/e2e && node pages_run.js"
 run 教材系列E2E bash -c "cd $M/tests/e2e && node series_run.js"
 run 教材导入E2E bash -c "cd $M/tests/e2e && node textbook_import_run.js"
 run 多人E2E     bash -c "cd $M/tests/e2e && node multiuser_run.js"
+run 两端页面E2E bash -c "cd $M/tests/e2e && node ends_run.js"
 run app2编译    bash -c "cd $M/app2 && $PY build.py"
 
 # 上传要先起 dsl/ 的服务。

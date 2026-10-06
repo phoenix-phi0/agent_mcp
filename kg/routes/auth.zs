@@ -44,11 +44,12 @@
 
 
 # 现在是谁。前端打开页面、登录、退出时问一次（templates/frontend/app.js.j2 的
-# refreshMe）：顶栏显示 label，hide 里的「侧」不进导航——学生看不到「管理」；
-# role / role_label 跟界面的「端」比——教师只看到「端 教师」的页面（学情、学生
-# 管理、教材导入），学生只看到「端 学生」的；badge 是顶栏的「教师端」。
-# 只是界面上藏起来，真正把关的是接口上的「角色 teacher」「只许 学生」。
-# 单人模式 user 是空串，顶栏什么都不多、所有页面照常可用、不分端。
+# refreshMe）：顶栏显示 label。学生端、教师端是两个页面（/ 和 /teacher，引擎按
+# 界面的「端」拆的）：role / role_label 跟页面的端比——教师在学生端登录送去
+# /teacher，学生在教师端登录被拒（「这是教师端」）。hide 是早先「侧 管理」用的，
+# 现在 kg 的界面不写「侧」了，留着不碍事；badge 是顶栏的「教师端」。
+# 只是界面上分开，真正把关的是接口上的「角色 teacher」「只许 学生」。
+# 单人模式 user 是空串，两个页面都不用登录、直接能用。
 接口 POST /auth/me 动作 auth_me 公开
   用包 common db http
   设 out.user = {current_user}
