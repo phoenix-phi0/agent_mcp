@@ -11,7 +11,7 @@
   三、学习进度（空库）：概览是 0、说「还没有作答」；在学、最近作答、得分
       是空的；按等级五行；现在能学有根节点
   四、学习进度（答了题之后）：经 /quiz 答一对一错，概览、在学、最近作答、
-      按等级跟着变；刷到达标后已掌握数和按等级的已掌握数加一；答题自动打分：
+      按等级跟着变；刷到达标（得分过 80）后已掌握数和按等级的已掌握数加一；答题自动打分：
       掌握得分有这个点（当前分、变化、打分时间），概览有平均得分；手工再记
       一次分，变化跟着变；按分从低到高排
   五、知识图谱浮层：答对/答题，没做过说「还没做过」，别的学习者看不到；
@@ -261,7 +261,8 @@ def main():
     doing = lst(body, "doing") or []
     check(len(doing) == 1 and doing[0]["label"] == plabel and doing[0]["tally"] == "1/2",
           f"在学：{doing}")
-    check(doing and doing[0]["verdict"] == "还差 6 题", f"不够 8 题：{doing and doing[0]['verdict']}")
+    check(doing and doing[0]["verdict"].startswith("得分 ") and "差" in doing[0]["verdict"],
+          f"还没达标，说得分差几分：{doing and doing[0]['verdict']}")
     rec = lst(body, "recent") or []
     check([r["result"] for r in rec] == ["错", "对"], f"最近作答新的在前：{[r['result'] for r in rec]}")
     check(all(r["label"] == plabel for r in rec), f"最近作答关联到知识点名：{[r['label'] for r in rec]}")
@@ -271,24 +272,32 @@ def main():
     n5row = next(r for r in lst(body, "levels") if r["level"] == "N5")
     check(n4row["answers"] == 2 and n5row["answers"] == 0, f"按等级：N4 答过 2，N5 答过 0")
 
-    # 刷到达标：再记 7 道对的（经 /learn/answer，跟做题页同一套汇总）
-    for _ in range(7):
-        post("/learn/answer", point=point, correct=1)
+    # 刷到达标：接着记对的，直到掌握（经 /learn/answer，跟做题页同一套汇总；
+    # 掌握看得分，过 80 为止，几道才到由得分算法定）
+    extra = 0
+    for _ in range(20):
+        _, r = post("/learn/answer", point=point, correct=1)
+        extra += 1
+        if r.get("mastered") == "1":
+            break
+    right_n, total_n = 1 + extra, 2 + extra
     st, body = post("/progress/page")
     pg = (body.get("state") or {}).get("prog") or {}
     doing = lst(body, "doing") or []
-    check(pg.get("head") == f"已掌握 1 / 总知识点 {nodes}", f"达标后：{pg.get('head')}")
-    check(doing and doing[0]["tally"] == "8/9" and doing[0]["verdict"] == "达标", f"在学里标达标：{doing}")
+    check(pg.get("head") == f"已掌握 1 / 总知识点 {nodes}", f"达标后：{pg.get('head')}（又答对 {extra} 道）")
+    check(doing and doing[0]["tally"] == f"{right_n}/{total_n}" and doing[0]["verdict"].startswith("达标"),
+          f"在学里标达标：{doing}")
     in_n4 = rows("SELECT 1 FROM question q JOIN item i ON i.code = q.item"
                  " WHERE q.level = 'N4' AND i.point = ?", point)
     n4row = next(r for r in lst(body, "levels") if r["level"] == "N4")
     check(bool(in_n4) and n4row["tally"] == f"1/{want_pts}", f"按等级：N4 已掌握 {n4row['tally']}")
-    check(pg.get("answers") == 9 and pg.get("rate_text") == "正确率 88%", f"9 题 8 对：{pg.get('rate_text')}")
-    st, body = post("/progress/page", rate="95")
+    check(pg.get("answers") == total_n and pg.get("rate_text") == f"正确率 {right_n * 100 // total_n}%",
+          f"{total_n} 题 {right_n} 对：{pg.get('rate_text')}")
+    st, body = post("/progress/page", line="95", keep="95")
     doing = lst(body, "doing") or []
-    check(doing and doing[0]["verdict"] == "正确率差 7 个点", f"达标线从请求来：{doing and doing[0]['verdict']}")
+    check(doing and "差" in doing[0]["verdict"], f"达标线从请求来：{doing and doing[0]['verdict']}")
 
-    # 答题时自动打分：9 次作答，分变了才记，当前分是最新那行
+    # 答题时自动打分：每次作答都重算，分变了才记，当前分是最新那行
     sc = lst(body, "scores") or []
     auto = rows("SELECT value FROM score WHERE learner = 'me' AND point = ? ORDER BY id", point)
     check(len(sc) == 1 and sc[0]["label"] == plabel and sc[0]["value"] == auto[-1]["value"] and sc[0]["at"],
@@ -326,7 +335,7 @@ def main():
     # ------------------------------------------------------------------
     print("五、知识图谱浮层：答对/答题")
     st, body = post("/node/one", code=point)
-    check(st == 200 and (body.get("state") or {}).get("node_tally") == "答对 8 / 答题 9（已掌握）",
+    check(st == 200 and (body.get("state") or {}).get("node_tally") == f"答对 {right_n} / 答题 {total_n}（已掌握）",
           f"做过的点：{(body.get('state') or {}).get('node_tally')}")
     check((body.get("form") or {}).get("code") == point and (body.get("lists") or {}).get("items"),
           "对照：原来的详情照旧（表单、条目）")

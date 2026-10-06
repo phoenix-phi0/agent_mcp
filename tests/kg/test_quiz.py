@@ -280,7 +280,8 @@ def main():
                             " JOIN item i ON i.code = q.item WHERE q.code = a.item)")
     check(bad_pt == 0, "每条流水的 point 都是那道题的条目所属的点")
 
-    # 刚达标：t3 出一道选择题，在那道题的点上铺 7/7，再答对它
+    # 刚达标：t3 出一道选择题，在那道题的点上铺 7 道对的作答（汇总 7/7），
+    # 再答对它。掌握看得分：基础题全对 7 道还不到 80，第 8 道正好到 80
     st, body = post("/quiz/start", learner="t3", pick_level="全部", pick_kind="挖空")
     cd = card(body)
     q = one("SELECT q.code, q.answer, i.point FROM question q JOIN item i ON i.code = q.item"
@@ -288,6 +289,8 @@ def main():
     con = sqlite3.connect(db)
     con.execute("INSERT INTO mastery(learner, point, right, total, mastered) VALUES ('t3', ?, 7, 7, 0)",
                 (q["point"],))
+    con.executemany("INSERT INTO attempt(learner, point, item, correct, answer) VALUES ('t3', ?, ?, 1, '')",
+                    [(q["point"], q["code"])] * 7)
     con.commit()
     con.close()
     st, body = post("/quiz/answer", learner="t3", choice=right_key(cd))

@@ -11,7 +11,8 @@
 # 判题用 quiz 包的「判对错」，跟「判题」同一套规则：选择题抓选项字母，
 # 接续题整段比对（只认标准答案和「可接受」里列的写法）。
 #
-# 学习者不传就是 me，跟 learn.zs 同一个默认值。达标线也一样：80%、至少 8 题。
+# 学习者不传就是 me，跟 learn.zs 同一个默认值。掌握看得分（达标线 80、
+# 回落线 60），判定在 scripts/mastery_update.zs，跟 /learn/answer 同一份。
 
 
 # 整批导入。整表清空重灌，在一个事务里：有坏题（缺题号、缺答案、题号重复）
@@ -242,9 +243,10 @@
 #
 # 选择题看 choice（单选），接续题看 given（输入框）。
 #
-# 同一个事务里给这道题所属的知识点重算掌握得分（scripts/score_update.zs，
-# 算法在 queries/score_calc.sql，打分参数的默认值也在那个脚本里——/learn/answer
-# 和 /score/rebuild 共用）。跟当前分不同才记一行。变化放在 state.score_change
+# 同一个事务里给这道题所属的知识点重算掌握得分、再按得分改掌握标记
+# （scripts/mastery_update.zs，/learn/answer 和 /score/rebuild 共用；得分算法在
+# queries/score_calc.sql，判定规则在 queries/mastery_one.sql）。分跟当前分不同
+# 才记一行。变化放在 state.score_change
 # （「推量判断 得分 42 → 51」），批改下面显示；不走 messages。
 接口 POST /quiz/answer 动作 quiz_answer
   用包 common db http quiz
@@ -252,14 +254,6 @@
   设 learner = {learner 或}
   如果 {learner} 为空
     设 learner = me
-  结束
-  设 rate = {rate 或}
-  如果 {rate} 为空
-    设 rate = 80
-  结束
-  设 min_count = {min_count 或}
-  如果 {min_count} 为空
-    设 min_count = 8
   结束
 
   设 query.learner = {learner}
@@ -325,23 +319,11 @@
       设 affected = 写库表 app.db attempt_insert {rec}
       设 affected = 写库表 app.db mastery_bump {rec}
 
-      设 cond.learner = {learner}
-      设 cond.point = {key.point}
-      设 cond.rate = {rate}
-      设 cond.min_count = {min_count}
-      设 status = 查一行表 app.db mastery_one {cond}
-      如果 {status.ok} 等于 1
-        如果 {status.mastered} 等于 0
-          设 just_passed = 是
-        结束
-      结束
-      设 mark.learner = {learner}
-      设 mark.point = {key.point}
-      设 mark.mastered = {status.ok}
-      设 affected = 写库表 app.db mastery_set {mark}
-
-      设 scoring = 执行 scripts/score_update.zs learner={learner} point={key.point}
+      # 重算得分、按得分改掌握标记，见 scripts/mastery_update.zs（跟
+      # /learn/answer 同一份）
+      设 scoring = 执行 scripts/mastery_update.zs learner={learner} point={key.point} line={line 或} keep={keep 或}
       设 score_text = {scoring.text 或}
+      设 just_passed = {scoring.just}
     结束
   结束
 
@@ -425,8 +407,8 @@
   结束
 
   设 who.learner = {learner}
-  设 who.rate = 80
-  设 who.min_count = 8
+  设 who.line = 80
+  设 who.keep = 60
   设 who.level = {round_info.level 或}
   设 progress = 查一值表 app.db progress_brief {who}
 

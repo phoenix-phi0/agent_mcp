@@ -3,7 +3,7 @@
 -- progress_levels / learn_next），只是压成几行、截到 800 字。
 --
 -- :learner    学习者
--- :rate       达标线：正确率（整数百分比），:min_count 最少题数——跟进度页一样现算
+-- :line       达标线（掌握得分），:keep 回落线——跟进度页一样现算（mastery_one.sql）
 -- :level      意图判定给的等级（N4、n4、「N4级」都认），认出来时多一行「这一级
 --             还没掌握的知识点」；认不出当没给
 --
@@ -33,15 +33,21 @@ a AS (
   SELECT count(*) AS n, coalesce(sum(correct), 0) AS r
   FROM attempt WHERE learner = :learner
 ),
+cur AS (
+  SELECT s.point, s.value FROM score s
+  WHERE s.learner = :learner
+    AND s.id = (SELECT max(x.id) FROM score x
+                 WHERE x.learner = s.learner AND x.point = s.point)
+),
 doing AS (
   SELECT n.label || ' ' || m.right || '/' || m.total || '（' ||
-         CASE WHEN m.total >= CAST(:min_count AS INTEGER)
-               AND m.right * 100 / m.total >= CAST(:rate AS INTEGER) THEN '达标'
-              WHEN m.total < CAST(:min_count AS INTEGER)
-              THEN '还差 ' || (CAST(:min_count AS INTEGER) - m.total) || ' 题'
-              ELSE '正确率差 ' || (CAST(:rate AS INTEGER) - m.right * 100 / m.total) || ' 个点'
+         CASE WHEN c.value IS NULL THEN '还没打分'
+              WHEN c.value >= CAST(:line AS INTEGER)
+                OR (m.mastered = 1 AND c.value >= CAST(:keep AS INTEGER)) THEN '达标'
+              ELSE '得分差 ' || (CAST(:line AS INTEGER) - c.value) || ' 分'
          END || '）' AS s
   FROM mastery m JOIN node n ON n.code = m.point
+  LEFT JOIN cur c ON c.point = m.point
   WHERE m.learner = :learner AND m.total > 0
   ORDER BY m.updated DESC, m.id DESC
   LIMIT 8

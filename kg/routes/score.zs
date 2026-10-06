@@ -5,7 +5,8 @@
 # queries/score_calc.sql）。/score/add 是手工记一次，留着给调试和以后别的
 # 来源用。
 #
-# 不影响「掌握」和解锁：那两样仍只看 mastery 的计数达标线。
+# 「掌握」和解锁跟着得分走：答完一题由 scripts/mastery_update.zs 按得分改
+# mastery 的掌握标记（达标线 80、回落线 60），解锁看那个标记。
 #
 # 学习者不传就是 me，跟 learn.zs、node.zs 同一个默认值（这个项目没开
 # 认证，是一个人自己用的）。每个接口开头都是同一段：先取 {learner 或}
@@ -105,7 +106,8 @@
   设 added = 0
   事务 app.db
     遍历 item 于 {missing}
-      设 scoring = 执行 scripts/score_update.zs learner={item.learner} point={item.point}
+      # 补分的同时把掌握标记按得分对齐（scripts/mastery_update.zs）
+      设 scoring = 执行 scripts/mastery_update.zs learner={item.learner} point={item.point}
       如果 {scoring.changed} 等于 1
         设 added = 相加 {added} 1
       结束

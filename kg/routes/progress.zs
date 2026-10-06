@@ -15,8 +15,8 @@
 #   state.dictation 单词默写（dictation_stats）：练过几个词、正确率、错词本几个，
 #                  链接到默写页。读的是 word_attempt，跟上面的学习记录分开
 #
-# 学习者不传就是 me，达标线不传就是 80% / 8 题——跟 learn.zs、quiz.zs
-# 开头同一段默认值。
+# 学习者不传就是 me，达标线不传就是得分 80、回落线 60——跟
+# scripts/mastery_update.zs 同一套默认值。
 接口 POST /progress/page 动作 progress_page
   用包 db http
 
@@ -24,21 +24,21 @@
   如果 {learner} 为空
     设 learner = me
   结束
-  设 rate = {rate 或}
-  如果 {rate} 为空
-    设 rate = 80
+  设 line = {line 或}
+  如果 {line} 为空
+    设 line = 80
   结束
-  设 min_count = {min_count 或}
-  如果 {min_count} 为空
-    设 min_count = 8
+  设 keep = {keep 或}
+  如果 {keep} 为空
+    设 keep = 60
   结束
 
   设 who.learner = {learner}
   设 overview = 查一行表 app.db progress_overview {who}
 
   设 line_args.learner = {learner}
-  设 line_args.rate = {rate}
-  设 line_args.min_count = {min_count}
+  设 line_args.line = {line}
+  设 line_args.keep = {keep}
   设 doing = 查询表 app.db progress_doing {line_args}
 
   设 next_args.learner = {learner}

@@ -55,8 +55,8 @@
 # 模型回来之后一起写，一个事务：模型调用出错时这一轮整个不记，不会留下
 # 一句没有回答的问话。老师那条的 links 原文记在 links 列。
 #
-# 学习者不传就是 me，跟做题、学习记录同一个默认值；达标线 80% / 8 题跟
-# 学习进度页一样。
+# 学习者不传就是 me，跟做题、学习记录同一个默认值；达标线（得分 80，
+# 回落线 60）跟学习进度页一样。
 
 
 # 进页面：把最近的对话放回消息流。只回 state，不推 messages——切一次界面
@@ -231,8 +231,8 @@
   否则
     # ---- 要模型回答的几路：先取进度摘要 ----
     设 who.learner = {learner}
-    设 who.rate = 80
-    设 who.min_count = 8
+    设 who.line = 80
+    设 who.keep = 60
     设 who.level = {intent_json.level 或}
     设 progress = 查一值表 app.db progress_brief {who}
 

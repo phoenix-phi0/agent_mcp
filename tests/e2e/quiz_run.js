@@ -448,11 +448,14 @@ function openPage(hash) {
   execFileSync(PY, ["-c", "import sqlite3;c=sqlite3.connect('" + PROJ + "/app.db');" +
     "c.execute(\"DELETE FROM mastery WHERE learner='me' AND point=?\", ('" + pt.point + "',));" +
     "c.execute(\"INSERT INTO mastery(learner, point, right, total, mastered) VALUES ('me', ?, 7, 7, 0)\", ('" + pt.point + "',));" +
+    // 掌握看得分（最近的作答越近越重）：铺 12 道对的，前面几节在这个点上
+    // 答错过的也压得下去；只铺了作答、没走接口，标记还是 0，下一道答对时才判
+    "c.executemany(\"INSERT INTO attempt(learner, point, item, correct, answer) VALUES ('me', ?, ?, 1, '')\", [('" + pt.point + "', '" + q.code + "')] * 12);" +
     "c.commit()"]);
   say(Array.isArray(p.shared().talk), "对照：读得到问老师的消息流（talk）");
   const talkBefore = p.shared().talk.length;
   p.choiceText(origOptions(q)[q.answer]).click();
-  say(await waitFor(() => p.verdict().startsWith("○")), "答对，凑满 8/8");
+  say(await waitFor(() => p.verdict().startsWith("○")), "答对，得分过 80");
   say(await waitFor(() => p.cardText().includes(`「${pt.label}」达标了`)), `题卡上看得见喜报：「${pt.label}」达标了`);
   say(p.shared().talk.length === talkBefore && !p.shared().talk.some(m => (m.text || "").includes("达标")),
       "问老师的消息流里没有多出喜报");

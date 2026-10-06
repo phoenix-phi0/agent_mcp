@@ -1,6 +1,8 @@
 # 学习记录：记作答、看进度、算下一步学什么。
 #
-# 达标线从请求来，不给就用默认（80% 正确率、至少 8 题）。那是教学策略，
+# 掌握看掌握得分（不看累计正确率，理由见 queries/mastery_one.sql）：得分
+# ≥ 达标线 line 算掌握，掌握之后 ≥ 回落线 keep 就继续算。两条线从请求来，
+# 不给就用默认（80 / 60，在 scripts/mastery_update.zs）。那是教学策略，
 # 不是语言结构，所以既不在图里也不写死在这儿——严格模式、考前冲刺都可以
 # 传不同的线。
 #
@@ -21,14 +23,6 @@
   如果 {learner} 为空
     设 learner = me
   结束
-  设 rate = {rate 或}
-  如果 {rate} 为空
-    设 rate = 80
-  结束
-  设 min_count = {min_count 或}
-  如果 {min_count} 为空
-    设 min_count = 8
-  结束
 
   # 对错必须给：缺了的话 CAST 成 0，记成一道错题，不报错
   设 correct = {correct 或}
@@ -48,30 +42,12 @@
     设 affected = 写库表 app.db attempt_insert {rec}
     设 affected = 写库表 app.db mastery_bump {rec}
 
-    设 cond.learner = {learner}
-    设 cond.point = {point}
-    设 cond.rate = {rate}
-    设 cond.min_count = {min_count}
-    设 status = 查一行表 app.db mastery_one {cond}
-
-    # 刚达标：这次答完才够线，之前不够。用来提示「解锁了新知识点」
-    设 just_passed = 否
-    如果 {status.ok} 等于 1
-      如果 {status.mastered} 等于 0
-        设 just_passed = 是
-      结束
-    结束
-
-    设 mark.learner = {learner}
-    设 mark.point = {point}
-    设 mark.mastered = {status.ok}
-    设 affected = 写库表 app.db mastery_set {mark}
-
-    # 掌握得分跟着重算（跟做题页同一个脚本、同一套参数），分变了才记一行
-    设 scoring = 执行 scripts/score_update.zs learner={learner} point={point}
+    # 重算得分、按得分改掌握标记（达标线 line / 回落线 keep 不传就用
+    # 脚本里的默认值），见 scripts/mastery_update.zs
+    设 scoring = 执行 scripts/mastery_update.zs learner={learner} point={point} line={line 或} keep={keep 或}
   结束
 
-  返回 {"right":"{status.right}","total":"{status.total}","rate":"{status.rate}","mastered":"{status.ok}","just":"{just_passed}","score":"{scoring.after}"}
+  返回 {"right":"{scoring.right}","total":"{scoring.total}","rate":"{scoring.rate}","mastered":"{scoring.mastered}","just":"{scoring.just}","score":"{scoring.after}"}
 结束
 
 
@@ -96,19 +72,19 @@
   如果 {learner} 为空
     设 learner = me
   结束
-  设 rate = {rate 或}
-  如果 {rate} 为空
-    设 rate = 80
+  设 line = {line 或}
+  如果 {line} 为空
+    设 line = 80
   结束
-  设 min_count = {min_count 或}
-  如果 {min_count} 为空
-    设 min_count = 8
+  设 keep = {keep 或}
+  如果 {keep} 为空
+    设 keep = 60
   结束
 
   设 overview = 查一行 app.db learn_progress learner={learner}
   设 cond.learner = {learner}
-  设 cond.rate = {rate}
-  设 cond.min_count = {min_count}
+  设 cond.line = {line}
+  设 cond.keep = {keep}
   设 cond.limit = 10
   设 doing = 查询表 app.db learn_doing {cond}
 
