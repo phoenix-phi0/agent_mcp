@@ -75,12 +75,15 @@
     设 chat_rows = 查询表 app.db report_chat {who}
     # 这个学生的 AI 老师设定，和全班的放在一起（全班的只读），见 routes/teacher_note.zs
     设 note_rows = 查询表 app.db teacher_note_list {who}
+    # 传达（routes/teacher_relay.zs）：这个学生的和全班的，状态是这个学生的
+    设 relay_rows = 查询表 app.db relay_list_student {who}
     设 group.student_points = {points}
     设 group.student_wrong = {wrong}
     设 group.student_recent = {recent}
     设 group.student_book = {book}
     设 group.student_chat = {chat_rows}
     设 group.student_notes = {note_rows}
+    设 group.student_relays = {relay_rows}
     响应 lists {group}
   结束
 结束

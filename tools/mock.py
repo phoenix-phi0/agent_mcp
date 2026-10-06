@@ -157,6 +157,35 @@ class MockClient:
             "usage": {"prompt_tokens": 0, "completion_tokens": 0},
         }
 
+    def chat_json(self, prompt, system=None, temperature=None, model=None,
+                  **kwargs):
+        """「问JSON」：回复照常按规则 / handler 出，再当 JSON 解析（容忍 ```json
+        包裹），解析不了抛 ValueError——跟真客户端一样，脚本那一行报错。规则的
+        reply 写 JSON 文本；handler 也可以直接回 dict / list。记成 type 为
+        chat_json 的一次调用。"""
+        from .zhipu import strip_json
+        self.last_model = model
+        reply = self._make_reply(prompt, system)
+        self._record("chat_json", prompt=prompt, system=system,
+                     temperature=temperature, model=model, reply=reply)
+        if isinstance(reply, (dict, list)):
+            return reply
+        try:
+            return json.loads(strip_json(str(reply)))
+        except json.JSONDecodeError:
+            raise ValueError(f"模型没有返回合法 JSON。最后一次回复：{str(reply)[:200]}") from None
+
+    def chat_json_messages(self, messages, temperature=None, model=None,
+                           **kwargs):
+        last = next(
+            (m["content"] for m in reversed(messages) if m["role"] == "user"), ""
+        )
+        system = next(
+            (m["content"] for m in messages if m["role"] == "system"), None
+        )
+        return self.chat_json(last, system=system, temperature=temperature,
+                              model=model)
+
     def stream(self, prompt, system=None, temperature=None, model=None,
                **kwargs):
         self.last_model = model

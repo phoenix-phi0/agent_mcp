@@ -17,7 +17,11 @@
 #                      问老师记录（只读，老师的回答带着当时用了的 AI 老师设定）、
 #                      AI 老师设定：这个学生个人的和全班的放在一起（全班的只读），
 #                      新增 / 编辑在「编辑学生设定」浮层里（地址里的 student 跟着
-#                      提交，接口就知道是给这个学生的），行上停用 / 启用 / 删除
+#                      提交，接口就知道是给这个学生的），行上停用 / 启用 / 删除；
+#                      传达：这个学生的和全班的（全班的只读），状态是这个学生的
+#                      （待传达·已带入 n 轮 / 已传达 / 传达有误 / 已过期），传达到
+#                      了的「看那条回复」开「学生传达记录」浮层，个人的在「编辑
+#                      学生传达」浮层里新增 / 编辑
 #
 # 「当」的条件里不能有空格；「提示」里不能有双引号。
 
@@ -141,6 +145,26 @@
         动作 teacher_note_delete 远程 危险 带 note_id 当 row.mine==1 删除
       结束
     结束
+    区域 传达
+      文案 要让这个学生知道的事：AI老师会结合话题自然地说给他，说没说到由AI判定。全班的只读（到「AI老师设定」页改），状态是这个学生的。
+      动作 new_student_relay 打开 编辑学生传达 重置 给这个学生加一条传达
+      文案 当 lists.student_relays&&!lists.student_relays.length 还没有传达。
+      列表 学生传达表 绑 student_relays 当 lists.student_relays&&lists.student_relays.length
+        列 relay_id 编号
+        列 relay_scope 范围
+        列 relay_urgency 紧急程度
+        列 relay_brief 要点
+        列 relay_facts 必须准确的信息
+        列 relay_due 截止日期
+        列 relay_state_text 状态
+        列 relay_excerpt AI原话
+        动作 open_student_relay_message 打开 学生传达记录 带 message_id 当 row.message_id 看那条回复
+        动作 edit_student_relay 打开 编辑学生传达 带 relay_id 当 row.mine==1 编辑
+        动作 teacher_relay_disable 远程 带 relay_id 当 row.mine==1&&row.relay_enabled_text==='启用' 停用
+        动作 teacher_relay_enable 远程 带 relay_id 当 row.mine==1&&row.relay_enabled_text==='停用' 启用
+        动作 teacher_relay_delete 远程 危险 带 relay_id 当 row.mine==1 删除
+      结束
+    结束
   结束
 
   浮层 编辑学生设定 宽 560px 载入 teacher_note_open
@@ -153,6 +177,33 @@
     分组 底栏 横排 底栏
       动作 teacher_note_save 提交 远程 关闭 保存
       动作 cancel_student_note 次要 关闭 取消
+    结束
+  结束
+
+  浮层 编辑学生传达 宽 600px 载入 teacher_relay_open
+    分组 主体 竖排 间距 12px
+      字段 relay_point 控件 多行 提示 写要让学生明白什么（意图，不是台词），最多300字 要点
+      字段 relay_urgency 控件 下拉 紧急程度（不选是尽快。顺便：话题沾边才说；尽快：一两轮内；立即：下一条就说）
+      字段 relay_voice 控件 下拉 口吻（不选是以老师名义）
+      字段 relay_facts 提示 日期、数字、范围这类，AI要原样说对，判定时核对，可空 必须准确的信息
+      字段 relay_keywords 提示 「顺便」时提示什么算沾边，逗号分隔，可空 话题关键词
+      字段 relay_rounds 控件 数字 几轮没传达到就升级为立即（0或不填是3）
+      字段 relay_due 控件 日期 截止日期（当天升级为立即，过了没传达到就不再带）
+    结束
+    分组 底栏 横排 底栏
+      动作 teacher_relay_save 提交 远程 关闭 保存
+      动作 cancel_student_relay 次要 关闭 取消
+    结束
+  结束
+
+  浮层 学生传达记录 宽 640px 载入 teacher_relay_message
+    分组 主体 竖排 间距 12px
+      字段 relay_msg_ask 控件 多行 学生问
+      字段 relay_msg_reply 控件 多行 AI老师的回复
+      字段 relay_excerpt 传达的那句
+    结束
+    分组 底栏 横排 底栏
+      动作 close_student_relay_message 次要 关闭 返回
     结束
   结束
 结束

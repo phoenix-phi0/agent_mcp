@@ -1,0 +1,100 @@
+# AI 老师设定的第四种：传达（教师端，ui/teacher_note.ui、ui/report.ui，接口在
+# routes/teacher_relay.zs，拼进提示词在 scripts/teacher_notes.zs，判定在
+# scripts/relay_judge.zs）。
+#
+# 跟记忆 / 作者注 / 关键词卡反过来：那三种是暗中影响 AI 老师、不让学生知道；传达
+# 是老师要 AI 老师「让学生知道某件事」（下周三小测、作业改了截止日……），学生会在
+# AI 的回复里看到传达的内容。提示词里用另一套标记（【老师要你转达给学生｜…】），
+# 跟「教师设定」的保密段落分开。
+#
+# 为什么是新表、不往 teacher_note 里加一种：teacher_note.note_kind 是枚举，库里
+# 是 CHECK (note_kind IN ('记忆','作者注','关键词卡'))，加一个值得重建表（「迁移
+# 只加」不做、也不该做）；而且传达的字段（紧急程度、口吻、必须准确的信息、轮数、
+# 截止日）和按学生跟踪的状态，跟那三种几乎不重合，硬塞进去一半的列对另一半没
+# 意义。三张表都靠「迁移 只加」补建，不碰已有的表。
+#
+# teacher_relay  一条要传达的要点
+#   relay_point     要点：老师写的意图（要让学生明白什么），不是台词
+#   relay_student   空 = 全班（每个学生各自跟踪状态）；否则是这个学生的用户名
+#   relay_urgency   顺便（话题沾边才说）/ 尽快（默认，一两轮内找过渡说）/ 立即
+#                   （下一条回复就说）
+#   relay_voice     以老师名义（默认，「王老师让我提醒你……」，名字是 relay_by 那个
+#                   教师的显示名，没有就「老师」）/ AI自己的口吻
+#   relay_facts     必须准确的信息（日期、数字、范围……），可空；判定时核对
+#   relay_keywords  「顺便」的提示：话题里出现这些说法就算沾边（可空，空时 AI 自己判）
+#   relay_rounds    带了这么多轮还没传达到就升级为「立即」（默认 3）
+#   relay_due       截止日期（YYYY-MM-DD，可空）。到截止那天还没传达到升级为「立即」，
+#                   过了截止日还没传达到就是「已过期」，不再带入
+#   relay_by        谁写 / 最后改的（多人模式是教师的用户名，单人模式是「老师」）
+#
+# relay_state  每个（要点，学生）一行，第一次带入时建：
+#   status     待传达 / 已传达 / 传达有误（信息说错了，再带一次并要求更正）/
+#              有误已停止（更正那次还是错的，不再带，等老师处理）。「已过期」不存，
+#              查的时候按 relay_due 算（只对没传达到的）
+#   carried_n  带进过几条成功生成的回复（「已带入 n 轮」）
+#   miss_n     判成「没传达到」的次数（含判定失败），到 relay_rounds 升级为立即
+#   wrong_n    判成「传达了但信息不准确」的次数
+#   message_id / excerpt / delivered_at  已传达的那条老师回复、AI 原话摘录、时间
+#              （传达有误时也先记下说错的那句，页面上给老师看）
+#   改了要点或必须准确的信息：这条的状态全部清掉，重新传达
+#
+# relay_use  一条老师回复带了哪条传达（一条回复最多一条），和这次的判定：
+#   verdict  待判定 / 已传达 / 未传达 / 有误 / 判定失败；judge_note 是判定的理由或
+#            出错原因（判定失败也记在这里，同时引擎往 stderr 打一行）
+#   urgency  这次实际用的紧急程度（升级过的写「立即」）
+#   跟回复同一个事务写：模型出错时整轮不记，不算带入过。
+#
+# teacher_relay_view  只撑页面上的列、浮层的字段，表里不存东西。
+
+实体 teacher_relay 传达
+  字段 relay_point 文本 必填 要点
+  字段 relay_student 文本 索引 学生
+  字段 relay_urgency 枚举 顺便,尽快,立即 必填 默认 尽快 紧急程度
+  字段 relay_voice 枚举 以老师名义,AI自己的口吻 必填 默认 以老师名义 口吻
+  字段 relay_facts 文本 必须准确的信息
+  字段 relay_keywords 文本 话题关键词
+  字段 relay_rounds 整数 必填 默认 3 几轮没传达到就升级
+  字段 relay_due 文本 截止日期
+  字段 relay_enabled 布尔 必填 默认 1 启用
+  字段 relay_by 文本 写的人
+  字段 relay_created 文本 必填 默认 现在 创建时间
+  字段 relay_updated 文本 必填 默认 现在 更新时间
+结束
+
+实体 relay_state 传达状态
+  字段 relay_id 整数 必填 索引 传达
+  字段 learner 文本 必填 索引 学生
+  字段 status 文本 必填 默认 待传达 状态
+  字段 carried_n 整数 必填 默认 0 已带入
+  字段 miss_n 整数 必填 默认 0 没传达到
+  字段 wrong_n 整数 必填 默认 0 说错
+  字段 message_id 整数 传达的那条回复
+  字段 excerpt 文本 AI原话
+  字段 delivered_at 文本 传达时间
+  字段 state_updated 文本 必填 默认 现在 更新时间
+  唯一 relay_id learner
+结束
+
+实体 relay_use 回复带的传达
+  字段 message_id 整数 必填 索引 老师那条回复
+  字段 relay_id 整数 必填 索引 传达
+  字段 learner 文本 必填 索引 学生
+  字段 urgency 文本 用的紧急程度
+  字段 verdict 文本 必填 默认 待判定 判定
+  字段 excerpt 文本 AI原话
+  字段 judge_note 文本 判定说明
+  字段 used_at 文本 必填 默认 现在 时间
+  字段 judged_at 文本 判定时间
+结束
+
+实体 teacher_relay_view 传达页面
+  字段 relay_brief 文本 要点
+  字段 relay_scope 文本 范围
+  字段 relay_state_text 文本 状态
+  字段 relay_done 文本 完成情况
+  字段 relay_student_label 文本 学生
+  字段 relay_excerpt 文本 AI原话
+  字段 relay_at 文本 时间
+  字段 relay_msg_ask 长文本 学生问
+  字段 relay_msg_reply 长文本 AI老师的回复
+结束

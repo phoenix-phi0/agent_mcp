@@ -73,6 +73,7 @@ run 老师讲语法  $PY tests/kg/test_teacher_bunpou.py
 run 问老师      $PY tests/kg/test_teacher_chat.py
 run 请老师讲课  $PY tests/kg/test_teacher_lesson.py
 run AI老师设定  $PY tests/kg/test_teacher_note.py
+run AI老师传达  $PY tests/kg/test_teacher_relay.py
 run 教材和进度  $PY tests/kg/test_pages.py
 run 多人模式    $PY tests/kg/test_multiuser.py
 run 教师学生分端 $PY tests/kg/test_roles.py
@@ -109,6 +110,7 @@ run 教材导入E2E bash -c "cd $M/tests/e2e && node textbook_import_run.js"
 run 多人E2E     bash -c "cd $M/tests/e2e && node multiuser_run.js"
 run 两端页面E2E bash -c "cd $M/tests/e2e && node ends_run.js"
 run 老师设定E2E bash -c "cd $M/tests/e2e && node teacher_note_run.js"
+run 老师传达E2E bash -c "cd $M/tests/e2e && node teacher_relay_run.js"
 run app2编译    bash -c "cd $M/app2 && $PY build.py"
 
 # 上传要先起 dsl/ 的服务。

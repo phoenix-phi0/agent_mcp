@@ -253,7 +253,9 @@ def background_reason(exc) -> str:
         if getattr(cur, "model_call", False) and model is None:
             model = cur
         last = cur
-        cur = cur.__cause__ or cur.__context__
+        # 「raise … from None」压掉的上下文不往里找：json 解析失败的最里层是
+        # StopIteration(0)，取它的第一行就成了一个「0」
+        cur = cur.__cause__ or (None if cur.__suppress_context__ else cur.__context__)
     if model is not None:
         first = (str(model).strip().splitlines() or [type(model).__name__])[0]
         return f"模型没有回应：{first}"[:200]

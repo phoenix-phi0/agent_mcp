@@ -12,6 +12,12 @@
 # 下面的预览：选一个学生、输一句示例提问，显示会命中哪些关键词卡、拼进提示词的
 # 三段和它们的位置，不调模型。
 #
+# 第四种「传达」（routes/teacher_relay.zs）：要让学生知道的事，在单独的区域里：
+# 全班的传达列表（完成情况「已传达 x/总 y」）、「新增传达」和行上「编辑」开「编辑传达」
+# 浮层，行上停用 / 启用 / 删除；下面是各学生在每条全班传达上的状态，传达到了的行上
+# 「看那条回复」开「传达记录」浮层（学生那句、AI 老师回复全文、传达的那句）。
+# 预览里也显示这次带哪条传达、拼出来的传达段。
+#
 # 「当」的条件里不能有空格；「提示」里不能有双引号和空格。
 
 界面 自定义 AI老师设定 端 教师
@@ -22,6 +28,7 @@
   结束
   分组 顶栏 横排 间距 12px 对齐 center
     动作 new_note 打开 编辑设定 重置 新增设定
+    动作 new_relay 打开 编辑传达 重置 新增传达
   结束
 
   布局 占满
@@ -57,7 +64,40 @@
         列 hit_placed 放进去了吗
       结束
       文案 当 shared.preview&&lists.preview_hits&&!lists.preview_hits.length 没有命中的关键词卡。
+      显示 preview.relay_pick 当 shared.preview 这次带的传达
       显示 preview.layout 正文 当 shared.preview 拼好的样子（其余材料用……代替）
+    结束
+  结束
+
+  布局 占满
+    区域 传达
+      文案 传达是要让学生知道的事（比如下周三小测、作业截止日改了）：写清楚要让学生明白什么，AI老师会结合当时的话题自然地说给学生，一条回复最多说一件。说没说到由AI判定（快档），全班的按每个学生分别跟踪。跟上面三种不同，学生会在AI的回复里看到传达的内容，但看不到这里的设定。
+      文案 当 lists.class_relays&&!lists.class_relays.length 还没有全班的传达。
+      列表 全班传达表 绑 class_relays 当 lists.class_relays&&lists.class_relays.length
+        列 relay_id 编号
+        列 relay_urgency 紧急程度
+        列 relay_voice 口吻
+        列 relay_brief 要点
+        列 relay_facts 必须准确的信息
+        列 relay_due 截止日期
+        列 relay_done 完成情况
+        列 relay_state_text 状态
+        列 relay_updated 更新时间
+        列 relay_by 写的人
+        动作 edit_relay 打开 编辑传达 带 relay_id 编辑
+        动作 teacher_relay_disable 远程 带 relay_id 当 row.relay_state_text!=='停用' 停用
+        动作 teacher_relay_enable 远程 带 relay_id 当 row.relay_state_text==='停用' 启用
+        动作 teacher_relay_delete 远程 危险 带 relay_id 删除
+      结束
+      文案 当 lists.class_relay_states&&lists.class_relay_states.length 各学生的传达状态：
+      列表 传达状态表 绑 class_relay_states 当 lists.class_relay_states&&lists.class_relay_states.length
+        列 relay_id 编号
+        列 relay_brief 要点
+        列 relay_student_label 学生
+        列 relay_state_text 状态
+        列 relay_excerpt AI原话
+        动作 open_relay_message 打开 传达记录 带 message_id 当 row.message_id 看那条回复
+      结束
     结束
   结束
 
@@ -71,6 +111,33 @@
     分组 底栏 横排 底栏
       动作 teacher_note_save 提交 远程 关闭 保存
       动作 cancel_note 次要 关闭 取消
+    结束
+  结束
+
+  浮层 编辑传达 宽 600px 载入 teacher_relay_open
+    分组 主体 竖排 间距 12px
+      字段 relay_point 控件 多行 提示 写要让学生明白什么（意图，不是台词），最多300字 要点
+      字段 relay_urgency 控件 下拉 紧急程度（不选是尽快。顺便：话题沾边才说；尽快：一两轮内；立即：下一条就说）
+      字段 relay_voice 控件 下拉 口吻（不选是以老师名义）
+      字段 relay_facts 提示 日期、数字、范围这类，AI要原样说对，判定时核对，可空 必须准确的信息
+      字段 relay_keywords 提示 「顺便」时提示什么算沾边，逗号分隔，可空 话题关键词
+      字段 relay_rounds 控件 数字 几轮没传达到就升级为立即（0或不填是3）
+      字段 relay_due 控件 日期 截止日期（当天升级为立即，过了没传达到就不再带）
+    结束
+    分组 底栏 横排 底栏
+      动作 teacher_relay_save 提交 远程 关闭 保存
+      动作 cancel_relay 次要 关闭 取消
+    结束
+  结束
+
+  浮层 传达记录 宽 640px 载入 teacher_relay_message
+    分组 主体 竖排 间距 12px
+      字段 relay_msg_ask 控件 多行 学生问
+      字段 relay_msg_reply 控件 多行 AI老师的回复
+      字段 relay_excerpt 传达的那句
+    结束
+    分组 底栏 横排 底栏
+      动作 close_relay_message 次要 关闭 返回
     结束
   结束
 结束

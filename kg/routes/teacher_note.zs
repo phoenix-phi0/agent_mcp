@@ -26,7 +26,7 @@
 # 3000 字，超了 400 一句人话，不存。
 
 
-# 「AI老师设定」页进页面：全班的设定、预览的学生下拉
+# 「AI老师设定」页进页面：全班的设定、全班的传达和各学生的传达状态、预览的学生下拉
 接口 POST /teacher_note/home 动作 teacher_note_home 只许 教师
   用包 common db http
 
@@ -35,6 +35,11 @@
   设 students = 查询 app.db teacher_note_students
   设 group.class_notes = {rows}
   设 group.note_students = {students}
+  # 第四种「传达」（routes/teacher_relay.zs）：全班的传达和各学生的状态
+  设 relays = 查询 app.db relay_list_class
+  设 relay_states = 查询 app.db relay_class_states
+  设 group.class_relays = {relays}
+  设 group.class_relay_states = {relay_states}
   响应 lists {group}
 结束
 
@@ -197,8 +202,10 @@
 # 设定是什么样。跟问老师调的是同一个 scripts/teacher_notes.zs（用这个学生真实的
 # 最近几句判关键词），不调模型、不写库，「只用于下一条」也不会被用掉。
 #
-# state.preview：system / cards / tail 三段原文，ids，layout（三段放在提示词里
-# 的位置，其余材料用「……」代替）；lists.preview_hits：命中的关键词卡
+# state.preview：system / cards / relay / tail 四段原文，ids，relay_pick（这次带哪条
+# 传达、用的紧急程度、后面还排着几条），layout（各段放在提示词里的位置，其余材料
+# 用「……」代替）；lists.preview_hits：命中的关键词卡。传达的预览同样不写库：不算
+# 带入、不判定
 接口 POST /teacher_note/preview 动作 teacher_note_preview 只许 教师
   用包 common db http
 
@@ -218,7 +225,12 @@
   设 preview.cards = {notes.cards 或 （没有命中的关键词卡）}
   设 preview.tail = {notes.tail 或 （没有生效的作者注）}
   设 preview.ids = {notes.ids 或 （无）}
-  设 preview.layout = 【系统提示词】你是一位耐心的日语老师……你不要自己写网址。{notes.system}{nl}{nl}【发给模型的提示词】学生现在用的教材：【……】课文、进度等材料：【……】{notes.cards}最近的对话（旧的在前）：【……】{notes.tail}学生现在说：【{sample}】请直接回答学生现在这句话。
+  设 preview.relay = {notes.relay 或 （没有待传达的要点）}
+  设 preview.relay_pick = （没有待传达的要点）
+  如果 {notes.relay_id} 不为空
+    设 preview.relay_pick = 传达#{notes.relay_id}「{notes.relay_brief}」，这次按「{notes.relay_urgency}」带；后面还排着{notes.relay_queue}条（一条回复只带一条）
+  结束
+  设 preview.layout = 【系统提示词】你是一位耐心的日语老师……你不要自己写网址。{notes.system}{nl}{nl}【发给模型的提示词】学生现在用的教材：【……】课文、进度等材料：【……】{notes.cards}最近的对话（旧的在前）：【……】{notes.relay}{notes.tail}学生现在说：【{sample}】请直接回答学生现在这句话。
   设 state.preview = {preview}
   响应 state {state}
   设 group.preview_hits = {notes.hits}

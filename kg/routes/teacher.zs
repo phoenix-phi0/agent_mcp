@@ -76,6 +76,12 @@
 # 设定，「只用于下一条」的作者注靠它算用没用过。出题、找不到课这两路不调回答
 # 的模型，不带设定也不记。
 #
+# 传达（教师要 AI 老师让学生知道的事，entities/teacher_relay.entity）也由
+# scripts/teacher_notes.zs 拼：一条回复最多带一条，放在作者注之前（notes.relay）。
+# 回答成功（同一个事务）在 relay_use 记下带了哪条、relay_state 的「已带入」加一；
+# 事务之后「后台执行」scripts/relay_judge.zs 用快档判这条回复传达到了没有——学生
+# 不等判定。没带传达的回复不判。
+#
 # 对话记录在 chat_message（学习记录，只进不改）。学习者那条和老师那条在
 # 模型回来之后一起写，一个事务：模型调用出错时这一轮整个不记，不会留下
 # 一句没有回答的问话。老师那条的 links 原文记在 links 列。
@@ -215,6 +221,7 @@
   设 reply.who = 老师
   # 回答用了的教师设定 id（只有调模型回答的几路会填）
   设 notes_used =
+  设 relay_used =
   设 reply.link =
   设 reply.link_text =
   设 lesson_code =
@@ -374,9 +381,10 @@
         设 links.href3 = {brief.link}
         设 links.text3 = 复习薄弱点
       结束
-      问 answer_text = 下面是这个学生在网站上的学习进度（网站统计的，以它为准）：【{progress}】学生现在用的教材：【{series_now.label}】按进度推荐的下一课：【{suggestion}】{notes.cards}最近的对话（旧的在前）：【{recent_talk}】{notes.tail}学生现在说：【{message}】请以学习进度为主回答：说清他现在的情况（只用上面给的数字和知识点），指出薄弱的地方（有掌握得分的话，得分低的点先说），给出具体的下一步建议（先读或复习哪一课、练哪些点）。还没有作答记录的话，就建议从推荐的课开始、去做题页做几道。 用 平衡
+      问 answer_text = 下面是这个学生在网站上的学习进度（网站统计的，以它为准）：【{progress}】学生现在用的教材：【{series_now.label}】按进度推荐的下一课：【{suggestion}】{notes.cards}最近的对话（旧的在前）：【{recent_talk}】{notes.relay}{notes.tail}学生现在说：【{message}】请以学习进度为主回答：说清他现在的情况（只用上面给的数字和知识点），指出薄弱的地方（有掌握得分的话，得分低的点先说），给出具体的下一步建议（先读或复习哪一课、练哪些点）。还没有作答记录的话，就建议从推荐的课开始、去做题页做几道。 用 平衡
       设 reply.text = {answer_text}
       设 notes_used = {notes.ids}
+      设 relay_used = {notes.relay_id}
       设 reply.link = {links.href2}
       设 reply.link_text = {links.text2}
     否则
@@ -424,9 +432,10 @@
         结束
         设 links.href3 = #%E6%95%99%E6%9D%90
         设 links.text3 = 打开教材
-        问 answer_text = 学生现在用的教材：【{series_now.label}】下面是网站教材的课文目录（按等级分组，只有标题）：【{catalog}】标题或条目跟学生的问题直接对上的课：【{related}】按学生进度推荐的课：【{suggestion}】这个学生的学习进度：【{progress}】{notes.cards}最近的对话（旧的在前）：【{recent_talk}】{notes.tail}学生现在说：【{message}】请根据目录回答学生关于教材的问题，推荐具体的课时写出课文标题；目录里没有的课不要编。 用 平衡
+        问 answer_text = 学生现在用的教材：【{series_now.label}】下面是网站教材的课文目录（按等级分组，只有标题）：【{catalog}】标题或条目跟学生的问题直接对上的课：【{related}】按学生进度推荐的课：【{suggestion}】这个学生的学习进度：【{progress}】{notes.cards}最近的对话（旧的在前）：【{recent_talk}】{notes.relay}{notes.tail}学生现在说：【{message}】请根据目录回答学生关于教材的问题，推荐具体的课时写出课文标题；目录里没有的课不要编。 用 平衡
         设 reply.text = {answer_text}
         设 notes_used = {notes.ids}
+        设 relay_used = {notes.relay_id}
         设 reply.link = {links.href1}
         设 reply.link_text = {links.text1}
         如果 {reply.link} 为空
@@ -463,9 +472,10 @@
         结束
         设 reply.link = {links.href1}
         设 reply.link_text = {links.text1}
-        问 answer_text = 学生现在用的教材：【{series_now.label}】学生请你讲解教材里的这一课，讲解以课文为准：【{pinned.body}】这个学生在这一课的答题情况（网站统计的）：【{pinned.record}】他整体的学习进度（网站统计的）：【{progress}】{notes.cards}最近的对话（旧的在前）：【{recent_talk}】{notes.tail}学生现在说：【{message}】请这样讲：先用一两句话说这一课讲什么、什么时候用；再讲接续和要点，用课文里的例句说明（日语原文加中文）；有容易混的说法提一句怎么区分；最后结合他在这一课的答题情况给建议——答错过的条目重点讲，还没做过题就建议做这一课的题。学生问的是这一课里的具体问题时，直接回答那个问题。 用 平衡
+        问 answer_text = 学生现在用的教材：【{series_now.label}】学生请你讲解教材里的这一课，讲解以课文为准：【{pinned.body}】这个学生在这一课的答题情况（网站统计的）：【{pinned.record}】他整体的学习进度（网站统计的）：【{progress}】{notes.cards}最近的对话（旧的在前）：【{recent_talk}】{notes.relay}{notes.tail}学生现在说：【{message}】请这样讲：先用一两句话说这一课讲什么、什么时候用；再讲接续和要点，用课文里的例句说明（日语原文加中文）；有容易混的说法提一句怎么区分；最后结合他在这一课的答题情况给建议——答错过的条目重点讲，还没做过题就建议做这一课的题。学生问的是这一课里的具体问题时，直接回答那个问题。 用 平衡
         设 reply.text = {answer_text}
         设 notes_used = {notes.ids}
+        设 relay_used = {notes.relay_id}
       否则
         # ---- 讲解：平衡档，带课文正文、进度和最近几轮 ----
         设 search.quiz = 0
@@ -497,9 +507,10 @@
           设 reply.link_text = {links.text1}
         结束
 
-        问 answer_text = 学生现在用的教材：【{series_now.label}】下面是网站课文库里和这个问题最相关的课文，讲解时以它为准（跟问题无关就忽略）：【{reference}】这个学生的学习进度（网站统计的，跟问题有关时可以结合着给建议）：【{progress}】{notes.cards}最近的对话（旧的在前，接着这些往下聊）：【{recent_talk}】{notes.tail}学生现在说：【{message}】请直接回答学生现在这句话。 用 平衡
+        问 answer_text = 学生现在用的教材：【{series_now.label}】下面是网站课文库里和这个问题最相关的课文，讲解时以它为准（跟问题无关就忽略）：【{reference}】这个学生的学习进度（网站统计的，跟问题有关时可以结合着给建议）：【{progress}】{notes.cards}最近的对话（旧的在前，接着这些往下聊）：【{recent_talk}】{notes.relay}{notes.tail}学生现在说：【{message}】请直接回答学生现在这句话。 用 平衡
         设 reply.text = {answer_text}
         设 notes_used = {notes.ids}
+        设 relay_used = {notes.relay_id}
       结束
       结束
       结束
@@ -535,6 +546,24 @@
       设 use_row.learner = {learner}
       设 use_row.note_ids = {notes_used}
       设 affected = 写库表 app.db chat_note_use_add {use_row}
+    结束
+    # 这条回复带了哪条传达（最多一条）：记下来，这个学生在这条传达上「已带入」加一
+    如果 {relay_used} 不为空
+      设 relay_row.learner = {learner}
+      设 relay_row.relay_id = {relay_used}
+      设 relay_row.urgency = {notes.relay_urgency}
+      设 affected = 写库表 app.db relay_use_add {relay_row}
+      设 affected = 写库表 app.db relay_state_carry {relay_row}
+    结束
+  结束
+
+  # 传达判定放后台（快档，scripts/relay_judge.zs）：学生先拿到回复，判定自己写库。
+  # 判定出错（模型出错、回的不是 JSON）由 relay_judge_fail.zs 记成「判定失败」，
+  # 当没传达到算。没带传达的回复不判、不调模型
+  如果 {relay_used} 不为空
+    设 relay_use_id = 查一值表 app.db relay_use_last {relay_row}
+    如果 {relay_use_id} 不为空
+      后台执行 scripts/relay_judge.zs use_id={relay_use_id} on_error=scripts/relay_judge_fail.zs
     结束
   结束
 
