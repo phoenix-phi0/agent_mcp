@@ -110,6 +110,15 @@ _CALLABLE = {
     "cbatch.wait":     ("tools.cbatch", "wait"),
     "cbatch.jobs":     ("tools.cbatch", "jobs"),
     "cbatch.cancel":   ("tools.cbatch", "cancel"),
+    # GBatch：同样的批量，执行端换成 Grok Build 的无头模式（grok -p）。
+    # 要批准的工具调用会中断整条（不是拒掉接着干），记成 error——见
+    # gbatch.py 模块文档。不收 bypassPermissions、单次上限 10 条。
+    "gbatch.describe": ("tools.gbatch", "describe"),
+    "gbatch.submit":   ("tools.gbatch", "submit"),
+    "gbatch.status":   ("tools.gbatch", "status"),
+    "gbatch.wait":     ("tools.gbatch", "wait"),
+    "gbatch.jobs":     ("tools.gbatch", "jobs"),
+    "gbatch.cancel":   ("tools.gbatch", "cancel"),
     # 精确编辑：改几行不用重写整个文件。
     #
     # write_file 只能整个覆盖，改 ui.py（1132 行）里的两行要把一千一百行

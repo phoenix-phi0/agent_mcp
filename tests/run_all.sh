@@ -86,6 +86,7 @@ run 运行模式    $PY tests/dsl/test_run_mode.py
 run 命名约定    $PY tests/dsl/test_naming.py
 run 字符串动词  $PY tests/dsl/test_text_verbs.py
 run 批量claude  $PY tests/tools/test_cbatch.py
+run 批量grok    $PY tests/tools/test_gbatch.py
 run 代理工作目录 $PY tests/tools/test_zcode_workdir.py
 run 认证        $PY tests/auth/test_auth.py
 run 认证攻击    $PY tests/auth/test_auth_attack.py
