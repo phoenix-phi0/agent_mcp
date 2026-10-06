@@ -49,6 +49,24 @@ cbatch.wait    job_id=... timeout=110 every=15
 字段里。要让它改文件就传 `permission_mode="acceptEdits"`，或者用 `allowed_tools`
 指定具体工具。`bypassPermissions` 不收。
 
+GBatch 接口同 CBatch，执行端换成 Grok Build 的 `grok -p`（`gbatch.submit/wait/
+status/...`，`gbatch.describe()` 列出权限用法和工具名映射）。跟 CBatch 的差别：
+
+- **要批准的调用会让整条中断**（stopReason=cancelled，退出码照样 0），不是只拒
+  那一个接着干。被中断记 error，写明卡在哪个调用（「需要批准：Edit /tmp/x.py」），
+  status/wait 的 `hint` 给出该加的 `allowed_tools`。
+- `permission_mode="acceptEdits"` 在 grok 里本身不生效（运行时没有这个模式，落到
+  default），gbatch 自动补 `--allow Edit`；**跑命令还要 `allowed_tools` 加 `Bash`
+  或 `Bash(python3 *)` 这类**。只给 Bash 不算能写文件（模型会用 write 工具）。
+  **带重定向的串联命令连 `--allow Bash` 也盖不住**（实测 `mkdir && printf … > a.py
+  && python3 a.py` 被中断），提示词里写明「用写文件工具建文件、命令一条一条跑」。
+- `allowed_tools` 收 Claude 的名字，自动翻：Glob→Grep、Write/MultiEdit/
+  NotebookEdit→Edit、LS→Read；`Bash(...)` 这类原样；认不出的（Task 等）跳过、
+  进返回值和 job.json 的 `warnings`。`"*"` 不收。
+- submit 返回的 `warnings` 还有预检：提示词像要写文件/跑命令而没放行时提醒。
+- 模型默认用 grok 自己的，没有 `model="auto"`；原始输出在任务目录
+  `task_<n>.raw.json` / `task_<n>.stderr.log`，实际命令行在 job.json 的 `cmd`。
+
 **清理起的服务不要用 `pkill -f '关键字'`**：它会匹配到跑这段脚本的 shell 自己，
 把自己杀掉（犯过三次）。记 PID 按进程组杀：
 

@@ -51,6 +51,7 @@ fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
 
 os.environ["GBATCH_HOME"] = str(TMP / "jobs")
 os.environ["GBATCH_GROK"] = str(fake)
+os.environ["GROK_HOME"] = str(TMP / "grok_home")     # 不去读真的会话记录
 os.environ["CLAUDECODE"] = "1"
 os.environ["CLAUDE_CODE_SESSION_ID"] = "parent"
 
