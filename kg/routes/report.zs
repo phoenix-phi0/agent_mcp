@@ -34,7 +34,8 @@
 
 
 # 点进一个学生（#学情?student=s1，界面上的「载入」）：抬头、概况、各知识点、
-# 常错条目、最近作答、默写错词本、问老师记录、上一份 AI 总结。
+# 常错条目、最近作答、默写错词本、问老师记录（老师的回答带着当时用了的 AI 老师
+# 设定）、上一份 AI 总结、AI 老师设定（这个学生的和全班的）。
 #
 # 不是学生（教师账号、库里没这个人）：回 state.student.missing 那句，页面上
 # 直接显示，不报错。
@@ -72,11 +73,14 @@
     设 recent = 查询表 app.db report_recent {who}
     设 book = 查询表 app.db report_book {who}
     设 chat_rows = 查询表 app.db report_chat {who}
+    # 这个学生的 AI 老师设定，和全班的放在一起（全班的只读），见 routes/teacher_note.zs
+    设 note_rows = 查询表 app.db teacher_note_list {who}
     设 group.student_points = {points}
     设 group.student_wrong = {wrong}
     设 group.student_recent = {recent}
     设 group.student_book = {book}
     设 group.student_chat = {chat_rows}
+    设 group.student_notes = {note_rows}
     响应 lists {group}
   结束
 结束

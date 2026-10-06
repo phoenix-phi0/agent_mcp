@@ -115,7 +115,7 @@ def main() -> int:
         t_js = (web / "teacher.js").read_text(encoding="utf-8")
         check(screen_names(main_js) == ["知识图谱", "登录", "改密码", "学习进度", "做题", "默写", "问老师", "教材"],
               f"学生页（/）：{screen_names(main_js)}")
-        check(screen_names(t_js) == ["学情", "学生管理", "教材导入", "登录", "改密码"],
+        check(screen_names(t_js) == ["学情", "学生管理", "AI老师设定", "教材导入", "登录", "改密码"],
               f"教师页（/teacher）：学情在前：{screen_names(t_js)}")
         check("nav-side" not in main_js and "nav-side" not in t_js, "两边都没有「管理」那组（kg 的界面不再写「侧 管理」）")
         main_html = (web / "index.html").read_text(encoding="utf-8")

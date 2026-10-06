@@ -68,6 +68,14 @@
 # link / link_text 照旧给一个（做题的那个优先，没有就是第一个），只认这
 # 两个键的地方照样能用。
 #
+# 教师设定（教师端「AI老师设定」页、学情的学生页上写的，routes/teacher_note.zs）：
+# 要模型回答的几路都调 scripts/teacher_notes.zs 现拼——记忆接在系统提示词末尾，
+# 关键词卡放在「最近的对话」之前，作者注紧贴「学生现在说」之前，都用「【教师
+# 设定，学生看不到…】」标出边界。设定不进 chat_message、不占「最近几轮」，学生
+# 的接口也不回它；回答成功（同一个事务）才在 chat_note_use 记这条回复用了哪些
+# 设定，「只用于下一条」的作者注靠它算用没用过。出题、找不到课这两路不调回答
+# 的模型，不带设定也不记。
+#
 # 对话记录在 chat_message（学习记录，只进不改）。学习者那条和老师那条在
 # 模型回来之后一起写，一个事务：模型调用出错时这一轮整个不记，不会留下
 # 一句没有回答的问话。老师那条的 links 原文记在 links 列。
@@ -205,6 +213,8 @@
   设 search.learner = {learner}
 
   设 reply.who = 老师
+  # 回答用了的教师设定 id（只有调模型回答的几路会填）
+  设 notes_used =
   设 reply.link =
   设 reply.link_text =
   设 lesson_code =
@@ -317,7 +327,13 @@
     设 who.level = {intent_json.level 或}
     设 progress = 查一值表 app.db progress_brief {who}
 
-    系统 你是一位耐心的日语老师，学生是中国人。用中文讲解，日语例句给出原文和中文意思。回答简洁、讲清重点，不要客套。你只讲解，不在对话里出题、不给学生判分；学生想练习时请他去做题页。提示词里会给你这个学生的学习进度（网站统计的），可以结合进度给建议，但不要编造进度里没有的数据（没给的数字、没列出的知识点不要说）。课文和做题页的链接由网站附在你的回复下面，你不要自己写网址。
+    # 教师设定（AI 老师设定页、学情的学生页上写的，学生看不到）：每次现拼，不进
+    # 对话记录、不占「最近几轮」。记忆接在系统提示词末尾，关键词卡放在「最近的
+    # 对话」之前，作者注紧贴「学生现在说」之前。见 scripts/teacher_notes.zs。
+    # 回答成功（下面的事务写进去）才记 chat_note_use，「只用于下一条」才算用掉
+    设 notes = 执行 scripts/teacher_notes.zs learner={learner} message={message}
+
+    系统 你是一位耐心的日语老师，学生是中国人。用中文讲解，日语例句给出原文和中文意思。回答简洁、讲清重点，不要客套。你只讲解，不在对话里出题、不给学生判分；学生想练习时请他去做题页。提示词里会给你这个学生的学习进度（网站统计的），可以结合进度给建议，但不要编造进度里没有的数据（没给的数字、没列出的知识点不要说）。课文和做题页的链接由网站附在你的回复下面，你不要自己写网址。{notes.system}
 
     如果 {intent} 等于 进度
       # ---- 进度：以进度摘要为主，推荐一课 ----
@@ -358,8 +374,9 @@
         设 links.href3 = {brief.link}
         设 links.text3 = 复习薄弱点
       结束
-      问 answer_text = 下面是这个学生在网站上的学习进度（网站统计的，以它为准）：【{progress}】学生现在用的教材：【{series_now.label}】按进度推荐的下一课：【{suggestion}】最近的对话（旧的在前）：【{recent_talk}】学生现在说：【{message}】请以学习进度为主回答：说清他现在的情况（只用上面给的数字和知识点），指出薄弱的地方（有掌握得分的话，得分低的点先说），给出具体的下一步建议（先读或复习哪一课、练哪些点）。还没有作答记录的话，就建议从推荐的课开始、去做题页做几道。 用 平衡
+      问 answer_text = 下面是这个学生在网站上的学习进度（网站统计的，以它为准）：【{progress}】学生现在用的教材：【{series_now.label}】按进度推荐的下一课：【{suggestion}】{notes.cards}最近的对话（旧的在前）：【{recent_talk}】{notes.tail}学生现在说：【{message}】请以学习进度为主回答：说清他现在的情况（只用上面给的数字和知识点），指出薄弱的地方（有掌握得分的话，得分低的点先说），给出具体的下一步建议（先读或复习哪一课、练哪些点）。还没有作答记录的话，就建议从推荐的课开始、去做题页做几道。 用 平衡
       设 reply.text = {answer_text}
+      设 notes_used = {notes.ids}
       设 reply.link = {links.href2}
       设 reply.link_text = {links.text2}
     否则
@@ -407,8 +424,9 @@
         结束
         设 links.href3 = #%E6%95%99%E6%9D%90
         设 links.text3 = 打开教材
-        问 answer_text = 学生现在用的教材：【{series_now.label}】下面是网站教材的课文目录（按等级分组，只有标题）：【{catalog}】标题或条目跟学生的问题直接对上的课：【{related}】按学生进度推荐的课：【{suggestion}】这个学生的学习进度：【{progress}】最近的对话（旧的在前）：【{recent_talk}】学生现在说：【{message}】请根据目录回答学生关于教材的问题，推荐具体的课时写出课文标题；目录里没有的课不要编。 用 平衡
+        问 answer_text = 学生现在用的教材：【{series_now.label}】下面是网站教材的课文目录（按等级分组，只有标题）：【{catalog}】标题或条目跟学生的问题直接对上的课：【{related}】按学生进度推荐的课：【{suggestion}】这个学生的学习进度：【{progress}】{notes.cards}最近的对话（旧的在前）：【{recent_talk}】{notes.tail}学生现在说：【{message}】请根据目录回答学生关于教材的问题，推荐具体的课时写出课文标题；目录里没有的课不要编。 用 平衡
         设 reply.text = {answer_text}
+        设 notes_used = {notes.ids}
         设 reply.link = {links.href1}
         设 reply.link_text = {links.text1}
         如果 {reply.link} 为空
@@ -445,8 +463,9 @@
         结束
         设 reply.link = {links.href1}
         设 reply.link_text = {links.text1}
-        问 answer_text = 学生现在用的教材：【{series_now.label}】学生请你讲解教材里的这一课，讲解以课文为准：【{pinned.body}】这个学生在这一课的答题情况（网站统计的）：【{pinned.record}】他整体的学习进度（网站统计的）：【{progress}】最近的对话（旧的在前）：【{recent_talk}】学生现在说：【{message}】请这样讲：先用一两句话说这一课讲什么、什么时候用；再讲接续和要点，用课文里的例句说明（日语原文加中文）；有容易混的说法提一句怎么区分；最后结合他在这一课的答题情况给建议——答错过的条目重点讲，还没做过题就建议做这一课的题。学生问的是这一课里的具体问题时，直接回答那个问题。 用 平衡
+        问 answer_text = 学生现在用的教材：【{series_now.label}】学生请你讲解教材里的这一课，讲解以课文为准：【{pinned.body}】这个学生在这一课的答题情况（网站统计的）：【{pinned.record}】他整体的学习进度（网站统计的）：【{progress}】{notes.cards}最近的对话（旧的在前）：【{recent_talk}】{notes.tail}学生现在说：【{message}】请这样讲：先用一两句话说这一课讲什么、什么时候用；再讲接续和要点，用课文里的例句说明（日语原文加中文）；有容易混的说法提一句怎么区分；最后结合他在这一课的答题情况给建议——答错过的条目重点讲，还没做过题就建议做这一课的题。学生问的是这一课里的具体问题时，直接回答那个问题。 用 平衡
         设 reply.text = {answer_text}
+        设 notes_used = {notes.ids}
       否则
         # ---- 讲解：平衡档，带课文正文、进度和最近几轮 ----
         设 search.quiz = 0
@@ -478,8 +497,9 @@
           设 reply.link_text = {links.text1}
         结束
 
-        问 answer_text = 学生现在用的教材：【{series_now.label}】下面是网站课文库里和这个问题最相关的课文，讲解时以它为准（跟问题无关就忽略）：【{reference}】这个学生的学习进度（网站统计的，跟问题有关时可以结合着给建议）：【{progress}】最近的对话（旧的在前，接着这些往下聊）：【{recent_talk}】学生现在说：【{message}】请直接回答学生现在这句话。 用 平衡
+        问 answer_text = 学生现在用的教材：【{series_now.label}】下面是网站课文库里和这个问题最相关的课文，讲解时以它为准（跟问题无关就忽略）：【{reference}】这个学生的学习进度（网站统计的，跟问题有关时可以结合着给建议）：【{progress}】{notes.cards}最近的对话（旧的在前，接着这些往下聊）：【{recent_talk}】{notes.tail}学生现在说：【{message}】请直接回答学生现在这句话。 用 平衡
         设 reply.text = {answer_text}
+        设 notes_used = {notes.ids}
       结束
       结束
       结束
@@ -510,6 +530,12 @@
     设 reply_row.links = {links_json}
     设 reply_row.round_key =
     设 affected = 写库表 app.db chat_add {reply_row}
+    # 这条回复用了哪些教师设定（学情的问老师记录里看；「只用于下一条」靠它算用过）
+    如果 {notes_used} 不为空
+      设 use_row.learner = {learner}
+      设 use_row.note_ids = {notes_used}
+      设 affected = 写库表 app.db chat_note_use_add {use_row}
+    结束
   结束
 
   如果 {echo_ask} 等于 是

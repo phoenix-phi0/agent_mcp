@@ -14,7 +14,10 @@
 #   #学情?student=s1   一个学生：抬头（教材、最近学习）、概况、「请 AI 写学情总结」
 #                      （平衡档，十几秒，等的时候有提示；写好的存起来，下次打开还
 #                      在）、各知识点得分与掌握、常错条目、最近作答、默写错词本、
-#                      问老师记录（只读）
+#                      问老师记录（只读，老师的回答带着当时用了的 AI 老师设定）、
+#                      AI 老师设定：这个学生个人的和全班的放在一起（全班的只读），
+#                      新增 / 编辑在「编辑学生设定」浮层里（地址里的 student 跟着
+#                      提交，接口就知道是给这个学生的），行上停用 / 启用 / 删除
 #
 # 「当」的条件里不能有空格；「提示」里不能有双引号。
 
@@ -116,7 +119,40 @@
         列 chat_who 谁
         列 chat_text 内容
         列 chat_at 时间
+        列 chat_notes 用了的设定
       结束
+    结束
+    区域 AI老师设定
+      文案 这个学生的AI老师设定和全班的放在一起看：全班的只读（到「AI老师设定」页改），这个学生个人的排在全班的后面。只进问老师里AI老师的提示词，学生看不到。
+      动作 new_student_note 打开 编辑学生设定 重置 给这个学生加一条
+      文案 当 lists.student_notes&&!lists.student_notes.length 还没有设定。
+      列表 学生设定表 绑 student_notes 当 lists.student_notes&&lists.student_notes.length
+        列 note_id 编号
+        列 note_scope 范围
+        列 note_kind 种类
+        列 note_keywords 关键词
+        列 note_brief 内容
+        列 note_state 状态
+        列 note_updated 更新时间
+        列 note_by 写的人
+        动作 edit_student_note 打开 编辑学生设定 带 note_id 当 row.mine==1 编辑
+        动作 teacher_note_disable 远程 带 note_id 当 row.mine==1&&row.note_state!=='停用' 停用
+        动作 teacher_note_enable 远程 带 note_id 当 row.mine==1&&row.note_state==='停用' 启用
+        动作 teacher_note_delete 远程 危险 带 note_id 当 row.mine==1 删除
+      结束
+    结束
+  结束
+
+  浮层 编辑学生设定 宽 560px 载入 teacher_note_open
+    分组 主体 竖排 间距 12px
+      字段 note_kind 控件 下拉 种类
+      字段 note_keywords 提示 关键词卡才要填，逗号分隔，比如：ばかり,たばかり 关键词
+      字段 note_content 控件 多行 提示 最多400字。学生看不到，只进AI老师的提示词 内容
+      字段 note_once 控件 开关 只用于下一条回复（只对作者注有效）
+    结束
+    分组 底栏 横排 底栏
+      动作 teacher_note_save 提交 远程 关闭 保存
+      动作 cancel_student_note 次要 关闭 取消
     结束
   结束
 结束

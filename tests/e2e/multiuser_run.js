@@ -229,7 +229,7 @@ async function login(p, user, pw) {
                           && p.$("nav").classList.contains("nav-role-teacher")),
         "顶栏最前面是「教师端」标识，整条换了颜色（nav-role-teacher）");
     const teacherPages = () => p.$$("nav > a, nav .nav-side a").map(a => a.textContent.trim());
-    say(await waitFor(() => teacherPages().join("|") === "学情|学生管理|教材导入"),
+    say(await waitFor(() => teacherPages().join("|") === "学情|学生管理|AI老师设定|教材导入"),
         `导航只有教师页：${teacherPages().join("|")}`);
     say(!["知识图谱", "做题", "默写", "问老师", "教材", "学习进度"].some(t => p.nav(t)) && !p.$("nav .nav-side"),
         "没有学生的学习页、没有「管理」那组");

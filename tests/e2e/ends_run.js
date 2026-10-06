@@ -161,7 +161,7 @@ function openPage(hash, path = "/") {
     p = openPage("", "/teacher");
     say(await waitFor(() => p.active() === "学情" && p.screen().includes("还没有学生")),
         `不用登录，落在学情：${p.active()} ${p.hash()}`);
-    say(p.pages().join("|") === "学情|学生管理|教材导入", `导航只有教师页：${p.pages().join("|")}`);
+    say(p.pages().join("|") === "学情|学生管理|AI老师设定|教材导入", `导航只有教师页：${p.pages().join("|")}`);
     say(!["知识图谱", "做题", "默写", "问老师", "教材", "学习进度"].some(t => p.nav(t)), "没有学生的学习页");
     say((p.$("nav .nav-badge") || {}).textContent === "教师端" && p.$("nav").classList.contains("nav-role-teacher"),
         "顶栏「教师端」标识，整条换色");

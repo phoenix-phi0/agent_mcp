@@ -226,10 +226,12 @@ const _app = createApp({
     //
     // 早先是反过来的：地址一变就关浮层，浮层本身不进地址。
     const openOverlay = ref(parseHash()[1]["浮层"] || null);
-    // keep：界面上的按钮（不是列表行）打开浮层时，地址里原有的参数留着——
-    // 审阅页 #教材导入?job=3 上点「删除这个任务」，确认浮层里的按钮提交时还
-    // 得知道是哪个任务；关掉浮层也回到 ?job=3，而不是光秃秃的界面。行上打开
-    // 的（「带 id」）照旧只带这一行的参数，关掉回到不带参数的界面。
+    // keep：打开浮层时，地址里原有的参数留着——审阅页 #教材导入?job=3 上点
+    // 「删除这个任务」，确认浮层里的按钮提交时还得知道是哪个任务；关掉浮层也
+    // 回到 ?job=3，而不是光秃秃的界面。行上打开的（「带 id」）也一样留着，
+    // 这一行的参数盖在上面：学情的学生页 #学情?student=s1 上点一行设定的「编辑」，
+    // 地址是 ?student=s1&浮层=…&note_id=5，保存时接口知道是哪个学生的，关掉回到
+    // ?student=s1。原来没有参数的界面（#笔记列表）跟以前一样，关掉回到不带参数的。
     let overlayBase = null;
     function showOverlay(name, p, keep) {
       const base = keep ? Object.fromEntries(
@@ -842,7 +844,7 @@ const _app = createApp({
         reset(current.value.name);
         fillForm(current.value.name, row);
 <% if has_overlays %>
-        showOverlay(opens, p);
+        showOverlay(opens, p, true);
 <% endif %>
         return;
       }

@@ -108,7 +108,9 @@
           <% if a.has("远程") and not a.goto and not a.opens %>
           <button type="button" :disabled="busy" class="btn <% if a.has("危险") %>btn-danger<% else %>btn-ghost<% endif %>" @click="onRowRemote('<%= a.name %>', row, '<%= a.carry %>')"<%= 当(a) %>><%= a.label or a.name %></button>
           <% else %>
-          <button type="button" class="btn btn-ghost" @click="onRow('<%= a.name %>', row, '<%= a.goto %>', '<%= a.carry %>', '<%= a.opens %>')"><%= a.label or a.name %></button>
+          {#- 「打开 浮层 带 id」「切到 …」也认「当」：学情的学生页上全班的设定只读，
+              「编辑」只画在这个学生自己的那几行上（row.mine==1）。 -#}
+          <button type="button" class="btn btn-ghost" @click="onRow('<%= a.name %>', row, '<%= a.goto %>', '<%= a.carry %>', '<%= a.opens %>')"<%= 当(a) %>><%= a.label or a.name %></button>
           <% endif %>
           <% endfor %>
         </td>

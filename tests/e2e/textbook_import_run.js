@@ -196,7 +196,7 @@ let server = null;
   p.close();
   p = openPage("", "/teacher");
   await waitFor(() => p.nav("教材导入"));
-  say(p.$$("nav > a").map(a => a.textContent.trim()).join("|") === "学情|学生管理|教材导入" && !p.$("nav .nav-side"),
+  say(p.$$("nav > a").map(a => a.textContent.trim()).join("|") === "学情|学生管理|AI老师设定|教材导入" && !p.$("nav .nav-side"),
       // ui/report.ui、student.ui 按文件名排在前面
       `教师端（/teacher）：${p.$$("nav > a").map(a => a.textContent.trim()).join("|")}`);
 
