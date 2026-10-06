@@ -4,7 +4,7 @@
 # 那是一整个对象，不是表格的行。
 
 # 列表页，同时把整张图也给出去——一次请求把这一页要的都拿齐。
-接口 POST /node/list 动作 node_list
+接口 POST /node/list 动作 node_list 只许 学生
   用包 db http
   # 左边的列表和右边的图用同一份数据：都带 state（掌握/可学/锁定），
   # 引擎按它给列表行加 row-done / row-open / row-locked，跟图上的颜色一致。
@@ -31,7 +31,7 @@
 
 # 一个知识点的全貌：直接前置、直接后续、挂着的词，还有自己答对/答题和
 # 掌握得分。
-接口 POST /node/one 动作 node_detail
+接口 POST /node/one 动作 node_detail 只许 学生
   用包 db http
   设 record = 查一行 app.db node_one code={code}
   如果 {record.code} 为空

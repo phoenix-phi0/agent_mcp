@@ -14,7 +14,7 @@
 
 # 记一次作答：写流水、更新汇总、重算掌握标记、重算掌握得分。一个事务——
 # 中途断了就全不算，不能出现「流水记了但汇总没加」。
-接口 POST /learn/answer 动作 learn_answer
+接口 POST /learn/answer 动作 learn_answer 只许 学生
   用包 common db http
 
   # 对错必须给：缺了的话 CAST 成 0，记成一道错题，不报错
@@ -45,7 +45,7 @@
 
 
 # 现在能学什么：自己没掌握、前置都掌握了的知识点，按依赖深度排。
-接口 POST /learn/next 动作 learn_next
+接口 POST /learn/next 动作 learn_next 只许 学生
   用包 db http
   设 rows = 查询 app.db learn_next learner={learner} limit=20
   设 group.next = {rows}
@@ -54,7 +54,7 @@
 
 
 # 进度：掌握了多少，以及在学的那些还差什么。
-接口 POST /learn/status 动作 learn_status
+接口 POST /learn/status 动作 learn_status 只许 学生
   用包 db http
 
   设 line = {line 或}

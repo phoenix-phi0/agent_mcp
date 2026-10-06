@@ -62,7 +62,7 @@
 # 不把上次没答完的那道题重新推出来：进页面这个动作切一次界面就跑一次，
 # 推出来的话来回切几次，消息流里就叠几份同一道题。上次那道就放着，
 # 点「开始」或「下一题」接着做。
-接口 POST /quiz/state 动作 quiz_state
+接口 POST /quiz/state 动作 quiz_state 只许 学生
   用包 db http
 
   设 query.learner = {learner}
@@ -97,7 +97,7 @@
 # 开始：按顶栏的等级、考点出第一道，这一轮的计数清零。按课练着的话就此
 # 退出按课模式——地址里的 lesson 不管（前端会把它并进提交），而且让前端
 # 回到不带参数的 #做题：不然一刷新「载入」又按那一课出了。
-接口 POST /quiz/start 动作 quiz_start
+接口 POST /quiz/start 动作 quiz_start 只许 学生
   用包 db http
 
   设 chosen_level = {pick_level 或 全部}
@@ -115,7 +115,7 @@
 # 下一题：不清零这一轮的计数。按课练着就还在库里记的那一课（一轮做完时
 # 出提示，不换课）；否则等级、考点用页面上现在选的——中途换了考点，
 # 下一道就按新的出（这一轮出过的条目照样不再出）。
-接口 POST /quiz/next 动作 quiz_next
+接口 POST /quiz/next 动作 quiz_next 只许 学生
   用包 db http
 
   设 query.learner = {learner}
@@ -134,7 +134,7 @@
 # 从头一轮、计数清零（本课换一道没出过的题）；复习薄弱点重新挑一轮；自由练
 # 按库里记的等级考点重新出一轮（优先换没出过、出得少的条目）。还没出过题
 # （库里没有当前题）回 400。
-接口 POST /quiz/again 动作 quiz_again
+接口 POST /quiz/again 动作 quiz_again 只许 学生
   用包 db http
 
   设 query.learner = {learner}
@@ -167,7 +167,7 @@
 # 库里已经在复习、这一轮还没出够（刷新、来回切）就接着这一轮，不清零；
 # 不然开新的一轮。一道都没答过的人不报错，界面上说先按等级做几道
 # （phase=noreview），顶栏等级没选过的填成 N5。
-接口 POST /quiz/lesson 动作 quiz_lesson
+接口 POST /quiz/lesson 动作 quiz_lesson 只许 学生
   用包 db http
 
   设 lesson = {lesson 或}
@@ -228,7 +228,7 @@
 # queries/score_calc.sql，判定规则在 queries/mastery_one.sql）。分跟当前分不同
 # 才记一行。变化放在 state.score_change
 # （「推量判断 得分 42 → 51」），批改下面显示；不走 messages。
-接口 POST /quiz/answer 动作 quiz_answer
+接口 POST /quiz/answer 动作 quiz_answer 只许 学生
   用包 common db http quiz
 
   设 query.learner = {learner}
@@ -375,7 +375,7 @@
 # 模型慢的时候：平衡档是 cli:claude/sonnet，实测一次十秒上下；claude 卡住
 # 90 秒算超时，排队等不到也一样，改用档位的 fallback（智谱），见
 # tools/llm_router.py。前端只锁做题页自己的按钮，等的时候可以去别的页面。
-接口 POST /quiz/summary 动作 quiz_summary
+接口 POST /quiz/summary 动作 quiz_summary 只许 学生
   用包 common db http
 
   设 query.learner = {learner}

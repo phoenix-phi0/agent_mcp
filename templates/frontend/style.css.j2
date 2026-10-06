@@ -56,6 +56,15 @@ nav a.active { background:var(--accent); color:#fff; border-color:var(--accent);
 /* 开着登录时顶栏右边：显示名、改密码、退出 */
 .nav-user { display:flex; gap:8px; align-items:center; margin-left:auto; padding-left:12px; }
 .nav-user-name { font-size:13px; color:var(--muted); }
+/* 多人模式下这是哪一端（/auth/me 的 badge）。教师端整条顶栏换个颜色，一眼
+   看得出不是学生的页面 */
+.nav-badge {
+  font-size:12px; font-weight:600; padding:3px 10px; border-radius:10px;
+  background:var(--accent); color:#fff;
+}
+nav.nav-role-teacher { background:#fbf3e6; border-bottom:2px solid #b4690e; padding-bottom:10px; }
+nav.nav-role-teacher .nav-badge { background:#b4690e; }
+nav.nav-role-teacher a.active { background:#b4690e; border-color:#b4690e; }
 .nav-user .nav-logout {
   background:none; border:1px solid transparent; color:var(--muted); cursor:pointer;
   font:inherit; font-size:13px; padding:4px 10px; border-radius:4px;

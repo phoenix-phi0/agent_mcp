@@ -8,7 +8,10 @@
 #       起作用；learner 照旧是请求里的 learner，没给就是 me
 #   多人模式（py -m kg --登录、KG_LOGIN=1）  除了标「公开」的，所有接口都要
 #       登录；learner 就是登录的用户名，请求体里的 learner 一律不算；标了
-#       「角色 teacher」的接口（管理侧）只许教师，学生 403「需要教师权限」
+#       「角色 teacher」「只许 教师」的接口（管理侧）只许教师，学生 403「需要
+#       教师权限」；标了「只许 学生」的（做题、默写、问老师、进度……会读写
+#       学习记录的）只许学生，教师 403「教师账号不参与学习，请用学生账号」——
+#       教师是单独的一端，不产生学习记录
 #
 # 「认证 核对」：每个请求按 cookie 里的用户名查一次 user_auth，停用的账号下一个
 # 请求就当没登录（令牌本身是无状态的签名串，没法吊销，靠这一步）。
@@ -19,6 +22,7 @@
 认证 核对 app.db user_auth
 认证 身份 learner 默认 me
 认证 角色 teacher 教师
+认证 角色 student 学生 拒绝 教师账号不参与学习，请用学生账号
 
 
 # 登录失败不区分「没这个人」「密码错」「停用了」（user_by_name 查不到停用的）
@@ -40,21 +44,27 @@
 
 
 # 现在是谁。前端打开页面、登录、退出时问一次（templates/frontend/app.js.j2 的
-# refreshMe）：顶栏显示 label，hide 里的「侧」不进导航——学生看不到「管理」。
-# 只是界面上藏起来，真正把关的是接口上的「角色 teacher」。
-# 单人模式 user 是空串，顶栏什么都不多、管理侧照常可用。
+# refreshMe）：顶栏显示 label，hide 里的「侧」不进导航——学生看不到「管理」；
+# role / role_label 跟界面的「端」比——教师只看到「端 教师」的页面（学情、学生
+# 管理、教材导入），学生只看到「端 学生」的；badge 是顶栏的「教师端」。
+# 只是界面上藏起来，真正把关的是接口上的「角色 teacher」「只许 学生」。
+# 单人模式 user 是空串，顶栏什么都不多、所有页面照常可用、不分端。
 接口 POST /auth/me 动作 auth_me 公开
   用包 common db http
   设 out.user = {current_user}
   设 out.mode = {auth_mode}
   设 out.label =
   设 out.role =
+  设 out.role_label =
+  设 out.badge =
   设 out.hide = 解析JSON []
   如果 {current_user} 不为空
     设 who.username = {current_user}
     设 me = 查一行表 app.db auth_me {who}
     设 out.label = {me.label}
     设 out.role = {me.role}
+    设 out.role_label = {me.role_label}
+    设 out.badge = {me.badge}
     设 out.hide = 解析JSON {me.hide}
   结束
   返回 {out}

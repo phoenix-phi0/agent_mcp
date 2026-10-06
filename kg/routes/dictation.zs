@@ -18,7 +18,7 @@
 
 # 进页面时：把上次选的方向、等级、题源填回去，显示这一轮的成绩。不推消息，
 # 也不把上次没答完的那个词推出来（切一次界面跑一次）；点「开始」接着练。
-接口 POST /dictation/state 动作 dictation_state
+接口 POST /dictation/state 动作 dictation_state 只许 学生
   用包 db http
 
   设 query.learner = {learner}
@@ -34,7 +34,7 @@
 
 
 # 开始：按顶栏选的方向、等级、题源开一轮（计数清零）。
-接口 POST /dictation/start 动作 dictation_start
+接口 POST /dictation/start 动作 dictation_start 只许 学生
   用包 db http
 
   设 result = 执行 scripts/dictation_pick.zs learner={learner} direction_label={dict_direction 或 看中文写日语} level={dict_level 或 全部} source_label={dict_source 或 随机} new_round=1
@@ -46,7 +46,7 @@
 
 # 下一个：接着这一轮，方向、等级、题源用库里记的（这一轮开始时选的）——
 # 中途改了顶栏不算，点「开始」才按新的来，一轮里不会混着两个方向。
-接口 POST /dictation/next 动作 dictation_next
+接口 POST /dictation/next 动作 dictation_next 只许 学生
   用包 db http
 
   设 query.learner = {learner}
@@ -62,7 +62,7 @@
 
 
 # 再来一轮：一轮结束时的按钮。方向、等级、题源照这一轮的，从头一轮。
-接口 POST /dictation/again 动作 dictation_again
+接口 POST /dictation/again 动作 dictation_again 只许 学生
   用包 db http
 
   设 query.learner = {learner}
@@ -76,7 +76,7 @@
 
 # 练错词：一轮结束时的按钮。方向、等级照这一轮的，题源换成错词复习，顶栏
 # 也跟着改。错词本空时界面上说一声（dphase=empty）。
-接口 POST /dictation/wrong 动作 dictation_wrong
+接口 POST /dictation/wrong 动作 dictation_wrong 只许 学生
   用包 db http
 
   设 query.learner = {learner}
@@ -95,7 +95,7 @@
 
 
 # 随机练一轮：错词本空时卡上的按钮。方向、等级照刚才的，题源换成随机。
-接口 POST /dictation/random 动作 dictation_random
+接口 POST /dictation/random 动作 dictation_random 只许 学生
   用包 db http
 
   设 query.learner = {learner}
@@ -117,7 +117,7 @@
 # 直接开一轮错词复习。还可以带 direction=reading（看汉字写读音）、
 # level=N4。参数名特意不叫 dict_*：地址参数会盖掉每次提交的同名键，叫那个
 # 名字的话顶栏下拉就改不动了。没给的照库里记的。
-接口 POST /dictation/load 动作 dictation_load
+接口 POST /dictation/load 动作 dictation_load 只许 学生
   用包 db http
 
   设 query.learner = {learner}
@@ -154,7 +154,7 @@
 # 提示：首个假名和读音的字数，卡上显示。记下看过提示，交的时候
 # word_attempt.hinted = 1——答对照样算对，但不算进「连续答对两次出错词本」。
 # 已经交了的不给（没意义，也不改记录）。
-接口 POST /dictation/hint 动作 dictation_hint
+接口 POST /dictation/hint 动作 dictation_hint 只许 学生
   用包 db http
 
   设 query.learner = {learner}
@@ -194,7 +194,7 @@
 # 交答案：判当前那个词，记进 word_attempt（一个事务），卡上原地出批改：
 # 对错、正确的「汉字【读音】意思」、你写的、补充的一句（同义词也算对、
 # 写成了同读音的另一个词、这是另一个读法……）。空答案回 400，不记。
-接口 POST /dictation/answer 动作 dictation_answer
+接口 POST /dictation/answer 动作 dictation_answer 只许 学生
   用包 db http japanese
 
   设 query.learner = {learner}
@@ -273,7 +273,7 @@
 
 # 错词本：按学习者、方向（meaning / reading）、等级（全部 / N5..N1）列出来。
 # 界面上没直接用（练错词走出词的查询），给别的地方和测试查。
-接口 POST /dictation/book 动作 dictation_book
+接口 POST /dictation/book 动作 dictation_book 只许 学生
   用包 db http
 
   设 book_args.learner = {learner}

@@ -25,7 +25,7 @@
 # 「当」的条件里不能有空格；「提示」里不能有双引号（会截断输入框的 placeholder 属性，
 # 整个编辑页画不出来）。
 
-界面 自定义 教材导入 侧 管理 载入 import_load
+界面 自定义 教材导入 侧 管理 端 教师 载入 import_load
   动作 import_home 远程 进入时 隐藏 刷新
   动作 import_poll 远程 隐藏 每隔 2 当 params.job&&shared.job&&shared.job.running 轮询
 

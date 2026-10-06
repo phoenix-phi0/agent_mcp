@@ -172,6 +172,10 @@ class Node:
     side: str = ""               # 界面的「侧 管理」：导航里不跟学习者的页面排在
                                  # 一起，归到右边一组（组名就是这个词）。教材
                                  # 导入这类管理页用，见 app.js.j2 的 nav
+    audience: str = ""           # 界面的「端 教师」/「端 学生」：开着登录时只给这个
+                                 # 角色看（导航、首页、直接打地址都按它），别的角色
+                                 # 看不到；没开登录（单人用）不分端。见 app.js.j2
+                                 # 的 visible
     every: int = 0               # 动作的「每隔 2」：所在界面开着、「当」成立时
                                  # 每 2 秒悄悄提交一次（后台任务的进度轮询）
     required: Optional[bool] = None
@@ -226,7 +230,7 @@ class Node:
             "type": self.type, "widget": self.widget, "bind": self.bind,
             "when": self.when, "hint": self.hint, "goto": self.goto,
             "opens": self.opens, "accept": self.accept, "maxsize": self.maxsize,
-            "side": self.side, "every": self.every,
+            "side": self.side, "audience": self.audience, "every": self.every,
             "required": self.required, "role": self.role,
             "ratio": self.ratio, "cols": self.cols, "size": dict(self.size),
             "clears": list(self.clears),
@@ -387,6 +391,15 @@ KEYED_MODIFIERS = KEYED_MODIFIERS | {"选项来自", "改时"}
 #   动作 import_poll 远程 隐藏 每隔 2 当 shared.job.running
 KEYED_MODIFIERS = KEYED_MODIFIERS | {"侧", "每隔"}
 
+# 界面「端 <角色>」：多人模式（开着登录）下按角色分端——写了「端 教师」的界面
+# 只有教师看得到，「端 学生」的只有学生；没写的谁都看得到（登录、改密码）。
+# 角色写中文名或代号都行，跟 /auth/me 回的 role / role_label 比。导航、首页
+# （登录后落在本端第一个能看的界面）、直接打地址（退回本端首页并提示）都按它。
+# 只是界面上分开——真正把关的是接口的「只许」（403）。没开登录时不分端。
+#   界面 自定义 学情 侧 管理 端 教师
+# 不叫「角色」：界面的「角色」已经是表单 / 列表 / 自定义（dump 里的「角色=」）。
+KEYED_MODIFIERS = KEYED_MODIFIERS | {"端"}
+
 # 动作「回车」：答完才出现的那颗「下一题」用。三件事：
 #   1. 一次提交回来、界面上没有输入框可还焦点时，焦点给这颗按钮，并
 #      scrollIntoView({block:'nearest'})——卡片长了按钮不会落在看不见的地方；
@@ -504,6 +517,8 @@ def _apply_keyed(node: Node, keyed: dict):
         node.on_change = keyed["改时"]
     if "侧" in keyed:
         node.side = keyed["侧"]
+    if "端" in keyed:
+        node.audience = keyed["端"]
     if "每隔" in keyed:
         try:
             node.every = max(int(keyed["每隔"]), 0)
@@ -704,6 +719,8 @@ def dump(nodes, indent: int = 0) -> str:
             extras.append(f"改时={n.on_change}")
         if getattr(n, "side", ""):
             extras.append(f"侧={n.side}")
+        if getattr(n, "audience", ""):
+            extras.append(f"端={n.audience}")
         if getattr(n, "every", 0):
             extras.append(f"每隔={n.every}")
         if n.type:
@@ -1225,7 +1242,8 @@ def render_vue(screens, title="UI", options_map=None, rows=None,
         "options_map": options_map,
         "default_widgets": _default_widgets(),
         "screens_json": json.dumps(
-            [{"name": s.name, "role": s.role or DEFAULT_ROLE, "side": s.side}
+            [{"name": s.name, "role": s.role or DEFAULT_ROLE, "side": s.side,
+              **({"audience": s.audience} if s.audience else {})}
              for s in screens],
             ensure_ascii=False),
         # 写了「侧」的界面：导航里归到右边（按组名），没有就不生成那段

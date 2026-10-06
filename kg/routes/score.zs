@@ -13,8 +13,16 @@
 
 
 # 记一次打分。分值 0–100 的整数。返回这个点打完之后的当前分。
+#
+# 记在 {learner} 名下：单人模式是请求里的学习者（调试用）；多人模式下 learner
+# 是登录的人，也就是教师自己——教师不参与学习、不该有得分，所以多人模式下
+# 这个接口不开（学生本来就 403，教师也 403）。得分由做题自动算。
 接口 POST /score/add 动作 score_add 角色 teacher
   用包 common db http
+
+  如果 {auth_mode} 等于 on
+    返回 {"error":"教师账号不参与学习，请用学生账号"} 403
+  结束
 
   设 value = {value 或}
   如果 {value} 为空
@@ -48,7 +56,7 @@
 
 # 当前得分：每个知识点取最新的一次。给 point 就只看那一个，不给是全部。
 # 没打过分的点不出现。
-接口 POST /score/now 动作 score_now
+接口 POST /score/now 动作 score_now 只许 学生
   用包 db http
 
   设 cond.learner = {learner}
@@ -60,7 +68,7 @@
 
 
 # 一个知识点的全部打分，从早到晚。
-接口 POST /score/history 动作 score_history
+接口 POST /score/history 动作 score_history 只许 学生
   用包 db http
 
   设 point = {point 或}

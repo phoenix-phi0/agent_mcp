@@ -30,7 +30,7 @@
 #
 # 「当」的条件里不能有空格（修饰值按空格切）。
 
-界面 自定义 默写 载入 dictation_load
+界面 自定义 默写 端 学生 载入 dictation_load
   动作 dictation_state 远程 进入时 隐藏 刷新
 
   分组 顶栏 横排 顶栏 间距 12px 对齐 center

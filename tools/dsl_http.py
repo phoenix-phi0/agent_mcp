@@ -114,11 +114,20 @@ GET 的查询参数也注入。
                                   没给或空串就是 me（单人用，跟以前每个接口开头
                                   「{learner 或} 空了补 me」那段一样）
     认证 角色 teacher 教师        角色的中文名，拒绝时说「需要教师权限」
+    认证 角色 student 学生 拒绝 教师账号不参与学习，请用学生账号
+                                  「拒绝」后面是别人调「只许 学生」的接口时
+                                  403 的说明（整句，可以有空格）；不写是
+                                  「需要学生权限」
 
-接口行上的「角色 teacher」：开着登录时只许 {current_role} 是 teacher 的人调，
+接口行上的「角色 teacher」或「只许 教师」（两种写法一样，后者用中文名，按上面
+的「认证 角色」对回 teacher）：开着登录时只许 {current_role} 是这个角色的人调，
 别人回 403。没开登录时不查（单人用，管理侧照常可用）。
 
     接口 POST /import/home 动作 import_home 角色 teacher
+    接口 POST /report/home 动作 report_home 只许 教师
+    接口 POST /quiz/answer 动作 quiz_answer 只许 学生
+
+写了没声明的中文角色名（「只许 校长」）启动时记一条警告：开着登录时谁都 403。
 
 注入的变量（都放在请求字段之后，请求体里的同名字段盖不掉）：
 
@@ -146,9 +155,11 @@ from . import packs
 
 # 接口 POST /chat 动作 send 公开  ——  方法、动作、公开、角色都可省
 # 接口 POST /import/home 动作 import_home 角色 teacher
+# 接口 POST /quiz/answer 动作 quiz_answer 只许 学生   —— 「只许」跟「角色」一样，
+#                                    写中文名，按「认证 角色」对回角色代号
 API_RE = re.compile(
     r"^接口\s+(?:(GET|POST|PUT|DELETE)\s+)?(/\S*)"
-    r"(?:\s+动作\s+(\S+))?(\s+公开)?(?:\s+角色\s+(\S+))?\s*$", re.I)
+    r"(?:\s+动作\s+(\S+))?(\s+公开)?(?:\s+(?:角色|只许)\s+(\S+))?\s*$", re.I)
 # 服务 8091  或  服务 8091-8099
 SERVICE_RE = re.compile(r"^服务\s+(\d{2,5})(?:\s*-\s*(\d{2,5}))?\s*$")
 # 认证 必须 —— 路由目录里任何一个文件写了这行，所有接口都要求登录，
@@ -162,7 +173,9 @@ AUTH_CHECK_RE = re.compile(r"^认证\s+核对\s+(\S+)\s+(\S+)\s*$")
 # 认证 身份 learner 默认 me —— 注入「这是谁的数据」
 AUTH_IDENTITY_RE = re.compile(r"^认证\s+身份\s+([A-Za-z_]\w*)\s+默认\s+(\S+)\s*$")
 # 认证 角色 teacher 教师 —— 角色的中文名，403 的说明里用
-AUTH_ROLE_RE = re.compile(r"^认证\s+角色\s+(\S+)\s+(\S+)\s*$")
+# 认证 角色 student 学生 拒绝 教师账号不参与学习，请用学生账号 —— 别人调「只许
+# 学生」的接口时 403 说这句（整句，到行尾）
+AUTH_ROLE_RE = re.compile(r"^认证\s+角色\s+(\S+)\s+(\S+)(?:\s+拒绝\s+(.+?))?\s*$")
 # 开了登录、监听的又不是本机时，cookie 走明文 http 会被同网段的人截走
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 
@@ -328,6 +341,8 @@ def auth_config(root: Path) -> dict:
         "check": one(AUTH_CHECK_RE, "核对"),
         "identity": one(AUTH_IDENTITY_RE, "身份"),
         "roles": {m.group(1): m.group(2) for m in top_level_matches(root, AUTH_ROLE_RE)},
+        "deny": {m.group(1): m.group(3) for m in top_level_matches(root, AUTH_ROLE_RE)
+                 if m.group(3)},
     }
 
 
@@ -468,6 +483,16 @@ class Router:
         self.auth_check = cfg["check"]
         self.identity = cfg["identity"]
         self.role_labels = cfg["roles"]
+        self.role_deny = cfg["deny"]
+        # 「只许 学生」写的是中文名：对回角色代号（student），之后一律按代号比。
+        # 对不上的（没声明的名字）原样留着，记一条警告——开着登录时谁都 403
+        by_label = {label: code for code, label in self.role_labels.items()}
+        for ep in self.table.values():
+            if ep.role in by_label:
+                ep.role = by_label[ep.role]
+            elif ep.role and self.role_labels and ep.role not in self.role_labels:
+                self.warnings.append(f"{ep.src.name}:{ep.line} 接口 {ep.path} 的角色「{ep.role}」"
+                                     f"没有用「认证 角色」声明（开着登录时谁都 403）")
         # cookie 只走 https。本机 http 不能开（浏览器就不发了），对外部署到
         # https 后面时开
         self.secure_cookie = bool(secure_cookie)
@@ -807,7 +832,7 @@ class Router:
         # 「角色 teacher」：开着登录时查角色。没开登录是单人用，不查
         if self.auth_required and ep.role and str((info or {}).get("role") or "") != ep.role:
             label = self.role_labels.get(ep.role, ep.role)
-            return jsonify({"error": f"需要{label}权限"}), 403
+            return jsonify({"error": self.role_deny.get(ep.role) or f"需要{label}权限"}), 403
 
         form, uploads = self._read_request()
         # GET 的查询参数也注入，跟 body 字段并列

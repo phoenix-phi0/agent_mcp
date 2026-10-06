@@ -73,6 +73,7 @@ run 问老师      $PY tests/kg/test_teacher_chat.py
 run 请老师讲课  $PY tests/kg/test_teacher_lesson.py
 run 教材和进度  $PY tests/kg/test_pages.py
 run 多人模式    $PY tests/kg/test_multiuser.py
+run 教师学生分端 $PY tests/kg/test_roles.py
 run 并发用包    $PY tests/dsl/test_use_concurrent.py
 run 假模型脚本  $PY tests/dsl/test_mock_script.py
 run 模型可选    $PY tests/dsl/test_model_select.py

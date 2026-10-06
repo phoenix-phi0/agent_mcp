@@ -88,7 +88,7 @@
 # 跑一次，推消息的话来回切几次就叠几份。state 里的 talk 是整条流，直接替换。
 # 库里的 links 是 JSON 文本，逐条解析回列表（老数据只有 link 的，查询里已经
 # 拼成一个元素的数组）。
-接口 POST /teacher/state 动作 teacher_state
+接口 POST /teacher/state 动作 teacher_state 只许 学生
   用包 common db http
 
   设 query.learner = {learner}
@@ -102,7 +102,7 @@
 结束
 
 
-接口 POST /teacher/send 动作 teacher_send
+接口 POST /teacher/send 动作 teacher_send 只许 学生
   用包 common db http
 
   设 message = {content 或}

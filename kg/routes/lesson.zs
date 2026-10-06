@@ -71,15 +71,23 @@
 #
 # 等级、关键字是用户填的，关键字里可能有空格、日语，所以拼一个字典交给
 # 查询表，不用按位置传的写法（那种按空格切参数，值一有空格就错位）。
+#
+# 多人模式下教师也能调（审阅教材时看课文），但教师不参与学习、不记偏好：
+# learner 当空的，learner_pref_set 什么都不写；选的系列只管这一次的列表
+# （series_chosen：给了有效的系列就用它，否则偏好，否则 hanabira）。
 接口 POST /lesson/list 动作 lesson_list
-  用包 db http data
+  用包 db http data text
 
   设 pref.learner = {learner}
+  设 is_teacher = 相等 {current_role} teacher
+  如果 {is_teacher} 等于 是
+    设 pref.learner =
+  结束
   设 pref.series = {series 或}
   如果 {pref.series} 不为空
     设 affected = 写库表 app.db learner_pref_set {pref}
   结束
-  设 current = 查一行表 app.db series_current {pref}
+  设 current = 查一行表 app.db series_chosen {pref}
 
   设 query.series = {current.code}
   设 query.lesson_level = {lesson_level 或 全部}

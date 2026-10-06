@@ -357,6 +357,47 @@ def test_dynamic_select():
           [i.code for i in r2.get("issues", []) if "改时" in i.message], ["missing_endpoint"])
 
 
+def test_audience():
+    print("\n[界面的「端」：多人模式下按角色分端]")
+    ui = ("界面 自定义 做题 端 学生\n"
+          "  文案 学生的页\n"
+          "结束\n"
+          "界面 表单 登录\n"
+          "  分组 主体\n"
+          "    字段 username 用户名\n"
+          "  结束\n"
+          "结束\n"
+          "界面 自定义 学情 侧 管理 端 教师 载入 report_one\n"
+          "  文案 教师的页\n"
+          "结束\n")
+    from tools.ui import parse, dump
+    screens = parse(ui)
+    check("「端 教师」进 audience，不进名字，侧和载入照旧",
+          [(s.name, s.audience, s.side) for s in screens] + [screens[2].load],
+          [("做题", "学生", ""), ("登录", "", ""), ("学情", "教师", "管理"), "report_one"])
+    check("dump 里有「端=」", "端=教师" in dump(screens), True)
+    eps = {"auth_me": "/auth/me", "auth_logout": "/auth/logout", "report_one": "/report/one"}
+    r = compile_ui(ui, backend="vue", fields={"username": "文本"}, options={"endpoints": eps})
+    check("编译没有 issue", [i.code for i in r.get("issues", [])], [])
+    js = r["result"]["files"]["app.js"]
+    check("screens 里带 audience（没写的不带）",
+          '{"name": "学情", "role": "自定义", "side": "管理", "audience": "教师"}' in js
+          and '{"name": "登录", "role": "表单", "side": ""}' in js, True)
+    check("导航按 visible 过滤：左边一组、管理那组，整组看不到就不画",
+          ".filter(s => !AUTH_SCREENS.includes(s.name)).filter(visible)" in js
+          and "screens.filter(s => s.side === '管理').filter(visible)" in js
+          and "screens.some(s => s.side === '管理' && visible(s))" in js, True)
+    check("visible 认 role / role_label；首页、直接打地址都按它；先认人再进第一个界面",
+          "s.audience !== m.role && s.audience !== m.roleLabel" in js
+          and "!hiddenScreen(s.name)" in js and "meReady.then(onRoute)" in js, True)
+    check("顶栏的标识和按角色的 class", 'class="nav-badge"' in js and "'nav-role-' + me.role" in js, True)
+    # 没有 auth_me 的项目：visible 恒真，照旧直接进第一个界面
+    r2 = compile_ui(ui, backend="vue", fields={"username": "文本"},
+                    options={"endpoints": {"report_one": "/report/one"}})
+    js2 = r2["result"]["files"]["app.js"]
+    check("没有 auth_me：visible 恒真、不等认人", "const visible = () => true;" in js2
+          and "meReady" not in js2 and "nav-badge" not in js2, True)
+
 def test_side_poll_row_remote():
     print("\n[侧、每隔、列表行上的远程动作、打开浮层留着参数]")
     ui = ("界面 自定义 教材\n"
@@ -433,6 +474,7 @@ def main() -> int:
         test_trigger,
         test_dynamic_select,
         test_side_poll_row_remote,
+        test_audience,
     ]:
         try:
             fn()

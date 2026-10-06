@@ -140,8 +140,11 @@ const _app = createApp({
     // 「改密码」也算：登录之后才用得上的账号页，不进导航、不当首页
     const AUTH_SCREENS = [LOGIN, "注册", "改密码"];
     let afterLogin = "";
+    // 首页：第一个不是登录页、这个人又看得到的界面（多人模式下教师落在教师端
+    // 的第一页，见下面的 visible）
     const firstAppScreen = () =>
-      (screens.find(s => !AUTH_SCREENS.includes(s.name)) || screens[0]).name;
+      (screens.find(s => !AUTH_SCREENS.includes(s.name) && !hiddenScreen(s.name))
+       || screens.find(s => !AUTH_SCREENS.includes(s.name)) || screens[0]).name;
     // 把一条记录填进某个界面的表单。列表点「编辑」、按地址参数「载入」
     // 都走这里，类型转换只写一处。
     //
@@ -322,7 +325,7 @@ const _app = createApp({
         data = { error: `服务器返回的不是 JSON（${r.status}）` };
       }
 <% if has_me %>
-      if (r.status === 401) me.value = { user: "", label: "", hide: [] };
+      if (r.status === 401) me.value = { ...NOBODY };
 <% endif %>
       if (r.status === 401 && current.value.name !== LOGIN
           && screens.some(s => s.name === LOGIN)) {
@@ -386,16 +389,33 @@ const _app = createApp({
         }
       }
 <% if has_me %>
-      // 登录、退出都带 go 回来：换了人，顶栏的名字和能看的「侧」跟着换
-      if (resp.go) refreshMe();
-<% endif %>
-      // go：后端让前端换到哪个界面。「@来处」是登录前被打断的那个地址。
+      // 登录、退出都带 go 回来：换了人，顶栏的名字、能看的「侧」和「端」跟着换。
+      // 登录（「@来处」）先问清是谁再跳——不然教师登录后先进了学生的页面、发出
+      // 一串 403。别的 go（做题页换题、退出回登录页）照旧马上跳，顺手刷新一次
       if (resp.go === "@来处") {
+        refreshMe().then(() => followGo(resp.go)).catch(() => {});
+        return;
+      }
+      if (resp.go) refreshMe().catch(() => {});
+<% endif %>
+      followGo(resp.go);
+    }
+    function followGo(target) {
+      // go：后端让前端换到哪个界面。「@来处」是登录前被打断的那个地址；那页
+      // 不是这个人这一端的（学生的页面上被弹去登录、登进来的是教师），就去
+      // 本端首页，不提示
+      if (target === "@来处") {
         const back = afterLogin;
         afterLogin = "";
-        if (back) location.hash = back;
+        const raw = back.replace(/^#\/?/, "");
+        const cut = raw.indexOf("?");
+        const name = decodeURIComponent(cut < 0 ? raw : raw.slice(0, cut));
+        if (back && !hiddenScreen(name)) location.hash = back;
         else go(firstAppScreen());
-      } else if (resp.go && screens.some(s => s.name === resp.go)) {
+        return;
+      }
+      const resp = { go: target };
+      if (resp.go && screens.some(s => s.name === resp.go)) {
         go(resp.go);
       } else if (typeof resp.go === "string" && resp.go.startsWith("#")) {
         // 「#界面?参数」：带着参数换过去（新建导入后跳到这个任务的审阅页
@@ -410,11 +430,17 @@ const _app = createApp({
     }
 <% endif %>
 <% if has_me %>
-    // 现在是谁（auth_me）：{user, label, hide}。开着登录时顶栏显示名字、「改密码」
-    // 和「退出」；hide 里的「侧」（学生的是「管理」）不进导航，地址直接打过去也
-    // 退回首页。这只是界面上藏起来——真正把关的是后端接口的「角色」（403）。
-    // 没开登录时 user 是空串，顶栏什么都不多。
-    const me = ref({ user: "", label: "", hide: [] });
+    // 现在是谁（auth_me）：{user, label, hide, role, role_label, badge}。开着登录
+    // 时顶栏显示名字、「改密码」和「退出」；看不到的界面（visible）不进导航，
+    // 地址直接打过去也退回本端首页：
+    //   hide   里的「侧」（学生的是「管理」）
+    //   role   界面写了「端 教师」「端 学生」的，只给这个角色（role 或 role_label
+    //          对得上）——多人模式下教师、学生各是一端，互相看不到
+    //   badge  顶栏最前面的标识（「教师端」），nav 加 class nav-role-<role>
+    // 这只是界面上藏起来——真正把关的是后端接口的「角色」「只许」（403）。
+    // 没开登录时 user 是空串：什么都不藏、不分端，顶栏什么都不多。
+    const NOBODY = { user: "", label: "", hide: [], role: "", roleLabel: "", badge: "" };
+    const me = ref({ ...NOBODY });
     async function refreshMe() {
       try {
         const r = await fetch(endpoints.auth_me, { method: "POST",
@@ -422,24 +448,41 @@ const _app = createApp({
           body: JSON.stringify({ action: "auth_me", form: {} }) });
         const d = await r.json();
         me.value = { user: d.user || "", label: d.label || d.user || "",
-                     hide: Array.isArray(d.hide) ? d.hide : [] };
+                     hide: Array.isArray(d.hide) ? d.hide : [],
+                     role: d.role || "", roleLabel: d.role_label || "", badge: d.badge || "" };
       } catch (e) {
-        me.value = { user: "", label: "", hide: [] };
+        me.value = { ...NOBODY };
       }
       guardSide();
     }
+    function visible(s) {
+      const m = me.value;
+      if (!m.user) return true;
+      if (s.side && m.hide.includes(s.side)) return false;
+      if (s.audience && s.audience !== m.role && s.audience !== m.roleLabel) return false;
+      return true;
+    }
     function hiddenScreen(name) {
       const s = screens.find(x => x.name === name);
-      return !!(s && s.side && me.value.hide.includes(s.side));
+      return !!(s && !visible(s));
     }
     function guardSide() {
-      if (hiddenScreen(route.value)) {
-        showNotice("没有权限打开这个页面", "no");
-        go(firstAppScreen());
+      if (!hiddenScreen(route.value)) return;
+      // 地址里明说了要这一页（直接打的、点的链接）才提示；空地址落在默认的
+      // 第一个界面上不算，悄悄换到本端首页
+      if (location.hash.replace(/^#\/?/, "")) {
+        const s = screens.find(x => x.name === route.value) || {};
+        showNotice(s.audience ? `没有权限打开这个页面（${s.audience}端的），已回到首页`
+                              : "没有权限打开这个页面", "no");
       }
+      go(firstAppScreen());
     }
     window.addEventListener("hashchange", guardSide);
-    refreshMe();
+    // 先知道是谁，再跑第一个界面的「进入时」（见文件末尾的 onRoute）
+    const meReady = refreshMe();
+<% else %>
+    const visible = () => true;
+    function hiddenScreen() { return false; }
 <% endif %>
     function onSubmit() { console.log("submit", current.value.name, form.value); }
 <% if has_endpoints %>
@@ -846,7 +889,13 @@ const _app = createApp({
       }
     }
     window.addEventListener("hashchange", onRoute);
+<% if has_me %>
+    // 开着 auth_me 时等它回来再进第一个界面：教师打开首页时默认的第一个界面
+    // 是学生的，先跑它的「进入时」会白白收一串 403
+    meReady.then(onRoute);
+<% else %>
     onRoute();
+<% endif %>
 <% if has_graphs %>
     // 节点图：Vue Flow 画，dagre 排，游戏科技树的样子。只有这一种排布。
     //   层   = 最长前置链步数。给每条边设 minlen = 两端步数之差，dagre 的网络单纯形
@@ -1102,7 +1151,7 @@ const _app = createApp({
 <% endif %>
     }
 <% endif %>
-    return { route, params, forms, form, rowsOf, lists, notice, nav, AUTH_SCREENS, current<% if has_me %>, me<% endif %>, busy, pending, go, isHref, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_row_remote %>, onRowRemote<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
+    return { route, params, forms, form, rowsOf, lists, notice, nav, AUTH_SCREENS, current<% if has_me %>, me<% endif %>, visible, busy, pending, go, isHref, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_row_remote %>, onRowRemote<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
   },
   template: `
 {#- 顶部导航。两种来路：
@@ -1133,14 +1182,18 @@ const _app = createApp({
 <% elif not has_goto and screens|length > 1 %>
 {#- 「侧 管理」的界面不跟学习者的页面混排：左边是没写「侧」的，写了的按
     组名归到右边一组，前面一个组名（「管理」）。只是位置分开，不是权限。 -#}
-    <nav v-if="current.name !== '登录' && current.name !== '注册'">
-      <a v-for="s in screens.filter(s => !s.side).filter(s => !AUTH_SCREENS.includes(s.name))" :key="s.name"
+    <nav v-if="current.name !== '登录' && current.name !== '注册'"<% if has_me %> :class="me.role ? 'nav-role-' + me.role : ''"<% endif %>>
+<% if has_me %>
+{#- 多人模式下这是哪一端（「教师端」），没开登录或这个角色没有标识时不显示 -#}
+      <span v-if="me.user && me.badge" class="nav-badge">{{ me.badge }}</span>
+<% endif %>
+      <a v-for="s in screens.filter(s => !s.side).filter(s => !AUTH_SCREENS.includes(s.name)).filter(visible)" :key="s.name"
          :class="{ active: current.name === s.name }"
          href="#" @click.prevent="go(s.name)">{{ s.name }}</a>
 <% for side in nav_sides %>
-      <span class="nav-side"<% if loop.first %> style="margin-left:auto"<% endif %><% if has_me %> v-if="!me.hide.includes('<%= side %>')"<% endif %>>
+      <span class="nav-side"<% if loop.first %> style="margin-left:auto"<% endif %><% if has_me %> v-if="!me.hide.includes('<%= side %>') && screens.some(s => s.side === '<%= side %>' && visible(s))"<% endif %>>
         <span class="nav-side-h"><%= side %></span>
-        <a v-for="s in screens.filter(s => s.side === '<%= side %>')" :key="s.name"
+        <a v-for="s in screens.filter(s => s.side === '<%= side %>').filter(visible)" :key="s.name"
            :class="{ active: current.name === s.name }"
            href="#" @click.prevent="go(s.name)">{{ s.name }}</a>
       </span>

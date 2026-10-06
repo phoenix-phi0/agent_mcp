@@ -17,7 +17,7 @@
 #
 # {learner} 由路由器注入（单人模式没给是 me，多人模式是登录的人），达标线不传就是得分 80、回落线 60——跟
 # scripts/mastery_update.zs 同一套默认值。
-接口 POST /progress/page 动作 progress_page
+接口 POST /progress/page 动作 progress_page 只许 学生
   用包 db http
 
   设 line = {line 或}

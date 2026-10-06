@@ -1,0 +1,121 @@
+# 学情（教师端首页）：全班学得怎么样、哪个学生卡在哪。全是读，接口在
+# routes/report.zs（「只许 教师」），查询在 queries/report_*.sql。
+#
+# 「侧 管理」「端 教师」：多人模式下教师登录后落在这一页（教师端第一个界面），
+# 学生看不到；单人模式下在右边「管理」那组里照常能开。
+#
+# 同一个界面按地址切两块（「当」看 params）：
+#
+#   #学情              全班表（点名字进去）：显示名、最近学习、作答数、近期正确率、
+#                      平均得分、已掌握、薄弱知识点前 3、错词本；排序下拉（最近
+#                      学习 / 平均得分），一改就重排。下面是全班薄弱点：答错最多的
+#                      知识点、条目各前 10
+#   #学情?student=s1   一个学生：抬头（教材、最近学习）、概况、「请 AI 写学情总结」
+#                      （平衡档，十几秒，等的时候有提示；写好的存起来，下次打开还
+#                      在）、各知识点得分与掌握、常错条目、最近作答、默写错词本、
+#                      问老师记录（只读）
+#
+# 「当」的条件里不能有空格；「提示」里不能有双引号。
+
+界面 自定义 学情 侧 管理 端 教师 载入 report_one
+  动作 report_home 远程 进入时 隐藏 刷新
+
+  # ---- 全班 ----
+  分组 排序 横排 间距 12px 对齐 center 当 !params.student
+    字段 report_sort 控件 下拉 宽 140px 改时 report_home 排序
+    显示 class_count
+  结束
+
+  布局 占满 当 !params.student
+    区域 全班
+      文案 当 lists.class_rows&&!lists.class_rows.length 还没有学生，也没有谁的学习记录。去「学生管理」建账号。
+      列表 全班表 绑 class_rows 当 lists.class_rows&&lists.class_rows.length
+        列 label 地址 href 学生
+        列 last_active 最近学习
+        列 attempt_n 作答数
+        列 recent_rate 近期正确率
+        列 avg_score 平均得分
+        列 mastered_n 已掌握
+        列 weak_points 薄弱知识点
+        列 book_n 错词本
+      结束
+    结束
+    区域 全班薄弱点
+      文案 当 lists.class_weak_points&&!lists.class_weak_points.length 还没有人答错过。
+      列表 薄弱知识点表 绑 class_weak_points 当 lists.class_weak_points&&lists.class_weak_points.length
+        列 label 知识点
+        列 wrong_n 答错
+        列 answer_n 作答
+        列 learner_n 答错的人数
+      结束
+      列表 常错条目表 绑 class_weak_items 当 lists.class_weak_items&&lists.class_weak_items.length
+        列 label 条目
+        列 point_label 所属知识点
+        列 wrong_n 答错
+        列 answer_n 作答
+        列 learner_n 答错的人数
+      结束
+    结束
+  结束
+
+  # ---- 一个学生 ----
+  分组 学生顶栏 横排 顶栏 间距 12px 对齐 center 当 params.student
+    链接 student_back 绑 student.back 次要 ← 回全班
+    显示 student.head 当 shared.student&&shared.student.username===params.student&&!shared.student.missing
+    显示 student.missing 当 shared.student&&shared.student.missing
+  结束
+
+  布局 占满 当 params.student&&shared.student&&shared.student.username===params.student&&!shared.student.missing
+    区域 概况
+      显示 student.overview 正文
+      显示 student.dictation
+      分组 总结按钮 横排 间距 12px 对齐 center
+        动作 report_summary 远程 请 AI 写学情总结
+        文案 当 pending==='report_summary' AI 正在看这个学生的数据，写总结要十几秒……
+      结束
+      显示 student_summary.head 当 shared.student_summary&&shared.student_summary.student===params.student&&shared.student_summary.text
+      显示 student_summary.text 正文 当 shared.student_summary&&shared.student_summary.student===params.student&&shared.student_summary.text
+    结束
+    区域 各知识点
+      文案 当 lists.student_points&&!lists.student_points.length 还没有答过题。
+      列表 知识点表 绑 student_points 当 lists.student_points&&lists.student_points.length
+        列 label 知识点
+        列 tally 答对/答题
+        列 score_text 得分
+        列 mastered_text 掌握
+      结束
+    结束
+    区域 常错条目 当 lists.student_wrong&&lists.student_wrong.length
+      列表 常错表 绑 student_wrong
+        列 label 条目
+        列 point_label 所属知识点
+        列 wrong_n 答错
+        列 tally 答对/答题
+        列 last_wrong 最近答错
+      结束
+    结束
+    区域 最近作答 当 lists.student_recent&&lists.student_recent.length
+      列表 最近作答表 绑 student_recent
+        列 at 时间
+        列 point_label 知识点
+        列 stem_brief 题干
+        列 given_text 作答
+        列 result 对错
+      结束
+    结束
+    区域 默写错词本 当 lists.student_book&&lists.student_book.length
+      列表 错词表 绑 student_book
+        列 label 单词
+        列 direction_label 方向
+        列 last_wrong 最近答错
+      结束
+    结束
+    区域 问老师记录 当 lists.student_chat&&lists.student_chat.length
+      列表 问老师表 绑 student_chat
+        列 chat_who 谁
+        列 chat_text 内容
+        列 chat_at 时间
+      结束
+    结束
+  结束
+结束
