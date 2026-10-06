@@ -158,13 +158,17 @@ const ITEM_HEAD = "条目|所属知识点";
   p.nav("教材").click();
   say(await waitFor(() => p.hash() === "#教材"), `到了 ${p.hash()}`);
   say(await waitFor(() => (p.rows(LIST_HEAD) || []).length === total), `课文表 ${(p.rows(LIST_HEAD) || []).length} 行（库里 ${total}）`);
-  say(p.selects().length === 1 && p.selects()[0].value === "全部", "顶栏等级默认「全部」");
+  // 顶栏两个下拉：系列（选项是接口给的，只有 hanabira 一项也显示）、等级
+  say(await waitFor(() => p.selects().length === 2 && p.selects()[0].value === "hanabira"
+                       && [...p.selects()[0].options].filter(o => o.value).length === 1),
+      "顶栏最前面是系列下拉，只有一个系列也显示，选着 hanabira");
+  say(p.selects()[1].value === "全部", "顶栏等级默认「全部」");
   say(p.texts().includes(`共${total}课`), "顶栏写着共几课");
   say(!p.table(EX_HEAD), "还没读课：没有例句表");
   say(!(p.$$(".stream .smsg").length), "没有往哪条消息流里推东西");
 
   console.log("二、按等级、关键字筛");
-  p.pick(p.selects()[0], "N4");
+  p.pick(p.selects()[1], "N4");
   p.btn("搜索").click();
   say(await waitFor(() => (p.rows(LIST_HEAD) || []).length === n4), `选 N4 点搜索：${(p.rows(LIST_HEAD) || []).length} 行（库里 ${n4}）`);
   say(p.rows(LIST_HEAD).every(r => r[0] === "N4"), "每行都是 N4");
@@ -217,7 +221,7 @@ const ITEM_HEAD = "条目|所属知识点";
   p.w.history.back();
   say(await waitFor(() => p.hash() === "#教材" && (p.rows(LIST_HEAD) || []).length === total),
       `后退：回到课文表（${p.hash()}，${(p.rows(LIST_HEAD) || []).length} 行）`);
-  say(p.selects().length === 1 && p.selects()[0].value === "全部", "回来时顶栏等级跟表一致（全部）");
+  say(p.selects().length === 2 && p.selects()[1].value === "全部", "回来时顶栏等级跟表一致（全部）");
   say(!p.table(EX_HEAD), "阅读视图收起来了");
   p.$$(".screen a.cell-link").find(x => x.textContent.trim() === L.title).click();
   await waitFor(() => p.texts().some(t => t.startsWith(`《${L.title}》　N4　`)));

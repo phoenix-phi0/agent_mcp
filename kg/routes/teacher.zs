@@ -74,6 +74,14 @@
 #
 # 学习者不传就是 me，跟做题、学习记录同一个默认值；达标线（得分 80，
 # 回落线 60）跟学习进度页一样。
+#
+# 教材系列：老师知道学习者当前用哪套教材（series_current，教材页的「系列」
+# 下拉记的偏好，没记过是 hanabira），要模型回答的几路提示词里都写上。找课
+# （lesson_find）先在当前系列里找，找不到才全库兜底——兜底找到的课 tag 是
+# 「（系列名）」，接在回复和链接文字里的标题后面；「第N课」只在当前系列里认
+# （lesson_ref）；教材目录（lesson_catalog）、推荐的课（progress_pick）都只看
+# 当前系列。链接都带课号（#教材?lesson=课号、#做题?lesson=课号），哪个系列
+# 的课都一样。
 
 
 # 进页面：把最近的对话放回消息流。只回 state，不推 messages——切一次界面
@@ -121,6 +129,7 @@
   如果 {recent_talk} 为空
     设 recent_talk = （这是第一句，之前没有对话）
   结束
+  设 series_now = 查一行表 app.db series_current {query}
 
   # ---- 指名了哪一课：lesson 参数，或者原话里的课号、第N课、这课 ----
   设 pinned.code =
@@ -201,6 +210,7 @@
   设 search.message = {message}
   设 search.level = {intent_json.level 或}
   设 search.pin = {pinned.code 或}
+  设 search.learner = {learner}
 
   设 reply.who = 老师
   设 reply.link =
@@ -230,11 +240,11 @@
     设 scope = 查一行表 app.db quiz_link {scope_args}
     如果 {lesson_row.code 或} 不为空
       设 lesson_code = {lesson_row.code}
-      设 reply.text = {opening}《{lesson_row.title}》（{lesson_row.level}）这一课有 {lesson_row.n} 道题，点下面的链接直接开始。题目、批改和解析都在做题页，我这边不出题也不判分；做完有不明白的再回来问我。
+      设 reply.text = {opening}《{lesson_row.title}》{lesson_row.tag}（{lesson_row.level}）这一课有 {lesson_row.n} 道题，点下面的链接直接开始。题目、批改和解析都在做题页，我这边不出题也不判分；做完有不明白的再回来问我。
       设 reply.link = {lesson_row.link}
-      设 reply.link_text = 去做题：《{lesson_row.title}》
+      设 reply.link_text = 去做题：《{lesson_row.title}》{lesson_row.tag}
       设 links.href2 = {lesson_row.read}
-      设 links.text2 = 读课文：《{lesson_row.title}》
+      设 links.text2 = 读课文：《{lesson_row.title}》{lesson_row.tag}
     否则
       如果 {word} 为空
         # ---- 没指定具体内容：看学情 ----
@@ -356,7 +366,7 @@
         设 links.href3 = {brief.link}
         设 links.text3 = 复习薄弱点
       结束
-      问 answer_text = 下面是这个学生在网站上的学习进度（网站统计的，以它为准）：【{progress}】按进度推荐的下一课：【{suggestion}】最近的对话（旧的在前）：【{recent_talk}】学生现在说：【{message}】请以学习进度为主回答：说清他现在的情况（只用上面给的数字和知识点），指出薄弱的地方（有掌握得分的话，得分低的点先说），给出具体的下一步建议（先读或复习哪一课、练哪些点）。还没有作答记录的话，就建议从推荐的课开始、去做题页做几道。 用 平衡
+      问 answer_text = 下面是这个学生在网站上的学习进度（网站统计的，以它为准）：【{progress}】学生现在用的教材：【{series_now.label}】按进度推荐的下一课：【{suggestion}】最近的对话（旧的在前）：【{recent_talk}】学生现在说：【{message}】请以学习进度为主回答：说清他现在的情况（只用上面给的数字和知识点），指出薄弱的地方（有掌握得分的话，得分低的点先说），给出具体的下一步建议（先读或复习哪一课、练哪些点）。还没有作答记录的话，就建议从推荐的课开始、去做题页做几道。 用 平衡
       设 reply.text = {answer_text}
       设 reply.link = {links.href2}
       设 reply.link_text = {links.text2}
@@ -364,20 +374,21 @@
       如果 {intent} 等于 教材
         # ---- 教材：课文目录 + 直接对上的课 + 按进度推荐的课 ----
         设 catalog_args.level = {intent_json.level 或}
+        设 catalog_args.learner = {learner}
         设 catalog = 查一值表 app.db lesson_catalog {catalog_args}
         设 search.quiz = 0
         设 lessons = 查询表 app.db lesson_find {search}
         设 related =
         遍历 lesson_row 于 {lessons}
           如果 {lesson_row.strong} 等于 1
-            设 related = {related}《{lesson_row.title}》（{lesson_row.level}，课文 {lesson_row.code}）：{lesson_row.summary}；
+            设 related = {related}《{lesson_row.title}》{lesson_row.tag}（{lesson_row.level}，课文 {lesson_row.code}）：{lesson_row.summary}；
             如果 {links.href1} 为空
               设 lesson_code = {lesson_row.code}
               设 links.href1 = {lesson_row.read}
-              设 links.text1 = 读课文：《{lesson_row.title}》
+              设 links.text1 = 读课文：《{lesson_row.title}》{lesson_row.tag}
             否则
               设 links.href2 = {lesson_row.read}
-              设 links.text2 = 读课文：《{lesson_row.title}》
+              设 links.text2 = 读课文：《{lesson_row.title}》{lesson_row.tag}
             结束
           结束
         结束
@@ -404,7 +415,7 @@
         结束
         设 links.href3 = #%E6%95%99%E6%9D%90
         设 links.text3 = 打开教材
-        问 answer_text = 下面是网站教材的课文目录（按等级分组，只有标题）：【{catalog}】标题或条目跟学生的问题直接对上的课：【{related}】按学生进度推荐的课：【{suggestion}】这个学生的学习进度：【{progress}】最近的对话（旧的在前）：【{recent_talk}】学生现在说：【{message}】请根据目录回答学生关于教材的问题，推荐具体的课时写出课文标题；目录里没有的课不要编。 用 平衡
+        问 answer_text = 学生现在用的教材：【{series_now.label}】下面是网站教材的课文目录（按等级分组，只有标题）：【{catalog}】标题或条目跟学生的问题直接对上的课：【{related}】按学生进度推荐的课：【{suggestion}】这个学生的学习进度：【{progress}】最近的对话（旧的在前）：【{recent_talk}】学生现在说：【{message}】请根据目录回答学生关于教材的问题，推荐具体的课时写出课文标题；目录里没有的课不要编。 用 平衡
         设 reply.text = {answer_text}
         设 reply.link = {links.href1}
         设 reply.link_text = {links.text1}
@@ -433,16 +444,16 @@
         # ---- 讲一课：这一课的正文、他在这一课的答题情况 ----
         设 lesson_code = {pinned.code}
         设 links.href1 = {pinned.read}
-        设 links.text1 = 读课文：《{pinned.title}》
+        设 links.text1 = 读课文：《{pinned.title}》{pinned.tag}
         如果 {pinned.link} 不为空
           设 links.href1 = {pinned.link}
-          设 links.text1 = 做这课的题：《{pinned.title}》（{pinned.n} 道）
+          设 links.text1 = 做这课的题：《{pinned.title}》{pinned.tag}（{pinned.n} 道）
           设 links.href2 = {pinned.read}
-          设 links.text2 = 读课文：《{pinned.title}》
+          设 links.text2 = 读课文：《{pinned.title}》{pinned.tag}
         结束
         设 reply.link = {links.href1}
         设 reply.link_text = {links.text1}
-        问 answer_text = 学生请你讲解教材里的这一课，讲解以课文为准：【{pinned.body}】这个学生在这一课的答题情况（网站统计的）：【{pinned.record}】他整体的学习进度（网站统计的）：【{progress}】最近的对话（旧的在前）：【{recent_talk}】学生现在说：【{message}】请这样讲：先用一两句话说这一课讲什么、什么时候用；再讲接续和要点，用课文里的例句说明（日语原文加中文）；有容易混的说法提一句怎么区分；最后结合他在这一课的答题情况给建议——答错过的条目重点讲，还没做过题就建议做这一课的题。学生问的是这一课里的具体问题时，直接回答那个问题。 用 平衡
+        问 answer_text = 学生现在用的教材：【{series_now.label}】学生请你讲解教材里的这一课，讲解以课文为准：【{pinned.body}】这个学生在这一课的答题情况（网站统计的）：【{pinned.record}】他整体的学习进度（网站统计的）：【{progress}】最近的对话（旧的在前）：【{recent_talk}】学生现在说：【{message}】请这样讲：先用一两句话说这一课讲什么、什么时候用；再讲接续和要点，用课文里的例句说明（日语原文加中文）；有容易混的说法提一句怎么区分；最后结合他在这一课的答题情况给建议——答错过的条目重点讲，还没做过题就建议做这一课的题。学生问的是这一课里的具体问题时，直接回答那个问题。 用 平衡
         设 reply.text = {answer_text}
       否则
         # ---- 讲解：平衡档，带课文正文、进度和最近几轮 ----
@@ -454,13 +465,13 @@
           如果 {lesson_code} 为空
             设 lesson_code = {lesson_row.code}
             设 links.href1 = {lesson_row.read}
-            设 links.text1 = 读课文：《{lesson_row.title}》
+            设 links.text1 = 读课文：《{lesson_row.title}》{lesson_row.tag}
           结束
           如果 {reply.link} 为空
             如果 {lesson_row.strong} 等于 1
               如果 {lesson_row.n} 不等于 0
                 设 reply.link = {lesson_row.link}
-                设 reply.link_text = 练一练：《{lesson_row.title}》（{lesson_row.n} 道题）
+                设 reply.link_text = 练一练：《{lesson_row.title}》{lesson_row.tag}（{lesson_row.n} 道题）
               结束
             结束
           结束
@@ -475,7 +486,7 @@
           设 reply.link_text = {links.text1}
         结束
 
-        问 answer_text = 下面是网站课文库里和这个问题最相关的课文，讲解时以它为准（跟问题无关就忽略）：【{reference}】这个学生的学习进度（网站统计的，跟问题有关时可以结合着给建议）：【{progress}】最近的对话（旧的在前，接着这些往下聊）：【{recent_talk}】学生现在说：【{message}】请直接回答学生现在这句话。 用 平衡
+        问 answer_text = 学生现在用的教材：【{series_now.label}】下面是网站课文库里和这个问题最相关的课文，讲解时以它为准（跟问题无关就忽略）：【{reference}】这个学生的学习进度（网站统计的，跟问题有关时可以结合着给建议）：【{progress}】最近的对话（旧的在前，接着这些往下聊）：【{recent_talk}】学生现在说：【{message}】请直接回答学生现在这句话。 用 平衡
         设 reply.text = {answer_text}
       结束
       结束

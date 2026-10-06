@@ -8,6 +8,10 @@
 --            出题时用——光是讲解里提了一句的课不能当成「这一课的题」
 -- :pin       已经认定的那一课（教材页带来的 lesson、原话里的课号、「第46课」、
 --            「这课」，见 lesson_ref.sql），没有就空串。它直接排第一、算 strong
+-- :learner   学习者。先在他当前的系列（learner_pref，没记过是 hanabira，同
+--            series_current.sql）里找；当前系列一课都没命中才全库兜底，兜底找到
+--            的课 other = 1、tag 是「（系列名）」，老师回复和链接文字里接在标题
+--            后面，看得出不是当前系列的课。pin 的那一课不管哪个系列都留着
 --
 -- 打分：标题、条目名命中 3，原话里出现条目名按条目名的字数算（てから 比
 -- から 长，「てから怎么用」先找到 てから 那课），一句话、接续、讲解命中各 1。
@@ -21,7 +25,29 @@
 -- 两个换行，脚本里直接一课接一课拼起来。link 是做题页按课文出题的地址，
 -- 写法跟 kg/__main__.py 的 quiz_link 一样（界面名编过码）；read 是教材页读
 -- 这一课的地址（跟 lesson_list 的 href 一样），老师回复里的「读课文」用它。
-WITH kw AS (
+--
+-- lq 是「课的题」：hanabira 的题库按课文编号打了标（question.lesson），照旧按
+-- 标；别的系列的课没有自己的题，按映射取——挂着的条目（item_lesson）的题，
+-- 加上直接挂的知识点（lesson_point）下所有条目的题。几个课文查询里是同一段。
+WITH lq AS (
+  SELECT q.lesson AS lesson, q.code, q.item FROM question q WHERE q.lesson IS NOT NULL
+  UNION
+  SELECT l.code, q.code, q.item FROM lesson l
+  JOIN item_lesson il ON il.lesson = l.code JOIN question q ON q.item = il.item
+  WHERE l.series <> 'hanabira'
+  UNION
+  SELECT l.code, q.code, q.item FROM lesson l
+  JOIN lesson_point lp ON lp.lesson = l.code JOIN item i ON i.point = lp.point
+  JOIN question q ON q.item = i.code
+  WHERE l.series <> 'hanabira'
+),
+cur AS (
+  SELECT coalesce((SELECT p.series FROM learner_pref p
+                   WHERE p.learner = :learner
+                     AND EXISTS (SELECT 1 FROM series s WHERE s.code = p.series)),
+                  'hanabira') AS s
+),
+kw AS (
   SELECT DISTINCT replace(replace(replace(replace(trim(value), '～', ''), '〜', ''), ' ', ''), '　', '') AS k
   FROM json_each(CASE WHEN json_valid(:keywords) AND json_type(:keywords) = 'array'
                       THEN :keywords ELSE json_array(:keywords) END)
@@ -58,10 +84,24 @@ scored AS (
   SELECT l.*, (h.t + h.b) * 3 + h.m * 2 + h.s + h.f + h.e
                 + CASE WHEN l.code = coalesce(:pin, '') THEN 1000 ELSE 0 END AS score,
          (h.t + h.b + h.m) > 0 OR l.code = coalesce(:pin, '') AS strong,
-         (SELECT count(*) FROM question q WHERE q.lesson = l.code) AS n
+         (SELECT count(*) FROM lq WHERE lq.lesson = l.code) AS n
   FROM lesson l JOIN hit h ON h.code = l.code
+),
+pool AS (
+  SELECT * FROM scored
+  WHERE score > 0
+    AND (CAST(:quiz AS INTEGER) = 0 OR (strong AND n > 0))
+),
+mine AS (
+  SELECT * FROM pool, cur
+  WHERE pool.series = cur.s OR pool.code = coalesce(:pin, '')
+     OR NOT EXISTS (SELECT 1 FROM pool p2 WHERE p2.series = cur.s)
 )
-SELECT code, level, title, summary, n, score, strong,
+SELECT code, level, title, summary, n, score, strong, series,
+       CASE WHEN series = s THEN 0 ELSE 1 END AS other,
+       CASE WHEN series = s THEN ''
+            ELSE '（' || coalesce((SELECT label FROM series x WHERE x.code = mine.series), series) || '）'
+       END AS tag,
        '#%E5%81%9A%E9%A2%98?lesson=' || code AS link,
        '#%E6%95%99%E6%9D%90?lesson=' || code AS read,
        '《' || title || '》（' || level || '，课文 ' || code || '）' || char(10)
@@ -70,8 +110,6 @@ SELECT code, level, title, summary, n, score, strong,
          || explanation || char(10)
          || CASE WHEN coalesce(examples, '') <> '' THEN '例句：' || examples || char(10) ELSE '' END
          || char(10) AS body
-FROM scored
-WHERE score > 0
-  AND (CAST(:quiz AS INTEGER) = 0 OR (strong AND n > 0))
+FROM mine
 ORDER BY score DESC, (level = upper(trim(:level))) DESC, n DESC, code
 LIMIT 2

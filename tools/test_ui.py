@@ -323,6 +323,40 @@ def test_trigger():
     check("没写触发：触发表是空的", "const triggers = {};" in r3["result"]["files"]["app.js"], True)
 
 
+def test_dynamic_select():
+    print("\n[下拉：选项来自、改时]")
+    ui = ("界面 自定义 教材\n"
+          "  动作 lesson_list 远程 进入时 隐藏 刷新\n"
+          "  分组 顶栏 横排\n"
+          "    字段 series 控件 下拉 选项来自 series_options 改时 lesson_list 宽 150px 系列\n"
+          "    字段 lesson_level 控件 下拉 宽 90px 等级\n"
+          "    动作 lesson_list 提交 远程 搜索\n"
+          "  结束\n"
+          "结束\n")
+    s = one(ui)
+    f = s.children[1].children[0]
+    check("「选项来自」「改时」进了各自的属性，没进标签",
+          (f.name, f.widget, f.source, f.on_change, f.label),
+          ("series", "下拉", "series_options", "lesson_list", "系列"))
+    plain = s.children[1].children[1]
+    check("没写的字段两样都是空的", (plain.source, plain.on_change), ("", ""))
+    eps = {"lesson_list": "/lesson/list"}
+    r = compile_ui(ui, backend="vue", fields={"series": "文本", "lesson_level": "文本"},
+                   options={"endpoints": eps, "options_map": {"lesson_level": ["全部", "N5"]}})
+    check("编译没有 issue", [i.code for i in r.get("issues", [])], [])
+    js = r["result"]["files"]["app.js"]
+    check("选项从 lists 的那个键取（rowsOf），每行 value / label",
+          '<option v-for="o in rowsOf(\'series_options\')" :key="o.value" :value="o.value">{{ o.label || o.value }}</option>' in js, True)
+    check("改了就提交那个动作",
+          '@change="typeof submitTo === \'function\' && submitTo(\'lesson_list\')"' in js, True)
+    check("对照：普通下拉照旧是编译时的枚举选项、不挂 change",
+          '<option value="N5">N5</option>' in js and js.count("@change=\"typeof submitTo") == 1, True)
+    r2 = compile_ui(ui, backend="vue", fields={"series": "文本", "lesson_level": "文本"},
+                    options={"endpoints": {"other": "/x"}})
+    check("改时的接口不存在：报 missing_endpoint",
+          [i.code for i in r2.get("issues", []) if "改时" in i.message], ["missing_endpoint"])
+
+
 # ----------------------------------------------------------------------
 
 
@@ -341,6 +375,7 @@ def main() -> int:
         test_compile,
         test_links,
         test_trigger,
+        test_dynamic_select,
     ]:
         try:
             fn()

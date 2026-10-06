@@ -15,6 +15,13 @@
 #
 # examples 存 JSON 文本 [{"jp":…,"zh":…}]：例句只整体读出来给页面用，
 # 不单独查，没必要拆表。
+#
+# 教材系列（entities/series.entity）：每课属于一个系列（series），导入按系列
+# 清空重灌，只动那个系列的课和挂接。series 后加的列，老库靠「迁移 只加」补，
+# 默认 hanabira（加列前的课全是 hanabira 的）。不关联 series 表：SQLite 给
+# 已有的表 ADD COLUMN 时，带外键的列默认值只能是 NULL。
+# seq 是课序：线性教材（第1课、第2课……）填，抬头、「第N课」按它；hanabira
+# 不填，课号末尾三位数就是「第N课」（N5 第46课 = hb-n5-046）。
 
 实体 lesson 课文
   字段 code 文本 必填 唯一 编号
@@ -26,6 +33,8 @@
   字段 examples 文本 例句
   字段 changed 整数 必填 默认 0 改过例句
   字段 source_title 文本 原标题
+  字段 series 文本 必填 默认 hanabira 索引 系列
+  字段 seq 整数 课序
   主键 code
 结束
 
@@ -34,4 +43,15 @@
   字段 item 文本 必填 索引 关联 item 条目
   字段 lesson 文本 必填 索引 关联 lesson 课文
   字段 rank 整数 必填 默认 1 顺序
+结束
+
+
+# 课直接挂知识点：新教材的课只知道讲的是哪个知识点（node），对不上具体
+# 条目时用这张；对得上条目的照旧走 item_lesson。两样都只引用已有的
+# item / node，导入时引用不存在的整行拒收（routes/lesson.zs），绝不新建。
+# 跟 item_lesson 一样是内容，按系列清空重灌。
+实体 lesson_point 课文知识点
+  字段 lesson 文本 必填 索引 关联 lesson 课文
+  字段 point 文本 必填 索引 关联 node 知识点
+  唯一 lesson point
 结束

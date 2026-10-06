@@ -101,8 +101,8 @@ def main():
     check((body.get("state") or {}).get("lesson_count") == f"共{len(lessons)}课",
           f"顶栏的课数：{(body.get('state') or {}).get('lesson_count')}")
     check(not body.get("messages"), "进页面调的接口不推消息")
-    check(body.get("form") == {"lesson_level": "全部", "keyword": ""},
-          f"用的条件填回表单（等级下拉不是空的）：{body.get('form')}")
+    check(body.get("form") == {"lesson_level": "全部", "keyword": "", "series": "hanabira"},
+          f"用的条件填回表单（等级、系列下拉不是空的）：{body.get('form')}")
     rowmap = {r["code"]: r for r in lst(body, "lessons")}
     check(set(rowmap[LESSON]) >= {"level", "title", "summary", "qcount", "href"},
           f"每行有等级、标题、一句话、题数、地址：{sorted(rowmap[LESSON])}")
@@ -184,7 +184,8 @@ def main():
           f"「问老师」的地址编过码：{rd.get('ask')}")
     check(len(lst(body, "lessons") or []) == len(lessons), "顺带把课文表换回全部（表单被清回默认了）")
     check(not body.get("messages"), "读课不推消息")
-    check(body.get("form") == {"lesson_level": "全部", "keyword": ""}, "读课：表单填回默认，跟换回全部的课文表一致")
+    check(body.get("form") == {"lesson_level": "全部", "keyword": "", "series": "hanabira"},
+          "读课：表单填回默认（系列是当前的），跟换回全部的课文表一致")
 
     st, body = post("/lesson/one", lesson=NOQ)
     rd = (body.get("state") or {}).get("reading") or {}

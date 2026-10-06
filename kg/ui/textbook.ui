@@ -1,6 +1,7 @@
 # 教材：课文表 + 阅读视图，同一个界面，按地址切换。
 #
-#   #教材                    课文表：顶栏筛等级、搜关键字（标题、一句话、条目名）
+#   #教材                    课文表：顶栏选系列、筛等级、搜关键字（标题、一句话、
+#                            条目名）
 #   #教材?lesson=hb-n4-118   读这一课：抬头、一句话、接续、讲解、例句、挂着的
 #                            条目，顶上和底下「请老师讲解」，底下还有「练这一课」
 #                            「问老师」
@@ -16,6 +17,11 @@
 #               B 课，B 还没拉回来时不该顶着 A 的内容
 #   没有这一课  对得上、但后端说没有（reading.missing）
 # 「当」的条件里不能有空格。
+#
+# 系列（教材系列，见 entities/series.entity）：顶栏最前面的下拉，选项是接口给
+# 的（「选项来自 series_options」，series 表里 sort ≥ 0 的，只有一个也显示），
+# 「改时 lesson_list」：一选就提交，记进学习者的偏好、课文表换成那个系列的课。
+# 课文表顶栏和阅读顶栏都写着系列名（state.series_head / reading.series_label）。
 #
 # 表里点标题、「练这一课」「问老师」「回课文表」都是链接（「链接」和列的
 # 「地址」），走地址跳转，不用「切到」：切到带不了参数，用了它引擎还会以为
@@ -35,9 +41,11 @@
   动作 lesson_list 远程 进入时 隐藏 刷新
 
   分组 顶栏 横排 顶栏 间距 12px 对齐 center 当 !params.lesson
+    字段 series 控件 下拉 选项来自 series_options 改时 lesson_list 宽 150px 系列
     字段 lesson_level 控件 下拉 宽 90px 等级
     字段 keyword 控件 多行 单行高 宽 260px 提示 标题、一句话或条目名（Enter搜索）
     动作 lesson_list 提交 远程 搜索
+    显示 series_head
     显示 lesson_count
   结束
 
@@ -55,6 +63,7 @@
 
   分组 阅读顶栏 横排 顶栏 间距 12px 对齐 center 当 params.lesson
     链接 back 绑 reading.back 次要 ← 回课文表
+    显示 reading.series_label 当 params.lesson&&shared.reading.code===params.lesson&&!shared.reading.missing
     显示 reading.head 当 params.lesson&&shared.reading.code===params.lesson
     链接 explain_top 绑 reading.explain 当 params.lesson&&shared.reading.code===params.lesson&&!shared.reading.missing 请老师讲解
   结束

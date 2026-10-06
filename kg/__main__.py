@@ -173,6 +173,23 @@ def run_import(quiet: bool = False) -> int:
     else:
         say("没有 lessons.jsonl，跳过课文导入")
 
+    # 别的教材系列：content/series/<code>/lessons.jsonl，每个系列单独导（按系列
+    # 清空重灌，互不牵连）。下划线开头的（_example）是格式示例，不进正式导入。
+    # 格式见 content/series/README.md。
+    for f in sorted((CONTENT / "series").glob("*/lessons.jsonl")):
+        code = f.parent.name
+        if code.startswith("_") or code == "hanabira":
+            continue
+        r = c.post("/lesson/import", json={"form": {"series": code}})
+        d = r.get_json() or {}
+        if r.status_code != 200:
+            say(f"系列 {code} 导入失败（{r.status_code}），库里这个系列没动：{d.get('error') or d}")
+        else:
+            say(f"系列 {code}：课文 {d.get('lessons')} 课，映射到条目 {d.get('links')}、"
+                f"知识点 {d.get('points')}，拒收 {d.get('rejected')} 行")
+            if d.get("note"):
+                say("  " + d["note"].strip()[:300])
+
     # 语法题库。源文件在本项目之外（workspace/ 下，quiz 包也读它），.zs 的
     # 读JSONL 只能读项目目录里的文件，所以这里读出来放进请求——只读文件，
     # 不动内容，怎么进库在 routes/quiz.zs。题目挂在条目上，排在条目之后。

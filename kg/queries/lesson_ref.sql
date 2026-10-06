@@ -3,18 +3,23 @@
 --
 -- :message  学习者的原话
 -- :level    意图判定给的等级（N5），「第46课」好几个等级都有时先取它
--- :learner  学习者。「这课」指的是这个人最近一次对话里老师参考的那一课
+-- :learner  学习者。「这课」指的是这个人最近一次对话里老师参考的那一课；
+--           「第N课」只在他当前的系列里认（learner_pref，没记过是 hanabira）
 --
 -- 按顺序认，先认出来的算：
---   课号     原话里有课号（hb-n5-046，不分大小写）——教材页阅读视图的抬头上有
---   第N课    「第46课」「第046课」：课号末尾的三位数。提到了等级只认那一级；
---            没提等级时只有一个等级有这个号才认，几个等级都有就不猜，
---            candidates 列出这几课（老师回复里请学习者说是哪一级）
+--   课号     原话里有课号（hb-n5-046，不分大小写），哪个系列的都认——课号全库
+--            唯一，说出来就不会认错。教材页阅读视图的抬头上有
+--   第N课    只在当前系列里认。有课序（seq，线性教材）的课：「第N课」就是课序 N，
+--            系列里课序不重，不看等级。没有课序的（hanabira）：「第46课」
+--            「第046课」是课号末尾的三位数，提到了等级只认那一级；没提等级时
+--            只有一个等级有这个号才认，几个等级都有就不猜，candidates 列出
+--            这几课（老师回复里请学习者说是哪一级）
 --   这课     「这课」「这一课」「本课」「这节课」「这篇课文」：最近一条带课文
 --            编号的对话记录（从教材页点「请老师讲解」、问过某一课之后接着问）
 --
 -- asked = 1：原话在指名某一课（有课号的样子、「第…课」、「这课」），不管认
--- 没认出来。认不出来时（「讲解第1课」：没有 001 号的课）老师回一句找不到、
+-- 没认出来。课号的样子是「某个课号的前缀-」后面跟着字母或数字：前缀取库里
+-- 课号第一个连字符之前那段（hb-n5-046 的 hb-），不写死哪个系列。认不出来时（「讲解第1课」：没有 001 号的课）老师回一句找不到、
 -- 指去教材页，不拿别的课凑数，也不调模型。
 --
 -- candidates：「第N课」对上了几课、没认定时的那几课，《标题》（等级，课号）、
@@ -24,6 +29,16 @@
 WITH said AS (
   SELECT lower(replace(replace(coalesce(:message, ''), ' ', ''), '　', '')) AS m
 ),
+cur AS (
+  SELECT coalesce((SELECT p.series FROM learner_pref p
+                   WHERE p.learner = :learner
+                     AND EXISTS (SELECT 1 FROM series s WHERE s.code = p.series)),
+                  'hanabira') AS s
+),
+prefix AS (
+  SELECT DISTINCT lower(substr(code, 1, instr(code, '-'))) AS p
+  FROM lesson WHERE instr(code, '-') > 1
+),
 by_code AS (
   SELECT l.code FROM lesson l, said
   WHERE instr(said.m, lower(l.code)) > 0
@@ -31,10 +46,13 @@ by_code AS (
   LIMIT 1
 ),
 no_hit AS (
-  SELECT l.code, l.level, l.title FROM lesson l, said
-  WHERE (instr(said.m, '第' || CAST(substr(l.code, -3) AS INTEGER) || '课') > 0
-         OR instr(said.m, '第' || substr(l.code, -3) || '课') > 0)
-    AND (trim(coalesce(:level, '')) = '' OR l.level = upper(trim(:level)))
+  SELECT l.code, l.level, l.title FROM lesson l, said, cur
+  WHERE l.series = cur.s
+    AND ((l.seq IS NOT NULL AND instr(said.m, '第' || l.seq || '课') > 0)
+         OR (l.seq IS NULL
+             AND (instr(said.m, '第' || CAST(substr(l.code, -3) AS INTEGER) || '课') > 0
+                  OR instr(said.m, '第' || substr(l.code, -3) || '课') > 0)
+             AND (trim(coalesce(:level, '')) = '' OR l.level = upper(trim(:level)))))
 ),
 by_no AS (
   SELECT code FROM no_hit WHERE (SELECT count(*) FROM no_hit) = 1
@@ -55,7 +73,7 @@ SELECT coalesce((SELECT code FROM by_code),
                 (SELECT code FROM by_no),
                 CASE WHEN (SELECT yes FROM pronoun) THEN (SELECT code FROM recent) END,
                 '') AS code,
-       CASE WHEN said.m GLOB '*hb-n[0-9]-*'
+       CASE WHEN EXISTS (SELECT 1 FROM prefix WHERE said.m GLOB '*' || prefix.p || '[0-9a-z]*')
               OR said.m GLOB '*第[0-9]*课*'
               OR said.m GLOB '*第[一二三四五六七八九十百零两]*课*'
               OR (SELECT yes FROM pronoun)

@@ -164,6 +164,11 @@ class Node:
                                  # 的 href 键（#教材?lesson=hb-n4-118）
     title_f: str = ""            # 节点图「标题 kanji,kana」
     sub_f: str = ""              # 节点图「说明 kana,meaning」
+    source: str = ""             # 下拉的「选项来自 series_options」：选项不是编译时
+                                 # 从实体枚举里取的，是接口用 lists 给的那组行
+                                 # [{value, label}]（教材页的系列，库里有几套列几套）
+    on_change: str = ""          # 字段的「改时 lesson_list」：值一改就提交这个动作
+                                 # （切换系列马上换课文表，不用再点「搜索」）
     required: Optional[bool] = None
     role: Optional[str] = None
     ratio: int = 0
@@ -360,6 +365,12 @@ KEYED_MODIFIERS = KEYED_MODIFIERS | {"交给", "翻页"}
 # 列「地址 <键>」：这一格画成链接，见上面「链接」的说明
 KEYED_MODIFIERS = KEYED_MODIFIERS | {"地址"}
 
+# 下拉「选项来自 <数据键>」：选项从接口的 lists 里那个键取，每行 {value, label}
+# （label 缺了显示 value）。实体枚举是编译时定死的，「库里有几套教材就列几套」
+# 这种只能运行时给。接口每次都要回这个键：进界面时前端会先清空 lists。
+# 字段「改时 <动作>」：值一改就提交这个动作，跟按了它的按钮一样。
+KEYED_MODIFIERS = KEYED_MODIFIERS | {"选项来自", "改时"}
+
 # 动作「回车」：答完才出现的那颗「下一题」用。三件事：
 #   1. 一次提交回来、界面上没有输入框可还焦点时，焦点给这颗按钮，并
 #      scrollIntoView({block:'nearest'})——卡片长了按钮不会落在看不见的地方；
@@ -471,6 +482,10 @@ def _apply_keyed(node: Node, keyed: dict):
         node.to = keyed["交给"]
     if "地址" in keyed:
         node.href = keyed["地址"]
+    if "选项来自" in keyed:
+        node.source = keyed["选项来自"]
+    if "改时" in keyed:
+        node.on_change = keyed["改时"]
     if "翻页" in keyed:
         node.flip = keyed["翻页"]
     if "点开" in keyed:
@@ -660,6 +675,10 @@ def dump(nodes, indent: int = 0) -> str:
             extras.append(f"接受={n.accept}")
         if n.maxsize:
             extras.append(f"最大={n.maxsize}")
+        if getattr(n, "source", ""):
+            extras.append(f"选项来自={n.source}")
+        if getattr(n, "on_change", ""):
+            extras.append(f"改时={n.on_change}")
         if n.type:
             extras.append(f"类型={n.type}")
         if n.ratio:
@@ -1345,6 +1364,12 @@ def check_loaders(screens, endpoints) -> list:
                     f"{what}「{holder.name}」要「载入 {holder.load}」，但没有这个接口",
                     line=holder.line, code="missing_endpoint"))
         # 「触发 X」同理：接口不存在的话带着参数进来什么都不发生
+        # 「改时 X」同理：接口不存在的话改了值什么都不发生
+        for node in screen.fields():
+            if node.on_change and endpoints is not None and node.on_change not in endpoints:
+                issues.append(Issue(
+                    f"字段「{node.name}」要「改时 {node.on_change}」，但没有这个接口",
+                    line=node.line, code="missing_endpoint"))
         if screen.trigger and endpoints is not None and screen.trigger not in endpoints:
             issues.append(Issue(
                 f"界面「{screen.name}」要「触发 {screen.trigger}」，但没有这个接口",

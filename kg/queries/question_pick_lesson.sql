@@ -16,8 +16,25 @@
 -- 混进易混的说法，本课语法就不总是答案了。
 --
 -- :seen 是这一轮出过的题号，「,a,b,」的样子；:n 是这一轮已经出了几道。
-WITH mine AS (
-  SELECT DISTINCT item FROM question WHERE lesson = :lesson
+--
+-- lq 是「课的题」：hanabira 的题库按课文编号打了标（question.lesson），照旧按
+-- 标；别的系列的课没有自己的题，按映射取——挂着的条目（item_lesson）的题，
+-- 加上直接挂的知识点（lesson_point）下所有条目的题。几个课文查询里是同一段。
+-- hanabira 的课 lq 就是 question.lesson = 这一课，出题结果跟加系列之前一样。
+WITH lq AS (
+  SELECT q.lesson AS lesson, q.code, q.item FROM question q WHERE q.lesson IS NOT NULL
+  UNION
+  SELECT l.code, q.code, q.item FROM lesson l
+  JOIN item_lesson il ON il.lesson = l.code JOIN question q ON q.item = il.item
+  WHERE l.series <> 'hanabira'
+  UNION
+  SELECT l.code, q.code, q.item FROM lesson l
+  JOIN lesson_point lp ON lp.lesson = l.code JOIN item i ON i.point = lp.point
+  JOIN question q ON q.item = i.code
+  WHERE l.series <> 'hanabira'
+),
+mine AS (
+  SELECT DISTINCT item FROM lq WHERE lesson = :lesson
 ),
 pair AS (
   SELECT b AS item FROM contrast WHERE a IN (SELECT item FROM mine)
@@ -28,7 +45,8 @@ lv AS (
   SELECT level FROM lesson WHERE code = :lesson
 ),
 kinds AS (
-  SELECT DISTINCT kind FROM question WHERE lesson = :lesson AND qtype = '选择'
+  SELECT DISTINCT kind FROM question
+  WHERE code IN (SELECT code FROM lq WHERE lesson = :lesson) AND qtype = '选择'
 ),
 done AS (
   SELECT DISTINCT item FROM question
@@ -43,7 +61,7 @@ cnt AS (
 cand AS (
   SELECT q.code, q.item, 0 AS other, 0 AS tier
   FROM question q
-  WHERE CAST(:n AS INTEGER) = 0 AND q.lesson = :lesson
+  WHERE CAST(:n AS INTEGER) = 0 AND q.code IN (SELECT code FROM lq WHERE lesson = :lesson)
   UNION ALL
   SELECT q.code, q.item, 1 AS other,
          CASE WHEN q.item IN (SELECT item FROM pair) THEN 0 ELSE 1 END AS tier

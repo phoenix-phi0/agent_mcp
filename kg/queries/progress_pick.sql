@@ -18,10 +18,38 @@
 --
 -- read 是教材页读这一课的地址，practice 是做题页按这一课出题的地址（没题
 -- 时空串），写法跟 lesson_list / lesson_one 一样（界面名编过码）。
+--
+-- 只推学习者当前系列（learner_pref，没记过是 hanabira）里的课。知识点、得分
+-- 是跨系列共享的，换了系列推的是新系列里讲这些点的课。
+--
+-- lq 是「课的题」：hanabira 的题库按课文编号打了标（question.lesson），照旧按
+-- 标；别的系列的课没有自己的题，按映射取——挂着的条目（item_lesson）的题，
+-- 加上直接挂的知识点（lesson_point）下所有条目的题。几个课文查询里是同一段。
 WITH RECURSIVE d(code, depth) AS (
   SELECT code, 0 FROM node WHERE code NOT IN (SELECT dst FROM prereq)
   UNION
   SELECT p.dst, d.depth + 1 FROM prereq p JOIN d ON p.src = d.code
+),
+lq AS (
+  SELECT q.lesson AS lesson, q.code, q.item FROM question q WHERE q.lesson IS NOT NULL
+  UNION
+  SELECT l.code, q.code, q.item FROM lesson l
+  JOIN item_lesson il ON il.lesson = l.code JOIN question q ON q.item = il.item
+  WHERE l.series <> 'hanabira'
+  UNION
+  SELECT l.code, q.code, q.item FROM lesson l
+  JOIN lesson_point lp ON lp.lesson = l.code JOIN item i ON i.point = lp.point
+  JOIN question q ON q.item = i.code
+  WHERE l.series <> 'hanabira'
+),
+qn AS (
+  SELECT lesson, count(*) AS n FROM lq GROUP BY lesson
+),
+cur AS (
+  SELECT coalesce((SELECT p.series FROM learner_pref p
+                   WHERE p.learner = :learner
+                     AND EXISTS (SELECT 1 FROM series s WHERE s.code = p.series)),
+                  'hanabira') AS s
 ),
 lvl AS (
   SELECT CASE WHEN instr(upper(coalesce(:level, '')), 'N5') > 0 THEN 'N5'
@@ -55,23 +83,22 @@ cand AS (
   -- 错的在前），没错过的课排后
   SELECT 0 AS pri, w.value AS ord,
          -coalesce((SELECT max(x.id) FROM attempt x
-                    JOIN question q2 ON q2.code = x.item
+                    JOIN lq q2 ON q2.code = x.item
                     WHERE x.learner = :learner AND x.correct = 0
                       AND x.point = w.point AND q2.lesson = pl.lesson), 0) AS sub,
          pl.lesson,
          '「' || coalesce(n.label, w.point) || '」掌握得分 ' || w.value || '，偏低，先复习' AS reason
   FROM low w
   JOIN (SELECT DISTINCT i.point, q.lesson FROM item i
-        JOIN question q ON q.item = i.code
-        WHERE q.lesson IS NOT NULL) pl ON pl.point = w.point
+        JOIN lq q ON q.item = i.code) pl ON pl.point = w.point
   LEFT JOIN node n ON n.code = w.point
   UNION ALL
   SELECT 1 AS pri, -max(x.id) AS ord, 0, q.lesson,
          '最近答错过「' || coalesce(n.label, x.point) || '」，先复习' AS reason
   FROM attempt x
-  JOIN question q ON q.code = x.item
+  JOIN lq q ON q.code = x.item
   LEFT JOIN node n ON n.code = x.point
-  WHERE x.learner = :learner AND x.correct = 0 AND q.lesson IS NOT NULL
+  WHERE x.learner = :learner AND x.correct = 0
     AND x.point NOT IN (SELECT point FROM done)
   GROUP BY q.lesson
   UNION ALL
@@ -81,16 +108,21 @@ cand AS (
   JOIN item i ON i.point = x.code
   JOIN item_lesson il ON il.item = i.code
   UNION ALL
+  SELECT 2, x.depth, 0, lp.lesson,
+         '「' || x.label || '」的前置都掌握了，现在能学'
+  FROM nxt x
+  JOIN lesson_point lp ON lp.point = x.code
+  UNION ALL
   SELECT 3, 0, 0, code, '按顺序从这一级的课开始' FROM lesson
 )
 SELECT l.code, l.level, l.title, l.summary, c.reason,
-       (SELECT count(*) FROM question q WHERE q.lesson = l.code) AS qcount,
+       coalesce((SELECT n FROM qn WHERE qn.lesson = l.code), 0) AS qcount,
        '#%E6%95%99%E6%9D%90?lesson=' || l.code AS read,
-       CASE WHEN (SELECT count(*) FROM question q WHERE q.lesson = l.code) > 0
+       CASE WHEN coalesce((SELECT n FROM qn WHERE qn.lesson = l.code), 0) > 0
             THEN '#%E5%81%9A%E9%A2%98?lesson=' || l.code ELSE '' END AS practice
-FROM cand c JOIN lesson l ON l.code = c.lesson, lvl
-WHERE lvl.v = '' OR l.level = lvl.v
+FROM cand c JOIN lesson l ON l.code = c.lesson, lvl, cur
+WHERE l.series = cur.s AND (lvl.v = '' OR l.level = lvl.v)
 ORDER BY c.pri, c.ord, c.sub,
-         (SELECT count(*) FROM question q WHERE q.lesson = l.code) > 0 DESC,
-         l.level DESC, l.code
+         coalesce((SELECT n FROM qn WHERE qn.lesson = l.code), 0) > 0 DESC,
+         l.level DESC, coalesce(l.seq, 0), l.code
 LIMIT 1

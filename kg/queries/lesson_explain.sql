@@ -14,8 +14,27 @@
 --          attempt.item 是题号）
 -- record   给模型看的答题情况：答过几次、对几次，答错过的条目和次数（多的在前，
 --          最多 5 个），还没做过就写「还没做过这一课的题」
-WITH q AS (
-  SELECT code, item FROM question WHERE lesson = :lesson
+-- series / tag  这一课的系列；不是学习者当前系列（learner_pref，没记过是
+--          hanabira）的课 tag 是「（系列名）」，老师的链接文字接在标题后面，
+--          当前系列的是空串
+--
+-- lq 是「课的题」：hanabira 的题库按课文编号打了标（question.lesson），照旧按
+-- 标；别的系列的课没有自己的题，按映射取——挂着的条目（item_lesson）的题，
+-- 加上直接挂的知识点（lesson_point）下所有条目的题。几个课文查询里是同一段。
+WITH lq AS (
+  SELECT q.lesson AS lesson, q.code, q.item FROM question q WHERE q.lesson IS NOT NULL
+  UNION
+  SELECT l.code, q.code, q.item FROM lesson l
+  JOIN item_lesson il ON il.lesson = l.code JOIN question q ON q.item = il.item
+  WHERE l.series <> 'hanabira'
+  UNION
+  SELECT l.code, q.code, q.item FROM lesson l
+  JOIN lesson_point lp ON lp.lesson = l.code JOIN item i ON i.point = lp.point
+  JOIN question q ON q.item = i.code
+  WHERE l.series <> 'hanabira'
+),
+q AS (
+  SELECT code, item FROM lq WHERE lesson = :lesson
 ),
 a AS (
   SELECT at.correct, q.item
@@ -30,6 +49,12 @@ wrong AS (
   ORDER BY times DESC, label
   LIMIT 5
 ),
+cur AS (
+  SELECT coalesce((SELECT p.series FROM learner_pref p
+                   WHERE p.learner = :learner
+                     AND EXISTS (SELECT 1 FROM series s WHERE s.code = p.series)),
+                  'hanabira') AS s
+),
 tally AS (
   SELECT count(*) AS answers, coalesce(sum(CASE WHEN correct THEN 1 ELSE 0 END), 0) AS rights FROM a
 )
@@ -37,7 +62,10 @@ SELECT l.code, l.level, l.title, l.summary,
        (SELECT count(*) FROM q) AS n,
        CASE WHEN (SELECT count(*) FROM q) > 0 THEN '#%E5%81%9A%E9%A2%98?lesson=' || l.code ELSE '' END AS link,
        '#%E6%95%99%E6%9D%90?lesson=' || l.code AS read,
-       t.answers, t.rights,
+       t.answers, t.rights, l.series,
+       CASE WHEN l.series = (SELECT s FROM cur) THEN ''
+            ELSE '（' || coalesce((SELECT label FROM series x WHERE x.code = l.series), l.series) || '）'
+       END AS tag,
        CASE WHEN t.answers = 0 THEN '还没做过这一课的题'
             ELSE '这一课的题答过 ' || t.answers || ' 次，答对 ' || t.rights || ' 次'
                  || coalesce('；答错过的条目：'

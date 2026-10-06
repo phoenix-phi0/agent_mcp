@@ -63,8 +63,17 @@
 <input type="file"<% if w == "选多文件" %> multiple<% endif %><% if f.accept %> accept="<%= f.accept %>"<% endif %><% if f.required %> required<% endif %> :ref="el => setFileEl('<%= f.bind or f.name %>', el)" @change="pickFile('<%= f.bind or f.name %>', $event, '<%= f.maxsize %>')">
 <%- elif w == "开关" -%>
 <input type="checkbox" v-model="<%= model %>">
+<%- elif w == "下拉" and f.source -%>
+{#- 「选项来自 键」：选项是接口用 lists 给的行 [{value, label}]，运行时才知道有
+    哪些（教材系列：库里有几套列几套）。rowsOf 跟表格取数据是同一个函数。
+    「改时 动作」：选了就提交那个动作。v-model 的 change 监听先挂（指令在
+    属性之前装），提交时表单里已经是新值。预览里没有 submitTo，不调。 -#}
+<select<%= 控件宽(f) %> v-model="<%= model %>"<% if f.required %> required<% endif %><% if f.on_change %> @change="typeof submitTo === 'function' && submitTo('<%= f.on_change %>')"<% endif %>>
+<option value="" disabled>请选择</option>
+<option v-for="o in rowsOf('<%= f.source %>')" :key="o.value" :value="o.value">{{ o.label || o.value }}</option>
+</select>
 <%- elif w == "下拉" -%>
-<select<%= 控件宽(f) %> v-model="<%= model %>"<% if f.required %> required<% endif %>>
+<select<%= 控件宽(f) %> v-model="<%= model %>"<% if f.required %> required<% endif %><% if f.on_change %> @change="typeof submitTo === 'function' && submitTo('<%= f.on_change %>')"<% endif %>>
 <option value="" disabled>请选择</option>
 <%- for o in opts %><option value="<%= o %>"><%= o %></option><% endfor -%>
 </select>

@@ -82,6 +82,11 @@
   设 code = {picked.code 或}
   如果 {code} 为空
     如果 {seen_n} 等于 0
+      # 别的系列的课没有自己的题，题从映射的条目、知识点来（lesson_scope /
+      # question_pick_lesson 的 lq）：映射的点下也没题时说清楚是哪种没有
+      如果 {lesson_row.series 或 hanabira} 不等于 hanabira
+        返回 {"error":"这一课映射的知识点下还没有题，可以先读课文，或者请老师讲解这一课"}
+      结束
       返回 {"error":"这一课还没有题"}
     结束
     # 这一轮出够了：说一声，不悄悄换到别的课。本课的题都轮到过了另外提一句

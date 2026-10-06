@@ -1,0 +1,30 @@
+# 教材系列：一套教材（hanabira 语法，以后可能有别的）。
+#
+# 知识点（node）、条目（item）、题目和学习记录都是**跨系列共享**的：新教材
+# 的课只映射到已有的知识点（item_lesson / lesson_point），不新建知识点。所以
+# 换了系列，做过的题、得分、掌握照旧算数，变的只是教材页列哪些课、「第N课」
+# 怎么认、老师按哪套课讲。
+#
+# 种子在 content/series.jsonl，随 /lesson/import 按编号 upsert（文件就是来源）。
+# sort 小于 0 的不进教材页的下拉（测试、示例用的系列）。label 是显示名
+# （命名规矩：中文显示名叫 label，name 是标识符）。
+
+实体 series 教材系列
+  字段 code 文本 必填 唯一 编号
+  字段 label 文本 必填 名称
+  字段 description 文本 简介
+  字段 source 文本 来源
+  字段 license 文本 许可
+  字段 sort 整数 必填 默认 0 排序
+  主键 code
+结束
+
+
+# 学习者选的系列：每人一行，没有就是 hanabira。教材页的系列下拉切换时写。
+# 这是偏好不是学习记录，但同样不重建、不随导入清空。
+实体 learner_pref 学习偏好
+  字段 learner 文本 必填 唯一 学习者
+  字段 series 文本 必填 默认 hanabira 系列
+  字段 updated 文本 默认 现在 更新时间
+  主键 learner
+结束
