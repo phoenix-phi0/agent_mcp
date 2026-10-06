@@ -104,12 +104,30 @@ run 教材导入E2E bash -c "cd $M/tests/e2e && node textbook_import_run.js"
 run 多人E2E     bash -c "cd $M/tests/e2e && node multiuser_run.js"
 run app2编译    bash -c "cd $M/app2 && $PY build.py"
 
-# 上传要先起 dsl/ 的服务
-( cd $M/dsl && setsid $PY serve_http.py > /tmp/run_all_upload.log 2>&1 & echo $! > /tmp/run_all_upload.pid )
-sleep 5
-run 文件上传    bash -c "cd $M/dsl && $PY test_upload.py"
-kill -TERM -"$(cat /tmp/run_all_upload.pid)" 2>/dev/null
-sleep 1
+# 上传要先起 dsl/ 的服务。
+#
+# 每次运行用自己的空闲端口，服务的进程号记在本脚本的变量里，不落到共用的
+# 文件。早先是固定的 /tmp/run_all_upload.pid 和默认端口 8091：几个会话同时
+# 跑全量时，后起的覆盖了 pid 文件，先跑完的那个按文件杀掉的是别人的服务，
+# 自己那个没人收；测试也可能连到别人的服务上。实际攒下过十几个残留。
+#
+# trap 兜底：脚本被 Ctrl+C、超时杀掉、终端断开时也把服务收掉。按进程组杀
+# （setsid 起的，组号就是它的进程号），服务派生的子进程一起走。
+UPORT=$($PY -c "import socket; s=socket.socket(); s.bind(('127.0.0.1', 0)); print(s.getsockname()[1]); s.close()")
+ULOG=$(mktemp /tmp/run_all_upload.XXXXXX.log)
+( cd $M/dsl && exec setsid $PY serve_http.py --port "$UPORT" > "$ULOG" 2>&1 ) &
+UPID=$!
+trap 'kill -TERM -"$UPID" 2>/dev/null' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+# 等它真的在听，而不是固定睡几秒：机器忙时 5 秒不够，闲时又白等
+for _ in $(seq 1 30); do
+  $PY -c "import socket,sys; socket.create_connection(('127.0.0.1', $UPORT), 0.5)" 2>/dev/null && break
+  sleep 0.5
+done
+run 文件上传    bash -c "cd $M/dsl && $PY test_upload.py --port $UPORT"
+kill -TERM -"$UPID" 2>/dev/null
+rm -f "$ULOG"
 
 echo "----"
 if [ "$FAILED" -eq 0 ]; then echo "全部通过"; else echo "$FAILED 组失败"; fi

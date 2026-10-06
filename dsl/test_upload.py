@@ -185,7 +185,10 @@ def main() -> int:
           判据=lambda s: "file" in s)
 
     小节("七、同一个字段存两次")
-    r = post(f"{base}/upload/twice", files={"file": ("a.txt", 内容)})
+    # 原名带上随机串：时间命名是「时间_原名」，到秒。几个会话同时跑全量时，
+    # 同一秒都传 a.txt 会存成同一个名字、互相覆盖，读回来就不是自己的内容
+    r = post(f"{base}/upload/twice",
+             files={"file": (f"a-{uuid.uuid4().hex[:8]}.txt", 内容)})
     print(f"      第一次：{r.get('first')}")
     print(f"      第二次：{r.get('second')}")
     # 动词里读之前 seek(0)。不加的话第二次指针停在末尾，读出来是空的，
@@ -209,8 +212,10 @@ def main() -> int:
     check("被挡住了（413 或连接中断）", r,
           判据=lambda d: d.get("_http") == 413 or d.get("_aborted"))
 
+    # 只认这次的大文件：同时有别的测试在跑的话（几个会话一起跑全量），
+    # uploads/ 里会多出它们传的小文件，那不算这里漏挡
     后 = set(UPLOADS.glob("*")) if UPLOADS.is_dir() else set()
-    check("没有留下文件", 后 - 前, set())
+    check("没有留下文件", {f for f in 后 - 前 if f.stat().st_size >= len(大)}, set())
 
     print(f"\n{'=' * 50}")
     print(f"通过 {通过}，失败 {失败}")
