@@ -22,8 +22,26 @@
     遍历 word 于 甲，乙 … 结束  列表变量可直接遍历
     遍历 item 于 {rows} 序号 i  序号从 1 开始，循环里用 {i}
     {name 或 默认}             取不到或为空就用默认；{name 或} 取空
+    {{内容}}                   字面的 {内容}，不展开（正则里找「{name}」这种）。
+                               \\d{4}、{2,3} 这类量词不用转义：没定义的 {…} 原样留
     逐项 word 于 列表 … 结束    自动加标题和输出
-    如果 条件 … 否则 … 结束
+    如果 条件 … 否则如果 条件 … 否则 … 结束
+                               只跑第一个成立的分支，「否则如果」可以多个，
+                               「否则」可选；「否则 如果」「否则若」同义
+    条件：甲 运算符 乙，组合用 且 / 或 / 非 / 括号（半角全角都行）
+        如果 {a} 等于 1 且 ( {b} 包含 x 或 非 {c} 为空 )
+                               优先级 非 > 且 > 或，短路。结构在展开之前的原文上
+                               认，{变量} 的值里有「等于」「或」「(」都不影响；
+                               且/或/非 要单独成词，{…} 外面的括号一律是分组——
+                               要比的字面值带这些字，先「设」进变量。运算符：包含
+                               不包含 等于 不等于 为空 不为空 大于 小于 不小于
+                               不大于 开头是 结尾是；大于 / 小于 这四个两边都能
+                               转数字时按数值比，否则按文本
+    设 total = 计算 {a} * 2 + 1
+                               + - * / // %、括号、负数、小数；函数 取整（向下）
+                               四舍五入(x, 位数) 最大 最小 绝对值。整数出整数，
+                               除数是 0 报错。{变量} 的值只当一个数，转不了就报错
+                               （不拼进算式里重新解析）。单独一行「计算 …」打印结果
     事务 库 … 结束             块内的写入要么全成要么全败
     执行 sub.zs key=值          独立作用域，key 在子脚本里就是 {key}
     后台执行 sub.zs key=值 on_error=fail.zs
@@ -144,6 +162,7 @@ API 和 CLI 的差别（能力表在 config.BACKENDS）：
 ## 文件是怎么拆的
 
     dsl_core.py      常量、值处理、条件求值。全是纯函数，不碰状态
+    dsl_calc.py      「计算」的算式解析（不用 eval）
     dsl_model.py     ModelMixin：问/问JSON/流式/对话/判定/挂载/带工具
     dsl_history.py   HistoryMixin：读存修剪对话历史
     dsl.py（本文件） 解析、执行、动词调用、事务、单条语句
@@ -172,13 +191,14 @@ from .dsl_model import ModelMixin
 
 # 重新导出，保持 `from tools.dsl import X` 的老写法能用
 from .dsl_core import (  # noqa: F401
-    BLOCK_OPENERS, CALL_PARAM_RE, DSLError, EMPTY_FORMS, IN_WORDS,
-    KEYWORDS, MAX_CALL_DEPTH, PACK_SEP_RE, RESERVED, RET_STATUS_RE,
+    BLOCK_OPENERS, CALL_PARAM_RE, DSLError, EMPTY_FORMS, ESC_OR_VAR_RE,
+    IN_WORDS, KEYWORDS, MAX_CALL_DEPTH, PACK_SEP_RE, RESERVED, RET_STATUS_RE,
     ScriptReturn, TX_BEGIN, TX_COMMIT, TX_ROLLBACK, VAR_RE, VERB_LIKE_RE,
-    as_number, check_name, dig, eval_parts, is_empty, iter_items, msg_size,
-    normalize, parse_condition, put, split_condition_tail, split_head,
-    split_items, to_text,
+    as_number, check_name, dig, eval_cond_expr, eval_parts, is_empty,
+    iter_items, msg_size, normalize, parse_cond_expr, parse_condition, put,
+    split_condition_tail, split_head, split_items, to_text,
 )
+from .dsl_calc import calculate
 
 import os
 import re
@@ -318,9 +338,16 @@ class DSLEngine(ModelMixin, HistoryMixin):
         但导入这类场景要的正相反——可选字段本来就常常没有，每个字段都先
         判空太啰嗦。所以给一个显式的写法，而不是改掉默认行为：想要「缺了
         当空」就写 `{项.after 或 }`，什么都不写默认值就是空。
+
+        **{{内容}}** 是字面的 {内容}，不展开。正则的量词 \\d{4}、{2,3} 本来
+        就原样留着（{4} 不是变量），要转义的是花括号里恰好是个已定义变量名
+        的时候：正则要找文本里的「{name}」而 name 又是变量，写 {{name}}。
+        只认成对的 {{…}}，JSON 结尾的 }} 不受影响。
         """
         def repl(m):
-            body = m.group(1)
+            if m.group(1) is not None:
+                return "{" + m.group(1) + "}"
+            body = m.group(2)
             # 「或」两边要有空格，否则「甲或乙」这种普通变量名会被误切
             head, sep, alt = body.partition(" 或 ")
             if not sep:
@@ -332,7 +359,7 @@ class DSLEngine(ModelMixin, HistoryMixin):
                 blank = got is None or (hasattr(got, "__len__") and not len(got))
                 return alt.strip() if blank else to_text(got)
             return m.group(0) if got is None else to_text(got)
-        return VAR_RE.sub(repl, text)
+        return ESC_OR_VAR_RE.sub(repl, text)
 
     def _resolve_items(self, raw: str):
         """整个就是一个变量引用时取原始值，否则展开成文本。
@@ -423,17 +450,14 @@ class DSLEngine(ModelMixin, HistoryMixin):
     # ------------------------------------------------------------------
 
     def _eval_condition(self, cond: str, lineno: int) -> bool:
-        left, op, right = parse_condition(self.expand(cond), lineno)
-        return eval_parts(left, op, right)
+        """先在原文上认结构（且 / 或 / 非 / 括号 / 运算符），再分别展开
+        比较的两边。见 dsl_core.parse_cond_expr。"""
+        return eval_cond_expr(parse_cond_expr(cond, lineno), self.expand, lineno)
 
     def _eval_against(self, value: str, cond: str, lineno: int) -> bool:
-        """条件省略左值时，拿 value 当左值。"""
-        cond = self.expand(cond).strip()
-        tail = split_condition_tail(cond)
-        if tail is not None:
-            return eval_parts(value, tail[0], tail[1])
-        left, op, right = parse_condition(cond, lineno)
-        return eval_parts(left, op, right)
+        """条件省略左值时，拿 value 当左值。组合条件里每个比较都可以省。"""
+        return eval_cond_expr(parse_cond_expr(cond, lineno), self.expand,
+                              lineno, value=to_text(value))
 
     # ------------------------------------------------------------------
     # 解析与执行
@@ -454,9 +478,31 @@ class DSLEngine(ModelMixin, HistoryMixin):
             p = self.workdir / p
         return self.run(p.read_text(encoding="utf-8"))
 
-    def _find_block(self, lines: list, start: int, stop: int):
+    @staticmethod
+    def _branch_of(line: str):
+        """这行是不是分支的分界：("elif", 条件原文) / ("else", "") / None。
+
+        「否则 如果 …」（中间有空格）也当「否则如果」——不然会被当成「否则」，
+        后面那半句悄悄丢掉，分支就全走歪了。「否则」后面跟别的字报错，
+        理由一样；跟 # 注释可以。
+        """
+        head, rest = split_head(line.strip())
+        if head == "elif":
+            return "elif", rest
+        if head != "else":
+            return None
+        sub_head, sub_rest = split_head(rest)
+        if sub_head == "if":
+            return "elif", sub_rest
+        if rest and not rest.startswith("#"):
+            return "else?", rest
+        return "else", ""
+
+    def _scan_block(self, lines: list, start: int, stop: int):
+        """找块的「结束」，顺带记下这一层的「否则如果」「否则」。
+        返回 ([(类别, 行号, 条件原文)…], 结束的行号)。"""
         depth = 0
-        else_at = None
+        marks = []
         for i in range(start, stop):
             head, _ = split_head(lines[i].strip())
             if head in BLOCK_OPENERS:
@@ -464,12 +510,25 @@ class DSLEngine(ModelMixin, HistoryMixin):
             elif head == "end":
                 depth -= 1
                 if depth == 0:
-                    return else_at, i
-            elif head == "else" and depth == 1:
-                if else_at is not None:
-                    raise DSLError(f"第 {i + 1} 行：同一个分支里有多个「否则」")
-                else_at = i
+                    return marks, i
+            elif head in ("else", "elif") and depth == 1:
+                kind, cond = self._branch_of(lines[i])
+                if kind == "else?":
+                    raise DSLError(f"第 {i + 1} 行：「否则」后面不能跟「{cond}」。"
+                                   f"要再判断一个条件写「否则如果 条件」")
+                if kind == "elif" and not cond:
+                    raise DSLError(f"第 {i + 1} 行：「否则如果」后面要跟条件")
+                if marks and marks[-1][0] == "else":
+                    raise DSLError(
+                        f"第 {i + 1} 行：同一个分支里有多个「否则」" if kind == "else"
+                        else f"第 {i + 1} 行：「否则如果」要写在「否则」前面")
+                marks.append((kind, i, cond))
         raise DSLError(f"第 {start + 1} 行的块没有对应的「结束」")
+
+    def _find_block(self, lines: list, start: int, stop: int):
+        """循环、事务用：返回 (第一个「否则 / 否则如果」的行号或 None, 结束的行号)。"""
+        marks, end = self._scan_block(lines, start, stop)
+        return (marks[0][1] if marks else None), end
 
     def _exec_block(self, lines: list, start: int, stop: int) -> None:
         i = start
@@ -514,16 +573,22 @@ class DSLEngine(ModelMixin, HistoryMixin):
             if head == "if":
                 if not rest:
                     raise DSLError(f"第 {i + 1} 行：「如果」后面要跟条件")
-                else_at, end = self._find_block(lines, i, stop)
-                if self._eval_condition(rest, i):
-                    self._exec_block(lines, i + 1, else_at if else_at else end)
-                elif else_at is not None:
-                    self._exec_block(lines, else_at + 1, end)
+                marks, end = self._scan_block(lines, i, stop)
+                # 分支：(类别, 起始行, 条件)，每段到下一个分界或「结束」为止。
+                # 只跑第一个成立的；后面的条件不求值
+                branches = [("if", i, rest)] + marks
+                for n, (kind, at, cond) in enumerate(branches):
+                    stop_at = branches[n + 1][1] if n + 1 < len(branches) else end
+                    if kind == "else" or self._eval_condition(cond, at):
+                        self._exec_block(lines, at + 1, stop_at)
+                        break
                 i = end + 1
                 continue
 
             if head == "else":
                 raise DSLError(f"第 {i + 1} 行：「否则」没有对应的「如果」")
+            if head == "elif":
+                raise DSLError(f"第 {i + 1} 行：「否则如果」没有对应的「如果」")
             if head == "end":
                 raise DSLError(f"第 {i + 1} 行：多余的「结束」")
 
@@ -737,6 +802,28 @@ class DSLEngine(ModelMixin, HistoryMixin):
                 self._emit(line)
 
     # ------------------------------------------------------------------
+    # 计算
+    # ------------------------------------------------------------------
+
+    def _do_compute(self, expr: str, lineno: int):
+        """计算 表达式 —— 见 dsl_calc。{变量} 在原文里认，取到的值只能当一个
+        数，不拼回表达式里再解析（值来自用户输入时，拼进去就能改写算式）。"""
+        def value_of(token: str):
+            m = VAR_RE.fullmatch(token)
+            body = m.group(1)
+            head, sep, alt = body.partition(" 或 ")
+            if not sep:
+                head, sep, alt = body.partition(" 或")
+            got = self.lookup(head.strip())
+            if sep and (got is None or (hasattr(got, "__len__") and not len(got))):
+                return alt.strip()
+            return got
+        try:
+            return calculate(expr, value_of)
+        except DSLError as e:
+            raise DSLError(f"第 {lineno + 1} 行：{e}") from None
+
+    # ------------------------------------------------------------------
     # 返回与子脚本
     # ------------------------------------------------------------------
 
@@ -906,6 +993,8 @@ class DSLEngine(ModelMixin, HistoryMixin):
             sub_head, sub_rest = split_head(value)
             if sub_head == "call":
                 self._do_call(sub_rest, lineno, assign_to=name)
+            elif sub_head == "compute":
+                self.store(name, self._do_compute(sub_rest, lineno))
             elif self._is_verb(sub_head):
                 try:
                     self._do_verb(sub_head, sub_rest, lineno, assign_to=name)
@@ -940,6 +1029,10 @@ class DSLEngine(ModelMixin, HistoryMixin):
 
         elif head == "print":
             self._emit(self.expand(rest))
+
+        elif head == "compute":
+            value = self._do_compute(rest, lineno)
+            self._deliver(value, None)
 
         elif head == "save":
             path, text = self._split_file_arg(rest, "保存")

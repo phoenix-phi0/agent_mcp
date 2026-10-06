@@ -36,6 +36,8 @@ KEYWORDS = {
     "遍历": "each", "循环": "each", "每个": "each",
     "逐项": "foreach", "逐个": "foreach",
     "如果": "if", "若": "if", "否则": "else", "结束": "end",
+    "否则如果": "elif", "否则若": "elif",
+    "计算": "compute",
     "事务": "tx",
     "执行": "call", "调用": "call",
     "后台执行": "call_bg",
@@ -74,6 +76,13 @@ CJK = re.compile(r"[\u4e00-\u9fff]")
 KEYWORDS_BY_LEN = sorted(KEYWORDS, key=len, reverse=True)
 
 VAR_RE = re.compile(r"\{([^{}]+)\}")
+# 插值实际用的：{{内容}} 是字面的 {内容}，不展开（正则的 \d{{4}}、
+# 恰好跟变量同名的 {n}）；其余同 VAR_RE。只认成对的 {{…}}，单个 }} 不动——
+# JSON 字面量 {"a":{x}} 的结尾就是 }}。
+ESC_OR_VAR_RE = re.compile(r"\{\{([^{}]*)\}\}|\{([^{}]+)\}")
+# 条件、计算在展开之前的原文上分词：{变量}、{{字面}} 整块算一个词，
+# 里面的空格和「或」（{x 或 默认}）不切
+BRACE_RE = re.compile(r"\{\{[^{}]*\}\}|\{[^{}]+\}")
 # 整个值就是一个没展开的 {变量}。未定义变量会原样保留成这个样子，
 # 判空时要当成「没有值」。
 UNEXPANDED_RE = re.compile(r"^\{[^{}]+\}$")
@@ -353,6 +362,254 @@ def parse_condition(cond: str, lineno: int):
             f"包含 / 不包含 / 等于 / 不等于 / 为空 / 不为空 / "
             f"大于 / 小于 / 不小于 / 不大于 / 开头是 / 结尾是")
     return parsed
+
+
+# ----------------------------------------------------------------------
+# 组合条件：且 / 或 / 非 / 括号
+#
+# 结构在**展开之前的原文**上认，展开只发生在比较的两侧。早先是先把整行
+# 展开再按空格找运算符，学生作答里有「等于」「包含」，条件就被切错了——
+# 变量值来自用户输入，不能让它决定条件的结构。
+#
+# 优先级 非 > 且 > 或，短路求值。且 / 或 / 非 要单独成词（空格或括号隔开）；
+# 括号半角全角都行，{…} 外面的括号一律是分组，贴着写也算（「({a} 等于 1」）。
+# 所以条件里要比的字面值本身带这几样（「等于 (A)」「等于 或」），先「设」进
+# 变量再 {变量}——变量的值不参与分词。
+# ----------------------------------------------------------------------
+
+COND_AND, COND_OR, COND_NOT = "且", "或", "非"
+OPEN_PARENS, CLOSE_PARENS = "(（", ")）"
+_COND_STRUCT = {COND_AND: "and", COND_OR: "or", COND_NOT: "not"}
+
+
+def raw_words(text: str) -> list:
+    """按空格切原文，{…} 整块不切（里面的空格、「或」原样留在词里）。"""
+    words, cur, i = [], [], 0
+    while i < len(text):
+        m = BRACE_RE.match(text, i)
+        if m:
+            cur.append(m.group(0))
+            i = m.end()
+            continue
+        if text[i].isspace():
+            if cur:
+                words.append("".join(cur))
+                cur = []
+        else:
+            cur.append(text[i])
+        i += 1
+    if cur:
+        words.append("".join(cur))
+    return words
+
+
+def cond_tokens(cond: str) -> list:
+    """原文分词，返回 [(类别, 文本)]。类别是 word / and / or / not / ( / )。
+
+    {…} 外面的括号一律单独成一个记号，不管有没有空格隔开（「（甲 等于 1）且」
+    里的「且」照样认得出）；{…} 里面的不算。
+    """
+    out = []
+
+    def word(w):
+        if w:
+            out.append((_COND_STRUCT[w], w) if w in _COND_STRUCT else ("word", w))
+
+    for w in raw_words(cond):
+        cur, i = [], 0
+        while i < len(w):
+            m = BRACE_RE.match(w, i)
+            if m:
+                cur.append(m.group(0))
+                i = m.end()
+                continue
+            ch = w[i]
+            if ch in OPEN_PARENS or ch in CLOSE_PARENS:
+                word("".join(cur))
+                cur = []
+                out.append(("(" if ch in OPEN_PARENS else ")", ch))
+            else:
+                cur.append(ch)
+            i += 1
+        word("".join(cur))
+    return out
+
+
+def parse_cond_expr(cond: str, lineno: int):
+    """原文 → 条件树：("or"|"and", [子树…]) / ("not", 子树) / ("cmp", 原文)。
+
+    只管结构，比较本身（哪个运算符、两边是什么）留到求值时再拆——那时
+    才知道是不是「直到 包含 X」这种省略左值的写法。
+    """
+    where = f"第 {lineno + 1} 行："
+    toks = cond_tokens(cond)
+    pos = 0
+
+    def peek():
+        return toks[pos][0] if pos < len(toks) else None
+
+    def missing(after: str):
+        nxt = peek()
+        if nxt is None:
+            return f"{where}「{after}」后面缺比较"
+        if nxt == ")":
+            return f"{where}「{after}」后面缺比较，紧跟着就是「{toks[pos][1]}」"
+        return f"{where}「{after}」后面缺比较，紧跟着又是「{toks[pos][1]}」"
+
+    def p_or():
+        nonlocal pos
+        items = [p_and()]
+        while peek() == "or":
+            pos += 1
+            if peek() in (None, ")", "and", "or"):
+                raise DSLError(missing(COND_OR))
+            items.append(p_and())
+        return items[0] if len(items) == 1 else ("or", items)
+
+    def p_and():
+        nonlocal pos
+        items = [p_not()]
+        while peek() == "and":
+            pos += 1
+            if peek() in (None, ")", "and", "or"):
+                raise DSLError(missing(COND_AND))
+            items.append(p_not())
+        return items[0] if len(items) == 1 else ("and", items)
+
+    def p_not():
+        nonlocal pos
+        kind = peek()
+        if kind == "not":
+            pos += 1
+            if peek() in (None, ")", "and", "or"):
+                raise DSLError(missing(COND_NOT))
+            return ("not", p_not())
+        if kind == "(":
+            opened = toks[pos][1]
+            pos += 1
+            if peek() == ")":
+                raise DSLError(f"{where}括号里是空的：「{opened}{toks[pos][1]}」")
+            inner = p_or()
+            if peek() != ")":
+                raise DSLError(f"{where}括号不配对：「{opened}」没有对应的右括号")
+            pos += 1
+            return inner
+        if kind in ("and", "or"):
+            raise DSLError(f"{where}「{toks[pos][1]}」前面缺比较")
+        if kind == ")":
+            raise DSLError(f"{where}括号不配对：多了一个「{toks[pos][1]}」")
+        words = []
+        while peek() == "word":
+            words.append(toks[pos][1])
+            pos += 1
+        if peek() == "(":
+            raise DSLError(f"{where}「{' '.join(words)}」后面直接跟了括号，"
+                           f"中间缺「且」或「或」（要比的值带括号的话先「设」进变量）")
+        if peek() == "not":
+            raise DSLError(f"{where}「非」只能写在一个比较的最前面："
+                           f"「{' '.join(words)} 非 …」看不懂")
+        return ("cmp", " ".join(words))
+
+    if not toks:
+        raise DSLError(f"{where}条件是空的")
+    tree = p_or()
+    if pos < len(toks):
+        # 能走到这里的只有多出来的右括号：别的情况在 p_* 里已经报了
+        raise DSLError(f"{where}括号不配对：多了一个「{toks[pos][1]}」")
+    return tree
+
+
+def _mask_braces(text: str) -> str:
+    """{…} 整块换成等长的占位，找紧贴写法的运算符时不会找进变量名里。"""
+    return BRACE_RE.sub(lambda m: "\0" * len(m.group(0)), text)
+
+
+def split_raw_tail(raw: str):
+    """原文版的 split_condition_tail：省略左值时拆出 (运算符, 右值原文)。"""
+    parts = raw_words(raw)
+    if parts:
+        op = OP_BY_WORD.get(parts[0])
+        if op is not None:
+            right = " ".join(parts[1:])
+            if op in UNARY_OPS and right:
+                return None
+            return op, right
+    masked = _mask_braces(raw)
+    for zh, op in CONDITION_OPS:
+        if masked.startswith(zh):
+            right = raw[len(zh):].strip()
+            if op in UNARY_OPS and right:
+                continue
+            return op, right
+    return None
+
+
+def split_raw_cmp(raw: str):
+    """原文版的 split_condition：拆成 (左值原文, 运算符, 右值原文)。
+
+    规则跟 split_condition 一样（先整词、再紧贴写法，一元的右边要空、
+    二元的两边都不能空），只是拆的是没展开的原文，所以 {变量} 展开成
+    空串、或者值里有「等于」「包含」都不影响。紧贴写法不会在 {…} 里面找。
+    """
+    parts = raw_words(raw)
+    for i, word in enumerate(parts):
+        op = OP_BY_WORD.get(word)
+        if op is None:
+            continue
+        left = " ".join(parts[:i])
+        right = " ".join(parts[i + 1:])
+        if op in UNARY_OPS:
+            if right:
+                continue
+            return left, op, ""
+        if not left or not right:
+            continue
+        return left, op, right
+
+    masked = _mask_braces(raw)
+    for zh, op in CONDITION_OPS:
+        idx = masked.find(zh)
+        if idx < 0:
+            continue
+        left, right = raw[:idx].strip(), raw[idx + len(zh):].strip()
+        if op in UNARY_OPS:
+            if right:
+                continue
+            return left, op, ""
+        if not left or not right:
+            continue
+        return left, op, right
+    return None
+
+
+def eval_cond_expr(tree, expand, lineno: int, value=None) -> bool:
+    """求值条件树。expand 把原文展开成文本；value 不是 None 时允许省略
+    左值（「重试 … 直到 包含 X」），拿它当左值。且 / 或 短路。"""
+    kind = tree[0]
+    if kind == "or":
+        return any(eval_cond_expr(t, expand, lineno, value) for t in tree[1])
+    if kind == "and":
+        return all(eval_cond_expr(t, expand, lineno, value) for t in tree[1])
+    if kind == "not":
+        return not eval_cond_expr(tree[1], expand, lineno, value)
+
+    raw = tree[1]
+    if value is not None:
+        tail = split_raw_tail(raw)
+        if tail is not None:
+            op, right = tail
+            return eval_parts(value, op, expand(right).strip())
+    parsed = split_raw_cmp(raw)
+    if parsed is None:
+        raise DSLError(
+            f"第 {lineno + 1} 行：看不懂的条件「{raw}」。可用："
+            f"包含 / 不包含 / 等于 / 不等于 / 为空 / 不为空 / "
+            f"大于 / 小于 / 不小于 / 不大于 / 开头是 / 结尾是，"
+            f"组合用 且 / 或 / 非 / 括号")
+    left, op, right = parsed
+    # 右值去首尾空白：早先整行展开后按空格切再拼，右值天然是去过空白的，
+    # 「包含」这种不 strip 的比较要保持一样
+    return eval_parts(expand(left), op, expand(right).strip())
 
 
 def split_head(line: str):

@@ -46,7 +46,7 @@ if str(BASE) not in sys.path:
 KEY = "8d055c36-0f9d-472a-b0cb-54ecacceb5ac"
 
 # 默认加载的动词包，按顺序，后者覆盖前者
-PACKS = ["common", "quiz", "japanese", "web"]
+PACKS = ["common", "text", "quiz", "japanese", "web"]
 
 # 可用的 agent：名字 -> (模块, 工厂函数)
 _AGENTS = {
