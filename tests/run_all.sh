@@ -65,6 +65,7 @@ run 做题        $PY tests/kg/test_quiz.py
 run 做题总结    $PY tests/kg/test_quiz_summary.py
 run 复习薄弱点  $PY tests/kg/test_quiz_review.py
 run 单词默写    $PY tests/kg/test_dictation.py
+run 规则对照    $PY tests/kg/test_rules_equiv.py
 run 老师讲语法  $PY tests/kg/test_teacher_bunpou.py
 run 问老师      $PY tests/kg/test_teacher_chat.py
 run 请老师讲课  $PY tests/kg/test_teacher_lesson.py
@@ -79,6 +80,7 @@ run 运行时兜底  $PY tests/dsl/test_model_fallback_runtime.py
 run 经WSL调CLI  $PY tests/dsl/test_cli_via_wsl.py
 run 运行模式    $PY tests/dsl/test_run_mode.py
 run 命名约定    $PY tests/dsl/test_naming.py
+run 字符串动词  $PY tests/dsl/test_text_verbs.py
 run 批量claude  $PY tests/tools/test_cbatch.py
 run 认证        $PY tests/auth/test_auth.py
 run 认证攻击    $PY tests/auth/test_auth_attack.py

@@ -163,7 +163,8 @@ def report():
         text = p.read_text(encoding="utf-8")
         if p.name.endswith(".j2"):
             text = strip_jinja(text)
-        allowed = parse_param_decl(text) if p.parent == ROOT / "verbs" else ()
+        # verbs/ 下的 .zs 动词（包顶层、defs/ 里的都算）：声明的参数是动词参数名
+        allowed = parse_param_decl(text) if ROOT / "verbs" in p.parents else ()
         hits = scan_zs(text, allowed) if kind == "zs" else scan_sql(text)
         for no, where, name in hits:
             out.append((str(p.relative_to(ROOT)), no, where, name))

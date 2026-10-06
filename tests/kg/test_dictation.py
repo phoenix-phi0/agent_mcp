@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""单词默写：routes/dictation.zs、scripts/dictation_pick.zs、japanese 包的「判默写」。
+"""单词默写：routes/dictation.zs、scripts/dictation_pick.zs、japanese 包的「判默写」（.zs）。
 
     cd /home/ysc/mcp && .venv/bin/python tests/kg/test_dictation.py
 
@@ -30,6 +30,7 @@ sys.path.insert(0, str(ROOT))
 
 from tests.kg.helpers import client, make_ws          # noqa: E402
 from tools.migrate import migrate_additive             # noqa: E402
+from tools.dsl import DSLError                          # noqa: E402
 
 passed = failed = 0
 
@@ -44,9 +45,14 @@ def check(ok, msg):
 
 
 def load_judge():
-    from tools.verbs import _import_file
-    m = _import_file(ROOT / "verbs/japanese/defs/判默写.py", "_verb_test_judge")
-    return m.判默写
+    """判默写写在 verbs/japanese/defs/判默写.zs 里，经引擎调（跟接口里「设 judged =
+    判默写 {judge_args}」同一条路）。参数坏了抛的是 DSLError（引擎把动词里的错
+    包一层），接口那边同样是 500。"""
+    from tools import packs
+    from tools.dsl import invoke_verb
+    reg = packs.registry(["common", "text", "japanese"], ROOT, cache=False)
+    return lambda arg: invoke_verb(reg, "判默写", arg, workdir=ROOT,
+                                   verbs_root=packs.verbs_root())
 
 
 NODES = [("noun", "名词"), ("verb-groups", "动词"), ("hiragana", "平假名"),
@@ -123,7 +129,7 @@ def main():
         try:
             judge(bad)
             check(False, f"坏参数没抛：{bad}")
-        except ValueError:
+        except (ValueError, DSLError):
             check(True, f"坏参数抛错：{str(bad)[:30]}")
 
     tmp = Path(tempfile.mkdtemp(prefix="dictation_test_"))

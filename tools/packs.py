@@ -40,7 +40,7 @@
 import os
 from pathlib import Path
 
-from .dsl import DSLEngine, RESERVED, to_text
+from .dsl import DSLEngine, RESERVED, invoke_verb, to_text
 from .verbs import VerbRegistry
 
 # 项目根：tools/ 的上一级
@@ -129,7 +129,8 @@ def engine_for(client=None, workspace: Path | str | None = None,
 
 def call_verb(name: str, *args, packs: list[str],
               workspace: Path | str | None = None):
-    """不经过 DSL，直接调一个 Python 动词。
+    """不写脚本，直接调一个动词。Python 写的直接调；.zs 写的（判对错这种规则
+    动词）在一个不带模型的引擎里跑（tools.dsl.invoke_verb）。
 
     练习模式那种「就三个固定的函数调用」的场景用这个——走 DSL 只是多一层。
     动词表在这里起的是函数注册表的作用，同一套动词两边都能用。
@@ -143,11 +144,9 @@ def call_verb(name: str, *args, packs: list[str],
     reg = registry(packs, workspace)
     if not reg.has(name):
         return f"[没有动词] {name}"
-    params = reg.bind(name, [to_text(a) for a in args])
-    kind, impl = reg.resolve(name)
-    if kind != "python":
-        return f"[{name} 不是 Python 动词]"
-    result = impl(**params)
+    # .zs 写的动词（判对错、拆选项、判默写）也能这么调：在一个不带模型的引擎里跑
+    ws = Path(workspace).resolve() if workspace else DATA_ROOT
+    result = invoke_verb(reg, name, *args, workdir=ws, verbs_root=verbs_root())
     return "" if result is None else result
 
 

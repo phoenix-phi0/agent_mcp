@@ -158,6 +158,28 @@ def load_data(pack_dir: Path | str, name: str, default=None):
         return default
 
 
+def as_list(x) -> list:
+    """列表参数，给动词实现用：真列表原样（复制一份）；JSON 数组文本解析；空当
+    空列表；别的报错。
+
+    DSL 调动词时参数一律是文本，列表到了动词里是 JSON 文本；从 Python 直接调
+    又是真列表——两种都得认。传错了东西（一段话当列表）报错而不是当成空列表：
+    悄悄当成没有，后面的结果全错还看不出来。
+    """
+    if isinstance(x, list):
+        return list(x)
+    s = "" if x is None else str(x).strip()
+    if not s:
+        return []
+    try:
+        v = json.loads(s)
+    except json.JSONDecodeError:
+        v = None
+    if not isinstance(v, list):
+        raise ValueError(f"要一个列表（JSON 数组），给的是：{s[:60]}")
+    return v
+
+
 def _import_file(path: Path, mod_name: str):
     """按文件路径导入一个模块，不经过 sys.path。"""
     spec = importlib.util.spec_from_file_location(mod_name, path)

@@ -33,25 +33,17 @@ def check(ok, msg):
 
 
 def load_verbs():
-    """直接加载 quiz 包，拿到动词函数。跟引擎「用包 quiz」是同一个 register。"""
-    import importlib.util
+    """加载 quiz 包，拿到动词函数。跟引擎「用包 quiz」是同一个 register。
+
+    用真的动词表：判题的规则在 defs/判作答.zs 里，判题要经同一张表去调它。
+    """
+    from tools.dsl import RESERVED
+    from tools.verbs import VerbRegistry
     ws = ROOT / "workspace" / "japanese"
-    spec = importlib.util.spec_from_file_location(
-        "quiz_verbs_test", ROOT / "verbs" / "quiz" / "_verbs.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    mod.PACK_DIR = ROOT / "verbs" / "quiz"
-    verbs = {}
-
-    class Reg:
-        def verb(self, *a, **k):
-            def deco(fn):
-                verbs[fn.__name__] = fn
-                return fn
-            return deco
-
-    mod.register(Reg(), ws)
-    return verbs
+    reg = VerbRegistry(reserved=RESERVED)
+    reg.load_pack(ROOT / "verbs" / "quiz", workspace=ws)
+    assert not reg.warnings, reg.warnings
+    return {n: reg.resolve(n)[1] for n in reg.names() if reg.kind_of(n) == "python"}
 
 
 def main():

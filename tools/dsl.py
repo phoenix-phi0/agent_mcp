@@ -853,6 +853,33 @@ def make_verbs(verbs_dir=None) -> VerbRegistry:
     return reg
 
 
+def _no_model(prompt, system=None):
+    raise DSLError("从 Python 直接调的动词里不能问模型：调用方没给模型客户端（invoke_verb 的 client）")
+
+
+def invoke_verb(verbs: VerbRegistry, name: str, *args, workdir=None,
+                verbs_root=None, client=None):
+    """从 Python 调一个动词，.py 写的和 .zs 写的都行，返回值跟脚本里拿到的一样。
+
+    参数照 DSL 的规矩转成文本（结构转 JSON），按位置绑。.zs 动词在一个新引擎
+    里跑：跟「设 x = 动词 …」走的是同一套（独立作用域、返回值优先于输出）。
+
+    client 不给时，.zs 动词里「问」模型直接报错——判题这类规则动词用不到模型，
+    真用到了说明调用方该显式给一个，而不是悄悄去花额度。
+    """
+    params = verbs.bind(name, [to_text(a) for a in args])
+    kind, impl = verbs.resolve(name)
+    if kind == "python":
+        return impl(**params)
+    from .mock import MockClient
+    eng = DSLEngine(client=client or MockClient(handler=_no_model, offline=True),
+                    workdir=workdir, verbose=False, verbs=verbs, verbs_root=verbs_root,
+                    _depth=1)
+    eng.vars.update(params)
+    text = eng.run(Path(impl).read_text(encoding="utf-8"))
+    return eng.returned[0] if eng.returned else text
+
+
 def run_script(path, verbs: VerbRegistry | None = None, **kwargs) -> str:
     p = Path(path)
     return DSLEngine(workdir=p.parent, verbs=verbs, **kwargs).run_file(p)
