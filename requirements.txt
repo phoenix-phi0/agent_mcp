@@ -1,0 +1,11 @@
+# 第三方依赖（.venv 里装的）。装：.venv/bin/pip install -r requirements.txt
+#
+# 只列代码里 import 到的；版本是现在 .venv 里的，>= 写法，不锁死。
+flask>=3.1          # HTTP 接口（tools/dsl_http.py）
+jinja2>=3.1         # 界面、代码生成的模板
+pyyaml>=6.0         # data 包「读YAML」、配置
+requests>=2.34      # 智谱客户端
+fastmcp>=4.0        # MCP 服务（fs_server_*）
+uvicorn>=0.54
+starlette>=1.7
+pypdf>=6.19         # doc 包「读文档」读 PDF（kg 教材导入页）。docx 用标准库读，不用装

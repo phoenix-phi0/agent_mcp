@@ -357,6 +357,62 @@ def test_dynamic_select():
           [i.code for i in r2.get("issues", []) if "改时" in i.message], ["missing_endpoint"])
 
 
+def test_side_poll_row_remote():
+    print("\n[侧、每隔、列表行上的远程动作、打开浮层留着参数]")
+    ui = ("界面 自定义 教材\n"
+          "  文案 学生的页\n"
+          "结束\n"
+          "界面 自定义 教材导入 侧 管理 载入 import_load\n"
+          "  动作 import_poll 远程 隐藏 每隔 2 当 params.job&&shared.job.running 轮询\n"
+          "  列表 块表 绑 chunks\n"
+          "    列 title 标题\n"
+          "    动作 chunk_retry 远程 带 chunk_id 当 row.state==='出错' 重试\n"
+          "  结束\n"
+          "  动作 ask_delete 危险 打开 确认删除 删除\n"
+          "  浮层 确认删除\n"
+          "    动作 job_delete 远程 关闭 危险 确认删除\n"
+          "  结束\n"
+          "结束\n")
+    from tools.ui import parse
+    screens = parse(ui)
+    check("「侧 管理」进 side，不进名字", (screens[1].name, screens[1].side, screens[1].load),
+          ("教材导入", "管理", "import_load"))
+    check("没写侧的是空", screens[0].side, "")
+    poll = screens[1].children[0]
+    check("「每隔 2」进 every，「当」照旧", (poll.every, poll.when, poll.label, poll.has("隐藏")),
+          (2, "params.job&&shared.job.running", "轮询", True))
+    eps = {"import_poll": "/import/poll", "chunk_retry": "/c/r", "job_delete": "/j/d",
+           "import_load": "/import/load"}
+    r = compile_ui(ui, backend="vue", fields={"title": "文本"}, options={"endpoints": eps})
+    check("编译没有 issue", [i.code for i in r.get("issues", [])], [])
+    js = r["result"]["files"]["app.js"]
+    check("导航：没写侧的在左，管理那组推到右边、带组名",
+          'screens.filter(s => !s.side)' in js and 'class="nav-side" style="margin-left:auto"' in js
+          and '<span class="nav-side-h">管理</span>' in js
+          and "screens.filter(s => s.side === '管理')" in js, True)
+    check("每隔：一个跟着「当」的 <zs-poll>，组件和 pollOnce 都生成了",
+          '<zs-poll action="import_poll" :every="2" v-if="params.job&&shared.job.running"></zs-poll>' in js
+          and '_app.component("ZsPoll"' in js and "async function pollOnce(name)" in js, True)
+    check("隐藏的动作不画按钮", "submitTo('import_poll')" in js, False)
+    check("行上的远程动作：onRowRemote 带这一行的 chunk_id，「当」里能用 row",
+          "onRowRemote('chunk_retry', row, 'chunk_id')" in js and 'v-if="row.state===\'出错\'"' in js
+          and "async function onRowRemote(name, row, carry)" in js, True)
+    check("界面上的「打开」浮层留着地址参数（keep）", "showOverlay('确认删除', null, true)" in js, True)
+    check("返回的 go 可以带参数（#界面?参数）", 'resp.go.startsWith("#")' in js, True)
+    plain = compile_ui("界面 自定义 甲\n  文案 x\n结束\n界面 自定义 乙\n  文案 y\n结束\n",
+                       backend="vue", fields={})["result"]["files"]["app.js"]
+    check("对照：没有侧、每隔、行上远程的项目一行相关代码都不生成",
+          ("nav-side" in plain, "ZsPoll" in plain, "onRowRemote" in plain), (False, False, False))
+    bad = compile_ui("界面 自定义 甲\n  动作 x 每隔 3 刷新\n结束\n", backend="vue", fields={},
+                     options={"endpoints": {"x": "/x"}})
+    check("每隔配的不是远程动作：报 every_not_remote",
+          [i.code for i in bad.get("issues", [])], ["every_not_remote"])
+    bad2 = compile_ui("界面 自定义 甲\n  动作 x 远程 每隔 3 刷新\n结束\n", backend="vue", fields={},
+                      options={"endpoints": {"y": "/y"}})
+    check("每隔的接口不存在：报 missing_endpoint",
+          [i.code for i in bad2.get("issues", []) if "每隔" in i.message], ["missing_endpoint"])
+
+
 # ----------------------------------------------------------------------
 
 
@@ -376,6 +432,7 @@ def main() -> int:
         test_links,
         test_trigger,
         test_dynamic_select,
+        test_side_poll_row_remote,
     ]:
         try:
             fn()

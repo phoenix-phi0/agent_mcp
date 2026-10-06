@@ -10,7 +10,8 @@ node_modules/
 *.db-wal
 *.db-shm
 
-# 运行产物
+# 运行产物。uploads/ 是「存文件」存上传文件的地方（kg 教材导入页传的教材在
+# kg/uploads/），不进 git
 sessions/
 uploads/
 *.log

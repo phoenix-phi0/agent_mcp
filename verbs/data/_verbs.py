@@ -162,6 +162,17 @@ def register(reg, workspace):
             encoding="utf-8")
         return f"[已写入 {文件}，{len(rows)} 条]"
 
+    @reg.verb("删掉工作目录里的一个文件（不删目录）。不在也不报错，返回「是」（删了）或「否」。"
+              "例如 删文件 uploads/a.pdf")
+    def 删文件(文件: str) -> str:
+        f = safe(文件)
+        if f.is_dir():
+            raise ValueError(f"删文件：{文件} 是目录，只删文件")
+        if not f.is_file():
+            return "否"
+        f.unlink()
+        return "是"
+
     # ------------------------------------------------------------------
     # 结构操作
     # ------------------------------------------------------------------

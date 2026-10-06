@@ -1,0 +1,98 @@
+# 教材导入：管理侧「教材导入」页（ui/textbook_import.ui，接口在
+# routes/textbook_import.zs）的草稿。
+#
+#   上传一本教材（pdf / docx / md / txt）→ 取文本、按课切块（import_chunk）
+#   → 后台逐块请模型抽出每课、映射到已有条目 / 知识点（import_lesson，草稿）
+#   → 人逐课审阅：改字段、增删映射、通过 / 驳回
+#   → 确认导入：通过的课写成 content/series/<code>/lessons.jsonl、系列写进
+#     content/series.jsonl，再走按系列导入（scripts/lesson_import.zs）
+#
+# 这三张表是**草稿**：不是内容（课文还没进 lesson），也不是学习记录。只加表，
+# 已有的库靠「迁移 只加」补建，别的表一列不动。删一个导入任务只删这里的
+# 行，已经导进 lesson 的课不受影响（要撤下系列另有按钮）。
+#
+# 映射只引用已有的 item / node，**绝不新建**：模型给的编号先用 SQL 过一遍，
+# 库里没有的丢掉、记进 dropped，审阅时看得到。
+
+
+# 一次导入：一个上传的文件 → 一个系列。series / label / source / license 确认
+# 导入时写进 content/series.jsonl；prefix 是课号前缀（mnn → mnn-001）。
+# rewrite：让模型用自己的话写讲解和例句（商业教材的原文不能直接入库），只
+# 保留语法点名称、课序这类事实。overwrite：系列已经有了，明确要覆盖。
+# level_hint：给模型的候选清单按等级预筛（全部 = 不筛）。
+# imported / report：确认导入的时间和导入报告（JSON 文本），没导过是空。
+实体 import_job 教材导入
+  字段 series 文本 必填 索引 系列编号
+  字段 label 文本 必填 显示名
+  字段 source 文本 来源
+  字段 license 文本 授权
+  字段 prefix 文本 必填 课号前缀
+  字段 level_hint 文本 必填 默认 全部 等级范围
+  字段 rewrite 布尔 默认 1 改写讲解和例句
+  字段 overwrite 布尔 默认 0 覆盖已有系列
+  字段 document 文件 教材文件
+  字段 file_name 文本 原文件名
+  字段 doc_kind 文本 格式
+  字段 pages 整数 默认 0 页数
+  字段 paragraphs 整数 默认 0 段落数
+  字段 chars 整数 默认 0 字数
+  字段 imported 文本 导入时间
+  字段 report 文本 导入报告
+  字段 created 文本 必填 默认 现在 时间
+结束
+
+
+# 切出来的一块（一般是一课）。后台一块一个「后台执行」（scripts/import_chunk.zs），
+# chunk_status：待解析 → 解析中 → 完成 / 出错。出错的 error 是一句人话（模型
+# 超时、回复不是 JSON……），页面上能「重试」这一块。tries 是请过几次模型。
+实体 import_chunk 导入块
+  字段 job 整数 必填 索引 导入任务
+  字段 seq 整数 必填 块序
+  字段 title 文本 标题
+  字段 body 文本 必填 内容
+  字段 chunk_status 文本 必填 默认 待解析 状态
+  字段 error 文本 出错原因
+  字段 tries 整数 默认 0 次数
+  字段 updated 文本 默认 现在 更新时间
+结束
+
+
+# 一课草稿。items / points 是 JSON 数组文本（已有条目、知识点的编号，过了
+# 存在性校验）；dropped 是模型给了、库里没有、被丢掉的编号；issues 是审阅
+# 要看的问题（等级没认出、孤课、课序重复……），每次改动后重算。confidence 是
+# 模型自评的映射把握（0–100），reason 是它的理由。review：待审 / 通过 / 驳回，
+# 确认导入只导「通过」的。
+实体 import_lesson 导入草稿课
+  字段 job 整数 必填 索引 导入任务
+  字段 chunk 整数 索引 来自哪块
+  字段 seq 整数 课序
+  字段 title 文本 必填 标题
+  字段 draft_level 枚举 N5,N4,N3,N2,N1 等级
+  字段 summary 文本 一句话
+  字段 explanation 文本 讲解
+  字段 formation 文本 接续
+  字段 examples 文本 例句
+  字段 items 文本 映射的条目
+  字段 points 文本 映射的知识点
+  字段 dropped 文本 丢掉的编号
+  字段 confidence 整数 把握
+  字段 reason 文本 理由
+  字段 issues 文本 问题
+  字段 review 文本 必填 默认 待审 审阅
+结束
+
+
+# 只撑教材导入页的字段（同 page_view）：表格里算出来的几列、映射的增删框。
+# 表里不存东西。
+实体 import_view 教材导入页面
+  字段 job_state 文本 进度
+  字段 mapping 文本 映射
+  字段 lesson_n 整数 课数
+  字段 series_state 文本 状态
+  字段 map_kind 文本 种类
+  字段 map_code 文本 编号
+  字段 map_label 文本 名称
+  字段 map_add 文本 从已有的选
+  字段 map_typed 文本 或者输入编号
+  字段 chunk_n 整数 块数
+结束

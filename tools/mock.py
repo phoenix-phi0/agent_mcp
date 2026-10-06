@@ -22,7 +22,8 @@
     # 自定义函数
     MockClient(handler=lambda prompt, system: prompt[::-1])
 
-    # 几个词都出现才算命中（按顺序找第一条），都不中给 default
+    # 几个词都出现才算命中（按顺序找第一条），都不中给 default。delay 是回之前
+    # 等几秒（模拟慢模型）
     MockClient(rules=[{"when": ["判断意图", "出几道"], "reply": '{"intent":"出题"}'},
                       {"when": ["老师"], "reply": "好的"}], default="嗯")
 
@@ -87,6 +88,11 @@ class MockClient:
                 if isinstance(words, str):
                     words = [words]
                 if all(w in text for w in words):
+                    # 「delay」：回之前等几秒，浏览器测试里模拟慢模型（看得到
+                    # 「正在解析」的进度、轮询）
+                    if r.get("delay"):
+                        import time
+                        time.sleep(float(r["delay"]))
                     return r.get("reply", "")
 
         if self.default is not None:

@@ -38,6 +38,7 @@ KEYWORDS = {
     "如果": "if", "若": "if", "否则": "else", "结束": "end",
     "事务": "tx",
     "执行": "call", "调用": "call",
+    "后台执行": "call_bg",
     "判定": "verdict",
     "返回": "ret",
 }

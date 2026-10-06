@@ -140,11 +140,16 @@
 <%- macro 回车(a) -%><% if a.has("回车") %> data-enter="<%= a.name %>" @keydown.enter.prevent="enterKey($event)"<% endif %><%- endmacro -%>
 
 <%- macro 动作(a) -%>
+{#- 「每隔 N」：一个不可见的 <zs-poll>，「当」成立时挂上、定时悄悄提交这个
+    动作（见 app.js.j2 的 pollOnce）。跟按钮画不画（「隐藏」）无关。 -#}
+<%- if a.every and a.has("远程") -%>
+<zs-poll action="<%= a.name %>" :every="<%= a.every %>"<%= 当(a) %>></zs-poll>
+<%- endif -%>
 <%- if not a.has("隐藏") -%>
 <%- set kind = "危险" if a.has("危险") else "次要" if a.has("次要") else "提交" -%>
 <%- set 色 = "btn-danger" if a.has("危险") else ("btn-ghost" if a.has("次要") else "btn-primary") -%>
 <%- if a.opens -%>
-<button type="button" class="btn <%= 色 %>" @click.prevent="<% if a.has("重置") %>reset(current.name); <% endif %>showOverlay('<%= a.opens %>')"<%= 回车(a) %><%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
+<button type="button" class="btn <%= 色 %>" @click.prevent="<% if a.has("重置") %>reset(current.name); <% endif %>showOverlay('<%= a.opens %>', null, true)"<%= 回车(a) %><%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
 <%- elif a.has("关闭") and not a.has("远程") -%>
 <button type="button" class="btn <%= 色 %>" @click.prevent="closeOverlay()"<%= 回车(a) %><%= 当(a) %><%= 尺寸(a) %>><%= a.label or a.name %></button>
 <%- elif a.goto -%>

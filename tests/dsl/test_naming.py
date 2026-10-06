@@ -13,7 +13,7 @@
   设 X = / 设 X.y =            X（问、问JSON、流式、对话、读取、读JSON、读JSONL、判定 同）
   遍历 X 于 … 序号 Y           X、Y（逐项 同）
   {X} {X.y} {X 或 …}           X（JSON 样子的 {"k":…} 不算）
-  执行 a.zs k=v                k（脚本参数）
+  执行 a.zs k=v                k（脚本参数；后台执行 同）
   查询/查一行/查一值/写库 库 名 k=v   k（SQL 参数）
   .sql 里的 :k                 k
 
@@ -47,7 +47,7 @@ SKIP_PARTS = {"data", ".venv", "node_modules", "__pycache__"}
 ASSIGN_KW = ("设置", "设", "变量", "提问JSON", "问JSON", "提问", "问", "流式", "对话",
              "载入JSONL", "读JSONL", "载入JSON", "读JSON", "读取", "载入", "判定")
 LOOP_KW = ("遍历", "循环", "每个", "逐项", "逐个")
-CALL_KW = ("执行", "调用")
+CALL_KW = ("后台执行", "执行", "调用")
 DB_VERBS = ("查询", "查一行", "查一值", "写库")
 IN_WORDS = ("属于", "于", "在", "in")
 
@@ -178,6 +178,7 @@ def self_test():
         "设 card.题干 = x\n"            # 点号后的键不算
         "遍历 项 于 {列表} 序号 号\n"
         "执行 scripts/a.zs 学习者={learner}\n"
+        "后台执行 scripts/b.zs 块={chunk} on_error=scripts/c.zs\n"
         "设 r = 查询 app.db q 条数=5\n"
         "返回 {\"错误\":\"{原话 或}\"}\n"
         "# 设 注释 = 1\n"
@@ -187,7 +188,7 @@ def self_test():
     )
     got = {(w, n) for _, w, n in scan_zs(sample)}
     want = {("赋值", "回答"), ("遍历", "项"), ("引用", "列表"), ("序号", "号"),
-            ("脚本参数", "学习者"), ("SQL参数", "条数"), ("引用", "原话"),
+            ("脚本参数", "学习者"), ("脚本参数", "块"), ("SQL参数", "条数"), ("引用", "原话"),
             ("赋值（关键字）", "reset")}
     sql = {n for _, _, n in scan_sql("SELECT 1 WHERE a = :条数 AND b = :ok -- :注释\n"
                                       "AND c = '12:30' AND d::text = x")}

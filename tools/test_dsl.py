@@ -658,6 +658,47 @@ def test_tools():
         check("未知工具报错", "无法当工具用" in str(e), True)
 
 
+def test_background():
+    print("\n[后台执行]")
+    import threading
+    import time
+    from .dsl import wait_background
+    d = Path(tempfile.mkdtemp())
+    (d / "slow.zs").write_text("问 x = 慢活{n}\n保存 out_{n}.txt {x}\n", encoding="utf-8")
+    (d / "fail.zs").write_text("保存 fail_{n}.txt {error}\n", encoding="utf-8")
+    lock = threading.Lock()
+    live = {"now": 0, "max": 0}
+
+    def handler(prompt, system):
+        with lock:
+            live["now"] += 1
+            live["max"] = max(live["max"], live["now"])
+        time.sleep(0.3)
+        with lock:
+            live["now"] -= 1
+        if "慢活9" in prompt:
+            raise RuntimeError("claude 超过 90 秒没有返回\n细节")
+        return "好了" + prompt[-1]
+
+    c = MockClient(handler=handler, offline=True)
+    out, _ = run("后台执行 slow.zs n=1\n打印 先回来\n", client=c, workdir=d)
+    check("后台执行马上往下走，脚本先跑完", (out.strip(), (d / "out_1.txt").exists()), ("先回来", False))
+    check("等得到后台跑完", wait_background(10), True)
+    check("后台脚本照常跑完（同一个客户端、独立作用域，参数传进去了）",
+          (d / "out_1.txt").read_text(encoding="utf-8").strip(), "好了1")
+    out, _ = run("后台执行 slow.zs n=9 on_error=fail.zs\n", client=c, workdir=d)
+    wait_background(10)
+    check("出错时带着 error 跑 on_error 的脚本：模型的错是一句人话、只要第一行",
+          (d / "fail_9.txt").read_text(encoding="utf-8").strip(), "模型没有回应：claude 超过 90 秒没有返回")
+    check("出错那个脚本自己的后半截没跑", (d / "out_9.txt").exists(), False)
+    live["max"] = 0
+    run("".join(f"后台执行 slow.zs n={i}\n" for i in range(2, 7)), client=c, workdir=d)
+    wait_background(20)
+    check("五个后台活全跑完", all((d / f"out_{i}.txt").exists() for i in range(2, 7)), True)
+    check("同时最多跑 2 个（DSL_BG_WORKERS 默认 2），多的排队", live["max"], 2)
+    check_error("脚本不在：这一行就报错，不放到后台", "后台执行 nope.zs n=1\n", "找不到脚本", workdir=d)
+
+
 # ----------------------------------------------------------------------
 
 
@@ -686,6 +727,7 @@ def main() -> int:
         test_attach,
         test_ask_json,
         test_tools,
+        test_background,
     ]:
         fn()
 

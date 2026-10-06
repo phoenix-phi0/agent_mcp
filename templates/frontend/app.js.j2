@@ -20,6 +20,9 @@
 <% if enter_json is not defined %><% set enter_json = "{}" %><% endif %>
 <% if nav_json is not defined %><% set nav_json = "[]" %><% endif %>
 <% set nav = nav if nav is defined else false %>
+<% set nav_sides = nav_sides if nav_sides is defined else [] %>
+<% set has_poll = has_poll if has_poll is defined else false %>
+<% set has_row_remote = has_row_remote if has_row_remote is defined else false %>
 <% set nav_logout = nav_logout if nav_logout is defined else false %>
 <% set has_files = file_fields_json != "{}" %>
 <% set has_graphs = has_graphs if has_graphs is defined else false %>
@@ -204,13 +207,23 @@ const _app = createApp({
     //
     // 早先是反过来的：地址一变就关浮层，浮层本身不进地址。
     const openOverlay = ref(parseHash()[1]["浮层"] || null);
-    function showOverlay(name, p) {
+    // keep：界面上的按钮（不是列表行）打开浮层时，地址里原有的参数留着——
+    // 审阅页 #教材导入?job=3 上点「删除这个任务」，确认浮层里的按钮提交时还
+    // 得知道是哪个任务；关掉浮层也回到 ?job=3，而不是光秃秃的界面。行上打开
+    // 的（「带 id」）照旧只带这一行的参数，关掉回到不带参数的界面。
+    let overlayBase = null;
+    function showOverlay(name, p, keep) {
+      const base = keep ? Object.fromEntries(
+        Object.entries(params.value || {}).filter(([k]) => k !== "浮层")) : null;
+      overlayBase = base && Object.keys(base).length ? base : null;
       openOverlay.value = name;
-      go(route.value, Object.assign({ "浮层": name }, p || {}));
+      go(route.value, Object.assign({}, overlayBase || {}, { "浮层": name }, p || {}));
     }
     function closeOverlay() {
       openOverlay.value = null;
-      if ((params.value || {})["浮层"]) go(route.value);
+      const base = overlayBase;
+      overlayBase = null;
+      if ((params.value || {})["浮层"]) go(route.value, base || undefined);
     }
     // Esc 关掉。浮层里的输入框正在打字时也该响应，所以挂在 window 上。
     window.addEventListener("keydown", (ev) => {
@@ -374,6 +387,15 @@ const _app = createApp({
         else go(firstAppScreen());
       } else if (resp.go && screens.some(s => s.name === resp.go)) {
         go(resp.go);
+      } else if (typeof resp.go === "string" && resp.go.startsWith("#")) {
+        // 「#界面?参数」：带着参数换过去（新建导入后跳到这个任务的审阅页
+        // #教材导入?job=3）。跟点链接一样走地址，「载入」照常把记录拉回来
+        const raw = resp.go.slice(1);
+        const cut = raw.indexOf("?");
+        const name = decodeURIComponent(cut < 0 ? raw : raw.slice(0, cut));
+        if (screens.some(s => s.name === name)) {
+          go(name, cut < 0 ? {} : Object.fromEntries(new URLSearchParams(raw.slice(cut + 1))));
+        }
       }
     }
 <% endif %>
@@ -598,6 +620,54 @@ const _app = createApp({
       el.style.height = Math.min(el.scrollHeight, 180) + "px";
     }
 
+<% if has_row_remote %>
+    // 列表行上的「远程 带 id」：把这一行的 id（「带」的那个键）交给接口——
+    // 草稿课的通过、驳回，失败块的重试。跟按钮一样锁住这个界面；地址参数
+    // 照样盖进去（审阅页的 job），行上带的那个键最后放，以它为准。
+    async function onRowRemote(name, row, carry) {
+      if (!row) return;
+      const screen = current.value.name;
+      if (inflight.value[screen]) return;
+      const payload = JSON.parse(JSON.stringify(form.value));
+      for (const [k, v] of Object.entries(params.value || {})) {
+        if (k !== "浮层") payload[k] = v;
+      }
+      if (carry && row[carry] != null) payload[carry] = row[carry];
+      inflight.value = { ...inflight.value, [screen]: name };
+      try {
+        const ep = typeof endpoints !== "undefined" ? endpoints[name] : null;
+        if (!ep) { console.log("row", name, row); return; }
+        const resp = await postTo(ep, { action: name, form: payload });
+        if (route.value === screen) applyResponse(resp);
+      } catch (e) {
+        showNotice(String(e), "no");
+      } finally {
+        const { [screen]: _done, ...rest } = inflight.value;
+        inflight.value = rest;
+      }
+    }
+<% endif %>
+<% if has_poll %>
+    // 「每隔 N」的动作：界面开着、「当」成立时由 <zs-poll> 定时调这里。悄悄
+    // 发——不锁按钮、不清输入框、不摆占位：人在这页上照常点别的，后台
+    // 任务的进度自己往前走。这个界面正有请求在路上就跳过这一拍，不叠着发。
+    // 请求回来时人已经切走了就不往别的界面上放。
+    async function pollOnce(name) {
+      const screen = current.value.name;
+      if (inflight.value[screen]) return;
+      const ep = typeof endpoints !== "undefined" ? endpoints[name] : null;
+      if (!ep) return;
+      const payload = JSON.parse(JSON.stringify(form.value));
+      for (const [k, v] of Object.entries(params.value || {})) {
+        if (k !== "浮层") payload[k] = v;
+      }
+      try {
+        const resp = await postTo(ep, { action: name, form: payload });
+        if (route.value === screen && !inflight.value[screen]) applyResponse(resp);
+      } catch (e) { /* 断一拍没关系，下一拍再来 */ }
+    }
+    Vue.provide("zsPoll", pollOnce);
+<% endif %>
     function onRow(name, row, target, carry, opens) {
       console.log("row", name, row);
       if (!row) return;
@@ -990,7 +1060,7 @@ const _app = createApp({
 <% endif %>
     }
 <% endif %>
-    return { route, params, forms, form, rowsOf, lists, notice, nav, AUTH_SCREENS, current, busy, pending, go, isHref, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
+    return { route, params, forms, form, rowsOf, lists, notice, nav, AUTH_SCREENS, current, busy, pending, go, isHref, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_row_remote %>, onRowRemote<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
   },
   template: `
 {#- 顶部导航。两种来路：
@@ -1016,10 +1086,20 @@ const _app = createApp({
 <% endif %>
     </nav>
 <% elif not has_goto and screens|length > 1 %>
+{#- 「侧 管理」的界面不跟学习者的页面混排：左边是没写「侧」的，写了的按
+    组名归到右边一组，前面一个组名（「管理」）。只是位置分开，不是权限。 -#}
     <nav>
-      <a v-for="s in screens" :key="s.name"
+      <a v-for="s in screens.filter(s => !s.side)" :key="s.name"
          :class="{ active: current.name === s.name }"
          href="#" @click.prevent="go(s.name)">{{ s.name }}</a>
+<% for side in nav_sides %>
+      <span class="nav-side"<% if loop.first %> style="margin-left:auto"<% endif %>>
+        <span class="nav-side-h"><%= side %></span>
+        <a v-for="s in screens.filter(s => s.side === '<%= side %>')" :key="s.name"
+           :class="{ active: current.name === s.name }"
+           href="#" @click.prevent="go(s.name)">{{ s.name }}</a>
+      </span>
+<% endfor %>
     </nav>
 <% endif %>
     <% for screen_node in screens %>
@@ -1051,5 +1131,19 @@ if (typeof VueFlowCore !== "undefined") {
   _app.component("VueFlow", { template: '<div class="graph-missing">图组件没加载（检查网络或 CDN）</div>' });
   _app.component("Handle", { template: "<span></span>" });
 }
+<% endif %>
+<% if has_poll %>
+// 「每隔 N」：v-if 跟着动作的「当」，挂上就开始定时、卸下（条件不成立、切走
+// 界面）就停。用组件的生命周期管定时器，不用自己记「哪个界面开着几个」。
+_app.component("ZsPoll", {
+  props: ["action", "every"],
+  inject: ["zsPoll"],
+  mounted() {
+    const ms = Math.max(Number(this.every) || 2, 1) * 1000;
+    this._t = setInterval(() => this.zsPoll(this.action), ms);
+  },
+  unmounted() { clearInterval(this._t); },
+  template: "<span hidden></span>",
+});
 <% endif %>
 _app.mount("#app");

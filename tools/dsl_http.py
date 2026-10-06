@@ -544,7 +544,26 @@ class Router:
 
         if request.content_type and "multipart" in request.content_type:
             form = dict(request.form)
-            # 前端把字段包在 form 里，multipart 下那是个 JSON 字符串
+            # .ui 生成的前端（app.js.j2 的 postTo）把整个请求体 {action, form}
+            # 塞成一个 JSON 字符串放在 payload 里。早先这里只认 form 键，前端
+            # 发的 payload 原样留成一个字段，表单里的字段脚本一个都拿不到——
+            # 文件存下了，系列编号、显示名全是空的，而且不报错
+            payload = form.pop("payload", None)
+            if payload:
+                try:
+                    parsed = json.loads(payload)
+                except json.JSONDecodeError:
+                    parsed = None
+                if isinstance(parsed, dict):
+                    body = parsed.get("form")
+                    if isinstance(body, dict):
+                        form.update(body)
+                    if parsed.get("action") and "action" not in form:
+                        form["action"] = parsed["action"]
+                else:
+                    form["payload"] = payload
+            # 手拼 multipart 的调用方（dsl/test_upload.py）把字段包在 form 里，
+            # 那是个 JSON 字符串
             inner = form.pop("form", None)
             if inner:
                 try:

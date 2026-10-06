@@ -43,6 +43,40 @@ def _as_data(v):
         return v
 
 
+# 扩展名 -> 文件头该是什么样。存文件的「类型」白名单里有的才查
+_ZIP_KINDS = {"docx", "xlsx", "pptx", "zip"}
+_TEXT_KINDS = {"md", "txt", "csv", "json", "jsonl", "tsv"}
+
+
+def _bad_header(ext: str, head: bytes) -> str:
+    """文件头跟扩展名对不上时回一句说明，对得上回空串。"""
+    if ext == "pdf" and not head.startswith(b"%PDF-"):
+        return "不是 PDF（文件头不是 %PDF-）"
+    if ext in _ZIP_KINDS and not head.startswith(b"PK"):
+        return f"不是 {ext}（{ext} 文件其实是 zip，文件头该是 PK）"
+    if ext in _TEXT_KINDS and b"\x00" in head:
+        return "是二进制文件，不是纯文本"
+    return ""
+
+
+def _parse_size(s: str):
+    """「20MB」「500KB」「1024」→ 字节数；认不出回 None。"""
+    import re as _re
+    m = _re.match(r"^\s*(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)?\s*$", str(s), _re.I)
+    if not m:
+        return None
+    unit = {"B": 1, "KB": 1024, "MB": 1024 ** 2, "GB": 1024 ** 3}[(m.group(2) or "B").upper()]
+    return int(float(m.group(1)) * unit)
+
+
+def _human(n: int) -> str:
+    if n >= 1024 ** 2:
+        return f"{n / 1024 ** 2:.1f}MB"
+    if n >= 1024:
+        return f"{n / 1024:.0f}KB"
+    return f"{n}B"
+
+
 def register(reg, workspace):
 
     @reg.verb("往响应里塞一个字段：messages / state / lists / stream。")
@@ -112,14 +146,26 @@ def register(reg, workspace):
         b.setdefault("lists", {})[数据键] = rows
         return ""
 
-    @reg.verb("把上传的文件存到磁盘。返回存好的相对路径。")
-    def 存文件(字段: str, 目录: str = "uploads", 命名: str = "哈希") -> str:
+    @reg.verb("把上传的文件存到磁盘。返回存好的相对路径。"
+              "可限类型和大小：存文件 document uploads 哈希 pdf,docx,md,txt 20MB")
+    def 存文件(字段: str, 目录: str = "uploads", 命名: str = "哈希",
+            类型: str = "", 上限: str = "") -> str:
         """存一个上传的文件，返回路径。
 
             设 路径 = 存文件 头像 uploads 哈希
             如果 {路径} 开头是 [
               返回 {"error":"{路径}"} 400
             结束
+
+        **类型**（可选）：扩展名白名单，逗号隔开（pdf,docx,md,txt）。不光看
+        扩展名，还看文件头——扩展名谁都能改：pdf 要以 %PDF- 开头，docx /
+        xlsx / pptx 是 zip（PK 开头），md / txt / csv / json 不能有 NUL 字节
+        （二进制文件改个名字混不进来）。别的扩展名只查扩展名。
+
+        **上限**（可选）：单个文件的大小上限，20MB / 500KB / 字节数。整个
+        请求另有 32MB 的总上限（路由器那层，超了直接 413）。
+
+        不合格的回「[…]」开头的一句话，跟别的出错一样，不存盘。
 
         **命名三种**：
 
@@ -157,6 +203,23 @@ def register(reg, workspace):
         if not data:
             return f"[{字段} 是空文件]"
 
+        if 类型:
+            allowed = [t.strip().lower().lstrip(".") for t in 类型.split(",") if t.strip()]
+            got = (f.filename or "").rsplit(".", 1)[-1].lower() if "." in (f.filename or "") else ""
+            if got not in allowed:
+                return (f"[文件类型不支持] {f.filename or '（没有文件名）'}，"
+                        f"只收 {'、'.join(allowed)}")
+            bad = _bad_header(got, data[:4096])
+            if bad:
+                return f"[文件内容和扩展名对不上] {f.filename}：{bad}"
+        if 上限:
+            limit = _parse_size(上限)
+            if limit is None:
+                return f"[上限写错了] {上限}，写成 20MB / 500KB / 字节数"
+            if len(data) > limit:
+                return (f"[文件太大] {f.filename} 有 {_human(len(data))}，"
+                        f"上限 {_human(limit)}")
+
         base = Path(workspace) / 目录
         base.mkdir(parents=True, exist_ok=True)
 
@@ -187,6 +250,22 @@ def register(reg, workspace):
         target.write_bytes(data)
         # 返回相对 workspace 的路径：绝对路径存进库里，换台机器就全废了
         return f"{目录}/{name}"
+
+    @reg.verb("上传字段的原文件名、大小、扩展名：{name, size, ext}。没有这个字段回空字典。")
+    def 上传信息(字段: str) -> dict:
+        from tools.http_ctx import uploads as _uploads
+        from pathlib import Path
+
+        f = (_uploads() or {}).get(字段)
+        if f is None:
+            return {}
+        f.seek(0, 2)
+        size = f.tell()
+        f.seek(0)
+        # 只留最后一段：上传的名字里可能带路径（../），这里只是给人看的名字
+        name = Path((f.filename or "").replace("\\", "/")).name
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        return {"name": name, "size": size, "ext": ext}
 
     @reg.verb("这次请求带了哪些上传字段。排查用。")
     def 列上传() -> str:

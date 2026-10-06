@@ -61,6 +61,7 @@ run 掌握得分    $PY tests/kg/test_score.py
 run 对账清理    $PY tests/kg/test_prune.py
 run 课文        $PY tests/kg/test_lesson.py
 run 教材系列    $PY tests/kg/test_series.py
+run 教材导入    $PY tests/kg/test_textbook_import.py
 run 语法题库    $PY tests/quiz/test_bunpou.py
 run 做题        $PY tests/kg/test_quiz.py
 run 做题总结    $PY tests/kg/test_quiz_summary.py
@@ -96,6 +97,7 @@ run 复习E2E     bash -c "cd $M/tests/e2e && node review_run.js"
 run 默写E2E     bash -c "cd $M/tests/e2e && node dictation_run.js"
 run 教材进度E2E bash -c "cd $M/tests/e2e && node pages_run.js"
 run 教材系列E2E bash -c "cd $M/tests/e2e && node series_run.js"
+run 教材导入E2E bash -c "cd $M/tests/e2e && node textbook_import_run.js"
 run app2编译    bash -c "cd $M/app2 && $PY build.py"
 
 # 上传要先起 dsl/ 的服务

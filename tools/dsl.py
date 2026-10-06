@@ -26,6 +26,8 @@
     如果 条件 … 否则 … 结束
     事务 库 … 结束             块内的写入要么全成要么全败
     执行 sub.zs key=值          独立作用域，key 在子脚本里就是 {key}
+    后台执行 sub.zs key=值 on_error=fail.zs
+                               放到后台线程跑，马上往下走（见 _do_call_bg）
     判定 verdict_of = 提示词 键→输出 … 否则→输出
     返回 值 [状态码]           结束脚本并交出一个值
 
@@ -161,12 +163,65 @@ from .dsl_core import (  # noqa: F401
     split_items, to_text,
 )
 
+import os
 import re
+import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 # 「用包」加载动词包时持有。动词表可能被多个线程共用（见 _do_use）。
 # 只在真加载时才会等：包加载过一次之后，后面的「用包」查一下就跳过了。
 _USE_LOCK = threading.RLock()
+
+
+# 「后台执行」的线程池：全进程一个，懒建。见 DSLEngine._do_call_bg
+_BG_LOCK = threading.Lock()
+_BG_POOL = None
+_BG_PENDING = set()
+
+
+def _submit_background(fn) -> None:
+    global _BG_POOL
+    with _BG_LOCK:
+        if _BG_POOL is None:
+            try:
+                n = max(int(os.environ.get("DSL_BG_WORKERS", "2")), 1)
+            except ValueError:
+                n = 2
+            _BG_POOL = ThreadPoolExecutor(max_workers=n, thread_name_prefix="zs-bg")
+        fut = _BG_POOL.submit(fn)
+        _BG_PENDING.add(fut)
+    fut.add_done_callback(lambda f: _BG_PENDING.discard(f))
+
+
+def wait_background(timeout: float = 60) -> bool:
+    """等后台执行的活都跑完（测试用）。超时回 False。"""
+    import time
+    end = time.time() + timeout
+    while time.time() < end:
+        with _BG_LOCK:
+            busy = [f for f in _BG_PENDING if not f.done()]
+        if not busy:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def background_reason(exc) -> str:
+    """后台出错的一句人话：模型的错（dsl_model 打了 model_call 标记）说「模型
+    没有回应：第一行」，别的取最里面那层错误的第一行。最长 200 字。"""
+    seen, cur, model, last = set(), exc, None, exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if getattr(cur, "model_call", False) and model is None:
+            model = cur
+        last = cur
+        cur = cur.__cause__ or cur.__context__
+    if model is not None:
+        first = (str(model).strip().splitlines() or [type(model).__name__])[0]
+        return f"模型没有回应：{first}"[:200]
+    first = (str(last).strip().splitlines() or [type(last).__name__])[0]
+    return first[:200]
 
 
 class DSLEngine(ModelMixin, HistoryMixin):
@@ -725,6 +780,77 @@ class DSLEngine(ModelMixin, HistoryMixin):
         text = sub.run(path.read_text(encoding="utf-8"))
         self._deliver(sub.returned[0] if sub.returned else text, assign_to)
 
+    def _do_call_bg(self, rest: str, lineno: int) -> None:
+        """后台执行 子脚本.zs 键=值 ... [on_error=出错时.zs]
+
+        跟「执行」一样起一个独立作用域的子引擎（同一个模型客户端、同一套
+        动词），只是放到后台线程池里跑，这一行马上返回，接口照常回响应。
+        给调模型的慢活用：上传教材后逐块抽取，一块十几秒，不能让页面干等。
+
+        **结果怎么拿**：子脚本自己写库（进度、结果、出错），页面轮询那张表
+        （.ui 动作的「每隔」）。后台没有请求上下文，「响应」「消息」这类
+        动词在里面不起作用。
+
+        **出错**：子脚本抛了错（模型超时、SQL 出错……），这一行早就返回了，
+        没人接得住。所以可以给 on_error=另一个.zs：出错时用同样的参数再加
+        一个 error（一句人话：模型的错是「模型没有回应：…」，别的是错误的
+        第一行）跑它，把「这一块失败了、为什么」记进库里，页面上能看到、
+        能重试。不给 on_error 就只打一行日志到 stderr。
+
+        **并发**：全进程共用一个线程池，同时最多跑 DSL_BG_WORKERS 个（默认
+        2，跟 llm_router 里 claude -p 默认 2 个进程对齐），多出来的排队，
+        不会一下子起几十个线程去抢模型——排在 CLI 的信号量上超过 30 秒会被
+        当成「排队太久」改走 fallback。
+
+        参数值在交出去之前深拷贝一份：后台跑的时候请求那边的变量可能已经变了。
+        """
+        import copy
+        if self._depth >= MAX_CALL_DEPTH:
+            raise DSLError(f"脚本调用层数超过 {MAX_CALL_DEPTH}，可能存在循环调用")
+        parts = rest.split(None, 1)
+        if not parts:
+            raise DSLError(f"第 {lineno + 1} 行：「后台执行」后面要跟脚本名")
+        name = parts[0]
+        tail = parts[1] if len(parts) > 1 else ""
+        params = {}
+        for m in CALL_PARAM_RE.finditer(tail):
+            params[m.group(1).strip()] = self._resolve_items(m.group(2).strip())
+        params = copy.deepcopy(params)
+
+        def script_of(n):
+            n = str(n)
+            fname = n if n.endswith(".zs") else f"{n}.zs"
+            path = self._safe_path(self.expand(fname))
+            if not path.is_file():
+                raise DSLError(f"第 {lineno + 1} 行：找不到脚本：{self._rel(path)}")
+            return path
+
+        path = script_of(name)
+        on_error = params.pop("on_error", None)
+        fail_path = script_of(on_error) if on_error else None
+        main = self._sub_engine()
+        fail = self._sub_engine() if fail_path else None
+        text = path.read_text(encoding="utf-8")
+
+        def job():
+            try:
+                main.vars.update(copy.deepcopy(params))
+                main.run(text)
+            except Exception as e:  # 后台没人接，记下来交给 on_error
+                why = background_reason(e)
+                print(f"[后台执行出错] {path.name}: {why}", file=sys.stderr, flush=True)
+                if fail is None:
+                    return
+                try:
+                    fail.vars.update(copy.deepcopy(params))
+                    fail.vars["error"] = why
+                    fail.run(fail_path.read_text(encoding="utf-8"))
+                except Exception as e2:
+                    print(f"[后台执行出错] {fail_path.name}（处理出错的脚本自己也出错了）: "
+                          f"{background_reason(e2)}", file=sys.stderr, flush=True)
+
+        _submit_background(job)
+
     # ------------------------------------------------------------------
     # 单条语句
     # ------------------------------------------------------------------
@@ -791,6 +917,9 @@ class DSLEngine(ModelMixin, HistoryMixin):
 
         elif head == "call":
             self._do_call(rest, lineno)
+
+        elif head == "call_bg":
+            self._do_call_bg(rest, lineno)
 
         elif head == "print":
             self._emit(self.expand(rest))

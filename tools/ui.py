@@ -169,6 +169,11 @@ class Node:
                                  # [{value, label}]（教材页的系列，库里有几套列几套）
     on_change: str = ""          # 字段的「改时 lesson_list」：值一改就提交这个动作
                                  # （切换系列马上换课文表，不用再点「搜索」）
+    side: str = ""               # 界面的「侧 管理」：导航里不跟学习者的页面排在
+                                 # 一起，归到右边一组（组名就是这个词）。教材
+                                 # 导入这类管理页用，见 app.js.j2 的 nav
+    every: int = 0               # 动作的「每隔 2」：所在界面开着、「当」成立时
+                                 # 每 2 秒悄悄提交一次（后台任务的进度轮询）
     required: Optional[bool] = None
     role: Optional[str] = None
     ratio: int = 0
@@ -221,6 +226,7 @@ class Node:
             "type": self.type, "widget": self.widget, "bind": self.bind,
             "when": self.when, "hint": self.hint, "goto": self.goto,
             "opens": self.opens, "accept": self.accept, "maxsize": self.maxsize,
+            "side": self.side, "every": self.every,
             "required": self.required, "role": self.role,
             "ratio": self.ratio, "cols": self.cols, "size": dict(self.size),
             "clears": list(self.clears),
@@ -371,6 +377,16 @@ KEYED_MODIFIERS = KEYED_MODIFIERS | {"地址"}
 # 字段「改时 <动作>」：值一改就提交这个动作，跟按了它的按钮一样。
 KEYED_MODIFIERS = KEYED_MODIFIERS | {"选项来自", "改时"}
 
+# 界面「侧 <组名>」：导航分两边，学习者的页面在左，写了「侧」的页面按组名归到
+# 右边（「管理：教材导入」）。不涉及登录和权限——只是放的位置分开；要加口令
+# 是认证（gen auth）的事。
+#   界面 自定义 教材导入 侧 管理
+# 动作「每隔 <秒>」：所在界面开着、动作的「当」成立时，每隔这么多秒悄悄提交
+# 一次（不锁按钮、不清输入框、不摆占位）。后台任务跑着时轮询进度用，「当」
+# 不成立（任务跑完了）就停。一般配「隐藏」：
+#   动作 import_poll 远程 隐藏 每隔 2 当 shared.job.running
+KEYED_MODIFIERS = KEYED_MODIFIERS | {"侧", "每隔"}
+
 # 动作「回车」：答完才出现的那颗「下一题」用。三件事：
 #   1. 一次提交回来、界面上没有输入框可还焦点时，焦点给这颗按钮，并
 #      scrollIntoView({block:'nearest'})——卡片长了按钮不会落在看不见的地方；
@@ -486,6 +502,13 @@ def _apply_keyed(node: Node, keyed: dict):
         node.source = keyed["选项来自"]
     if "改时" in keyed:
         node.on_change = keyed["改时"]
+    if "侧" in keyed:
+        node.side = keyed["侧"]
+    if "每隔" in keyed:
+        try:
+            node.every = max(int(keyed["每隔"]), 0)
+        except ValueError:
+            node.every = 0       # 写了非数字就当没写；check_loaders 报出来
     if "翻页" in keyed:
         node.flip = keyed["翻页"]
     if "点开" in keyed:
@@ -679,6 +702,10 @@ def dump(nodes, indent: int = 0) -> str:
             extras.append(f"选项来自={n.source}")
         if getattr(n, "on_change", ""):
             extras.append(f"改时={n.on_change}")
+        if getattr(n, "side", ""):
+            extras.append(f"侧={n.side}")
+        if getattr(n, "every", 0):
+            extras.append(f"每隔={n.every}")
         if n.type:
             extras.append(f"类型={n.type}")
         if n.ratio:
@@ -1198,8 +1225,16 @@ def render_vue(screens, title="UI", options_map=None, rows=None,
         "options_map": options_map,
         "default_widgets": _default_widgets(),
         "screens_json": json.dumps(
-            [{"name": s.name, "role": s.role or DEFAULT_ROLE} for s in screens],
+            [{"name": s.name, "role": s.role or DEFAULT_ROLE, "side": s.side}
+             for s in screens],
             ensure_ascii=False),
+        # 写了「侧」的界面：导航里归到右边（按组名），没有就不生成那段
+        "nav_sides": sorted({s.side for s in screens if s.side},
+                            key=lambda x: [s.side for s in screens].index(x)),
+        # 有「每隔」的动作才生成轮询那段
+        "has_poll": any(a.every for s in screens for a in s.actions()),
+        "has_row_remote": any(a.has("远程") for s in screens for n in _walk_nodes(s)
+                              if n.kind == "列表" for a in n.of_kind("动作")),
         "form_defaults_json": json.dumps(_form_defaults(screens), ensure_ascii=False),
         # 表格数据的初值，按数据键分开：预览时每张表都塞同一份示例数据。
         # 数据键默认是表名，「绑」能另指一个。
@@ -1375,12 +1410,24 @@ def check_loaders(screens, endpoints) -> list:
                 f"界面「{screen.name}」要「触发 {screen.trigger}」，但没有这个接口",
                 line=screen.line, code="missing_endpoint"))
         for node in _walk_nodes(screen):
+            # 列表行上的「远程 带 id」：点了把这一行的 id 交给接口（行上的
+            # 通过、驳回、重试），也算有去处
             if (getattr(node, "carry", "") and not getattr(node, "goto", "") and not getattr(node, "popup", "")
-                    and not getattr(node, "opens", "")):
+                    and not getattr(node, "opens", "") and not node.has("远程")):
                 issues.append(Issue(
                     f"动作「{node.name}」写了「带 {node.carry}」但没有「切到」"
-                    f"或「打开」，参数无处可去",
+                    f"「打开」或「远程」，参数无处可去",
                     line=node.line, code="carry_without_goto"))
+            # 「每隔」只对远程动作有意义：本地动作没有请求可发
+            if node.kind == "动作" and getattr(node, "every", 0) and not node.has("远程"):
+                issues.append(Issue(
+                    f"动作「{node.name}」写了「每隔 {node.every}」但不是「远程」，没有请求可发",
+                    line=node.line, code="every_not_remote"))
+            if (node.kind == "动作" and getattr(node, "every", 0)
+                    and endpoints is not None and node.name not in endpoints):
+                issues.append(Issue(
+                    f"动作「{node.name}」要「每隔 {node.every}」轮询，但没有这个接口",
+                    line=node.line, code="missing_endpoint"))
     return issues
 
 
