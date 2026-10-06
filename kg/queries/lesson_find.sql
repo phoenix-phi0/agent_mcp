@@ -6,20 +6,33 @@
 -- :level     提到的等级（N4），同分时同等级的排前面
 -- :quiz      1 = 只要能出题的：标题或条目名命中（strong）且这一课有题。
 --            出题时用——光是讲解里提了一句的课不能当成「这一课的题」
+-- :pin       已经认定的那一课（教材页带来的 lesson、原话里的课号、「第46课」、
+--            「这课」，见 lesson_ref.sql），没有就空串。它直接排第一、算 strong
 --
 -- 打分：标题、条目名命中 3，原话里出现条目名按条目名的字数算（てから 比
 -- から 长，「てから怎么用」先找到 てから 那课），一句话、接续、讲解命中各 1。
--- 词去掉 ～ 〜 再比，「～ようだ」和「ようだ」一样。
+-- 词去掉 ～ 〜 再比，「～ようだ」和「ようだ」一样。标题也去掉空格（半角、全角）
+-- 再比：课文标题是「动词 て います」这样中间带空格的（125 课里 45 课），词
+-- 「ています」原样找不到，就落到讲解正文里提过一句的别的课上去了（实测
+-- 「讲一下 N5 的 ～ています」找成了《动词 たいです》）。原话里出现了整个标题
+-- （去掉空格、～ 再比，至少两个字）也算命中，跟标题命中一样算分。
 --
 -- body 是给模型看的课文正文（标题、一句话、接续、讲解、例句原文），末尾带
 -- 两个换行，脚本里直接一课接一课拼起来。link 是做题页按课文出题的地址，
 -- 写法跟 kg/__main__.py 的 quiz_link 一样（界面名编过码）；read 是教材页读
 -- 这一课的地址（跟 lesson_list 的 href 一样），老师回复里的「读课文」用它。
 WITH kw AS (
-  SELECT DISTINCT replace(replace(trim(value), '～', ''), '〜', '') AS k
+  SELECT DISTINCT replace(replace(replace(replace(trim(value), '～', ''), '〜', ''), ' ', ''), '　', '') AS k
   FROM json_each(CASE WHEN json_valid(:keywords) AND json_type(:keywords) = 'array'
                       THEN :keywords ELSE json_array(:keywords) END)
-  WHERE replace(replace(trim(value), '～', ''), '〜', '') <> ''
+  WHERE replace(replace(replace(replace(trim(value), '～', ''), '〜', ''), ' ', ''), '　', '') <> ''
+),
+said AS (
+  SELECT replace(replace(replace(replace(coalesce(:message, ''), '～', ''), '〜', ''), ' ', ''), '　', '') AS m
+),
+bare AS (
+  SELECT code, replace(replace(replace(replace(title, '～', ''), '〜', ''), ' ', ''), '　', '') AS t
+  FROM lesson
 ),
 labels AS (
   SELECT il.lesson, i.label
@@ -27,7 +40,9 @@ labels AS (
 ),
 hit AS (
   SELECT l.code,
-         (SELECT count(*) FROM kw WHERE instr(l.title, kw.k) > 0) AS t,
+         (SELECT count(*) FROM kw, bare WHERE bare.code = l.code AND instr(bare.t, kw.k) > 0)
+         + (SELECT count(*) FROM bare, said WHERE bare.code = l.code
+             AND length(bare.t) >= 2 AND instr(said.m, bare.t) > 0) AS t,
          (SELECT count(*) FROM kw, labels b
            WHERE b.lesson = l.code AND (b.label = kw.k OR
                  (length(kw.k) >= 2 AND instr(b.label, kw.k) > 0))) AS b,
@@ -40,8 +55,9 @@ hit AS (
   FROM lesson l
 ),
 scored AS (
-  SELECT l.*, (h.t + h.b) * 3 + h.m * 2 + h.s + h.f + h.e AS score,
-         (h.t + h.b + h.m) > 0 AS strong,
+  SELECT l.*, (h.t + h.b) * 3 + h.m * 2 + h.s + h.f + h.e
+                + CASE WHEN l.code = coalesce(:pin, '') THEN 1000 ELSE 0 END AS score,
+         (h.t + h.b + h.m) > 0 OR l.code = coalesce(:pin, '') AS strong,
          (SELECT count(*) FROM question q WHERE q.lesson = l.code) AS n
   FROM lesson l JOIN hit h ON h.code = l.code
 )

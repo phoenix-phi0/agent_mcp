@@ -66,6 +66,7 @@ run 复习薄弱点  $PY tests/kg/test_quiz_review.py
 run 单词默写    $PY tests/kg/test_dictation.py
 run 老师讲语法  $PY tests/kg/test_teacher_bunpou.py
 run 问老师      $PY tests/kg/test_teacher_chat.py
+run 请老师讲课  $PY tests/kg/test_teacher_lesson.py
 run 教材和进度  $PY tests/kg/test_pages.py
 run 并发用包    $PY tests/dsl/test_use_concurrent.py
 run 假模型脚本  $PY tests/dsl/test_mock_script.py

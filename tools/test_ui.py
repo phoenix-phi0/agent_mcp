@@ -295,6 +295,34 @@ def test_links():
           any(i.code == "path_conflict" for i in validate(clash)), True)
 
 
+
+def test_trigger():
+    print("\n[触发]")
+    ui = ("界面 自定义 问老师 触发 teacher_send\n"
+          "  动作 teacher_state 远程 进入时 隐藏 刷新\n"
+          "  消息流 talk 占满\n"
+          "  分组 底栏\n"
+          "    字段 content 控件 多行\n"
+          "    动作 teacher_send 提交 远程 回显 清空 发送\n"
+          "  结束\n"
+          "结束\n")
+    s = one(ui)
+    check("「触发」进了 trigger，没进标签、也不是载入", (s.name, s.trigger, s.load), ("问老师", "teacher_send", ""))
+    eps = {"teacher_send": "/teacher/send", "teacher_state": "/teacher/state"}
+    r = compile_ui(ui, backend="vue", options={"endpoints": eps})
+    check("编译没有 issue", [i.code for i in r.get("issues", [])], [])
+    js = r["result"]["files"]["app.js"]
+    check("触发表按界面名给出", 'const triggers = {"问老师": "teacher_send"};' in js, True)
+    check("跑之前用 replaceState 清掉地址参数（不留历史）",
+          'history.replaceState(null, "", "#" + encodeURIComponent(name));' in js, True)
+    check("「触发」排在「进入时」后面", js.index("await runTrigger(name)") > js.index("for (const a of acts)"), True)
+    r2 = compile_ui(ui, backend="vue", options={"endpoints": {"teacher_state": "/teacher/state"}})
+    check("触发的接口不存在：报 missing_endpoint",
+          [i.code for i in r2.get("issues", []) if "触发" in i.message], ["missing_endpoint"])
+    r3 = compile_ui(ui.replace(" 触发 teacher_send", ""), backend="vue", options={"endpoints": eps})
+    check("没写触发：触发表是空的", "const triggers = {};" in r3["result"]["files"]["app.js"], True)
+
+
 # ----------------------------------------------------------------------
 
 
@@ -312,6 +340,7 @@ def main() -> int:
         test_validate,
         test_compile,
         test_links,
+        test_trigger,
     ]:
         try:
             fn()

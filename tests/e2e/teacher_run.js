@@ -18,6 +18,10 @@
 //   切回「问老师」：刚才的对话还在，没有叠两份；刷新：从库里拉回来
 //   讲解那条下面有两个链接（读课文、练一练），刷新后也在；点「读课文」→
 //     地址变成 #教材?lesson=…，教材页的阅读视图显示的正是那一课
+//   教材页点「请老师讲解」→ 到问老师页，地址里的 lesson 随即去掉；历史对话
+//     先回来，后面接上「请老师讲解《…》这一课」和老师的讲解，讲解下面是
+//     「做这课的题」；之后发的话不带 lesson；刷新不会再讲一遍；点「做这课
+//     的题」出那一课的题
 
 const { execFileSync, spawn } = require("child_process");
 const fs = require("fs");
@@ -32,6 +36,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const WEB = PROJ + "/web";
 const MOCK = PROJ + "/mock.json";
 const REPLY = "てから表示先做前一件事再做后一件。";
+const EXPLAIN = "这一课讲 てから：先做前一件事，再做后一件。";
 
 let pass = 0, fail = 0;
 const say = (ok, msg) => { ok ? pass++ : fail++; console.log((ok ? "  ✓ " : "  ✗ ") + msg); };
@@ -68,7 +73,7 @@ function openPage(hash) {
     const url = new URL(u, BASE);
     // 页面传的 signal 是 jsdom 的 AbortSignal，Node 的 fetch 不认（报不是 AbortSignal 的实例），去掉
     const r = await fetch(url, { ...o, signal: undefined });
-    calls.push({ path: url.pathname, status: r.status });
+    calls.push({ path: url.pathname, status: r.status, body: o.body ? JSON.parse(o.body) : null });
     return r;
   };
   w.console.log = () => {};
@@ -125,6 +130,8 @@ function openPage(hash) {
   // 意图判定的系统提示词里有「意图分类器」，学习者原话跟在「学习者的消息：」后面
   fs.writeFileSync(MOCK, JSON.stringify({
     rules: [
+      // 讲一课那一路的提示词（routes/teacher.zs）
+      { when: ["学生请你讲解教材里的这一课"], reply: EXPLAIN },
       { when: ["意图分类器", "学习者的消息：给我出几道てから的题"],
         reply: '{"intent":"出题","keywords":["てから"],"level":"","kind":"","grade":"否"}' },
       { when: ["意图分类器"],
@@ -230,6 +237,62 @@ function openPage(hash) {
       `阅读视图显示的是《${lesson.title}》：抬头和一句话都在`);
   say(!p.$$(".screen table").some(t => t.textContent.includes("一句话") && t.textContent.includes("题数")),
       "没有显示课文表（是阅读视图，不是列表）");
+  p.close();
+
+  console.log("七、教材页「请老师讲解」→ 问老师页讲这一课");
+  const before = db("SELECT count(*) n FROM chat_message")[0].n;
+  p = openPage("#" + encodeURIComponent("教材") + "?lesson=" + lesson.code);
+  say(await waitFor(() => p.$(".screen") && p.$(".screen").textContent.includes(lesson.summary)),
+      "教材页读这一课");
+  const ex = () => p.$$(".screen a").filter(a => a.textContent.trim().startsWith("请老师讲解"));
+  say(await waitFor(() => ex().length === 2), `顶上和底下各有一个「请老师讲解」：${ex().map(a => a.textContent.trim())}`);
+  say(ex().every(a => decodeURIComponent(a.getAttribute("href")) === `#问老师?lesson=${lesson.code}`),
+      `地址是 #问老师?lesson=${lesson.code}：${ex()[0] && ex()[0].getAttribute("href")}`);
+  calls.length = 0;
+  ex()[0].click();
+  say(await waitFor(() => calls.some(c => c.path === "/teacher/send")), "到问老师页就发出了讲解请求");
+  const sent = calls.find(c => c.path === "/teacher/send") || {};
+  say(sent.body && sent.body.form && sent.body.form.lesson === lesson.code && !sent.body.form.content,
+      `请求带着 lesson、没有 content：${JSON.stringify(sent.body && sent.body.form)}`);
+  say(calls.findIndex(c => c.path === "/teacher/state") >= 0
+      && calls.findIndex(c => c.path === "/teacher/state") < calls.findIndex(c => c.path === "/teacher/send"),
+      `先拉历史再发请求：${calls.map(c => c.path)}`);
+  say(await waitFor(() => p.hash() === "#问老师"), `地址里的 lesson 去掉了：${p.hash()}`);
+  say(await waitFor(() => p.teacher().some(m => m.text === EXPLAIN), 8000), "老师的讲解出现在消息流");
+  let ms = p.msgs();
+  const k = ms.findIndex(m => m.text === EXPLAIN);
+  say(k > 0 && ms[k - 1].who === "你" && ms[k - 1].text.includes(`《${lesson.title}》`),
+      `讲解前面是「你：请老师讲解《${lesson.title}》…」：${k > 0 && ms[k - 1].text}`);
+  say(ms.length - 2 === before, `历史对话还在、没有叠：${ms.length} 条（之前 ${before} 条）`);
+  say(!ms.some(m => m.kind.includes("pending")), "「…」占位收掉了");
+  const el = (ms[k] && ms[k].links || []).map(a => ({ text: a.textContent, href: decodeURIComponent(a.getAttribute("href")) }));
+  say(el[0] && el[0].text.startsWith("做这课的题") && el[0].href === `#做题?lesson=${lesson.code}`,
+      `讲解下面第一个链接是做这课的题：${JSON.stringify(el)}`);
+  rows = db(`SELECT role, intent, lesson FROM chat_message ORDER BY id DESC LIMIT 2`);
+  say(rows.every(r => r.intent === "讲解" && r.lesson === lesson.code), `库里两条记着这一课：${JSON.stringify(rows)}`);
+
+  calls.length = 0;
+  p.type(p.box(), "这一课的接续再说一遍");
+  p.enter(p.box());
+  say(await waitFor(() => p.teacher().filter(m => m.text === EXPLAIN).length === 2), "接着问「这一课」，还是讲这一课");
+  const next = calls.find(c => c.path === "/teacher/send") || {};
+  say(next.body && !("lesson" in next.body.form), `之后发的话不带 lesson：${JSON.stringify(next.body && next.body.form)}`);
+  const n0 = db("SELECT count(*) n FROM chat_message")[0].n;
+  p.close();
+  calls.length = 0;
+  p = openPage("#" + encodeURIComponent("问老师"));
+  say(await waitFor(() => p.teacher().filter(m => m.text === EXPLAIN).length === 2), "刷新后讲解从库里拉回来");
+  await sleep(300);
+  say(!calls.some(c => c.path === "/teacher/send") && db("SELECT count(*) n FROM chat_message")[0].n === n0,
+      "刷新没有再讲一遍");
+  ms = p.msgs();
+  const go = (ms.find(m => m.text === EXPLAIN) || {}).links || [];
+  calls.length = 0;
+  go[0] && go[0].click();
+  say(await waitFor(() => p.hash() === `#做题?lesson=${lesson.code}`), `点「做这课的题」：${p.hash()}`);
+  say(await waitFor(() => p.card()), "出了题卡");
+  const cur2 = db("SELECT q.lesson FROM quiz_state s JOIN question q ON q.code = s.current WHERE s.learner = 'me'")[0] || {};
+  say(cur2.lesson === lesson.code, `出的是那一课的题：${cur2.lesson}`);
   p.close();
 
   console.log("六、服务端");

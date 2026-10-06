@@ -239,6 +239,8 @@ def main():
           and unquote(sm.get("chat", "")) == "#问老师",
           f"做题页 state.summary：正文、读课文、去问老师：{sm}")
     check(sm.get("practice") == "", "错得最多的就是在练的课：做题页不给「再练这一课」（卡上有再来一轮）")
+    check(unquote(sm.get("explain", "")) == f"#问老师?lesson={lesson}",
+          f"做题页 state.summary 有「请老师讲这课」：{sm.get('explain')}")
     check(not body.get("messages"), "做题页没有消息流，不往 messages 里推")
     check(state(body).get("phase") is None, "按课练总结完 phase 不动（还是那张一轮做完的卡）")
     r = c.post("/teacher/state", json={"form": {}}).get_json() or {}

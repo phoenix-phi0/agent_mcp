@@ -5,9 +5,10 @@
 --   label         范围：按课练《标题》/ 复习薄弱点 / 自由练（等级、考点）
 --   level         等级（按课练是那一课的，自由练是顶栏选的，复习不限），给进度摘要用
 --   lesson        在练的课（自由练、复习是空串）
---   worst / worst_title / read / practice
+--   worst / worst_title / read / practice / explain
 --                 错得最多的那一课（一样多先算在练的那课、再算最近做的；
---                 全对就是做得最多的），读课文和再练这一课的地址
+--                 全对就是做得最多的），读课文、再练这一课、请老师讲这课
+--                 （#问老师?lesson=…）的地址
 --   round_key     这一轮是哪一轮：起点 - 最后一道作答的 id。同一轮没再答题就
 --                 不变，/quiz/summary 用它认「这一轮总结过了」
 --   text          每道题一段：知识点·条目、课文、对错、题干（不含选项）、
@@ -101,6 +102,7 @@ SELECT
   coalesce((SELECT title FROM w), '') AS worst_title,
   coalesce((SELECT '#%E6%95%99%E6%9D%90?lesson=' || code FROM w), '') AS read,
   coalesce((SELECT '#%E5%81%9A%E9%A2%98?lesson=' || code FROM w), '') AS practice,
+  coalesce((SELECT '#%E9%97%AE%E8%80%81%E5%B8%88?lesson=' || code FROM w), '') AS explain,
   CASE WHEN (SELECT count(*) FROM r) > 30
        THEN '（这一轮共 ' || (SELECT count(*) FROM r) || ' 道，下面只列最近 30 道）' || char(10) ELSE '' END
   || '按知识点（答对/答题）：' || coalesce((SELECT group_concat(s, '；') FROM (SELECT s FROM bypt ORDER BY first)), '无')

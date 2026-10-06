@@ -143,6 +143,14 @@ class Node:
     load: str = ""               # 界面或浮层上的「载入 note_open」：带着地址
                                  # 参数进来、表单里又不是那一条时，调这个接口
                                  # 把记录拉回来
+    trigger: str = ""            # 界面上的「触发 teacher_send」：带着地址参数
+                                 # 进来时把参数交给这个动作跑一次（教材页的
+                                 # 「请老师讲解」跳到 #问老师?lesson=…，进来
+                                 # 就发出讲解请求）。跟「载入」的区别：载入是
+                                 # 按参数把记录拉回来，参数留在地址里，刷新
+                                 # 再拉一次没关系；触发是做一件事，跑之前就把
+                                 # 参数从地址里去掉（不留历史），刷新、后退
+                                 # 不会再做一次，之后的提交也不再带着它
     selects: str = ""            # 「选中 sel」：点中的图节点写进这个共享路径
     to: str = ""                 # 「选项」的「交给 quiz_answer」：点了哪个选项就
                                  # 把它写进同名表单字段，然后提交这个动作
@@ -321,7 +329,7 @@ SIZE_KEYS = {"宽": "width", "高": "height", "间距": "gap",
 # writing the label first leaves the whole 「当 ...」 inside the label: the
 # button reads 「下一题 当 shared.verdict」 and no v-if is emitted at all.
 KEYED_MODIFIERS = ({"绑", "控件", "当", "比", "列数", "提示", "切到", "打开",
-                    "接受", "最大", "选中", "方向", "带", "载入"}
+                    "接受", "最大", "选中", "方向", "带", "载入", "触发"}
                    | set(SIZE_KEYS))
 
 # Screen roles. Written before or after the screen name:
@@ -487,6 +495,8 @@ def _apply_keyed(node: Node, keyed: dict):
         node.carry = keyed["带"]
     if "载入" in keyed:
         node.load = keyed["载入"]
+    if "触发" in keyed:
+        node.trigger = keyed["触发"]
     if "选中" in keyed:
         node.selects = keyed["选中"]
     if "方向" in keyed:
@@ -1184,6 +1194,9 @@ def render_vue(screens, title="UI", options_map=None, rows=None,
         # 界面名 -> 「载入」用的动作。带着地址参数进来时用它把记录拉回来。
         "loaders_json": json.dumps({s.name: s.load for s in screens if s.load},
                                    ensure_ascii=False),
+        # 界面名 -> 「触发」的动作。带着地址参数进来时跑一次，跑前清掉参数
+        "triggers_json": json.dumps({s.name: s.trigger for s in screens if s.trigger},
+                                    ensure_ascii=False),
         # 界面名 -> 标了「进入时」的动作，每次进入那个界面自动跑一次。
         # 列表页靠它打开就有数据，不用先点一下刷新。
         "enter_json": json.dumps(
@@ -1331,6 +1344,11 @@ def check_loaders(screens, endpoints) -> list:
                 issues.append(Issue(
                     f"{what}「{holder.name}」要「载入 {holder.load}」，但没有这个接口",
                     line=holder.line, code="missing_endpoint"))
+        # 「触发 X」同理：接口不存在的话带着参数进来什么都不发生
+        if screen.trigger and endpoints is not None and screen.trigger not in endpoints:
+            issues.append(Issue(
+                f"界面「{screen.name}」要「触发 {screen.trigger}」，但没有这个接口",
+                line=screen.line, code="missing_endpoint"))
         for node in _walk_nodes(screen):
             if (getattr(node, "carry", "") and not getattr(node, "goto", "") and not getattr(node, "popup", "")
                     and not getattr(node, "opens", "")):

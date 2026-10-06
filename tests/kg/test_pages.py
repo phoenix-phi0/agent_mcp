@@ -26,6 +26,7 @@ import sqlite3
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -159,7 +160,10 @@ def main():
     rd = (body.get("state") or {}).get("reading") or {}
     src = by_code[LESSON]
     check(st == 200 and rd.get("code") == LESSON, f"拉回来的是这一课：{rd.get('code')}")
-    check(rd.get("head") == f"《{src['title']}》　{src['level']}", f"抬头：{rd.get('head')}")
+    no = int(src["code"][-3:])
+    check(rd.get("head") == f"《{src['title']}》　{src['level']}　第{no}课（{src['code']}）", f"抬头带课号：{rd.get('head')}")
+    check(unquote(rd.get("explain", "")) == f"#问老师?lesson={src['code']}",
+          f"「请老师讲解」的地址：{rd.get('explain')}")
     check(rd.get("summary") == src["summary"] and rd.get("explanation") == src["explanation"],
           "一句话、讲解原样")
     check(rd.get("formation") == (src.get("formation") or ""), f"接续：{rd.get('formation')}")

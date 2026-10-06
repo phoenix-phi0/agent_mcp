@@ -2,7 +2,8 @@
 #
 #   #教材                    课文表：顶栏筛等级、搜关键字（标题、一句话、条目名）
 #   #教材?lesson=hb-n4-118   读这一课：抬头、一句话、接续、讲解、例句、挂着的
-#                            条目，底下「练这一课」「问老师」
+#                            条目，顶上和底下「请老师讲解」，底下还有「练这一课」
+#                            「问老师」
 #
 # 为什么是地址不是浮层：讲解动辄几屏长，浮层里读着憋屈；而且课文要能从别处
 # 直接链过来（老师的回复、做题页、发给别人），#教材?lesson=… 就是那一课。
@@ -23,6 +24,12 @@
 #
 # 「问老师」只跳到问老师页，不预填问题：输入框预填要往地址里放参数，而地址
 # 参数会盖掉每次提交的同名键——那样之后发的每句话都成了预填的那句。
+#
+# 「请老师讲解」跳到 #问老师?lesson=…：问老师页「触发 teacher_send」，进去就
+# 把 lesson 交给它、发出讲解这一课的请求（不判意图、不靠关键词猜课），回复
+# 下面是「做这课的题」「读课文」。触发前地址里的 lesson 就清掉了，刷新、后退
+# 不会再讲一遍，之后发的话也不带它。抬头上有课号（第N课、hb-n4-118），在
+# 问老师页直接说「讲讲第118课」「讲一下 hb-n4-118」也行。
 
 界面 自定义 教材 载入 lesson_one
   动作 lesson_list 远程 进入时 隐藏 刷新
@@ -49,6 +56,7 @@
   分组 阅读顶栏 横排 顶栏 间距 12px 对齐 center 当 params.lesson
     链接 back 绑 reading.back 次要 ← 回课文表
     显示 reading.head 当 params.lesson&&shared.reading.code===params.lesson
+    链接 explain_top 绑 reading.explain 当 params.lesson&&shared.reading.code===params.lesson&&!shared.reading.missing 请老师讲解
   结束
 
   布局 占满 当 params.lesson&&shared.reading.code===params.lesson&&!shared.reading.missing
@@ -72,8 +80,9 @@
       结束
     结束
     区域 练习 横排 间距 12px 对齐 center
+      链接 explain 绑 reading.explain 请老师讲解这一课
       链接 practice 绑 reading.practice 练这一课
-      链接 ask 绑 reading.ask 问老师
+      链接 ask 绑 reading.ask 次要 问老师
       显示 reading.quiz_note
     结束
   结束

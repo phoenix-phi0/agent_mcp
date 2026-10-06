@@ -388,7 +388,7 @@
 # ——错得最多的那课，去问老师接着聊）。到问老师页历史里看得到，chat_recent
 # 也带着它，接着问「刚才那轮怎么样」接得上。
 #
-# 做题页上：总结放在 state.summary（{text, read, practice, chat}），界面画成
+# 做题页上：总结放在 state.summary（{text, read, practice, chat, explain}），界面画成
 # 一张总结卡片。做题页没有消息流，不走 messages。本轮 0 题时回 400 和一句话，
 # 不调模型。模型出错时路由器回 502 和一句人话（error），页面弹提示条；对话
 # 记录在模型回来之后才写，出错时不留半截。
@@ -476,6 +476,8 @@
   设 summary.read = {links.href1}
   设 summary.practice = {links.href2}
   设 summary.chat = {links.href3}
+  # 请老师讲错得最多的那一课（问老师页进去就发出讲解请求）
+  设 summary.explain = {round_info.explain 或}
   # 按课练、错得最多的就是在练的这一课：做题页上不给「再练这一课」——地址
   # 就是现在这个，点了不会重新载入；卡上本来就有「再来一轮」
   设 worst = {round_info.worst 或 -}

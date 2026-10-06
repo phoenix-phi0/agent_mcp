@@ -107,6 +107,7 @@
     动作 quiz_again 远程 再来一轮
     链接 more 绑 round.more 换一课
     链接 back 绑 round.back 次要 回教材看这一课
+    链接 explain 绑 round.explain 次要 请老师讲这课
     动作 quiz_summary 远程 请老师总结这一轮
   结束
 
@@ -118,6 +119,7 @@
   分组 下一步 横排 间距 12px 对齐 center 当 shared.summary&&shared.summary.text
     链接 chat 绑 summary.chat 去问老师接着聊
     链接 read 绑 summary.read 次要 读课文
+    链接 explain 绑 summary.explain 次要 请老师讲这课
     链接 practice 绑 summary.practice 次要 再练这一课
   结束
 

@@ -36,6 +36,23 @@
 #         几轮对话；回答下面附第一篇参考课文的「读课文」，能出题的再附
 #         「练一练」。
 #
+# 讲一课（讲解的一种，记的意图也是讲解）：指名了某一课时不判意图里的关键词
+# 去猜课，直接讲那一课。哪些算指名：
+#   lesson 参数  教材页的「请老师讲解」、做题页一轮结束的「请老师讲这课」跳到
+#                #问老师?lesson=…，问老师页的「触发」把它交给这个接口（content
+#                空，问话由这里拼「请老师讲解《标题》这一课」，跟回复一起回给
+#                前端放进消息流）。**不判意图**，少一次快档调用
+#   原话里的课   课号（hb-n5-046）、「第46课」、「这课」（最近对话里的那一课），
+#                见 lesson_ref.sql。照常判意图：「出第46课的题」还是出题这一路
+#                （lesson_find 把这一课排第一）；进度也照旧；讲解、教材、其他
+#                都改成讲这一课
+# 提示词里是这一课的正文和例句（lesson_explain）、学习者在这一课的答题情况
+# （答过几次、对几次、答错过的条目）、进度摘要、最近几轮；回复附「做这课的题」
+# （没有题就不附）和「读课文」。
+# 指名了但没有这一课（「讲解第1课」：课号没有 001 的；lesson 参数是不存在的
+# 编号；「这课」但之前没聊过哪一课）：不调模型、不拿别的课凑数，回一句找不到
+# 和怎么找，附「打开教材」。
+#
 # 除了出题，每一路的提示词里都有这个学习者的进度摘要（progress_brief：
 # 已掌握 x/总数、累计答题和正确率、在学的点和它们的掌握得分（低的在前）、
 # 最近答错的、现在能学的，
@@ -89,8 +106,13 @@
     设 learner = me
   结束
   设 message = {content 或}
-  如果 {message} 为空
-    返回 {"error":"先写点什么再发"} 400
+  设 lesson_pick = {lesson 或}
+  # 前端回显过的问话不用再回；lesson 参数进来、问话是这里拼的，要回给前端
+  设 echo_ask = 否
+  如果 {lesson_pick} 为空
+    如果 {message} 为空
+      返回 {"error":"先写点什么再发"} 400
+    结束
   结束
 
   # 最近几轮，不含这一句（这一句还没写进库）
@@ -100,9 +122,32 @@
     设 recent_talk = （这是第一句，之前没有对话）
   结束
 
+  # ---- 指名了哪一课：lesson 参数，或者原话里的课号、第N课、这课 ----
+  设 pinned.code =
+  设 lesson_missing = 否
+  设 lesson_asked = 0
+  设 lesson_candidates =
+  如果 {lesson_pick} 不为空
+    设 pin_args.lesson = {lesson_pick}
+    设 pin_args.learner = {learner}
+    设 pinned = 查一行表 app.db lesson_explain {pin_args}
+    如果 {pinned.code 或} 为空
+      设 lesson_missing = 是
+    结束
+    如果 {message} 为空
+      设 echo_ask = 是
+      设 message = 请老师讲解课文（{lesson_pick}）
+      如果 {pinned.code 或} 不为空
+        设 message = 请老师讲解《{pinned.title}》这一课（{pinned.level}）
+      结束
+    结束
+    # 不判意图：解析不出 JSON 就是空字典，下面 intent 取默认的讲解
+    设 intent_raw = 不判意图
+  否则
   # ---- 判意图（快档）----
   系统 你是日语学习网站的意图分类器。你只输出一个 JSON 对象，不回答学习者的问题，不加任何解释。
   问 intent_raw = 判断学习者发给日语老师的这条消息想干什么。intent 只能是五个值之一：「出题」= 想练习、做题、测一下、考考自己，或者把题目和自己的答案贴过来让老师判对错；「进度」= 问自己的学习情况，比如学得怎么样、哪里薄弱、错得多的是哪些、接下来学什么、某个等级还差什么；「教材」= 问网站教材或课文的整体情况，比如教材里有什么、某个等级有哪些课、有没有讲某个语法的课；「讲解」= 问语法、用法、意思、接续、几个说法的区别，请老师解释；「其他」= 打招呼、闲聊、和日语学习无关。输出一个 JSON 对象，键是：intent（出题 / 进度 / 教材 / 讲解 / 其他）；keywords（字符串数组，消息里提到的日语语法点或说法的原文，如 ために、ように、てから，没有就空数组）；level（提到的 JLPT 等级，N5 到 N1，没提就空串）；kind（想练的考点，只能是 挖空、意思、接续、找错句 之一，没提就空串）；grade（是不是贴了题目和答案让老师判对错，是 或 否）。学习者的消息：{message} 用 快
+  结束
   设 intent_json = 解析JSON {intent_raw}
   设 intent = {intent_json.intent 或 讲解}
   设 known = 否
@@ -125,9 +170,37 @@
     设 intent = 讲解
   结束
 
+  # 原话里指名了某一课：讲解、教材、其他都改成讲这一课；出题、进度照旧
+  # （出题时 lesson_find 把这一课排第一）
+  如果 {lesson_pick} 为空
+    设 ref_args.message = {message}
+    设 ref_args.level = {intent_json.level 或}
+    设 ref_args.learner = {learner}
+    设 ref = 查一行表 app.db lesson_ref {ref_args}
+    设 lesson_asked = {ref.asked 或 0}
+    设 lesson_pick = {ref.code 或}
+    设 lesson_candidates = {ref.candidates 或}
+    如果 {lesson_pick} 不为空
+      设 pin_args.lesson = {lesson_pick}
+      设 pin_args.learner = {learner}
+      设 pinned = 查一行表 app.db lesson_explain {pin_args}
+    结束
+    如果 {intent} 不等于 出题
+      如果 {intent} 不等于 进度
+        如果 {lesson_asked} 等于 1
+          设 intent = 讲解
+          如果 {lesson_pick} 为空
+            设 lesson_missing = 是
+          结束
+        结束
+      结束
+    结束
+  结束
+
   设 search.keywords = {intent_json.keywords 或}
   设 search.message = {message}
   设 search.level = {intent_json.level 或}
+  设 search.pin = {pinned.code 或}
 
   设 reply.who = 老师
   设 reply.link =
@@ -228,6 +301,12 @@
     结束
     设 links.href1 = {reply.link}
     设 links.text1 = {reply.link_text}
+    # 「出第47课的题」但几个等级都有 047：没认定是哪一课，先说一声
+    如果 {lesson_candidates} 不为空
+      如果 {lesson_code} 为空
+        设 reply.text = 好几个等级都有这个课号（{lesson_candidates}），说一下是哪一级，我就直接给那一课的题。{reply.text}
+      结束
+    结束
   否则
     # ---- 要模型回答的几路：先取进度摘要 ----
     设 who.learner = {learner}
@@ -334,6 +413,38 @@
           设 reply.link_text = {links.text3}
         结束
       否则
+      如果 {lesson_missing} 等于 是
+        # ---- 指名了一课但没有：不调模型，说怎么找 ----
+        # 文本里不能有半角空格：以文字开头、带空格的值会被当成动词调用
+        设 reply.text = 没找到你说的那一课，我不拿别的课凑数。教材里的课按等级编号，课号形如「hb-n5-046」（就是N5第46课），在教材页每课的抬头上能看到；最省事的是在教材页打开那一课，点「请老师讲解」。也可以直接说语法点，比如「讲一下～ています」。
+        如果 {lesson_candidates} 不为空
+          设 reply.text = 好几个等级都有这个课号：{lesson_candidates}。说一下是哪一级（比如「讲讲N5第46课」），或者直接说课号、语法点。
+        结束
+        如果 {lesson_pick} 不为空
+          设 reply.text = 没有这一课（{lesson_pick}），可能是课文编号写错了，或者教材更新后这一课没有了。回教材页重新选一课，点「请老师讲解」。
+        结束
+        设 lesson_code =
+        设 links.href1 = #%E6%95%99%E6%9D%90
+        设 links.text1 = 打开教材
+        设 reply.link = {links.href1}
+        设 reply.link_text = {links.text1}
+      否则
+      如果 {pinned.code 或} 不为空
+        # ---- 讲一课：这一课的正文、他在这一课的答题情况 ----
+        设 lesson_code = {pinned.code}
+        设 links.href1 = {pinned.read}
+        设 links.text1 = 读课文：《{pinned.title}》
+        如果 {pinned.link} 不为空
+          设 links.href1 = {pinned.link}
+          设 links.text1 = 做这课的题：《{pinned.title}》（{pinned.n} 道）
+          设 links.href2 = {pinned.read}
+          设 links.text2 = 读课文：《{pinned.title}》
+        结束
+        设 reply.link = {links.href1}
+        设 reply.link_text = {links.text1}
+        问 answer_text = 学生请你讲解教材里的这一课，讲解以课文为准：【{pinned.body}】这个学生在这一课的答题情况（网站统计的）：【{pinned.record}】他整体的学习进度（网站统计的）：【{progress}】最近的对话（旧的在前）：【{recent_talk}】学生现在说：【{message}】请这样讲：先用一两句话说这一课讲什么、什么时候用；再讲接续和要点，用课文里的例句说明（日语原文加中文）；有容易混的说法提一句怎么区分；最后结合他在这一课的答题情况给建议——答错过的条目重点讲，还没做过题就建议做这一课的题。学生问的是这一课里的具体问题时，直接回答那个问题。 用 平衡
+        设 reply.text = {answer_text}
+      否则
         # ---- 讲解：平衡档，带课文正文、进度和最近几轮 ----
         设 search.quiz = 0
         设 lessons = 查询表 app.db lesson_find {search}
@@ -367,6 +478,8 @@
         问 answer_text = 下面是网站课文库里和这个问题最相关的课文，讲解时以它为准（跟问题无关就忽略）：【{reference}】这个学生的学习进度（网站统计的，跟问题有关时可以结合着给建议）：【{progress}】最近的对话（旧的在前，接着这些往下聊）：【{recent_talk}】学生现在说：【{message}】请直接回答学生现在这句话。 用 平衡
         设 reply.text = {answer_text}
       结束
+      结束
+      结束
     结束
   结束
 
@@ -396,6 +509,12 @@
     设 affected = 写库表 app.db chat_add {reply_row}
   结束
 
+  如果 {echo_ask} 等于 是
+    设 ask_msg.who = 你
+    设 ask_msg.text = {message}
+    设 ask_msg.kind = user
+    响应 messages {ask_msg}
+  结束
   响应 messages {reply}
   设 state.intent = {intent}
   响应 state {state}

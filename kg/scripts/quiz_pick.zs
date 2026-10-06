@@ -55,6 +55,7 @@
 设 round_end.text =
 设 round_end.back =
 设 round_end.more =
+设 round_end.explain =
 设 code =
 # 条件左边展开成空串时认不出来，空的先当「无」
 设 mode_val = {mode 或 无}
@@ -95,6 +96,7 @@
     结束
     设 round_end.back = {lesson_row.back}
     设 round_end.more = {lesson_row.more}
+    设 round_end.explain = {lesson_row.explain}
   结束
 否则
   如果 {mode_val 或 无} 等于 review

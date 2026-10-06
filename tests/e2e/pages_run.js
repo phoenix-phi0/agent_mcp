@@ -187,7 +187,7 @@ const ITEM_HEAD = "条目|所属知识点";
   calls.length = 0;
   a.click();
   say(await waitFor(() => p.hash() === `#教材?lesson=${LESSON}`), `地址变成 ${p.hash()}`);
-  say(await waitFor(() => p.texts().includes(`《${L.title}》　N4`)), "顶栏是这一课的抬头");
+  say(await waitFor(() => p.texts().includes(`《${L.title}》　N4　第${Number(L.code.slice(-3))}课（${L.code}）`)), "顶栏是这一课的抬头（带课号）");
   say(calls.some(c => c.path === "/lesson/one" && c.status === 200), "调了「载入」拉这一课");
   say(p.texts().includes(L.summary) && p.texts().includes(L.explanation), "一句话、讲解都在");
   say(p.$$(".screen .dyn.prose .dyn-v").some(e => e.textContent === L.explanation), "讲解按正文排");
@@ -199,12 +199,13 @@ const ITEM_HEAD = "条目|所属知识点";
   say(items.some(r => r[0] === "ようだ"), `挂着的条目：${items.map(r => r.join("/"))}`);
   say(!p.table(LIST_HEAD) && !p.selects().length, "课文表和筛选收起来了");
   say(!!p.link("练这一课") && !!p.link("问老师") && !!p.link("← 回课文表"), "有「练这一课」「问老师」「回课文表」");
+  say(!!p.link("请老师讲解这一课") && !!p.link("请老师讲解"), "有「请老师讲解这一课」（底下）和「请老师讲解」（顶上）");
   say(p.texts().some(t => t.startsWith("这一课有 ")), "写着这一课有几道题");
   p.close();
 
   console.log("四、刷新、后退");
   p = openPage("#" + encodeURIComponent("教材") + "?lesson=" + LESSON);
-  say(await waitFor(() => p.texts().includes(`《${L.title}》　N4`) && (p.rows(EX_HEAD) || []).length === exs.length),
+  say(await waitFor(() => p.texts().some(t => t.startsWith(`《${L.title}》　N4　`)) && (p.rows(EX_HEAD) || []).length === exs.length),
       "地址直达 #教材?lesson=…（也就是刷新）：直接是这一课");
   say(!p.table(LIST_HEAD), "直达时课文表不出来");
   // 先从课文表点进来，后退应该回到课文表
@@ -212,14 +213,14 @@ const ITEM_HEAD = "条目|所属知识点";
   p = openPage("#" + encodeURIComponent("教材"));
   await waitFor(() => (p.rows(LIST_HEAD) || []).length === total);
   p.$$(".screen a.cell-link").find(x => x.textContent.trim() === L.title).click();
-  await waitFor(() => p.texts().includes(`《${L.title}》　N4`));
+  await waitFor(() => p.texts().some(t => t.startsWith(`《${L.title}》　N4　`)));
   p.w.history.back();
   say(await waitFor(() => p.hash() === "#教材" && (p.rows(LIST_HEAD) || []).length === total),
       `后退：回到课文表（${p.hash()}，${(p.rows(LIST_HEAD) || []).length} 行）`);
   say(p.selects().length === 1 && p.selects()[0].value === "全部", "回来时顶栏等级跟表一致（全部）");
   say(!p.table(EX_HEAD), "阅读视图收起来了");
   p.$$(".screen a.cell-link").find(x => x.textContent.trim() === L.title).click();
-  await waitFor(() => p.texts().includes(`《${L.title}》　N4`));
+  await waitFor(() => p.texts().some(t => t.startsWith(`《${L.title}》　N4　`)));
   p.link("← 回课文表").click();
   say(await waitFor(() => p.hash() === "#教材" && p.table(LIST_HEAD)), "点「回课文表」也回去");
 
@@ -233,7 +234,7 @@ const ITEM_HEAD = "条目|所属知识点";
   say(await waitFor(() => (db(`SELECT lesson FROM question WHERE code = '${cur()}'`)[0] || {}).lesson === LESSON),
       `是这一课的题：${cur()}`);
   p.w.history.back();
-  say(await waitFor(() => p.hash() === `#教材?lesson=${LESSON}` && p.texts().includes(`《${L.title}》　N4`)
+  say(await waitFor(() => p.hash() === `#教材?lesson=${LESSON}` && p.texts().some(t => t.startsWith(`《${L.title}》　N4　`))
                        && (p.rows(EX_HEAD) || []).length === exs.length),
       "后退：回到这一课，例句还在");
   p.link("问老师").click();
@@ -243,7 +244,7 @@ const ITEM_HEAD = "条目|所属知识点";
   console.log("六、没有题的课、没有这一课");
   const NQ = db(`SELECT * FROM lesson WHERE code = '${NOQ}'`)[0];
   p = openPage("#" + encodeURIComponent("教材") + "?lesson=" + NOQ);
-  say(await waitFor(() => p.texts().includes(`《${NQ.title}》　${NQ.level}`) && p.rows(EX_HEAD)),
+  say(await waitFor(() => p.texts().some(t => t.startsWith(`《${NQ.title}》　${NQ.level}　`)) && p.rows(EX_HEAD)),
       `没有题的课照样能读：《${NQ.title}》`);
   say(!p.link("练这一课") && !!p.link("问老师"), "没有题：不显示「练这一课」，「问老师」还在");
   say(p.texts().some(t => t.includes("还没有题")), "说了这一课还没有题");

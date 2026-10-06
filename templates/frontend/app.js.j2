@@ -16,6 +16,7 @@
 <% if lists_init_json is not defined %><% set lists_init_json = "{}" %><% endif %>
 <% if loaders_json is not defined %><% set loaders_json = "{}" %><% endif %>
 <% if overlay_loaders_json is not defined %><% set overlay_loaders_json = "{}" %><% endif %>
+<% if triggers_json is not defined %><% set triggers_json = "{}" %><% endif %>
 <% if enter_json is not defined %><% set enter_json = "{}" %><% endif %>
 <% if nav_json is not defined %><% set nav_json = "[]" %><% endif %>
 <% set nav = nav if nav is defined else false %>
@@ -50,6 +51,8 @@ const enterActions = <%= enter_json %>;
 const loaders = <%= loaders_json %>;
 // 浮层名 -> 同上，浮层上的「载入」
 const overlayLoaders = <%= overlay_loaders_json %>;
+// 界面名 -> 带着地址参数进来时跑一次的动作（.ui 里的「触发」）
+const triggers = <%= triggers_json %>;
 // 顶部导航：[{label, target, group}]。group 是同属一个实体的几个界面名，
 // 在其中任何一个上时那一项高亮。由项目编译时算好传进来。
 const nav = <%= nav_json %>;
@@ -642,6 +645,52 @@ const _app = createApp({
       if (seq === enterSeq && route.value === name) applyResponse(resp);
     }
 
+    // 「触发」：带着地址参数进来（#问老师?lesson=hb-n5-046）时，把参数交给
+    // 界面声明的动作跑一次——教材页的「请老师讲解」就是这样把讲解请求发出去的。
+    //
+    // 跑之前先把参数从地址里去掉，用 replaceState 不留历史：
+    //   刷新        地址里没参数了，不会再发一次（每次都是一次模型调用）
+    //   后退        回到来的那页，不会回到带参数的地址又触发一次
+    //   之后的提交  提交时地址参数会盖进表单（见 submitTo），不清掉的话之后
+    //               每句话都带着这一课
+    // 跟提交一样锁住这个界面、在消息流里摆「…」；请求回来时人已经切走了就
+    // 不往别的界面上放（下次进来「进入时」会从库里拉回）。
+    async function runTrigger(name) {
+      const act = triggers[name];
+      const p = Object.fromEntries(Object.entries(params.value || {}).filter(([k]) => k !== "浮层"));
+      if (!act || !Object.keys(p).length) return;
+      const ep = typeof endpoints !== "undefined" ? endpoints[act] : null;
+      if (!ep || inflight.value[name]) return;
+      history.replaceState(null, "", "#" + encodeURIComponent(name));
+      params.value = {};
+      inflight.value = { ...inflight.value, [name]: act };
+      const stream = screenStream[name] || "";
+      let placeholder = null;
+      if (stream && shared.value[stream]) {
+        placeholder = { who: "", text: "…", kind: "pending" };
+        shared.value[stream].push(placeholder);
+      }
+      const drop = () => {
+        const list = (stream && shared.value[stream]) || [];
+        const i = placeholder ? list.indexOf(placeholder) : -1;
+        if (i >= 0) list.splice(i, 1);
+      };
+      try {
+        const resp = await postTo(ep, { action: act, form: p });
+        drop();
+        if (route.value === name) applyResponse(resp);
+      } catch (e) {
+        drop();
+        if (route.value === name) {
+          if (stream) pushMessages(stream, [{who: "出错", text: String(e), kind: "no"}]);
+          else showNotice(String(e), "no");
+        }
+      } finally {
+        const { [name]: _done, ...rest } = inflight.value;
+        inflight.value = rest;
+      }
+    }
+
     // 进入一个界面时自动跑的动作（.ui 里标了「进入时」），打开就有数据。
     //
     // 切界面时上一个界面的数据不能留着：从笔记列表切到待办列表，请求回来
@@ -659,7 +708,6 @@ const _app = createApp({
       // 预览里没有后端，lists 是编译时塞的示例数据，清掉就什么都看不到了
       if (acts.some(remote)) lists.value = {};
       await runLoader(name);
-      if (!acts.length) return;
       const seq = ++enterSeq;
       for (const a of acts) {
         const ep = remote(a);
@@ -667,6 +715,10 @@ const _app = createApp({
         const resp = await postTo(ep, { action: a, form: forms.value[name] || {} });
         if (seq === enterSeq && route.value === name) applyResponse(resp);
       }
+      // 「触发」排在「进入时」后面：先把页面原有的数据（问老师的历史对话）
+      // 拉回来，再在后面接上这次的请求和回复——反过来的话，「进入时」回来
+      // 整条替换消息流，刚放上去的回复就被盖掉了
+      if (seq === enterSeq && route.value === name) await runTrigger(name);
     }
 
     // 换了界面才跑「进入时」；同一个界面、只是地址参数变了（开关浮层、换
@@ -678,7 +730,7 @@ const _app = createApp({
         entered = route.value;
         runEnter(route.value);
       } else {
-        runLoader(route.value);
+        runLoader(route.value).then(() => runTrigger(route.value));
       }
     }
     window.addEventListener("hashchange", onRoute);

@@ -36,6 +36,7 @@ import sqlite3
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -423,6 +424,10 @@ def main():
           and all(x["item"] in pair or (x["level"] == lv and x["kind"] in kinds) for x in oth),
           f"易混对比的条目先出、其余是同级同考点：{[x['item'] for x in oth]}，对比条目 {sorted(pair)}")
     check(end_body is not None, "一轮出够了：下一题不再出题")
+    rd = state(end_body or {}).get("round") or {}
+    check(unquote(rd.get("explain", "")) == f"#问老师?lesson={lesson}"
+          and unquote(rd.get("back", "")) == f"#教材?lesson={lesson}",
+          f"一轮做完：回教材看这一课旁边有「请老师讲这课」（#问老师?lesson=…）：{rd}")
     rd = state(end_body or {}).get("round") or {}
     check("这一轮做完了" in (rd.get("text") or "") and "再来一轮" in rd.get("text", "")
           and "都出过了" not in rd.get("text", ""),
