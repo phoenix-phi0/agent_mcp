@@ -37,12 +37,176 @@
 
 import inspect
 import json
+import re as _re
 from pathlib import Path
 
 from . import config
 from .dsl_core import (ATTACH_RE, DEFAULT_TOOL_ROUNDS, DSLError,
                        MAX_CALL_DEPTH, MODEL_ID_RE, MODEL_RE, RETRY_RE,
                        TOOLS_RE, UNEXPANDED_RE, to_text)
+
+
+# ----------------------------------------------------------------------
+# 问JSON 的「格式」后缀：问JSON r = 提示词 格式 action:合格|重做 note?:文本 重问 3 次
+#
+# 只认语句末尾、「格式」后面每个词都是「名字:类型」的情况，否则「格式」两个字
+# 当提示词正文。在展开之前的原文上认，变量的值里有「格式 a:b」不影响。
+# ----------------------------------------------------------------------
+
+FORMAT_RE = _re.compile(r"\s+格式((?:\s+\S+)+?)(?:\s+重问\s+(\d+)\s*次)?\s*$")
+FIELD_RE = _re.compile(r"^([^\s:?]+)(\?)?:(\S+)$")
+FORMAT_TYPES = ("文本", "数字", "是否", "列表")
+DEFAULT_REASKS = 2
+MAX_REASKS = 5
+_BAD_JSON = object()        # 解析不了的标记，跟 JSON 里的 null 区分开
+_REASK = ("你上次的回复不符合要求：{}。请改正后重新输出：只输出一个 JSON 对象，"
+          "不要代码围栏，不要任何解释。")
+
+
+def _split_format(rest: str, lineno: int):
+    """剥「格式 …」后缀，返回 (剩下的, 字段表或 None, 重问次数)。
+
+    字段表是 [(名字, 可选, 类型, 枚举值列表或 None)]。多个「格式」时从最右边
+    那个起认；类型写错（像格式却认不出）直接报错，不静默当提示词。
+    """
+    starts = [i.start() for i in _re.finditer(r"\s+格式\s", rest)]
+    for start in reversed(starts):
+        m = FORMAT_RE.match(rest, start)
+        if not m or not rest[:start].strip():
+            continue
+        tokens = m.group(1).split()
+        fields = [FIELD_RE.match(t) for t in tokens]
+        if not all(f and f.group(1).isidentifier() for f in fields):
+            continue
+        spec = []
+        for f in fields:
+            kind = f.group(3)
+            options = None
+            if "|" in kind:
+                options = [o.strip() for o in kind.split("|")]
+                if not all(options):
+                    raise DSLError(f"第 {lineno + 1} 行：「格式」里 {f.group(1)} "
+                                   f"的可选值有空的：{kind}")
+                kind = "枚举"
+            elif kind not in FORMAT_TYPES:
+                raise DSLError(f"第 {lineno + 1} 行：「格式」里 {f.group(1)} 的类型"
+                               f"「{kind}」不认识，只能是 文本 数字 是否 列表 "
+                               f"或 A|B|C")
+            spec.append((f.group(1), bool(f.group(2)), kind, options))
+        reasks = DEFAULT_REASKS
+        if m.group(2) is not None:
+            reasks = int(m.group(2))
+            if reasks > MAX_REASKS:
+                raise DSLError(f"第 {lineno + 1} 行：「重问 {reasks} 次」最多 "
+                               f"{MAX_REASKS} 次")
+        return rest[:start], spec, reasks
+    return rest, None, 0
+
+
+_KIND_DESC = {"文本": "文本（非空字符串）", "数字": "数字",
+              "是否": "是否（true 或 false）", "列表": "列表（JSON 数组）"}
+_KIND_SAMPLE = {"文本": "……", "数字": 0, "是否": True, "列表": ["……"]}
+
+
+def _format_note(spec: list) -> str:
+    """附在提示词末尾的格式说明：字段、类型、可选值，加一个示例。"""
+    lines = ["", "", "输出格式：只输出一个 JSON 对象，不要代码围栏，不要任何解释。字段："]
+    sample = {}
+    for name, optional, kind, options in spec:
+        desc = ("只能是 " + "、".join(f"\"{o}\"" for o in options) + " 之一"
+                if options else _KIND_DESC[kind])
+        if optional:
+            desc += "；可选，没有就不写这个字段"
+        lines.append(f"- {name}：{desc}")
+        sample[name] = options[0] if options else _KIND_SAMPLE[kind]
+    lines.append("示例：" + json.dumps(sample, ensure_ascii=False))
+    return "\n".join(lines)
+
+
+def _show(value) -> str:
+    text = to_text(value) if value is not None else "null"
+    return text if len(text) <= 50 else text[:50] + "…"
+
+
+def _check_format(data, spec: list):
+    """按字段表查一遍，返回 (规范化后的对象, 问题列表)。只查顶层，多余字段留着。"""
+    if data is _BAD_JSON:
+        return None, ["回复不是合法 JSON"]
+    if not isinstance(data, dict):
+        what = "列表" if isinstance(data, list) else "字符串或其他值"
+        return None, [f"回复应该是一个 JSON 对象，你回的是{what}"]
+    out, problems = dict(data), []
+    for name, optional, kind, options in spec:
+        if name not in data or data[name] is None:
+            if not optional:
+                problems.append(f"缺少字段 {name}")
+            continue
+        v = data[name]
+        if kind == "文本":
+            if isinstance(v, str) and v.strip():
+                continue
+            problems.append(f"{name} 应该是非空的文本，你回了 {_show(v)}")
+        elif kind == "数字":
+            n = _as_number(v)
+            if n is None:
+                problems.append(f"{name} 应该是数字，你回了 {_show(v)}")
+            else:
+                out[name] = n
+        elif kind == "是否":
+            b = _as_bool(v)
+            if b is None:
+                problems.append(f"{name} 应该是 true 或 false，你回了 {_show(v)}")
+            else:
+                out[name] = b
+        elif kind == "列表":
+            if not isinstance(v, list):
+                problems.append(f"{name} 应该是列表（JSON 数组），你回了 {_show(v)}")
+        else:
+            s = to_text(v).strip() if not isinstance(v, (dict, list)) else None
+            if s in options:
+                out[name] = s
+            else:
+                problems.append(f"{name} 只能是 {_or(options)}，你回了 {_show(v)}")
+    return out, problems
+
+
+def _or(options: list) -> str:
+    return options[0] if len(options) == 1 else \
+        "、".join(options[:-1]) + " 或 " + options[-1]
+
+
+def _as_number(v):
+    """int / float 原样；能转成数字的字符串转过来（整数出 int）；别的 None。"""
+    import math
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return v if math.isfinite(v) else None
+    if isinstance(v, str):
+        s = v.strip()
+        try:
+            return int(s)
+        except ValueError:
+            pass
+        try:
+            f = float(s)
+        except ValueError:
+            return None
+        return f if math.isfinite(f) else None
+    return None
+
+
+def _as_bool(v):
+    """布尔原样；是/否/true/false 字符串转成布尔（插值时 to_text 出 是/否）。"""
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in ("是", "true"):
+            return True
+        if s in ("否", "false"):
+            return False
+    return None
 
 
 class ModelMixin:
@@ -280,12 +444,30 @@ class ModelMixin:
         self._last_result = result
 
     def _do_ask_json(self, rest: str, lineno: int) -> None:
-        """问JSON X = 提示词 —— 要一个 JSON 回来，直接得到结构。
+        """问JSON X = 提示词 [附 文件] [格式 字段:类型 … [重问 N 次]] [用 模型]
 
         解析失败抛错而不是给空对象：后面 {决策.意图} 取不到会原样保留成
         字符串，扔进条件判断只会一路走到「否则」，错得很隐蔽。
+
+        带「格式」时走 _ask_json_format：附格式说明、检查、不对就重问，
+        重问用完抛错。不带的旧写法一行不变。
         """
         rest, model = self._split_model(rest)
+        rest, spec, reasks = _split_format(rest, lineno)
+        if spec is None:
+            # 「附」写在「格式」后面也认；都没有就原样不动
+            head, files = self._split_attach(rest)
+            if files:
+                head, spec, reasks = _split_format(head, lineno)
+                if spec is not None:
+                    rest = f"{head} 附 {','.join(files)}"
+        if spec is not None:
+            name, prompt = self._prompt_of(rest, "问JSON")
+            result = self._ask_json_format(prompt + _format_note(spec), spec,
+                                           reasks, model, lineno)
+            self.store(name, result)
+            self._last_result = to_text(result)
+            return
         name, prompt = self._prompt_of(rest, "问JSON")
         try:
             result = self.client.chat_json(
@@ -295,6 +477,41 @@ class ModelMixin:
             raise DSLError(f"第 {lineno + 1} 行：{e}") from e
         self.store(name, result)
         self._last_result = to_text(result)
+
+    def _ask_json_format(self, prompt: str, spec: list, reasks: int,
+                         model, lineno: int):
+        """带格式的问JSON：问一次，查一次，不对就把问题和它上次的回复
+        一起发回去重问，最多 reasks 次。非法 JSON 也算格式错。
+
+        自己调 chat_messages 拿原文、自己解析，不走 chat_json：重问要带上
+        上次的原文，而且 api / cli / 假客户端这样走的是同一条路。
+        """
+        from .zhipu import strip_json
+        msgs = []
+        if self.system:
+            msgs.append({"role": "system", "content": self.system})
+        msgs.append({"role": "user", "content": prompt})
+        for attempt in range(reasks + 1):
+            reply = self.client.chat_messages(
+                msgs, temperature=self.temperature, model=model or self.model)
+            if isinstance(reply, (dict, list)):     # 假客户端的 handler 可直接回结构
+                data, last = reply, to_text(reply)
+            else:
+                last = str(reply)
+                try:
+                    data = json.loads(strip_json(last))
+                except json.JSONDecodeError:
+                    data = _BAD_JSON
+            value, problems = _check_format(data, spec)
+            if not problems:
+                return value
+            if attempt < reasks:
+                msgs = msgs + [
+                    {"role": "assistant", "content": last},
+                    {"role": "user", "content": _REASK.format(
+                        "；".join(problems))}]
+        raise DSLError(f"第 {lineno + 1} 行：问JSON 格式不对："
+                       f"{'；'.join(problems)}；最后一次回复：{last[:200]}")
 
     def _do_stream(self, rest: str) -> None:
         """流式 X = 提示词 —— 边生成边打印，最后把整段存进变量。"""
