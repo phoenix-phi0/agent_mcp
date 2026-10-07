@@ -76,6 +76,18 @@ def main():
     check(one("a:文本 note?:文本", '{"a":"x"}') == '{"a":"x"}', "可选字段缺了不算错")
     check("note 应该是非空的文本" in one("a:文本 note?:文本", '{"a":"x","note":5}'),
           "可选字段存在就按类型查")
+    for v in ('""', '"   "', '" \\n\\t"', "null"):
+        check(one("a:文本 note?:文本", '{"a":"x","note":%s}' % v) == '{"a":"x"}',
+              f"可选文本是 {v} 算没给、去掉这个键")
+    check(one("a:文本 n?:数字 l?:列表 k?:是|否", '{"a":"x","n":"","l":" ","k":null}')
+          == '{"a":"x"}', "可选的数字/列表/枚举空串或 null 也算没给")
+    out, m = run("问JSON r = 读片段 格式 action:读|改 file?:文本 old?:文本 new?:文本\n"
+                 "打印 {r.action}",
+                 ['{"action":"读","file":"","old":"","new":"  "}', '{"action":"改"}'])
+    check(out == "读" and len(m.calls) == 1, f"可选字段空串不触发重问：{out} / {len(m.calls)}")
+    check("a 应该是非空的文本" in one("a:文本 note?:文本", '{"a":"  ","note":""}'),
+          "必填文本是纯空白仍判错")
+    check("应该是非空的文本" in one("a:文本", '{"a":""}'), "必填文本空串仍判错")
     check("缺少字段 a" in one("a:文本", '{"b":"x"}'), "必填缺了报缺少字段")
     check("缺少字段 a" in one("a:文本", '{"a":null}'), "必填是 null 也算缺")
     check(one("a:文本", '{"a":"x","extra":{"k":1}}') == '{"a":"x","extra":{"k":1}}',

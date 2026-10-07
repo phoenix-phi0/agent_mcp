@@ -137,11 +137,14 @@ def _check_format(data, spec: list):
         return None, [f"回复应该是一个 JSON 对象，你回的是{what}"]
     out, problems = dict(data), []
     for name, optional, kind, options in spec:
-        if name not in data or data[name] is None:
-            if not optional:
-                problems.append(f"缺少字段 {name}")
+        v = data.get(name)
+        if optional and (v is None or isinstance(v, str) and not v.strip()):
+            # 可选字段 null / 缺失 / 空串 / 纯空白都算「没给」：不算错，去掉这个键
+            out.pop(name, None)
             continue
-        v = data[name]
+        if v is None:
+            problems.append(f"缺少字段 {name}")
+            continue
         if kind == "文本":
             if isinstance(v, str) and v.strip():
                 continue
