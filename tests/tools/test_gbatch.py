@@ -190,9 +190,47 @@ def main():
     time.sleep(0.3)
     check(gbatch.status(j["job_id"])["status"] == "died", "进程没了就是 died，wait 不会空等")
 
+    print("推理强度 effort")
+    def run(tasks, **k):
+        LOG.unlink(missing_ok=True)
+        j = gbatch.submit(tasks, cwd=str(TMP), **k)
+        d = gbatch.wait(j["job_id"], timeout=30, every=0.2)
+        return d, calls()
+    d, cs = run(["e1"])
+    check(arg(cs[0], "--reasoning-effort") == "medium", "默认 medium 进命令行")
+    check(d["options"]["effort"] == "medium" and "medium" in d["tasks"][0]["cmd"],
+          "options 和 task cmd 记录 effort")
+    for zh, en in (("低", "low"), ("中", "medium"), ("高", "high"), ("极高", "xhigh")):
+        d, cs = run(["e2"], effort=zh)
+        check(arg(cs[0], "--reasoning-effort") == en, f"中文别名 {zh} → {en}")
+    d, cs = run(["e3"], effort="HIGH")
+    check(arg(cs[0], "--reasoning-effort") == "high", "大小写不敏感")
+    for none in (None, ""):
+        d, cs = run(["e4"], effort=none)
+        check("--reasoning-effort" not in cs[0]["argv"] and "--reasoning-effort" not in d["tasks"][0]["cmd"]
+              and d["options"]["effort"] is None, f"effort={none!r} 不传参数")
+    e = raises(gbatch.submit, ["x"], cwd=str(TMP), effort="super")
+    check(e and "low" in e and "xhigh" in e, "非法值报错并列出可选值", e)
+    e = raises(gbatch.submit, ["x"], cwd=str(TMP), effort="xhigh", model="grok-4.5-build")
+    check(e and "xhigh" in e, "grok-4.5 + xhigh 报错", e)
+    e = raises(gbatch.submit, [{"prompt": "x", "effort": "xhigh"}], cwd=str(TMP), model="grok-4.5")
+    check(e, "任务级 xhigh 也受 4.5 限制")
+    check(gbatch._norm_effort("high", "grok-4.5-build") == "high", "grok-4.5 + high 可以")
+    check(raises(gbatch.submit, [{"prompt": "x", "effort": "bad"}], cwd=str(TMP)),
+          "任务级非法值报错")
+    d, cs = run(["j1", {"prompt": "j2", "effort": "low"}, {"prompt": "j3", "effort": None},
+                 {"prompt": "j4"}], effort="high")
+    got = {c["prompt"]: arg(c, "--reasoning-effort") for c in cs}
+    check(got == {"j1": "high", "j2": "low", "j3": None, "j4": "high"},
+          "任务级覆盖优先于 job 级", got)
+    check(arg(cs[1], "--reasoning-effort") == "low" and "low" in d["tasks"][1]["cmd"],
+          "覆盖后的值记在该任务 cmd")
+    check("effort" in gbatch.describe() and "low" in gbatch.describe(), "describe 有 effort 说明")
+    j = {"job_id": d["id"]}          # 下面「jobs 新的在前」要用最新一个
+
     print("列表和概况")
     js = gbatch.jobs()
-    check(len(js) == 6 and js[0]["id"] == j["job_id"], "jobs 新的在前", [x["id"] for x in js])
+    check(len(js) >= 6 and js[0]["id"] == j["job_id"], "jobs 新的在前", [x["id"] for x in js])
     check("最近 5 个任务" in gbatch.describe(), "describe 能用")
 
     print(f"\n{'=' * 50}\n通过 {PASS}，失败 {FAIL}")

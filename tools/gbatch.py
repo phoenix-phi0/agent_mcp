@@ -122,6 +122,11 @@ GROK_HOME = Path(os.environ.get("GROK_HOME") or Path.home() / ".grok")
 
 PERMISSION_MODES = ("default", "acceptEdits", "auto", "dontAsk", "plan")
 
+# 推理强度，传给 --reasoning-effort。CLI 自己的默认是 high，gbatch 默认 medium。
+EFFORTS = ("low", "medium", "high", "xhigh")
+EFFORT_ALIASES = {"低": "low", "中": "medium", "高": "high", "极高": "xhigh"}
+DEFAULT_EFFORT = "medium"
+
 # allowed_tools 里的 Claude 工具名 → grok 规则名。grok 认的工具名只有
 # Bash / Read / Edit（Write 是别名）/ Grep（Glob 是别名）/ MCPTool /
 # WebFetch / WebSearch，见 22-permissions-and-safety.md「Tool Names」。
@@ -234,6 +239,22 @@ def _precheck(items, permission_mode, rules) -> list:
     return out
 
 
+def _norm_effort(v, model=None):
+    """推理强度归一成 low/medium/high/xhigh；None 或空串返回 None（不传参数）。
+    非法值、或 grok-4.5 配 xhigh 报错。"""
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return None
+    k = str(v).strip().lower()
+    k = EFFORT_ALIASES.get(str(v).strip(), k)
+    if k not in EFFORTS:
+        raise GBatchError(f"effort 只能是 {' / '.join(EFFORTS)}"
+                          f"（或中文 {' / '.join(EFFORT_ALIASES)}），"
+                          f"None 或空串表示不传，收到：{v!r}")
+    if k == "xhigh" and model and str(model).startswith("grok-4.5"):
+        raise GBatchError(f"模型 {model} 不支持 effort=xhigh，请用 high 及以下")
+    return k
+
+
 def _mask(s: str) -> str:
     return _SECRET.sub(lambda m: (m.group(2) or m.group(3) or m.group(1) or "") + "***", s)
 
@@ -282,7 +303,7 @@ def _save(d: dict) -> None:
 def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
            model: str = None, permission_mode: str = None,
            allowed_tools=None, timeout: int = TASK_TIMEOUT,
-           preamble: bool = True) -> dict:
+           preamble: bool = True, effort: str = DEFAULT_EFFORT) -> dict:
     """提交一批任务，立刻返回，不等跑完。
 
     tasks：提示词列表，或 {prompt, outfile} 字典列表。outfile 给了的话，
@@ -298,18 +319,25 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
         Claude 的工具名会翻成 grok 的（TOOL_MAP），认不出的跳过并记进
         warnings。
     timeout：单条任务的秒数上限。
+    effort：推理强度，传给 --reasoning-effort：low / medium / high / xhigh
+        （也收 低/中/高/极高），默认 medium。None 或空串不传，用 grok 自己
+        的默认（high）。tasks 里的字典可带 "effort" 单独覆盖。非法值直接
+        报错；grok-4.5 系列不支持 xhigh。
 
     返回 {"job_id", "status", "tasks", "dir", "allow", "warnings"}。
     warnings 里有工具名翻译的问题，和「提示词像要写文件/跑命令但没放行」
     的预检提示（只提示，照样提交）。
     """
+    job_effort = _norm_effort(effort, model)
     items = []
     for t in tasks:
         if isinstance(t, str) and t.strip():
-            items.append({"prompt": t, "outfile": ""})
+            items.append({"prompt": t, "outfile": "", "effort": job_effort})
         elif isinstance(t, dict) and t.get("prompt"):
             items.append({"prompt": t["prompt"],
-                          "outfile": t.get("outfile", "")})
+                          "outfile": t.get("outfile", ""),
+                          "effort": _norm_effort(t["effort"], model)
+                          if "effort" in t else job_effort})
         else:
             raise GBatchError(f"任务要是非空字符串或含 prompt 的字典，收到：{t!r}")
 
@@ -348,7 +376,8 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
         "options": {"model": model or None, "permission_mode": permission_mode,
                     "allowed_tools": list(allowed_tools or []),
                     "allow": rules,
-                    "timeout": int(timeout), "preamble": bool(preamble)},
+                    "timeout": int(timeout), "preamble": bool(preamble),
+                    "effort": job_effort},
         "warnings": warnings,
         "cmd": None,
         "tasks": [dict(it, status="pending", output="", error="",
@@ -496,6 +525,12 @@ def describe() -> str:
         "  bypassPermissions 不收；\"*\" 规则也不收",
         "  allowed_tools   每条一个 --allow，例：['Edit', 'Bash(python3 *)', 'Bash(git *)']",
         "",
+        "推理强度 effort（--reasoning-effort）：low / medium / high / xhigh，"
+        "也收 低/中/高/极高；默认 medium。",
+        "  轻任务（查文件、列清单、简单函数）用 low；复杂排查/重构用 high；",
+        "  None 或空串 = 不传，用 CLI 自己的默认（high）。grok-4.5 系列不支持 xhigh。",
+        "  tasks 里的 {\"prompt\": ..., \"effort\": \"low\"} 可单条覆盖 job 级。",
+        "",
         "工具名映射（Claude → grok 规则，其余名字跳过并记 warnings）：",
     ]
     lines += [f"  {k:13} → {v}" for k, v in TOOL_MAP.items() if k != v]
@@ -517,6 +552,10 @@ def _command(d: dict, t: dict, resume: str = None) -> list:
         cmd += ["-r", resume]
     if o["model"]:
         cmd += ["--model", o["model"]]
+    # 任务级 effort 优先；老任务的 job.json 没有这个字段，就不传
+    effort = t["effort"] if "effort" in t else o.get("effort")
+    if effort:
+        cmd += ["--reasoning-effort", effort]
     if o["permission_mode"]:
         cmd += ["--permission-mode", o["permission_mode"]]
     # 老任务的 job.json 没有 allow，退回原样的 allowed_tools

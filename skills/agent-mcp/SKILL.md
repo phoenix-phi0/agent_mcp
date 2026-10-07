@@ -63,6 +63,12 @@ status/...`，`gbatch.describe()` 列出权限用法和工具名映射）。跟 
 - `allowed_tools` 收 Claude 的名字，自动翻：Glob→Grep、Write/MultiEdit/
   NotebookEdit→Edit、LS→Read；`Bash(...)` 这类原样；认不出的（Task 等）跳过、
   进返回值和 job.json 的 `warnings`。`"*"` 不收。
+- **推理强度 `effort`**（→ `--reasoning-effort`）：`low` / `medium` / `high` / `xhigh`，
+  也收 低/中/高/极高，默认 `medium`；`None` 或空串不传，用 CLI 自己的默认（high）。
+  非法值 submit 时直接报错；`grok-4.5*` 模型不支持 `xhigh`。tasks 里的字典可单条覆盖：
+  `{"prompt": "...", "effort": "low"}`，优先于 job 级。实际用的值在 job.json 的
+  `options.effort` 和每条的 `cmd`。分档：轻任务（查文件、列清单、简单函数）用 `low`；
+  一般用默认 `medium`；复杂排查/重构用 `high`；`xhigh` 只给确实需要的难题。
 - submit 返回的 `warnings` 还有预检：提示词像要写文件/跑命令而没放行时提醒。
 - 模型默认用 grok 自己的，没有 `model="auto"`；原始输出在任务目录
   `task_<n>.raw.json` / `task_<n>.stderr.log`，实际命令行在 job.json 的 `cmd`。
