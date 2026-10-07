@@ -115,7 +115,11 @@ PREAMBLE = """这是批量任务里的一条，没有人在旁边看着，也没
    这类只读操作随便用；别的先想想是不是必须。写文件用写文件/编辑工具，
    不要用 shell 重定向（echo/printf/cat > 文件、heredoc）；命令一条一条
    跑，不要用 && ; | 串起来——这些放行规则覆盖不到，会被中断。
-5. 最后一段回复就是这条任务的结果，写清楚结论。"""
+5. 跑命令时不要在前面加环境变量赋值（如 PYTHONPATH=… python3 x.py、FOO=1 cmd），
+   这种写法不在权限规则里，会被拦下、整条中断。需要导入同目录模块时，在测试脚本
+   里用 sys.path.insert，或先 cd 到那个目录再运行；cd 也受限就直接用绝对路径
+   运行脚本，由脚本自己处理 sys.path。
+6. 最后一段回复就是这条任务的结果，写清楚结论。"""
 
 # grok 的 GROK_HOME（会话记录在它下面的 sessions/）
 GROK_HOME = Path(os.environ.get("GROK_HOME") or Path.home() / ".grok")

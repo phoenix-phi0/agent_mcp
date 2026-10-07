@@ -60,6 +60,8 @@ status/...`，`gbatch.describe()` 列出权限用法和工具名映射）。跟 
   或 `Bash(python3 *)` 这类**。只给 Bash 不算能写文件（模型会用 write 工具）。
   **带重定向的串联命令连 `--allow Bash` 也盖不住**（实测 `mkdir && printf … > a.py
   && python3 a.py` 被中断），提示词里写明「用写文件工具建文件、命令一条一条跑」。
+  命令前加环境变量赋值（`PYTHONPATH=… python3 x.py`）同样被拦，`--rules` 已叮嘱
+  模型改用 `sys.path.insert` 或先 cd / 用绝对路径。
 - `allowed_tools` 收 Claude 的名字，自动翻：Glob→Grep、Write/MultiEdit/
   NotebookEdit→Edit、LS→Read；`Bash(...)` 这类原样；认不出的（Task 等）跳过、
   进返回值和 job.json 的 `warnings`。`"*"` 不收。

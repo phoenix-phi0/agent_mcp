@@ -113,6 +113,8 @@ def main():
     check(all(c["cwd"] == str(TMP) for c in cs), "在指定 cwd 里跑")
     check(all(arg(c, "--output-format") == "json" for c in cs), "要 JSON 输出")
     check(all(arg(c, "--rules") == gbatch.PREAMBLE for c in cs), "环境交代走 --rules")
+    check("PYTHONPATH=" in gbatch.PREAMBLE and "sys.path.insert" in gbatch.PREAMBLE,
+          "--rules 含「不要加环境变量前缀」")
     check(all("--model" not in c["argv"] and "--permission-mode" not in c["argv"]
               and "--allow" not in c["argv"] and "--always-approve" not in c["argv"]
               for c in cs), "默认不带模型、不放开权限")
