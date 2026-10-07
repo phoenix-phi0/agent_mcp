@@ -75,6 +75,13 @@ status/...`，`gbatch.describe()` 列出权限用法和工具名映射）。跟 
 kill -TERM -"$(cat /tmp/x.pid)"
 ```
 
+**kg 的 8197 服务是用户级 systemd 服务 `kg8197`**（unit 在 `~/.config/systemd/user/kg8197.service`，
+不进仓库；已开 linger，独立于 zmcp.service 的 cgroup）。重启用
+`systemctl --user restart kg8197`，状态 `systemctl --user status kg8197`，
+日志 `/tmp/kg_8197.log`。**不要再用 setsid 起 8197，也不要按进程组 kill**
+（会被 systemd 拉起来重启，或者和它打架）。上面的 setsid + 按组杀只适用于临时起的服务。
+命令行里没有 `XDG_RUNTIME_DIR` 时先 `export XDG_RUNTIME_DIR=/run/user/$(id -u)`。
+
 服务的日志写文件，不要接管道——Flask 每请求一行日志，几百个请求就把 64KB
 的管道缓冲区写满，服务卡死，看着像挂了。
 
