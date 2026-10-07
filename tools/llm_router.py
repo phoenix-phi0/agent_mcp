@@ -507,8 +507,12 @@ class ClaudeCLIClient(_CLIBackend):
         opts = ["--output-format", "json",
                 "--tools", "", "--strict-mcp-config",
                 "--system-prompt", system or DEFAULT_SYSTEM]
+        # "sonnet@low"：@ 后面是努力程度，见 config.EFFORTS
+        model, effort = config.split_effort(model or "")
         if model:
             opts += ["--model", model]
+        if effort:
+            opts += ["--effort", effort]
         if self.use_wsl():
             label = "claude（经 WSL）"
             # 提示词从标准输入给：claude -p 不带提示词参数时读 stdin

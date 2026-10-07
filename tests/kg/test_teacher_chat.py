@@ -11,7 +11,7 @@
   （学习者原话）查 INTENTS 回预设的 JSON；别的调用（老师回答）回 REPLY。
 
 模型档位怎么断言：calls 里记的 model 是解析过的名字（现在的 models.json 里
-快 = cli:claude/haiku、平衡 = cli:claude/sonnet），tier 是从哪个档位查到的。
+快 = cli:claude/sonnet@low、平衡 = cli:claude/sonnet），tier 是从哪个档位查到的。
 两样都比：tier 等于「快」/「平衡」，model 等于 config.resolve_model(档位)——
 换了 models.json 也不用改测试。
 

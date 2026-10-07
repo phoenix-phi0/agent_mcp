@@ -41,8 +41,8 @@ if "--tools" in a:
         for i, sec in enumerate(prompt.split("### 任务 ")[1:], 1):
             if "GAP" in sec:
                 continue
-            m = "opus" if "HARD" in sec else "haiku" if "EASY" in sec else "sonnet"
-            picks.append({{"i": i, "model": m, "reason": "因为" + m}})
+            m = "hard" if "HARD" in sec else "easy" if "EASY" in sec else "normal"
+            picks.append({{"i": i, "tier": m, "reason": "因为" + m}})
         out = "```json\\n" + json.dumps(picks) + "\\n```"
     print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
                       "result": out, "session_id": "judge", "total_cost_usd": 0.002}}))
@@ -211,7 +211,7 @@ def main():
     time.sleep(0.3)
     check(cbatch.status(j["job_id"])["status"] == "died", "进程没了就是 died，wait 不会空等")
 
-    print("model=auto：haiku 评估后分模型")
+    print("model=auto：sonnet 低 effort 评估后分档")
     LOG.unlink()
     j = cbatch.submit(["EASY 跑命令", "HARD 重构", "普通活"], cwd=str(TMP), model="auto")
     d = cbatch.wait(j["job_id"], timeout=30, every=0.2)
@@ -219,15 +219,20 @@ def main():
     judge = [c for c in cs if "--tools" in c["argv"]]
     runs = [c for c in cs if "--tools" not in c["argv"]]
     arg = lambda c, k: c["argv"][c["argv"].index(k) + 1] if k in c["argv"] else None  # noqa: E731
-    check(len(judge) == 1 and arg(judge[0], "--model") == "haiku",
-          "整批只评估一次，用 haiku", len(judge))
+    check(len(judge) == 1 and arg(judge[0], "--model") == "sonnet"
+          and arg(judge[0], "--effort") == "low",
+          "整批只评估一次，用 sonnet 低 effort", judge[0]["argv"] if judge else len(judge))
     check(arg(judge[0], "--tools") == "" and "--strict-mcp-config" in judge[0]["argv"],
           "评估时不开工具、不连 MCP")
     check(judge[0]["cwd"] != str(TMP), "评估不在任务 cwd 里跑", judge[0]["cwd"])
-    check([arg(c, "--model") for c in runs] == ["haiku", "opus", "sonnet"],
-          "每条用分到的模型", [arg(c, "--model") for c in runs])
-    check([t["model"] for t in d["tasks"]] == ["haiku", "opus", "sonnet"]
-          and d["tasks"][1]["model_reason"] == "因为opus", "模型和理由记在任务里")
+    check([(arg(c, "--model"), arg(c, "--effort")) for c in runs]
+          == [("sonnet", "low"), ("opus", None), ("sonnet", None)],
+          "easy→sonnet+low、hard→opus、normal→sonnet 不带 effort",
+          [(arg(c, "--model"), arg(c, "--effort")) for c in runs])
+    check([(t["model"], t["effort"]) for t in d["tasks"]]
+          == [("sonnet", "low"), ("opus", None), ("sonnet", None)]
+          and d["tasks"][1]["model_reason"] == "hard：因为hard", "档和理由记在任务里",
+          [(t["model"], t["effort"], t["model_reason"]) for t in d["tasks"]])
     check(d["auto"]["ok"] and d["auto"]["cost_usd"] == 0.002, "评估结果记在 auto 里", d["auto"])
     check(d["status"] == "done", "整批 done", d["status"])
 

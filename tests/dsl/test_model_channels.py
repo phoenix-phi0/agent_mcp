@@ -220,6 +220,10 @@ def main():
         ("cli:claude", ("cli", "claude", "", False), "cli:claude"),
         ("cli:zcode", ("cli", "zcode", "", False), "cli:zcode"),
         ("claude:haiku", ("cli", "claude", "haiku", True), "cli:claude/haiku"),
+        ("cli:claude/sonnet@low", ("cli", "claude", "sonnet@low", False),
+         "cli:claude/sonnet@low"),
+        ("claude:opus@max", ("cli", "claude", "opus@max", True),
+         "cli:claude/opus@max"),
         ("claude", ("cli", "claude", "", True), "cli:claude"),
         ("zcode", ("cli", "zcode", "", True), "cli:zcode"),
         ("zcode:随便", ("cli", "zcode", "", True), "cli:zcode"),
@@ -241,6 +245,11 @@ def main():
         ("api:zhipu", "要写模型"),
         ("api:zhipu/", "缺模型名"),
         ("cli:zcode/glm-5", "不能选模型"),
+        ("cli:claude/sonnet@fast", "努力程度「fast」不认识"),
+        ("cli:claude/sonnet@", "努力程度「」不认识"),
+        ("cli:claude/@low", "「@」前面要写模型"),
+        ("api:zhipu/glm-5.3@low", "只有 cli:claude 能写"),
+        ("glm-5.3@low", "只有 cli:claude 能写"),
         ("", "不能是空的"),
         (None, "不能是空的"),
     ]
@@ -269,6 +278,14 @@ def main():
           and e.vars.get("三") == "zcode[]",
           f"cli:claude/haiku、cli:claude（不传 --model）、cli:zcode："
           f"{[(r['kind'], opt(r, '--model')) for r in rs]}")
+    check(all(opt(r, "--effort") is None for r in rs), "没写 @ 就不带 --effort")
+    e, mock = engine()
+    e.run("问 一 = 甲 用 cli:claude/sonnet@low\n问 二 = 乙 用 claude:opus@max")
+    rs = calls()
+    check([(opt(r, "--model"), opt(r, "--effort")) for r in rs]
+          == [("sonnet", "low"), ("opus", "max")] and not mock.calls,
+          f"@ 拆成 --model 和 --effort："
+          f"{[(opt(r, '--model'), opt(r, '--effort')) for r in rs]}")
     e, mock = engine()
     e.run("模型 cli:claude/opus\n问 一 = 甲\n问 二 = 乙 用 api:zhipu/glm-y")
     rs = calls()
@@ -511,11 +528,11 @@ def main():
     specs = {k: config.parse_model(v) for k, v in names.items()}
     check(all(not s.legacy and s.raw == s.canonical for s in specs.values()),
           f"没有旧写法：{names}")
-    check(specs["快"].canonical == "cli:claude/haiku"
+    check(specs["快"].canonical == "cli:claude/sonnet@low"
           and specs["平衡"].canonical == "cli:claude/sonnet"
           and specs["强"].canonical == "cli:claude/opus"
           and specs["克"].canonical == "cli:claude/sonnet"
-          and specs["克快"].canonical == "cli:claude/haiku"
+          and specs["克快"].canonical == "cli:claude/sonnet@low"
           and specs["克强"].canonical == "cli:claude/opus"
           and specs["z"].canonical == "cli:zcode"
           and cfg["default_tier"] == "平衡",

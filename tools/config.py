@@ -13,6 +13,8 @@
     api:zhipu/glm-5.3          智谱 HTTP API
     api:anthropic/<模型>        预留，还没接入（调用时报错）
     cli:claude/sonnet          本机 Claude Code（claude -p）；cli:claude 不带模型 = 它自己的默认
+    cli:claude/sonnet@low      同上，带努力程度（--effort）：low/medium/high/xhigh/max，
+                               不写用 claude 自己的默认；只有 cli:claude 能写
     cli:zcode                  本机 ZCode（zcode -p），不能选模型
 
 兼容写法（照旧能用，python -m tools.config 会标出来）：
@@ -145,6 +147,11 @@ BACKENDS = {
 
 CHANNELS = ("api", "cli")
 
+# 模型名后面「@努力程度」：只有 claude -p 有 --effort。值是 claude 认的那几个，
+# 写错了在解析时就报，不要等到真起 claude 才失败。
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+EFFORT_BACKENDS = {("cli", "claude")}
+
 
 class ModelSpec(NamedTuple):
     channel: str     # api / cli
@@ -171,9 +178,41 @@ def _providers(channel: str) -> str:
     return "、".join(f"{c}:{p}" for c, p in BACKENDS if c == channel)
 
 
+def split_effort(model: str) -> tuple:
+    """"sonnet@low" → ("sonnet", "low")；没有「@」→ (model, "")。"""
+    base, _, effort = model.partition("@")
+    return base.strip(), effort.strip()
+
+
+def _check_effort(raw: str, channel: str, provider: str, model: str) -> None:
+    """模型名里的「@努力程度」写得对不对，见 EFFORTS。"""
+    if "@" not in model:
+        return
+    base, effort = split_effort(model)
+    if (channel, provider) not in EFFORT_BACKENDS:
+        raise ModelNameError(
+            f"模型名「{raw}」：只有 cli:claude 能写「@努力程度」，"
+            f"{channel}:{provider} 不支持")
+    if not base:
+        raise ModelNameError(
+            f"模型名「{raw}」：「@」前面要写模型，如 cli:claude/sonnet@{effort or 'low'}")
+    if effort not in EFFORTS:
+        raise ModelNameError(
+            f"模型名「{raw}」：努力程度「{effort}」不认识，"
+            f"可用 {'、'.join(EFFORTS)}")
+
+
 def parse_model(name) -> ModelSpec:
     """任何写法的模型名 → ModelSpec。只认名字本身，不查档位和别名
-    （先 resolve_model 再 parse）。写错了抛 ModelNameError。"""
+    （先 resolve_model 再 parse）。写错了抛 ModelNameError。
+
+    「@努力程度」留在 model 里（"sonnet@low"），后端调用时再拆，见 split_effort。"""
+    spec = _parse_model(name)
+    _check_effort(spec.raw, spec.channel, spec.provider, spec.model)
+    return spec
+
+
+def _parse_model(name) -> ModelSpec:
     if not isinstance(name, str) or not name.strip():
         raise ModelNameError(f"模型名不能是空的：{name!r}")
     raw = name.strip()

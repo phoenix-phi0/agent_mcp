@@ -98,31 +98,39 @@ DSL_CMD = os.environ.get("CBATCH_DSL", "").split() or [sys.executable, "-m", "to
 # 贴结果这类活，用不着，一条贵五倍。要别的就在 submit 里传 model。
 DEFAULT_MODEL = "sonnet"
 
-# model="auto"：先让 haiku 把整批任务看一遍，每条分一个模型。
+# model="auto"：先让一个便宜的评估调用把整批任务看一遍，每条分一档。
 #
 # 一次评估整批，不是每条评一次：多花的是一次调用（约两分钱、几秒），
 # 跟任务条数无关。评估在执行器里做，submit 照样立刻返回。
 #
-# 评估失败（超时、输出不是要的格式、给了不认识的模型名）就整批退回
-# AUTO_FALLBACK，不让任务卡住——选错模型的代价是贵一点或差一点，任务
+# 评估失败（超时、输出不是要的格式、给了不认识的档）就整批退回
+# AUTO_FALLBACK，不让任务卡住——选错档的代价是贵一点或差一点，任务
 # 跑不了的代价更大。失败原因记在 job.json 的 auto 里。
-AUTO_MODELS = ("haiku", "sonnet", "opus")
-AUTO_JUDGE = "haiku"
-AUTO_FALLBACK = DEFAULT_MODEL
+#
+# 评估只给难度档，档到 (模型, effort) 的对应在这里定：换模型只改这张表，
+# 不用改提示词。最低一档原来是 haiku，Haiku 4.5 是上一代（知识截止
+# 2025-02），退役日期「不早于 2026-10-15」；Sonnet 5.5 低 effort 在官方
+# 测评上远强于它、按任务算花费也差不多，所以换成 sonnet + low。
+# effort 为 None 就不带 --effort，用 claude 自己的默认。
+AUTO_TIERS = {"easy": ("sonnet", "low"),
+              "normal": ("sonnet", None),
+              "hard": ("opus", None)}
+AUTO_JUDGE = ("sonnet", "low")
+AUTO_FALLBACK = (DEFAULT_MODEL, None)
 AUTO_TIMEOUT = 90
 # 每条提示词给评估看的长度上限。难度看开头基本就够了，整段塞进去是白花钱。
 AUTO_PEEK = 2000
 
 AUTO_PROMPT = """下面是一批要交给编程助手（Claude Code，能读写文件、跑命令）执行的任务。
-给每条任务选一个模型，在够用的前提下选便宜的：
+给每条任务定一个难度档，在够用的前提下选低的：
 
-- haiku：机械的活。跑一条命令贴输出、读文件摘一段、按明确说明改一两处、简单问答。
-- sonnet：常规开发。写一个函数或一个小模块、改 bug、写测试、读几个文件后总结。
-- opus：难的活。跨多个文件的设计或重构、原因不明的排查、要权衡取舍的方案、
+- easy：机械的活。跑一条命令贴输出、读文件摘一段、按明确说明改一两处、简单问答。
+- normal：常规开发。写一个函数或一个小模块、改 bug、写测试、读几个文件后总结。
+- hard：难的活。跨多个文件的设计或重构、原因不明的排查、要权衡取舍的方案、
   需求含糊要自己判断的。
 
 只输出一个 JSON 数组，不要别的文字、不要代码块标记。每条任务一个对象，
-按编号顺序：[{"i": 1, "model": "haiku", "reason": "一句话理由"}, ...]
+按编号顺序：[{"i": 1, "tier": "easy", "reason": "一句话理由"}, ...]
 
 """
 
@@ -263,9 +271,9 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
     cwd：claude 在哪个目录跑，决定它能看到哪些文件和项目设置。默认当前目录。
         不收 ~、/、家目录和含 .ssh 等凭证的父目录（当前目录是这些也不行）。
     model：默认 sonnet（DEFAULT_MODEL）。传 None 或空串就不带 --model，
-        用 Claude Code 自己的默认。传 "auto" 就先让 haiku 按难度给每条分
-        haiku / sonnet / opus，见 AUTO_PROMPT；分到的模型和理由记在每条
-        任务的 model、model_reason 里。
+        用 Claude Code 自己的默认。传 "auto" 就先评估难度，每条分到
+        AUTO_TIERS 里的一档（模型加 effort），见 AUTO_PROMPT；分到的结果和
+        理由记在每条任务的 model、effort、model_reason 里。
     permission_mode / allowed_tools：原样传给 claude，见模块文档「默认不
         放开权限」。
     timeout：单条任务的秒数上限。dsl 任务的 dsl 部分和兜底的 claude 各算一次。
@@ -333,7 +341,7 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
         "auto": None,
         "tasks": [dict(it, status="pending", output="", error="",
                        model=None if model == "auto" else (model or None),
-                       model_reason="",
+                       effort=None, model_reason="",
                        session_id=None, cost_usd=None, turns=None,
                        seconds=None, engine_used=None, versions=None,
                        calls=None, calls_log=None) for it in items],
@@ -456,7 +464,7 @@ def _child_env() -> dict:
 
 
 def _classify(d: dict) -> None:
-    """model="auto" 时给每条任务定模型，结果写进 t["model"] 和 d["auto"]。
+    """model="auto" 时给每条任务定档，结果写进 t["model"]、t["effort"] 和 d["auto"]。
 
     评估调用不开工具（--tools ""）、不连 MCP、换掉默认系统提示，在任务目录
     里跑而不是 cwd——它只需要看提示词，不该去读项目文件，也不该把项目的
@@ -465,10 +473,14 @@ def _classify(d: dict) -> None:
     body = AUTO_PROMPT + "\n\n".join(
         f"### 任务 {i}\n{t['prompt'][:AUTO_PEEK]}"
         for i, t in enumerate(d["tasks"], 1))
+    judge_model, judge_effort = AUTO_JUDGE
     cmd = [CLAUDE_BIN, "-p", body, "--output-format", "json",
-           "--model", AUTO_JUDGE, "--tools", "", "--strict-mcp-config",
-           "--system-prompt", "你负责给任务评估难度、分配模型。只输出 JSON。"]
-    info = {"judge": AUTO_JUDGE, "ok": False, "error": "", "cost_usd": None}
+           "--model", judge_model, "--effort", judge_effort,
+           "--tools", "", "--strict-mcp-config",
+           "--system-prompt", "你负责给任务评估难度。只输出 JSON。"]
+    info = {"judge": f"{judge_model}/{judge_effort}", "ok": False, "error": "",
+            "cost_usd": None}
+    fallback = "/".join(x for x in AUTO_FALLBACK if x)
     picks = {}
     try:
         p = subprocess.run(cmd, cwd=str(_job_dir(d["id"])), env=_child_env(),
@@ -481,21 +493,23 @@ def _classify(d: dict) -> None:
         if text.startswith("```"):
             text = text.strip("`").split("\n", 1)[-1].rsplit("```", 1)[0]
         for x in json.loads(text):
-            if x.get("model") in AUTO_MODELS:
-                picks[int(x["i"])] = (x["model"], str(x.get("reason", "")))
+            if x.get("tier") in AUTO_TIERS:
+                picks[int(x["i"])] = (*AUTO_TIERS[x["tier"]],
+                                      f"{x['tier']}：{x.get('reason', '')}")
         missing = [i for i in range(1, len(d["tasks"]) + 1) if i not in picks]
         if missing:
-            info["error"] = f"第 {missing} 条没给出可用的模型，用 {AUTO_FALLBACK}"
+            info["error"] = f"第 {missing} 条没给出可用的档，用 {fallback}"
         else:
             info["ok"] = True
     except subprocess.TimeoutExpired:
-        info["error"] = f"评估超过 {AUTO_TIMEOUT} 秒，整批用 {AUTO_FALLBACK}"
+        info["error"] = f"评估超过 {AUTO_TIMEOUT} 秒，整批用 {fallback}"
     except (json.JSONDecodeError, ValueError, TypeError, KeyError,
             AttributeError) as e:
-        info["error"] = f"评估结果解析不了（{e}），没分到的用 {AUTO_FALLBACK}"
+        info["error"] = f"评估结果解析不了（{e}），没分到的用 {fallback}"
 
     for i, t in enumerate(d["tasks"], 1):
-        t["model"], t["model_reason"] = picks.get(i, (AUTO_FALLBACK, "评估没给出，用默认"))
+        t["model"], t["effort"], t["model_reason"] = picks.get(
+            i, (*AUTO_FALLBACK, "评估没给出，用默认"))
     d["auto"] = info
 
 
@@ -506,6 +520,8 @@ def _command(d: dict, t: dict, resume: str = None) -> list:
         cmd += ["--resume", resume]
     if t.get("model"):
         cmd += ["--model", t["model"]]
+    if t.get("effort"):
+        cmd += ["--effort", t["effort"]]
     if o["permission_mode"]:
         cmd += ["--permission-mode", o["permission_mode"]]
     if o["allowed_tools"]:

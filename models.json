@@ -9,7 +9,7 @@
     "兼容旧写法：裸名 glm-5.3 = api:zhipu/glm-5.3，claude:sonnet = cli:claude/sonnet，zcode = cli:zcode。",
     "能力差别：api 支持「带工具」和真流式；cli 不支持「带工具」（报错），「流式」降级成整段一次性返回；",
     "cli 每次起一个进程，慢（十秒上下）；claude 吃 Max 订阅额度，zcode 吃 Z.AI 账号额度。",
-    "三档现在走 claude（快=haiku、平衡=sonnet、强=opus），各配一个智谱模型做 fallback 接住「带工具」。",
+    "三档现在走 claude（快=sonnet@low、平衡=sonnet、强=opus；快原来是 haiku，Haiku 4.5 退役日期不早于 2026-10-15，换成 sonnet 低努力程度；「@努力程度」只有 cli:claude 能写），各配一个智谱模型做 fallback 接住「带工具」。",
     "不写模型时以 config.json 的 model 为准（现在是 glm-5.3-flash），所以只有明写档位名的地方才走 claude。",
     "档位可以配备用模型（写了才生效）：\"强\": {\"model\": \"cli:claude/opus\", \"fallback\": \"api:zhipu/glm-5.3\"}，",
     "这一档遇到主模型没有的能力（带工具）时改用 fallback 并记 warning 日志；没写 fallback 就报错。",
@@ -18,13 +18,13 @@
   ],
   "default": "平衡",
   "tiers": {
-    "快": {"model": "cli:claude/haiku", "fallback": "api:zhipu/glm-5.3-flashx"},
+    "快": {"model": "cli:claude/sonnet@low", "fallback": "api:zhipu/glm-5.3-flashx"},
     "平衡": {"model": "cli:claude/sonnet", "fallback": "api:zhipu/glm-5.3-flash"},
     "强": {"model": "cli:claude/opus", "fallback": "api:zhipu/glm-5.3"}
   },
   "aliases": {
     "克": "cli:claude/sonnet",
-    "克快": "cli:claude/haiku",
+    "克快": "cli:claude/sonnet@low",
     "克强": "cli:claude/opus",
     "z": "cli:zcode"
   }
