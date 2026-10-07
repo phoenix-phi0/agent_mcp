@@ -44,6 +44,21 @@ CLAUDE_CODE_SESSION_ID 这些。原样传给子进程，claude -p 会以为自�
     cbatch.status(j["job_id"])                # 查进度
     cbatch.wait(j["job_id"])                  # 等跑完
     cbatch.cancel(j["job_id"])
+
+## 执行方式 engine
+
+默认 engine="claude"，就是上面说的 claude -p，行为不变。另外两种：
+
+- engine="dsl"：交给 tools/dslagent（中文 DSL 的修 bug 流程：固定模板 → 模型规划最多 2 版），
+  在任务的 project 目录里**直接改文件**。只适合「项目有测试、要让失败的测试通过」的任务。
+  没修好且 fallback（默认 true）就交给 claude -p 兜底：cwd=project，提示词带上 dsl 的记录摘要；
+  兜底的权限沿用这批的 permission_mode / allowed_tools，都没给就是 acceptEdits + 只放行测试命令。
+- engine="auto"：执行时判定（tools.dslagent.runner.decide_auto）：给了 project，且（给了 test_cmd 或
+  提示词里有失败测试 / Traceback），且测试能跑、初始确实有失败 → dsl；否则 → claude。判定理由记在 engine_reason。
+
+dsl 在独立进程里跑（python -m tools.dslagent run），记录在任务目录 task_<n>/ 下；每条任务的
+engine_used（template / plan / claude_fallback / claude）、versions、calls、cost_usd、seconds、calls_log
+都写在 job.json 里。
 """
 
 import json
@@ -73,6 +88,11 @@ CLAUDE_BIN = (os.environ.get("CBATCH_CLAUDE") or shutil.which("claude")
               or str(Path.home() / ".local" / "bin" / "claude"))
 
 MAX_TASKS = 10
+
+# 执行方式，见模块文档「执行方式 engine」
+ENGINES = ("claude", "dsl", "auto")
+# dsl 执行器的命令。测试换成假的，不调模型。
+DSL_CMD = os.environ.get("CBATCH_DSL", "").split() or [sys.executable, "-m", "tools.dslagent"]
 
 # 默认模型。不设的话用 Claude Code 自己的默认（Opus），批量任务多是跑命令、
 # 贴结果这类活，用不着，一条贵五倍。要别的就在 submit 里传 model。
@@ -194,10 +214,45 @@ def _settle(d: dict) -> dict:
 # 对外接口
 
 
+def _engine_fields(it: dict, i: int, engine, project, test_cmd, fallback,
+                   dsl_options) -> None:
+    """定下一条任务的 engine 和 dsl 字段（任务里的优先于这批的默认值），不对就报错。
+
+    claude 任务只多一个 engine 键，别的字段一律不带——它的执行跟原来一字不差。
+    """
+    eng = it.pop("_engine", engine) or "claude"
+    own = {k: it.pop("_" + k) for k in ("project", "test_cmd", "fallback", "dsl_options")
+           if "_" + k in it}
+    if eng not in ENGINES:
+        raise CBatchError(f"第 {i} 条：engine 只能是 {' / '.join(ENGINES)}，收到：{eng!r}")
+    it["engine"] = eng
+    if eng == "claude":
+        return
+    proj = own.get("project", project)
+    if eng == "dsl" and not proj:
+        raise CBatchError(f"第 {i} 条：engine=dsl 要给 project（要修的项目目录，dsl 会直接改里面的文件）")
+    if proj:
+        # 规则同 cwd：家目录、/、含凭证的目录不行
+        try:
+            proj = check_workdir(proj)
+        except UnsafeWorkdirError as e:
+            raise CBatchError(f"第 {i} 条：project 不能用：{e}") from None
+    fb = own.get("fallback", fallback)
+    if isinstance(fb, str):
+        fb = fb.strip().lower() not in ("0", "false", "no", "否", "")
+    opts = own.get("dsl_options", dsl_options) or {}
+    if not isinstance(opts, dict):
+        raise CBatchError(f"第 {i} 条：dsl_options 要是字典，收到：{opts!r}")
+    it.update(project=proj or None, test_cmd=own.get("test_cmd", test_cmd) or None,
+              fallback=bool(fb), dsl_options=opts, engine_reason="")
+
+
 def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
            model: str = DEFAULT_MODEL, permission_mode: str = None,
            allowed_tools=None, timeout: int = TASK_TIMEOUT,
-           preamble: bool = True) -> dict:
+           preamble: bool = True, engine: str = "claude", project: str = None,
+           test_cmd: str = None, fallback: bool = True,
+           dsl_options: dict = None) -> dict:
     """提交一批任务，立刻返回，不等跑完。
 
     tasks：提示词列表，或 {prompt, outfile} 字典列表。outfile 给了的话，
@@ -213,7 +268,12 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
         任务的 model、model_reason 里。
     permission_mode / allowed_tools：原样传给 claude，见模块文档「默认不
         放开权限」。
-    timeout：单条任务的秒数上限。
+    timeout：单条任务的秒数上限。dsl 任务的 dsl 部分和兜底的 claude 各算一次。
+    engine：claude（默认）/ dsl / auto，见模块文档「执行方式 engine」。
+        project、test_cmd、fallback、dsl_options 是这批的默认值，tasks 里的字典可以逐条覆盖
+        （{"prompt": …, "engine": "dsl", "project": "/path", "test_cmd": "…", "fallback": false}）。
+        engine=dsl 必须有 project（任务里或这里）；test_cmd 缺省按项目探测 pytest / unittest。
+        dsl_options 是调试用的：{"max_plan": 2, "template": true, "inject": {...}}。
 
     返回 {"job_id", "status", "tasks", "dir"}。
     """
@@ -224,6 +284,9 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
         elif isinstance(t, dict) and t.get("prompt"):
             items.append({"prompt": t["prompt"],
                           "outfile": t.get("outfile", "")})
+            for k in ("engine", "project", "test_cmd", "fallback", "dsl_options"):
+                if k in t:
+                    items[-1]["_" + k] = t[k]
         else:
             raise CBatchError(f"任务要是非空字符串或含 prompt 的字典，收到：{t!r}")
 
@@ -241,6 +304,8 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
                           "要放开就用 acceptEdits 或 allowed_tools 指定到具体工具")
     if shutil.which(CLAUDE_BIN) is None:
         raise CBatchError(f"找不到 {CLAUDE_BIN}，Claude Code 装了吗？")
+    for i, it in enumerate(items, 1):
+        _engine_fields(it, i, engine, project, test_cmd, fallback, dsl_options)
 
     # 家目录、/ 不行：claude 能读工作目录下的一切，那里有 .ssh、
     # .git-credentials 和各 CLI 的登录凭证。规则同 zcode_tool.check_workdir
@@ -263,13 +328,15 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
         "finished": None, "pid": None,
         "options": {"model": model, "permission_mode": permission_mode,
                     "allowed_tools": list(allowed_tools or []),
-                    "timeout": int(timeout), "preamble": bool(preamble)},
+                    "timeout": int(timeout), "preamble": bool(preamble),
+                    "engine": engine},
         "auto": None,
         "tasks": [dict(it, status="pending", output="", error="",
                        model=None if model == "auto" else (model or None),
                        model_reason="",
                        session_id=None, cost_usd=None, turns=None,
-                       seconds=None) for it in items],
+                       seconds=None, engine_used=None, versions=None,
+                       calls=None, calls_log=None) for it in items],
     }
     _save(d)
 
@@ -495,6 +562,117 @@ def _run_one(d: dict, t: dict, resume: str = None) -> None:
             t["error"] = (t["error"] + f" 写 outfile 失败：{e}").strip()
 
 
+# ---- engine=dsl / auto
+
+
+def _decide(t: dict) -> str:
+    """engine=auto：按 dslagent 的规则判一次，理由记进 t。返回 dsl 或 claude。"""
+    from .dslagent.runner import decide_auto
+    try:
+        r = decide_auto(t["prompt"], t.get("project"), t.get("test_cmd"))
+    except Exception as e:   # 判定本身坏了不该让任务卡住，退回默认
+        r = {"engine": "claude", "reason": f"判定出错（{type(e).__name__}: {e}），用 claude", "test_cmd": None}
+    t["engine_reason"] = "auto → " + r["engine"] + "：" + r["reason"]
+    if r["engine"] == "dsl" and r.get("test_cmd"):
+        t["test_cmd"] = r["test_cmd"]
+    return r["engine"]
+
+
+def _run_dsl(d: dict, t: dict, i: int) -> dict:
+    """在独立进程里跑 dslagent（它换掉 llm_router 的后端、设环境变量，都是进程级的），读回 result.json。
+
+    跟执行器同一个进程组：cancel 整组杀时它和它起的 claude 一起走。超时先 TERM（它会关掉常驻
+    claude、写下已有记录），10 秒还在就 KILL。
+    """
+    tdir = _job_dir(d["id"]) / f"task_{i}"
+    tdir.mkdir(parents=True, exist_ok=True)
+    (tdir / "task.txt").write_text(t["prompt"], encoding="utf-8")
+    o = t.get("dsl_options") or {}
+    timeout = d["options"]["timeout"]
+    cmd = [*DSL_CMD, "run", "--project", t["project"], "--task-file", str(tdir / "task.txt"),
+           "--out", str(tdir), "--wall", str(max(60, timeout - 60)),
+           "--max-plan", str(int(o.get("max_plan", 2)))]
+    if t.get("test_cmd"):
+        cmd += ["--test-cmd", t["test_cmd"]]
+    if o.get("template") is False:
+        cmd.append("--no-template")
+    if o.get("inject"):
+        cmd += ["--inject", json.dumps(o["inject"], ensure_ascii=False)]
+    t["calls_log"] = str(tdir / "calls.json")
+    with open(tdir / "runner.log", "ab") as log:
+        p = subprocess.Popen(cmd, cwd=str(ROOT), env=_child_env(), stdin=subprocess.DEVNULL,
+                             stdout=log, stderr=log)
+        try:
+            p.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            p.terminate()
+            try:
+                p.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait()
+    try:
+        return json.loads((tdir / "result.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        tail = (tdir / "runner.log").read_text(encoding="utf-8", errors="replace")[-600:]
+        why = f"超过 {timeout} 秒被杀" if p.returncode in (-15, -9, 143) else f"退出码 {p.returncode}"
+        return {"fixed": False, "engine_used": None, "versions": 0, "calls": 0, "cost": 0,
+                "stop": f"dsl 执行器没写出结果（{why}）：{tail}", "handoff": "", "report": "",
+                "calls_log": str(tdir / "calls.json"), "dir": str(tdir), "test_cmd": t.get("test_cmd")}
+
+
+def _fallback_prompt(t: dict, r: dict) -> str:
+    note = r.get("handoff") or r.get("stop") or "（没有记录）"
+    cmd = r.get("test_cmd") or t.get("test_cmd")
+    return (f"{t['prompt']}\n\n【交接说明】另一个自动修复流程（中文 DSL agent）已经先试过，没能修好。"
+            f"它对项目做的修改还在（见下面的 diff），对的留着、不对的改回去；它的判断不一定对，请自己核实。"
+            f"测试文件不要改。\n\n{note}"
+            + (f"\n\n跑测试用：{cmd}" if cmd else ""))
+
+
+def _run_engine(d: dict, t: dict, i: int, resume: str = None) -> None:
+    """engine=dsl / auto 的一条：auto 先判定；dsl 没修好且 fallback 就交 claude 兜底。结果写回 t。"""
+    t0 = time.time()
+    if t["engine"] == "auto" and _decide(t) == "claude":
+        _run_one(d, t, resume)
+        t["engine_used"] = "claude"
+        return
+    r = _run_dsl(d, t, i)
+    t.update(versions=r.get("versions"), calls=r.get("calls"), cost_usd=r.get("cost"),
+             calls_log=r.get("calls_log") or t.get("calls_log"), dsl_dir=r.get("dir"),
+             dsl_fixed=bool(r.get("fixed")), dsl_stop=r.get("stop", ""),
+             engine_used=r.get("engine_used") or "dsl", output=r.get("report") or r.get("stop", ""))
+    if r.get("fixed"):
+        t.update(status="done", seconds=round(time.time() - t0, 1))
+    elif t.get("fallback", True) and t.get("project"):
+        o = d["options"]
+        tools = list(o["allowed_tools"])
+        if not o["permission_mode"] and not tools:
+            cmd = r.get("test_cmd") or t.get("test_cmd")
+            tools = ["Read", "Grep", "Glob", "Edit"] + ([f"Bash({cmd}*)"] if cmd else [])
+        d2 = dict(d, cwd=t["project"],
+                  options=dict(o, permission_mode=o["permission_mode"] or "acceptEdits", allowed_tools=tools))
+        t2 = dict(t, prompt=_fallback_prompt(t, r), outfile="")
+        _run_one(d2, t2)
+        dsl_out = t["output"]
+        for k in ("status", "output", "error", "session_id", "turns", "denied"):
+            if k in t2:
+                t[k] = t2[k]
+        t["output"] = (t["output"] or "") + f"\n\n——（先跑的 DSL）{dsl_out}"
+        t["cost_usd"] = round((r.get("cost") or 0) + (t2.get("cost_usd") or 0), 4)
+        t["engine_used"] = "claude_fallback"
+        t["seconds"] = round(time.time() - t0, 1)
+    else:
+        t.update(status="error", error=r.get("stop") or "dsl 没修好", seconds=round(time.time() - t0, 1))
+    if t["outfile"] and t["output"]:
+        f = Path(d["cwd"]) / t["outfile"]
+        try:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(t["output"], encoding="utf-8")
+        except OSError as e:
+            t["error"] = (t["error"] + f" 写 outfile 失败：{e}").strip()
+
+
 def _detach(job_id: str) -> None:
     """起执行器然后自己退出，见 submit 里的说明。
 
@@ -522,13 +700,17 @@ def _run(job_id: str) -> None:
         _save(d)
 
     prev_session = None
-    for t in d["tasks"]:
+    for i, t in enumerate(d["tasks"], 1):
         if cancelled():
             break
         t["status"] = "running"
         _save(d)
         resume = prev_session if d["mode"] == "share" else None
-        _run_one(d, t, resume)
+        if t.get("engine", "claude") == "claude":
+            _run_one(d, t, resume)
+            t["engine_used"] = "claude"
+        else:
+            _run_engine(d, t, i, resume)
         prev_session = t["session_id"] if t["status"] == "done" else None
         if cancelled():
             return          # cancel() 负责收尾，这里再写会盖掉它

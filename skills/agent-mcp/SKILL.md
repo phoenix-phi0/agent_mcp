@@ -49,6 +49,30 @@ cbatch.wait    job_id=... timeout=110 every=15
 字段里。要让它改文件就传 `permission_mode="acceptEdits"`，或者用 `allowed_tools`
 指定具体工具。`bypassPermissions` 不收。
 
+**执行方式 `engine`**（job 级参数，tasks 里的字典可逐条覆盖）：
+
+- `claude`（默认）：上面说的 claude -p，行为完全不变。
+- `dsl`：交给 `tools/dslagent`（中文 DSL 修 bug 流程：固定模板一版 → 没修好再让模型写 .zs 计划，最多 2 版），
+  **在 `project` 目录里直接改文件**。字段：`project`（必填，规则同 cwd）、`test_cmd`（可选，缺省按项目探测
+  pytest / unittest）、`fallback`（默认 true：dsl 没修好就交 claude -p 兜底，cwd=project，提示词带上 dsl 的
+  交接说明和 diff；权限沿用这批的 permission_mode / allowed_tools，都没给就是 acceptEdits + 只放行测试命令）。
+- `auto`：执行时判定——给了 project，且（给了 test_cmd 或提示词里有「失败的测试」/Traceback/AssertionError 之类），
+  且测试能跑、初始确实有失败 → dsl；否则 → claude。理由记在任务的 `engine_reason`。
+
+```
+cbatch.submit  engine="dsl" tasks=[{"prompt": "用户报告…失败的测试：tests.test_x…", "project": "/home/ysc/proj"}]
+cbatch.submit  engine="auto" project="/home/ysc/proj" tasks=["…Traceback…", "给 README 加一节"]
+```
+
+每条任务多记 `engine_used`（template / plan / claude_fallback / claude）、`versions`、`calls`、`cost_usd`、
+`seconds`、`calls_log`（任务目录 `task_<n>/calls.json`，同目录有每版的 .zs、打印输出、result.json）。
+**适用范围**：只在「项目有测试、要让失败的测试通过」的修 bug 任务上验证过（shopkit N1–N10，回归 10/10）；
+**限制**：dsl 只有 code 动词包的能力——读/搜 .py、精确替换改文件、跑测试、跑 ≤30 行只读 Python，
+不能装依赖、不能改测试、不能跑别的命令；不像修 bug 的活别用 dsl。dsl 在独立进程里跑（`python -m tools.dslagent run`），
+临时目录默认 `~/.cache/dslagent/tmp`（`DSLAGENT_TMP` 可改），不用 /tmp。改了 cbatch.py 后 `tool_call … reset=True`
+就能让 submit 认新参数（执行器每批都是新进程，本来就用磁盘上的新代码），不用重启 zmcp。
+真模型集成测试：`tests/tools/dslagent_live.py paths|regress`（手动跑，花钱）。
+
 GBatch 接口同 CBatch，执行端换成 Grok Build 的 `grok -p`（`gbatch.submit/wait/
 status/...`，`gbatch.describe()` 列出权限用法和工具名映射）。跟 CBatch 的差别：
 
