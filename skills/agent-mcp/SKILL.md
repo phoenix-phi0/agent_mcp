@@ -72,6 +72,12 @@ cbatch.submit  engine="auto" project="/home/ysc/proj" tasks=["…Traceback…", 
 临时目录默认 `~/.cache/dslagent/tmp`（`DSLAGENT_TMP` 可改），不用 /tmp。改了 cbatch.py 后 `tool_call … reset=True`
 就能让 submit 认新参数（执行器每批都是新进程，本来就用磁盘上的新代码），不用重启 zmcp。
 真模型集成测试：`tests/tools/dslagent_live.py paths|regress`（手动跑，花钱）。
+**首 token 对冲**（`tools/dslagent/pool.py`）：一次模型调用发出 7 秒还没出首 token，就现起一个同系统提示+模型的
+备用 claude 进程重发同一问题，谁先出首 token 用谁、另一路直接杀掉（备用赢了就接替成常驻进程）；每次调用最多对冲 1 次，
+总超时（`DSL_CLAUDE_TIMEOUT`，默认 150）仍从主路发出算。阈值依据：plan9/11/12 共 344 次调用，正常首 token 最大 5.98 秒、
+长尾从 8.3 秒起（6.4%，最长 72 秒，另有 150 秒超时）。`DSLAGENT_HEDGE_SEC` 改阈值，`0` 关掉。备用不预热
+（每个 claude 进程约 290MB，并发 3 时全预热要多占 ~1.7G）。calls.json 每次调用记 `hedged`、`winner`（primary/backup）、
+`hedge_at_ms`、`extra_cost`（被杀那一路按 message_start 的 usage 估，已计入 `cost`；没出 message_start 记 0）。
 
 GBatch 接口同 CBatch，执行端换成 Grok Build 的 `grok -p`（`gbatch.submit/wait/
 status/...`，`gbatch.describe()` 列出权限用法和工具名映射）。跟 CBatch 的差别：

@@ -9,7 +9,8 @@
   2. 第 1 版套固定模板（template.py，不调模型规划）：定位.zs（预读 + 搜索 + 可直接给改法）→ 读改测.zs。
   3. 没修好 → 模型写 .zs 计划（prompts.py；系统提示缓存），白名单 + 假模型空跑检查，错了带行号回去重写（≤2 次），
      执行；最多 MAX_PLAN 版。每版之间项目里的修改保留。
-  4. 每次模型调用走常驻 claude 进程（pool.py），记进 calls.json（用途、耗时、费用、token）。
+  4. 每次模型调用走常驻 claude 进程（pool.py；首 token 超过 DSLAGENT_HEDGE_SEC 秒就换个会话对冲重发一次），
+     记进 calls.json（用途、耗时、费用、token、是否对冲）。
 预算：总模型调用 ≤ MAX_CALLS（含规划、重写、计划内的问）；墙钟超过 wall 不再开新一版。
 
 **要在独立进程里跑**（python -m tools.dslagent run …，cbatch 就是这么调的）：它把 llm_router 的
@@ -194,7 +195,8 @@ def _opt(cmd, name):
 
 
 def call_meta(p):
-    """从 claude 的 JSON 结果里取：费用、出错、回复前 400 字、duration_ms、duration_api_ms、usage；常驻进程另有 ttft/spawn。"""
+    """从 claude 的 JSON 结果里取：费用、出错、回复前 400 字、duration_ms、duration_api_ms、usage；常驻进程另有 ttft/spawn，
+    以及首 token 对冲的 hedged / winner / hedge_at_ms / extra_cost（费用 cost 已含 extra_cost）。"""
     try:
         r = json.loads(p.stdout)
     except Exception:
@@ -204,6 +206,8 @@ def call_meta(p):
     return {"cost": r.get("total_cost_usd"), "is_error": r.get("is_error"), "reply": str(r.get("result"))[:400],
             "duration_ms": r.get("duration_ms"), "duration_api_ms": r.get("duration_api_ms"),
             "ttft_ms": pm.get("ttft_ms"), "spawn": pm.get("spawn"), "retried": pm.get("retried"),
+            "hedged": pm.get("hedged"), "winner": pm.get("winner"), "hedge_at_ms": pm.get("hedge_at_ms"),
+            "extra_cost": pm.get("extra_cost"), "extra_cost_est": pm.get("extra_cost_est"),
             "usage": {"input": u.get("input_tokens"), "output": u.get("output_tokens"),
                       "cache_read": u.get("cache_read_input_tokens"), "cache_creation": u.get("cache_creation_input_tokens")}}
 

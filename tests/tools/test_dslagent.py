@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """tools/dslagent：不调模型的部分——补读范围的区间覆盖、模板抽参、auto 判定、测试命令探测、
-测试摘要、计划检查（白名单 / 去说明文字 / 补结束）、AgentEngine 的子脚本映射和语句白名单。
+测试摘要、计划检查（白名单 / 去说明文字 / 补结束）、AgentEngine 的子脚本映射和语句白名单、
+常驻进程池的首 token 对冲（假 claude 进程）。
 
     cd /home/ysc/mcp && .venv/bin/python tests/tools/test_dslagent.py
 
@@ -13,7 +14,9 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -63,6 +66,174 @@ CALC = "def total(xs):\n    return sum(xs) - 1\n\n\ndef avg(xs):\n    return tot
 TEST_FAIL = ("import unittest\nfrom pkg.calc import total\n\n\nclass CalcTest(unittest.TestCase):\n"
              "    def test_total(self):\n        self.assertEqual(total([1, 2]), 3)\n")
 TEST_OK = TEST_FAIL.replace("3)", "2)")
+
+
+# 假的常驻 claude（stream-json 进出）：第 i 个起的进程按 FAKE_PLAN[i] 行事——数字 = 多少秒后出首 token；
+# {"start": a, "delay": b} = a 秒出 message_start（带 usage）、b 秒出首 token；"die" = 收到问题就退出；"err" = 马上回报错的 result；
+# 列表 = 这个进程的第几问逐个取。
+# 每个进程把 pid 记进 FAKE_DIR/pids；回答里带 pid 和「上次 /clear 以来第几问」(hist)，用来查会话干不干净。
+FAKE_CLAUDE = r"""#!/usr/bin/env python3
+import json, os, sys, time
+d = os.environ["FAKE_DIR"]
+plan = json.load(open(os.path.join(d, "plan.json")))
+i = 0
+while True:
+    try:
+        os.close(os.open(os.path.join(d, f"idx_{i}"), os.O_CREAT | os.O_EXCL)); break
+    except FileExistsError:
+        i += 1
+with open(os.path.join(d, "pids"), "a") as f:
+    f.write(f"{os.getpid()}\n")
+beh = plan[i] if i < len(plan) else 0.05
+out = lambda o: (sys.stdout.write(json.dumps(o, ensure_ascii=False) + "\n"), sys.stdout.flush())
+hist, nq, total = 0, 0, 0.0
+for line in sys.stdin:
+    msg = json.loads(line)["message"]["content"]
+    if msg == "/clear":
+        hist = 0
+        out({"type": "result", "subtype": "success", "result": "", "total_cost_usd": total, "session_id": f"s{i}"})
+        continue
+    hist += 1
+    if beh == "die":
+        sys.exit(3)
+    if beh == "err":
+        out({"type": "result", "subtype": "error_during_execution", "is_error": True, "result": "API Error",
+             "session_id": f"s{i}", "total_cost_usd": total})
+        continue
+    nq += 1
+    b = beh[min(nq, len(beh)) - 1] if isinstance(beh, list) else beh
+    start, delay = (b["start"], b["delay"]) if isinstance(b, dict) else (None, b)
+    t0 = time.time()
+    if start is not None:
+        time.sleep(start)
+        out({"type": "stream_event", "event": {"type": "message_start", "message": {"usage": {
+            "input_tokens": 1000, "cache_read_input_tokens": 10000, "cache_creation_input_tokens": 0}}}})
+    time.sleep(max(0, delay - (time.time() - t0)))
+    out({"type": "stream_event", "event": {"type": "content_block_delta"}})
+    total += 0.01
+    out({"type": "result", "subtype": "success", "is_error": False, "session_id": f"s{i}", "total_cost_usd": total,
+         "result": f"答:{msg}|idx={i}|pid={os.getpid()}|hist={hist}"})
+"""
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    try:        # 僵尸进程也算死
+        return Path(f"/proc/{pid}/stat").read_text().split(")")[-1].split()[0] != "Z"
+    except OSError:
+        return False
+
+
+def test_hedge():
+    """常驻进程池的首 token 对冲：用假 claude 模拟慢/快/崩，不调模型。"""
+    import json
+    from tools.dslagent.pool import Pool
+    print("常驻进程池：首 token 对冲重发")
+    fake = TMP / "fake_claude.py"
+    fake.write_text(FAKE_CLAUDE, encoding="utf-8")
+    fake.chmod(0o755)
+    n = [0]
+
+    def setup(plan, hedge=0.4):
+        n[0] += 1
+        d = TMP / f"fake_{n[0]}"
+        d.mkdir()
+        (d / "plan.json").write_text(json.dumps(plan))
+        env = dict(os.environ, FAKE_DIR=str(d))
+        return d, Pool(d, str(fake), env, hedge=hedge)
+
+    def ask(pool, q, timeout=10):
+        t0 = time.time()
+        r = json.loads(pool.run_local(["claude", "-p", q, "--system-prompt", "S", "--model", "sonnet"], timeout).stdout)
+        return r, r["_pool"], time.time() - t0
+
+    def pids(d):
+        return [int(x) for x in (d / "pids").read_text().split()] if (d / "pids").exists() else []
+
+    def finish(d, pool):
+        pool.close()
+        time.sleep(0.2)
+        return [p for p in pids(d) if _pid_alive(p)]
+
+    d, pool = setup([0.05])
+    r, m, sec = ask(pool, "q1")
+    check(not m["hedged"] and m["winner"] is None and len(pids(d)) == 1 and r["result"].startswith("答:q1"),
+          "首 token 正常 → 不对冲、只有一个进程", m)
+    check(not finish(d, pool), "关池后不留进程")
+
+    d, pool = setup([3, 0.05])
+    r, m, sec = ask(pool, "q1")
+    win_pid = int(re.search(r"pid=(\d+)", r["result"]).group(1))
+    check(m["hedged"] and m["winner"] == "backup" and "idx=1" in r["result"] and sec < 2.0 and m["hedge_at_ms"] >= 400,
+          "主路首 token 很慢 → 0.4 秒后备用重发，备用先出首 token 就用备用", (m, round(sec, 2)))
+    time.sleep(0.1)
+    check(not _pid_alive(pids(d)[0]), "败者（主路）被杀掉")
+    r2, m2, _ = ask(pool, "q2")
+    check("idx=1" in r2["result"] and "hist=1" in r2["result"] and not m2["hedged"] and not m2["spawn"],
+          "下一问直接用赢的那个进程，会话是干净的（/clear 后第 1 问），不新起", r2["result"])
+    check(r["total_cost_usd"] == 0.01 and m["extra_cost"] == 0, "败者没出 message_start → 额外费用记 0", m)
+    check(not finish(d, pool), "关池后不留进程")
+
+    d, pool = setup([[1.0, 0.05], 3])
+    r, m, sec = ask(pool, "q1")
+    check(m["hedged"] and m["winner"] == "primary" and "idx=0" in r["result"] and sec < 1.8,
+          "对冲后主路先回来 → 用主路", (m, round(sec, 2)))
+    time.sleep(0.1)
+    check(len(pids(d)) == 2 and not _pid_alive(pids(d)[1]), "败者（备用）被杀掉")
+    r2, m2, _ = ask(pool, "q2")
+    check("idx=0" in r2["result"] and "hist=1" in r2["result"], "主路会话照常清空、继续用", r2["result"])
+    check(not finish(d, pool), "关池后不留进程")
+
+    d, pool = setup([5, 5])
+    r, m, sec = ask(pool, "q1", timeout=1.5)
+    time.sleep(0.2)
+    check(r["is_error"] and "超过" in r["result"] and m["hedged"] and 1.4 < sec < 2.5,
+          "备用也慢 → 总超时照样生效（从主路发出算）", (r["result"], round(sec, 2)))
+    check(len(pids(d)) == 2 and not any(_pid_alive(p) for p in pids(d)), "最多对冲 1 次（只起了 1 个备用），超时后两路都杀掉",
+          pids(d))
+    r2, m2, _ = ask(pool, "q2")
+    check("idx=2" in r2["result"] and m2["spawn"] and "hist=1" in r2["result"], "超时后下一问重起新进程", r2["result"])
+    check(not finish(d, pool), "关池后不留进程")
+
+    d, pool = setup([{"start": 0.1, "delay": 3}, 0.05])
+    r, m, sec = ask(pool, "q1")
+    check(m["winner"] == "backup" and m["extra_cost"] > 0 and m.get("extra_cost_est")
+          and abs(r["total_cost_usd"] - (0.01 + m["extra_cost"])) < 1e-9,
+          "败者已出 message_start → 按 usage 估费用，计入这次调用的费用", (m, r["total_cost_usd"]))
+    check(not finish(d, pool), "关池后不留进程")
+
+    d, pool = setup(["die", 3, 0.05])
+    r, m, sec = ask(pool, "q1")
+    check(not r["is_error"] and m.get("retried") and m["hedged"] and m["winner"] == "backup" and "idx=2" in r["result"],
+          "主路崩了 → 照旧重起重问（重问那次仍可对冲）", (m, r["result"]))
+    check(not finish(d, pool), "关池后不留进程")
+
+    d, pool = setup([1.0, "err"])
+    r, m, sec = ask(pool, "q1")
+    check(not r["is_error"] and m["winner"] == "primary" and "idx=0" in r["result"] and m.get("leg_died") == ["backup"],
+          "备用没出首 token 就报错 → 扔掉它，接着等主路", m)
+    check(not finish(d, pool), "关池后不留进程")
+
+    d, pool = setup([0.8], hedge=0)
+    r, m, sec = ask(pool, "q1")
+    check(not m["hedged"] and len(pids(d)) == 1 and "idx=0" in r["result"], "阈值 0 → 不对冲", m)
+    check(not finish(d, pool), "关池后不留进程")
+
+    os.environ["DSLAGENT_HEDGE_SEC"] = "2.5"
+    from tools.dslagent import pool as PL
+    check(PL.Pool("/", "x", {}).hedge == 2.5 and PL.Pool("/", "x", {}, hedge=1).hedge == 1,
+          "阈值可用 DSLAGENT_HEDGE_SEC / 参数配置")
+    del os.environ["DSLAGENT_HEDGE_SEC"]
+    check(PL.Pool("/", "x", {}).hedge == PL.HEDGE_SEC == 7.0, "默认阈值 7 秒")
+
+    call = SimpleNamespace(stdout=json.dumps({"total_cost_usd": 0.02, "_pool": {"hedged": True, "winner": "backup",
+                                                                                  "hedge_at_ms": 7000, "extra_cost": 0.01}}))
+    cm = R.call_meta(call)
+    check(cm["hedged"] and cm["winner"] == "backup" and cm["extra_cost"] == 0.01 and cm["hedge_at_ms"] == 7000,
+          "calls.json 记录带 hedged / winner / hedge_at_ms / extra_cost", cm)
 
 
 def main():
@@ -233,6 +404,8 @@ def main():
         msgs = bad.calls[0]["messages"]
         check("格式不对" in str(e) and len(bad.calls) == 2 and msgs[0] == {"role": "system", "content": PR.LIB_SYSTEM}
               and msgs[1]["content"] == f"{PR.RCT_TAG}x", "LIB 格式：系统提示换上、用户消息剥掉格式说明，缺字段重问用完报错", e)
+
+    test_hedge()
 
     print("执行器：开局全过 / 探测不到测试时不动手")
     r = R.run(ok, "x", TMP / "out_ok")
