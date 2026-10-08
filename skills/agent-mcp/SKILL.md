@@ -61,8 +61,12 @@ cbatch.wait    job_id=... timeout=110 every=15
     结论「修好」，再过完成前核对（任务点名的新建/删除文件、函数/类名、JSON 键、行数、import 逐条查，不满足补做一版，
     仍不满足问模型确认一次）；退回规划前回归已坏先回滚到开局快照。`engine_used=plan_task`。
   字段：`project`（必填，规则同 cwd）、`test_cmd`（可选，缺省按项目探测 pytest / unittest）、`fallback`（默认 true：
-  dsl 没成就交 claude -p 兜底，两条路径都适用，cwd=project，提示词带上 dsl 的交接说明和改动 diff；权限沿用这批的
-  permission_mode / allowed_tools，都没给就是 acceptEdits + 只放行测试命令）。
+  dsl 没成就交 claude -p 兜底，两条路径都适用，cwd=project，提示词带上 dsl 的交接说明和改动 diff，并说明可以跑项目里的
+  Python 验证、不要改 project 以外的文件）。兜底权限：这批**显式给了** `permission_mode` / `allowed_tools`（任一个）就完全照
+  用户的；都没给才用默认 `acceptEdits` + `cbatch.PROJECT_TOOLS`：Read、Edit、Write、Grep、Glob、`Bash(python3:*)`、
+  `Bash(python:*)`、pytest / `python3 -m unittest` 前缀、`Bash(ls|cat|head|tail|wc|diff:*)`、`Bash(git diff:*)`、
+  `Bash(git status:*)`，外加测试命令本身（`Bash(<test_cmd>*)`）。**不放开**任意 Bash、pip/npm install、curl/wget、rm、
+  git commit/push、systemctl（plan22 T2 曾因兜底不能跑 python 而失败）。
 - `auto`：执行时判定（`cbatch.decide(prompt, project, test_cmd)` 只判不跑，可单独调；`python -m tools.dslagent auto …`
   只跑规则部分）。顺序：
   1. **能力检查**（`runner.capability_gaps`，窄关键词）：装依赖（pip/npm install、安装依赖）、联网（网上抓、爬取、http 链接、
@@ -78,7 +82,7 @@ cbatch.wait    job_id=... timeout=110 every=15
      平均 5–8 秒、约 $0.01/次。
   理由、来源、分类耗时记在 `engine_reason`（如 `auto → dsl（task）［短分类］：规则拿不准（…）→ 短分类 5.2s：dsl_task → …`），
   细节在任务的 `route`（decision、source、needs、classify）。分类费用计入该任务的 `cost_usd`。
-  判给 claude 且给了 project 的，claude -p 在 project 里跑（权限同兜底）；没给 project 的照旧在 cwd 里跑。
+  判给 claude 且给了 project 的，claude -p 在 project 里跑（权限同兜底，含上面的默认放行清单）；没给 project 的照旧在 cwd 里跑。
   `engine="dsl"` 也做能力检查，命中只在 `engine_warning` 记警告、照跑 dsl（尊重显式选择）。
 - **早退回**：dsl 任务路径第 1 版计划卡在能力上——检查（含 2 次重写）仍报白名单外动词/语句，或计划自己打印
   `结论：缺能力：…`（任务路径首版提示里允许）——就不写第 2 版，`stop` 记「早退回…」、任务记 `dsl_early_exit`，

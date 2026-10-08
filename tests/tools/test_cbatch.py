@@ -138,6 +138,32 @@ def calls():
         if LOG.exists() else []
 
 
+def tools_of(c):
+    """--allowed-tools 后面跟的那一串（到下一个 -- 参数为止）。"""
+    a = c["argv"]
+    if "--allowed-tools" not in a:
+        return []
+    out = []
+    for x in a[a.index("--allowed-tools") + 1:]:
+        if x.startswith("--"):
+            break
+        out.append(x)
+    return out
+
+
+def default_tools_ok(ts, test_cmd=None):
+    """默认放行：能读写、能跑 python/测试和只读命令；没有任意 Bash、装包、联网、删除、git 提交推送。"""
+    need = {"Read", "Edit", "Write", "Grep", "Glob", "Bash(python3:*)", "Bash(python:*)", "Bash(pytest:*)",
+            "Bash(python3 -m pytest:*)", "Bash(python3 -m unittest:*)", "Bash(ls:*)", "Bash(cat:*)",
+            "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(diff:*)", "Bash(git diff:*)", "Bash(git status:*)"}
+    if test_cmd:
+        need.add(f"Bash({test_cmd}*)")
+    bad = [x for x in ts if x in ("Bash", "Bash(*)", "Bash(:*)", "*")
+           or any(w in x for w in ("pip", "npm", "curl", "wget", "rm ", "rm:", "git push", "git commit",
+                                   "systemctl", "sudo"))]
+    return need <= set(ts) and not bad
+
+
 def raises(fn, *a, **k):
     try:
         fn(*a, **k)
@@ -319,7 +345,11 @@ def main():
     arg = lambda c, k: c["argv"][c["argv"].index(k) + 1] if k in c["argv"] else None  # noqa: E731
     check(fb and fb[0]["cwd"] == str(proj) and arg(fb[0], "--permission-mode") == "acceptEdits"
           and "Bash(python3 -m unittest discover -s tests*)" in fb[0]["argv"],
-          "兜底在 project 里跑，默认 acceptEdits + 只放行测试命令", fb[0]["argv"] if fb else "")
+          "兜底在 project 里跑，默认 acceptEdits + 测试命令", fb[0]["argv"] if fb else "")
+    check(fb and default_tools_ok(tools_of(fb[0]), "python3 -m unittest discover -s tests"),
+          "兜底默认放行：python/pytest/unittest、只读命令；不含任意 Bash/pip/curl/git push", tools_of(fb[0]) if fb else "")
+    check(fb and "可以运行项目里的 Python" in fb[0]["prompt"] and "不要改项目以外的文件" in fb[0]["prompt"],
+          "兜底提示词说明可跑 Python 验证、不改项目外文件", fb[0]["prompt"][-400:] if fb else "")
     check(t[1]["engine_used"] == "claude_fallback" and t[1]["status"] == "done" and t[1]["cost_usd"] == 0.04
           and t[1]["versions"] == 3 and "DSL 报告没修好" in t[1]["output"],
           "兜底的那条：engine_used=claude_fallback，费用合计，输出附上 dsl 的报告", t[1])
@@ -334,6 +364,28 @@ def main():
           and "--test-cmd" in dl[1]["argv"] and "--test-cmd" not in dl[0]["argv"],
           "dsl 执行器拿到 project、给了才传 test_cmd", [x["argv"] for x in dl])
     check(d["options"]["engine"] == "claude", "job 级 engine 记在 options 里", d["options"])
+
+    print("engine：显式给了权限就照用户的，不套默认放行")
+    LOG.unlink()
+    j = cbatch.submit([{"prompt": "DSLNO 显式工具", "engine": "dsl", "project": str(proj)}],
+                      cwd=str(TMP), allowed_tools=["Read", "Bash(make test)"])
+    cbatch.wait(j["job_id"], timeout=60, every=0.2)
+    j = cbatch.submit([{"prompt": "DSLNO 显式模式", "engine": "dsl", "project": str(proj)}],
+                      cwd=str(TMP), permission_mode="plan")
+    cbatch.wait(j["job_id"], timeout=60, every=0.2)
+    c1 = [c for c in calls() if c["prompt"].startswith("DSLNO 显式工具")]
+    c2 = [c for c in calls() if c["prompt"].startswith("DSLNO 显式模式")]
+    check(c1 and tools_of(c1[0]) == ["Read", "Bash(make test)"], "显式 allowed_tools：原样照用，不追加默认",
+          tools_of(c1[0]) if c1 else calls())
+    check(c2 and arg(c2[0], "--permission-mode") == "plan" and not tools_of(c2[0]),
+          "显式 permission_mode：照用，不追加默认工具", c2[0]["argv"] if c2 else calls())
+    o = {"permission_mode": None, "allowed_tools": [], "model": None}
+    dd = cbatch._in_project({"options": o, "cwd": "/x"}, {"project": str(proj)}, "pytest -q")
+    check(dd["cwd"] == str(proj) and dd["options"]["permission_mode"] == "acceptEdits"
+          and default_tools_ok(dd["options"]["allowed_tools"], "pytest -q") and o["allowed_tools"] == [],
+          "_in_project 默认：acceptEdits + 默认清单 + 测试命令，不改原 options", dd["options"])
+    dd = cbatch._in_project({"options": dict(o, allowed_tools=["Read"]), "cwd": "/x"}, {"project": str(proj)}, "pytest")
+    check(dd["options"]["allowed_tools"] == ["Read"], "_in_project 显式 allowed_tools 不被覆盖", dd["options"])
 
     print("engine=auto：按规则分到 dsl / claude，理由记下")
     LOG.unlink()
@@ -439,6 +491,8 @@ def main():
     c1 = [c for c in calls() if c["prompt"] == "DSLOK RT_JUNK 弄一下"]
     check(c1 and c1[0]["cwd"] == str(ok) and "acceptEdits" in c1[0]["argv"],
           "auto 判给 claude 且有 project：在 project 里跑，权限同兜底", c1[0]["argv"] if c1 else calls())
+    check(c1 and default_tools_ok(tools_of(c1[0])), "auto→claude 也用默认放行清单（含 python）",
+          tools_of(c1[0]) if c1 else "")
     check(t[2]["engine_used"] == "plan_task" and "pip install" in t[2].get("engine_warning", ""),
           "engine=dsl 命中能力检查：只记警告，照跑 dsl", t[2])
     fb = [c for c in calls() if "DSLEARLY" in c["prompt"]]

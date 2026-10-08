@@ -53,7 +53,9 @@ CLAUDE_CODE_SESSION_ID 这些。原样传给子进程，claude -p 会以为自�
   有失败 → 修 bug 路径（固定模板 → 模型规划最多 2 版）；全过 → 任务路径（模型规划最多 2 版，
   可写/删文件、改模块名，完成＝测试全过 + 结论修好 + 完成前核对）。
   没成且 fallback（默认 true）就交给 claude -p 兜底：cwd=project，提示词带上 dsl 的记录摘要和改动 diff；
-  兜底的权限沿用这批的 permission_mode / allowed_tools，都没给就是 acceptEdits + 只放行测试命令。
+  兜底的权限沿用这批的 permission_mode / allowed_tools（给了任一个就照用户的）；都没给就是 acceptEdits +
+  PROJECT_TOOLS（Read/Edit/Write/Grep/Glob、python/pytest/unittest、ls/cat/head/tail/wc/diff、git diff/status）
+  + 测试命令，不放开任意 Bash / 装包 / 联网 / rm / git commit、push。
 - engine="auto"：执行时判定（decide()）。先做能力检查（runner.capability_gaps：装依赖/联网/任意 shell/改仓库外
   文件/浏览器/交互式调试）→ 命中就 claude。再走规则（runner.decide_auto）：没 project / 测试跑不起来 → claude；
   初始有失败且（给了 test_cmd 或提示词里有失败测试 / Traceback）→ dsl 修 bug；初始全过、没有报错说法、任务文本里
@@ -867,7 +869,8 @@ def _fallback_prompt(t: dict, r: dict) -> str:
         "自动修复流程（中文 DSL agent）已经先试过，没能修好"
     return (f"{t['prompt']}\n\n【交接说明】另一个{what}。"
             f"它对项目做的修改还在（见下面的 diff），对的留着、不对的改回去；它的判断不一定对，请自己核实。"
-            f"测试文件不要改。\n\n{note}"
+            f"测试文件不要改。可以运行项目里的 Python 脚本/代码来验证，工作目录限于本项目，不要改项目以外的文件。"
+            f"\n\n{note}"
             + (f"\n\n跑测试用：{cmd}" if cmd else ""))
 
 
@@ -893,7 +896,7 @@ def _run_engine(d: dict, t: dict, i: int, resume: str = None, gate=None) -> None
     if eng == "claude":
         with gate("claude"):
             t1 = time.time()
-            # 给了 project 就在 project 里跑，权限同兜底（这批没给权限时 acceptEdits + 只放行测试命令）
+            # 给了 project 就在 project 里跑，权限同兜底（这批没给权限时 acceptEdits + PROJECT_TOOLS + 测试命令）
             _run_one(_in_project(d, t, t.get("test_cmd")) if t.get("project") else d, t, resume)
             t["engine_used"] = "claude"
             # 耗时含判定（跑开局测试、短分类）
@@ -942,12 +945,25 @@ def _run_dsl_and_fallback(d: dict, t: dict, i: int, t0: float) -> None:
             t["error"] = (t["error"] + f" 写 outfile 失败：{e}").strip()
 
 
+# 兜底 / auto→claude 在 project 里跑、这批又没给权限时的默认放行：能读写、能跑 Python 和测试验证、
+# 几个只读命令；不放开任意 Bash、装包、联网、删除、git 提交推送、systemctl。
+PROJECT_TOOLS = ["Read", "Edit", "Write", "Grep", "Glob",
+                 "Bash(python3:*)", "Bash(python:*)",
+                 "Bash(python3 -m pytest:*)", "Bash(python -m pytest:*)", "Bash(pytest:*)",
+                 "Bash(python3 -m unittest:*)", "Bash(python -m unittest:*)",
+                 "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(diff:*)",
+                 "Bash(git diff:*)", "Bash(git status:*)"]
+
+
 def _in_project(d: dict, t: dict, test_cmd) -> dict:
-    """在 t 的 project 里跑 claude 用的 d：cwd=project；这批没给权限就 acceptEdits + 只放行测试命令。"""
+    """在 t 的 project 里跑 claude 用的 d：cwd=project；这批没给权限就 acceptEdits + PROJECT_TOOLS + 测试命令。
+
+    permission_mode / allowed_tools 给了任一个就照调用方的（只给 allowed_tools 时模式补 acceptEdits，同以前）。
+    """
     o = d["options"]
     tools = list(o["allowed_tools"])
     if not o["permission_mode"] and not tools:
-        tools = ["Read", "Grep", "Glob", "Edit"] + ([f"Bash({test_cmd}*)"] if test_cmd else [])
+        tools = PROJECT_TOOLS + ([f"Bash({test_cmd}*)"] if test_cmd else [])
     return dict(d, cwd=t["project"],
                 options=dict(o, permission_mode=o["permission_mode"] or "acceptEdits", allowed_tools=tools))
 
