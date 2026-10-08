@@ -76,6 +76,7 @@ run AI老师设定  $PY tests/kg/test_teacher_note.py
 run AI老师传达  $PY tests/kg/test_teacher_relay.py
 run 教材和进度  $PY tests/kg/test_pages.py
 run 多人模式    $PY tests/kg/test_multiuser.py
+run 命令行别名  $PY tests/kg/test_cli_alias.py
 run 教师学生分端 $PY tests/kg/test_roles.py
 run 并发用包    $PY tests/dsl/test_use_concurrent.py
 run 假模型脚本  $PY tests/dsl/test_mock_script.py

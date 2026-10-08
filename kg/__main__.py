@@ -11,6 +11,13 @@
     py -m kg 改密 <用户名>                   改任何账号的密码（交互输入）
     py -m kg 并入 me <用户名>                把单人模式 me 的学习记录归到这个账号
                           （这三个命令都能加 --库 别的库.db，测试用临时库）
+    py -m kg --help / py -m kg 建教师 --help  帮助（不建库、不起服务）
+
+中文子命令和选项都有英文别名，两种写法等价（对照表见下面的 COMMANDS / OPTIONS）：
+建教师 create-teacher、改密 passwd、并入 merge；--显示名 --display-name、
+--库 --db、--密码环境变量 --password-env、--登录 --login、--安全cookie
+--secure-cookie、--不开浏览器 --no-browser、--标题 --title、--入口 --entry。
+进来先把英文换成中文（canonical），后面的代码只认中文。
 
 ## 单人模式和多人模式
 
@@ -271,12 +278,55 @@ def do_import() -> int:
     return run_import()
 
 
+# ----------------------------------------------------------------------
+# 英文别名：中文是正名，英文是别名
+# ----------------------------------------------------------------------
+
+COMMANDS = {"建教师": "create-teacher", "改密": "passwd", "并入": "merge"}
+OPTIONS = {"--显示名": "--display-name", "--库": "--db", "--密码环境变量": "--password-env",
+           "--登录": "--login", "--安全cookie": "--secure-cookie",
+           "--不开浏览器": "--no-browser", "--标题": "--title", "--入口": "--entry"}
+# 后面跟一个值的选项：值原样留着，不当选项换（用户名、标题叫 --db 也不误伤）
+VALUED = {"--显示名", "--库", "--密码环境变量", "--标题", "--入口", "--host", "--port"}
+_EN_COMMANDS = {en: zh for zh, en in COMMANDS.items()}
+_EN_OPTIONS = {en: zh for zh, en in OPTIONS.items()}
+
+
+def canonical_options(argv: list) -> list:
+    """选项的英文别名换成中文（--db x → --库 x，--db=x → --库 x），别的原样。"""
+    out, skip = [], False
+    for a in argv:
+        if skip:
+            out.append(a)
+            skip = False
+            continue
+        head, eq, val = a.partition("=")
+        zh = _EN_OPTIONS.get(head, head)
+        if eq and zh in VALUED:
+            out += [zh, val]  # --库=x 拆成 --库 x：手写的 _opt 只认分开写
+            continue
+        if zh.startswith("--"):
+            a = zh + eq + val
+            skip = not eq and zh in VALUED
+        out.append(a)
+    return out
+
+
+def canonical(argv: list) -> list:
+    """整条命令行：开头的子命令和后面的选项都换成中文正名。"""
+    if argv and argv[0] in _EN_COMMANDS:
+        argv = [_EN_COMMANDS[argv[0]]] + argv[1:]
+    return argv[:1] + canonical_options(argv[1:]) if argv and not argv[0].startswith("-") \
+        else canonical_options(argv)
+
+
 def parse_login(argv: list, environ=None) -> tuple:
     """多人模式：(login, secure_cookie, 去掉 --登录/--安全cookie 之后的参数)。
     `py -m kg` 和 app.pyw 共用。默认单人（不登录）；--登录 或 KG_LOGIN 非空且不是 0
     才要求登录。--安全cookie / KG_SECURE_COOKIE 让登录 cookie 只走 https。
     """
     environ = os.environ if environ is None else environ
+    argv = canonical_options(argv)  # app.pyw 直接调这里：--login 也认
     on = lambda k: environ.get(k, "") not in ("", "0")
     login = "--登录" in argv or on("KG_LOGIN")
     secure = "--安全cookie" in argv or on("KG_SECURE_COOKIE")
@@ -392,6 +442,7 @@ def make_teacher(argv: list, environ=None) -> int:
     """py -m kg 建教师 <用户名> [--显示名 X] [--密码环境变量 X]"""
     sys.path.insert(0, str(ROOT))
     from tools.auth import USERNAME_RE, hash_password
+    argv = canonical_options(argv)
     args = _positional(argv)
     name = args[0].strip() if args else ""
     if not USERNAME_RE.match(name):
@@ -417,6 +468,7 @@ def change_password(argv: list, environ=None) -> int:
     """py -m kg 改密 <用户名> [--密码环境变量 X]：教师、学生都能改（本机管理员用）。"""
     sys.path.insert(0, str(ROOT))
     from tools.auth import hash_password
+    argv = canonical_options(argv)
     args = _positional(argv)
     name = args[0].strip() if args else ""
     if not name:
@@ -456,6 +508,7 @@ def merge_me(argv: list) -> int:
     """
     import sqlite3
     import time
+    argv = canonical_options(argv)
     args = _positional(argv)
     if len(args) != 2 or args[0] != "me":
         print("用法：py -m kg 并入 me <用户名>")
@@ -499,27 +552,62 @@ def merge_me(argv: list) -> int:
     return 0
 
 
-def main(argv: list[str]) -> int:
-    cmd = argv[0] if argv and not argv[0].startswith("-") else "run"
+HELP = {
+    "": """用法：py -m kg [子命令] [选项]          中文、英文写法等价
 
-    if cmd == "import":
-        return do_import()
-    if cmd == "setup":
-        return setup()
-    if cmd == "建教师":
-        return make_teacher(argv[1:])
-    if cmd == "改密":
-        return change_password(argv[1:])
-    if cmd == "并入":
-        return merge_me(argv[1:])
+子命令：
+  （不写）                            建库 + 导入 + 编译 + 起服务
+  setup                               只建库、导入、编译，不起服务
+  import                              只导入（知识点、条目、对照、单词）
+  建教师 / create-teacher <用户名>     建教师账号
+  改密 / passwd <用户名>               改任何账号的密码
+  并入 / merge me <用户名>             把单人模式 me 的学习记录归到这个账号
 
+起服务的选项（其余原样交给 gen run）：
+  --登录 / --login                    多人模式，要登录（也可设 KG_LOGIN=1）
+  --安全cookie / --secure-cookie      登录 cookie 只走 https（也可设 KG_SECURE_COOKIE=1）
+  --不开浏览器 / --no-browser         起服务后不开浏览器
+  --标题 / --title X                  页面标题，默认「日语学习」
+  --入口 / --entry X                  入口界面
+  --mock / --real                     模拟 / 真模型（默认真模型；也可设 KG_MOCK=1）
+  --host H / --port N                 监听地址和端口
+
+各子命令的选项：py -m kg <子命令> --help""",
+    "建教师": """用法：py -m kg 建教师 <用户名> [选项]
+      py -m kg create-teacher <用户名> [options]
+
+建教师账号。密码交互输两次、不回显。
+  --显示名 / --display-name X         显示名
+  --密码环境变量 / --password-env 变量名   从这个环境变量读密码（测试、脚本用）
+  --库 / --db 路径                    别的库（测试用临时库），默认 kg/app.db""",
+    "改密": """用法：py -m kg 改密 <用户名> [选项]
+      py -m kg passwd <用户名> [options]
+
+改任何账号（教师、学生）的密码。密码交互输两次、不回显。
+  --密码环境变量 / --password-env 变量名   从这个环境变量读密码（测试、脚本用）
+  --库 / --db 路径                    别的库（测试用临时库），默认 kg/app.db""",
+    "并入": """用法：py -m kg 并入 me <用户名> [选项]
+      py -m kg merge me <用户名> [options]
+
+把单人模式 me 的学习记录归到这个账号（先整库备份；账号已有记录就不做）。
+  --库 / --db 路径                    别的库（测试用临时库），默认 kg/app.db""",
+    "setup": "用法：py -m kg setup\n\n只建库、导入、编译，不起服务。",
+    "import": "用法：py -m kg import\n\n只导入（知识点、条目、对照、单词）。",
+}
+
+
+def show_help(args: list) -> int:
+    print(HELP.get(args[0] if args else "", HELP[""]))
+    return 0
+
+
+def serve(extra: list) -> int:
+    """建库 + 导入 + 编译 + 起服务。extra 是子命令之外的参数，已换成中文正名。"""
     code = setup()
     if code:
         return code
     sys.path.insert(0, str(ROOT))
     from gen.project import main as gen_main
-    # 除了开头那个子命令，其余参数（--port 之类）原样交给 gen run
-    extra = argv[1:] if (argv and not argv[0].startswith("-")) else argv
     # 默认真模型（跟 gen run 相反）：问老师要真回答。--mock 或 KG_MOCK=1 切回
     # 模拟，测试和不想花额度时用
     mock, extra = parse_mode(extra)
@@ -531,6 +619,35 @@ def main(argv: list[str]) -> int:
                     + (["--登录"] if login else []) + (["--安全cookie"] if secure else [])
                     + ([] if "--标题" in extra else ["--标题", TITLE])
                     + extra)
+
+
+HANDLERS = {
+    "import": lambda args: do_import(),
+    "setup": lambda args: setup(),
+    "建教师": make_teacher,
+    "改密": change_password,
+    "并入": merge_me,
+}
+
+
+def parse(argv: list) -> tuple:
+    """(处理函数, 交给它的参数)。英文别名在这里换成中文，后面只认中文。
+
+    -h / --help 不管在哪都只打帮助：不建库、不起服务。
+    """
+    argv = canonical(argv)
+    cmd = argv[0] if argv and not argv[0].startswith("-") else ""
+    if "-h" in argv or "--help" in argv:
+        return show_help, [cmd if cmd in HELP else ""]
+    if cmd in HANDLERS:
+        return HANDLERS[cmd], argv[1:]
+    # 除了开头那个子命令，其余参数（--port 之类）原样交给 gen run
+    return serve, argv[1:] if cmd else argv
+
+
+def main(argv: list[str]) -> int:
+    handler, args = parse(argv)
+    return handler(args)
 
 
 if __name__ == "__main__":
