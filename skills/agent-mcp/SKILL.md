@@ -78,6 +78,11 @@ cbatch.submit  engine="auto" project="/home/ysc/proj" tasks=["…Traceback…", 
 长尾从 8.3 秒起（6.4%，最长 72 秒，另有 150 秒超时）。`DSLAGENT_HEDGE_SEC` 改阈值，`0` 关掉。备用不预热
 （每个 claude 进程约 290MB，并发 3 时全预热要多占 ~1.7G）。calls.json 每次调用记 `hedged`、`winner`（primary/backup）、
 `hedge_at_ms`、`extra_cost`（被杀那一路按 message_start 的 usage 估，已计入 `cost`；没出 message_start 记 0）。
+**卡流对冲**：出了首 token（thinking 增量也算）之后这一路 20 秒没有任何新行，也现起备用重发，卡住那路不杀、谁先给出
+完整结果用谁（`DSLAGENT_STALL_SEC`，`0` 关）。plan15 B7、plan16 B4 那两次「150 秒超时、hedged=False」就是首 token
+7 秒内出了、之后流卡死；旧记录超时不带 ttft，看着像没出首 token。现在超时/崩溃的调用也记 `ttft_ms`、`hedge_reason`
+（no_token/stall）、`first_out_ms`、`no_output_ms`、`stall_ms`、`legs`（每一路的时刻明细）。问题在后台线程里写 stdin，
+进程还在启动、没读 stdin 时计时照样从发出算。
 **推理候选补充预读**（`tools/dslagent/infer.py`，默认开）：模板抽参之后，用 ast 抽项目事实（调用/同名方法弱边/常量读取/
 字面量/舍入/读 json）+ 小 Datalog 求值（从失败测试出发的调用闭包、名字/traceback/数据命中）+ 打分，取前 K=8 段**合并**进
 第一次定位的预读：模板预读不动，被同文件已有段包住的跳过，按名次加、加上会超 675 行（模板上限 450 的 1.5 倍）的跳过；

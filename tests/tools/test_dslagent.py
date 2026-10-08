@@ -69,8 +69,9 @@ TEST_OK = TEST_FAIL.replace("3)", "2)")
 
 
 # 假的常驻 claude（stream-json 进出）：第 i 个起的进程按 FAKE_PLAN[i] 行事——数字 = 多少秒后出首 token；
-# {"start": a, "delay": b} = a 秒出 message_start（带 usage）、b 秒出首 token；"die" = 收到问题就退出；"err" = 马上回报错的 result；
-# 列表 = 这个进程的第几问逐个取。
+# {"start": a, "delay": b} = a 秒出 message_start（带 usage）、b 秒出首 token；dict 里再加 "stall": c = 出首 token 后
+# 卡 c 秒才出结果（流卡住）、"boot": d = 进程起来先睡 d 秒才开始读 stdin（预热没完成）；
+# "die" = 收到问题就退出；"err" = 马上回报错的 result；列表 = 这个进程的第几问逐个取。
 # 每个进程把 pid 记进 FAKE_DIR/pids；回答里带 pid 和「上次 /clear 以来第几问」(hist)，用来查会话干不干净。
 FAKE_CLAUDE = r"""#!/usr/bin/env python3
 import json, os, sys, time
@@ -85,6 +86,8 @@ while True:
 with open(os.path.join(d, "pids"), "a") as f:
     f.write(f"{os.getpid()}\n")
 beh = plan[i] if i < len(plan) else 0.05
+if isinstance(beh, dict) and beh.get("boot"):
+    time.sleep(beh["boot"])
 out = lambda o: (sys.stdout.write(json.dumps(o, ensure_ascii=False) + "\n"), sys.stdout.flush())
 hist, nq, total = 0, 0, 0.0
 for line in sys.stdin:
@@ -102,7 +105,7 @@ for line in sys.stdin:
         continue
     nq += 1
     b = beh[min(nq, len(beh)) - 1] if isinstance(beh, list) else beh
-    start, delay = (b["start"], b["delay"]) if isinstance(b, dict) else (None, b)
+    start, delay = (b.get("start"), b.get("delay", 0.05)) if isinstance(b, dict) else (None, b)
     t0 = time.time()
     if start is not None:
         time.sleep(start)
@@ -110,6 +113,7 @@ for line in sys.stdin:
             "input_tokens": 1000, "cache_read_input_tokens": 10000, "cache_creation_input_tokens": 0}}}})
     time.sleep(max(0, delay - (time.time() - t0)))
     out({"type": "stream_event", "event": {"type": "content_block_delta"}})
+    time.sleep(b.get("stall", 0) if isinstance(b, dict) else 0)
     total += 0.01
     out({"type": "result", "subtype": "success", "is_error": False, "session_id": f"s{i}", "total_cost_usd": total,
          "result": f"答:{msg}|idx={i}|pid={os.getpid()}|hist={hist}"})
@@ -137,13 +141,13 @@ def test_hedge():
     fake.chmod(0o755)
     n = [0]
 
-    def setup(plan, hedge=0.4):
+    def setup(plan, hedge=0.4, stall=20):
         n[0] += 1
         d = TMP / f"fake_{n[0]}"
         d.mkdir()
         (d / "plan.json").write_text(json.dumps(plan))
         env = dict(os.environ, FAKE_DIR=str(d))
-        return d, Pool(d, str(fake), env, hedge=hedge)
+        return d, Pool(d, str(fake), env, hedge=hedge, stall=stall)
 
     def ask(pool, q, timeout=10):
         t0 = time.time()
@@ -222,18 +226,63 @@ def test_hedge():
     check(not m["hedged"] and len(pids(d)) == 1 and "idx=0" in r["result"], "阈值 0 → 不对冲", m)
     check(not finish(d, pool), "关池后不留进程")
 
+    # —— 以下是 plan15 B7 / plan16 B4「150 秒超时、hedged=False」排查补的情况 ——
+    d, pool = setup([{"delay": 0.1, "stall": 30}, 0.05], stall=0.6)
+    r, m, sec = ask(pool, "q1", timeout=8)
+    check(not r["is_error"] and m["hedged"] and m["hedge_reason"] == "stall" and m["winner"] == "backup"
+          and "idx=1" in r["result"] and sec < 3.5,
+          "首 token 很快出了、之后流卡住 → 卡流对冲，备用先给出结果就用备用（修复前：干等到总超时）", (m, round(sec, 2)))
+    check(m["ttft_ms"] is not None and m["legs"][0]["tok"] is not None and m["legs"][0]["end"] == "lost",
+          "记录：首 token 时刻、每一路明细（卡住那路被杀）", m.get("legs"))
+    check(not finish(d, pool), "关池后不留进程")
+
+    d, pool = setup([{"delay": 0.1, "stall": 30}, {"delay": 0.1, "stall": 30}], stall=0.6)
+    r, m, sec = ask(pool, "q1", timeout=2)
+    check(r["is_error"] and "超过" in r["result"] and m["ttft_ms"] is not None and m["stall_ms"] >= 1000
+          and m["hedge_reason"] == "stall" and m["first_out_ms"] is not None,
+          "两路都卡 → 总超时照样生效；超时记录带 ttft / stall_ms / first_out_ms（修复前超时不带 ttft，像没出首 token）", m)
+    check(not finish(d, pool), "关池后不留进程")
+
+    d, pool = setup([{"boot": 1.5, "delay": 30}, 0.05], hedge=0.4)
+    pool.prewarm("S", "sonnet")     # 预热：进程刚起、还没开始读 stdin
+    r, m, sec = ask(pool, "x" * 400000)
+    check(m["hedged"] and m["hedge_reason"] == "no_token" and m["winner"] == "backup" and 350 <= m["hedge_at_ms"] < 900,
+          "预热没完成 + 大问题写满管道 → 照样从发出起 0.4 秒对冲（修复前 send 卡到进程开始读才开始计时）", m)
+    check(not finish(d, pool), "关池后不留进程")
+
+    d, pool = setup([{"boot": 60, "delay": 0.05}, {"boot": 60, "delay": 0.05}], hedge=0.3)
+    r, m, sec = ask(pool, "x" * 400000, timeout=1.5)
+    check(r["is_error"] and "超过" in r["result"] and sec < 3 and m["no_output_ms"] >= 1400 and m["first_out_ms"] is None
+          and m["hedged"], "进程一直不读 stdin、一行输出都没有 → 对冲 + 总超时都生效（修复前永远卡在 send）；记 no_output_ms",
+          (round(sec, 2), m))
+    check(not finish(d, pool), "关池后不留进程")
+
+    d, pool = setup([{"start": 0.05, "delay": 0.1, "stall": 30}, 0.05], stall=0)
+    r, m, sec = ask(pool, "q1", timeout=1.5)
+    check(r["is_error"] and not m["hedged"], "卡流阈值 0 → 不做卡流对冲", m)
+    check(not finish(d, pool), "关池后不留进程")
+
     os.environ["DSLAGENT_HEDGE_SEC"] = "2.5"
     from tools.dslagent import pool as PL
     check(PL.Pool("/", "x", {}).hedge == 2.5 and PL.Pool("/", "x", {}, hedge=1).hedge == 1,
           "阈值可用 DSLAGENT_HEDGE_SEC / 参数配置")
     del os.environ["DSLAGENT_HEDGE_SEC"]
     check(PL.Pool("/", "x", {}).hedge == PL.HEDGE_SEC == 7.0, "默认阈值 7 秒")
+    os.environ["DSLAGENT_STALL_SEC"] = "9"
+    check(PL.Pool("/", "x", {}).stall == 9 and PL.Pool("/", "x", {}, stall=1).stall == 1, "卡流阈值可用 DSLAGENT_STALL_SEC / 参数配置")
+    del os.environ["DSLAGENT_STALL_SEC"]
+    check(PL.Pool("/", "x", {}).stall == PL.STALL_SEC == 20.0, "默认卡流阈值 20 秒")
 
     call = SimpleNamespace(stdout=json.dumps({"total_cost_usd": 0.02, "_pool": {"hedged": True, "winner": "backup",
                                                                                   "hedge_at_ms": 7000, "extra_cost": 0.01}}))
     cm = R.call_meta(call)
     check(cm["hedged"] and cm["winner"] == "backup" and cm["extra_cost"] == 0.01 and cm["hedge_at_ms"] == 7000,
           "calls.json 记录带 hedged / winner / hedge_at_ms / extra_cost", cm)
+    call = SimpleNamespace(stdout=json.dumps({"is_error": True, "_pool": {"hedged": False, "ttft_ms": 3000, "stall_ms": 147000,
+                                                                          "no_output_ms": 900, "hedge_reason": None}}))
+    cm = R.call_meta(call)
+    check(cm["ttft_ms"] == 3000 and cm["stall_ms"] == 147000 and cm["no_output_ms"] == 900 and "hedge_reason" in cm,
+          "calls.json 记录带 ttft（超时也带）/ stall_ms / no_output_ms / hedge_reason", cm)
 
 
 def main():
