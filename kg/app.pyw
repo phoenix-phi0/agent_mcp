@@ -3,6 +3,7 @@
 
     py kg/app.pyw          开发时
     双击 app.pyw           平时
+    双击 teacher.pyw       教师端（= app.pyw --教师 / --teacher，或 KG_TEACHER=1）
 
 跟 gen/app.pyw 同一套：起 Flask 在随机空端口，等它活过来，用 pywebview 开
 一个原生窗口，关窗口就退出（webview.start() 阻塞到关闭，服务线程是 daemon）。
@@ -114,6 +115,20 @@ def build_app(argv: list, environ=None):
     return app, mock, title
 
 
+def window_target(port: int, title: str, argv: list, environ=None) -> tuple:
+    """窗口打开哪一页、标题叫什么：(url, title)。不开窗口，测试直接调它。
+
+    --教师 / --teacher / KG_TEACHER=1 开教师端 /teacher，标题加「· 教师端」；
+    别的（单人还是多人、真模型还是模拟）不归它管。
+    """
+    from kg.__main__ import parse_teacher
+
+    teacher, _ = parse_teacher(argv, environ)
+    if teacher:
+        return f"http://127.0.0.1:{port}/teacher", f"{title} · 教师端"
+    return f"http://127.0.0.1:{port}/", title
+
+
 def main(argv: list = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     start_log()
@@ -136,6 +151,7 @@ def main(argv: list = None) -> int:
 
     port = free_port()
     app, _mock, title = build_app(argv)
+    url, title = window_target(port, title, argv)
     threading.Thread(
         target=lambda: app.run(host="127.0.0.1", port=port,
                                threaded=True, debug=False),
@@ -150,7 +166,7 @@ def main(argv: list = None) -> int:
         time.sleep(0.05)
 
     webview.create_window(
-        title, f"http://127.0.0.1:{port}",
+        title, url,
         width=1200, height=860, min_size=(820, 560))
     webview.start()          # 阻塞到窗口关闭
     return 0

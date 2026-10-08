@@ -13,6 +13,9 @@
                           （这三个命令都能加 --库 别的库.db，测试用临时库）
     py -m kg --help / py -m kg 建教师 --help  帮助（不建库、不起服务）
 
+桌面入口：双击 app.pyw（学生端 /）或 teacher.pyw（教师端 /teacher，等于
+app.pyw --教师 / --teacher，也可设 KG_TEACHER=1）。两个都默认单人模式。
+
 中文子命令和选项都有英文别名，两种写法等价（对照表见下面的 COMMANDS / OPTIONS）：
 建教师 create-teacher、改密 passwd、并入 merge；--显示名 --display-name、
 --库 --db、--密码环境变量 --password-env、--登录 --login、--安全cookie
@@ -333,6 +336,20 @@ def parse_login(argv: list, environ=None) -> tuple:
     return login, secure, [a for a in argv if a not in ("--登录", "--安全cookie")]
 
 
+# 只有桌面入口 app.pyw 认：打开 /teacher 而不是 /。py -m kg 不认（浏览器里自己开 /teacher）
+APP_OPTIONS = {"--教师": "--teacher"}
+
+
+def parse_teacher(argv: list, environ=None) -> tuple:
+    """教师端：(teacher, 去掉 --教师/--teacher 之后的参数)。app.pyw / teacher.pyw 用。
+    --教师、--teacher 或 KG_TEACHER 非空且不是 0。只管开哪一页，登录不登录照旧看 --登录。
+    """
+    environ = os.environ if environ is None else environ
+    flags = set(APP_OPTIONS) | set(APP_OPTIONS.values())
+    teacher = any(a in flags for a in argv) or environ.get("KG_TEACHER", "") not in ("", "0")
+    return teacher, [a for a in argv if a not in flags]
+
+
 def login_line(login: bool) -> str:
     if login:
         return "登录：多人模式（--登录 / KG_LOGIN）——要登录，学习记录按账号分开，管理侧只许教师"
@@ -571,6 +588,11 @@ HELP = {
   --入口 / --entry X                  入口界面
   --mock / --real                     模拟 / 真模型（默认真模型；也可设 KG_MOCK=1）
   --host H / --port N                 监听地址和端口
+
+桌面入口（app.pyw）另认：
+  --教师 / --teacher                  开教师端 /teacher（也可设 KG_TEACHER=1；
+                                      双击 teacher.pyw 一样）。默认单人模式，多人加 --登录，
+                                      先 py -m kg create-teacher <用户名> 建教师账号
 
 各子命令的选项：py -m kg <子命令> --help""",
     "建教师": """用法：py -m kg 建教师 <用户名> [选项]

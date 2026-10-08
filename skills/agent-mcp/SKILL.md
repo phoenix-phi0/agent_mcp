@@ -380,6 +380,8 @@ tools/dsl_http.py「认证」一节。kg 的教师只能命令行建：`py -m kg
 `--标题 --title`、`--入口 --entry`。例：`py -m kg create-teacher t1 --password-env PW
 --db /tmp/a.db`（测试一律用临时库，密码走环境变量）。kg 多人模式下教师是单独的一端：会读写学习记录的
 接口都「只许 学生」（教师 403），教师只看学情、学生管理、教材导入。
+教师端桌面入口：双击 `kg/teacher.pyw`，或 `pythonw kg/app.pyw --teacher`（`--教师` / `KG_TEACHER=1`），
+开 `/teacher`、标题加「· 教师端」；默认单人模式，多人需加 `--login` 并先用 `python -m kg create-teacher` 建教师账号。
 **参数别叫 learner**：多人模式下请求体里的 learner 被引擎盖成登录的人，教师端
 查某个学生要用别的名字（学情用 `student`）。
 

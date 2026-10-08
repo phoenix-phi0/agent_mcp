@@ -78,6 +78,7 @@ run 教材和进度  $PY tests/kg/test_pages.py
 run 多人模式    $PY tests/kg/test_multiuser.py
 run 命令行别名  $PY tests/kg/test_cli_alias.py
 run 教师学生分端 $PY tests/kg/test_roles.py
+run 教师端入口 $PY tests/kg/test_teacher_entry.py
 run 并发用包    $PY tests/dsl/test_use_concurrent.py
 run 假模型脚本  $PY tests/dsl/test_mock_script.py
 run 问JSON格式  $PY tests/dsl/test_ask_json_format.py
