@@ -78,6 +78,17 @@ cbatch.submit  engine="auto" project="/home/ysc/proj" tasks=["…Traceback…", 
 长尾从 8.3 秒起（6.4%，最长 72 秒，另有 150 秒超时）。`DSLAGENT_HEDGE_SEC` 改阈值，`0` 关掉。备用不预热
 （每个 claude 进程约 290MB，并发 3 时全预热要多占 ~1.7G）。calls.json 每次调用记 `hedged`、`winner`（primary/backup）、
 `hedge_at_ms`、`extra_cost`（被杀那一路按 message_start 的 usage 估，已计入 `cost`；没出 message_start 记 0）。
+**推理候选补充预读**（`tools/dslagent/infer.py`，默认开）：模板抽参之后，用 ast 抽项目事实（调用/同名方法弱边/常量读取/
+字面量/舍入/读 json）+ 小 Datalog 求值（从失败测试出发的调用闭包、名字/traceback/数据命中）+ 打分，取前 K=8 段**合并**进
+第一次定位的预读：模板预读不动，被同文件已有段包住的跳过，按名次加、加上会超 675 行（模板上限 450 的 1.5 倍）的跳过；
+不替代模板、不做硬过滤，只是多给模型几段原文。抽事实在开局跑测试时后台先做；抽取/推理出错、等待超过 3 秒
+（`DSLAGENT_INFER_TIMEOUT`）、.py 超过 400 个 → 回退为只用模板预读。result.json 的 `infer`（及第 1 版 `template.infer`）
+记本地耗时、候选段、模板原预读、合并后预读、`fallback`（回退原因，空＝没回退）。关：`DSLAGENT_INFER=0` 或
+`python -m tools.dslagent run --no-infer`。规则/权重/段长与 plan15 冻结版逐项一致（`tests/tools/test_dslagent_infer.py`
+在实验场景存在时对照）。实测（各 1 次）：N1–N10 10/10、B1–B8 8/8，首次定位直接给改法 N 7/10（原 3/10）、B 5/8（原 0/8），
+本地耗时均 ≈0.35 秒。**局限**：项目小时模板本就整份预读，候选几乎不增量（≤60 行的文件整份给，偏差在预读量而非位置）；
+读错字典键、大差额的舍入错（只认断言两边差 ≤2 的舍入）没有专门规则；动态调用（getattr、字典分派、obj.m()）
+只按同名方法尽力连边，只作排序提示；同分的段先后随 hash 种子变（段集合不变）。
 
 GBatch 接口同 CBatch，执行端换成 Grok Build 的 `grok -p`（`gbatch.submit/wait/
 status/...`，`gbatch.describe()` 列出权限用法和工具名映射）。跟 CBatch 的差别：

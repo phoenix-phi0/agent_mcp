@@ -215,14 +215,16 @@ def call_meta(p):
 # ------------------------------------------------------------ 主流程
 
 def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True, wall=WALL, inject=None,
-        max_calls=MAX_CALLS):
+        max_calls=MAX_CALLS, infer=None):
     """跑一次。project 里直接改文件；记录写进 out_dir（calls.json、result.json、plan_v*.zs/out.txt、state/）。
-    inject：测试用，{"template": "fail"} 让模板这一版什么都不做（触发转规划 / 兜底的路径）。返回结果字典（同 result.json）。"""
+    inject：测试用，{"template": "fail"} 让模板这一版什么都不做（触发转规划 / 兜底的路径）。
+    infer：模板预读并入推理候选（infer.py）；None＝看 DSLAGENT_INFER（默认开）。返回结果字典（同 result.json）。"""
     from tools import llm_router
     from tools.mock import MockClient
 
     from . import plan as P
     from . import prompts as PR
+    from . import infer as I
     from . import template as T
     from .engine import AgentEngine
     from .pool import Pool, child_env
@@ -272,6 +274,9 @@ def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True,
     if kinds:
         prewarm(PR.LIB_SYSTEM if kinds[0] == "template" else PR.SYSTEM)   # 模板只调 定位/读改测（系统提示 LIB_SYSTEM）
 
+    # 推理候选的事实抽取只读源码、和测试结果无关：后台线程先做，和开局跑测试重叠
+    ijob = I.start(project) if template and I.enabled(infer) else None
+    res["infer"] = {"on": ijob is not None}
     snap = snapshot(project)
     st0 = test_state(project, test_cmd)
     test0 = st0["summary"]
@@ -335,7 +340,10 @@ def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True,
             t0 = time.time()
             try:
                 if kind == "template":
-                    txt, tparams = T.build(task, test0, project)
+                    aug = (lambda p: I.augment(ijob, p, task, test0, project)) if ijob else None
+                    txt, tparams = T.build(task, test0, project, augment=aug)
+                    if "infer" in tparams:
+                        res["infer"] = tparams["infer"]
                     if inject.get("template") == "fail":
                         txt = INJECT_FAIL
                         tparams = dict(tparams, injected="fail")

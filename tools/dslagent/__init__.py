@@ -3,6 +3,7 @@
 把 /tmp/dslagent 的 plan6/plan7 实验（P6 臂）搬成生产路径，只留：
   pool.py      常驻 claude 进程池（stream-json，每次调用后 /clear），单次调用省 ≈3 秒
   template.py  第 1 版固定模板：从任务描述 / 测试摘要里按规则抽关键词和预读段落，不调模型规划
+  infer.py     推理候选：ast 事实 + 小 Datalog + 打分，前 8 段并进模板预读（≤675 行；出错/超时回退；DSLAGENT_INFER=0 关）
   prompts.py   模板没修好时的规划提示（不变的大段在系统提示里，跨调用读缓存）
   plan.py      计划检查：去说明文字、白名单、补末尾「结束」、假模型空跑
   engine.py    AgentEngine（DSLEngine 子类）：系统子脚本映射、语句白名单、子脚本调用记录

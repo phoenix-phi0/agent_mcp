@@ -156,11 +156,21 @@ def extract(desc, test, repo, files=None):
     return {"kw": kw, "kw_why": [f"{why}（{n} 行）" for _, _, why, n in kept], "pre": ",".join(segs), "pre_lines": total}
 
 
-def build(desc, test, repo):
+def _infer_note(p):
+    i = p.get("infer")
+    if not i:
+        return ""
+    return "（推理回退，只用模板预读）" if i["fallback"] else f"（含推理候选 {i.get('added', 0)} 段）"
+
+
+def build(desc, test, repo, augment=None):
+    """augment：可选 p → p，抽参之后改预读（runner 用它并入推理候选，见 infer.py）。"""
     p = extract(desc, test, repo)
+    if augment:
+        p = augment(p)
     pre = p["pre"] or "无"
     s = f"""用包 common text code
-# 第 1 版：固定模板（不调模型规划）。kw 来自：{'；'.join(p['kw_why']) or '无'}；预读 {p['pre_lines']} 行
+# 第 1 版：固定模板（不调模型规划）。kw 来自：{'；'.join(p['kw_why']) or '无'}；预读 {p['pre_lines']} 行{_infer_note(p)}
 设 t0 = 跑测试
 设 h = 开局失败：{{t0.summary}}
 设 p = 执行 定位.zs task={{task}} kw={p['kw']} hint={{h}} pre={pre} rounds=3

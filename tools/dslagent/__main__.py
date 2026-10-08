@@ -23,6 +23,7 @@ def main(argv=None):
     r.add_argument("--test-cmd")
     r.add_argument("--max-plan", type=int, default=2)
     r.add_argument("--no-template", action="store_true")
+    r.add_argument("--no-infer", action="store_true", help="模板预读不并入推理候选（同 DSLAGENT_INFER=0）")
     r.add_argument("--wall", type=int, default=500)
     r.add_argument("--inject", default="{}", help="测试用 JSON，如 {\"template\": \"fail\"}")
     u = sp.add_parser("auto", help="只做 engine=auto 的判定")
@@ -43,7 +44,8 @@ def main(argv=None):
         raise SystemExit(143)
     signal.signal(signal.SIGTERM, on_term)
     res = runner.run(a.project, _task(a), a.out, test_cmd=a.test_cmd, max_plan=a.max_plan,
-                     template=not a.no_template, wall=a.wall, inject=json.loads(a.inject or "{}"))
+                     template=not a.no_template, wall=a.wall, inject=json.loads(a.inject or "{}"),
+                     infer=False if a.no_infer else None)
     print(json.dumps({k: res[k] for k in ("fixed", "engine_used", "versions", "calls", "cost", "seconds", "stop")},
                      ensure_ascii=False))
     return 0
