@@ -4,8 +4,13 @@
     r = runner.run(project, task, out_dir)          # 在 project 里直接改文件
     r["fixed"], r["engine_used"], r["handoff"]       # handoff：没修好时给兜底 claude 的交接说明
 
-流程（plan6/plan7 验证过的 P6 生产路径）：
-  1. 开局跑测试（test_cmd 缺省按项目探测 pytest / unittest）。一开始就全过 → 不动手，交回。
+两条路径（开局跑测试定，result.json 的 kind 记 bugfix / task）：
+  - 修 bug（开局有失败测试）：下面 1–5，plan6/plan7 验证过的 P6 生产路径。
+  - 任务（开局测试全过）：不套模板，模型规划最多 MAX_PLAN 版（系统提示同修 bug 的规划，用户提示换成「完成任务」的说法，
+    文件清单含 .json/.csv/.md 等），一版算完成＝测试全过、测试文件没动、脚本没报错、结论「修好」，再过完成前核对；
+    写/删/改模块名动词（verbs/code）都过安全约束；退回规划前回归已坏先回滚到开局快照。engine_used=plan_task。
+流程（修 bug）：
+  1. 开局跑测试（test_cmd 缺省按项目探测 pytest / unittest）。测试命令没跑到测试 → 不动手，交回。
   2. 第 1 版套固定模板（template.py，不调模型规划）：定位.zs（预读 + 搜索 + 可直接给改法）→ 读改测.zs。
   3. 没修好 → 模型写 .zs 计划（prompts.py；系统提示缓存），白名单 + 假模型空跑检查，错了带行号回去重写（≤2 次），
      执行；最多 MAX_PLAN 版。每版之间项目里的修改保留。
@@ -119,29 +124,51 @@ def test_state(project, test_cmd, timeout=120):
 
 
 def decide_auto(prompt, project, test_cmd=None, timeout=120):
-    """engine=auto 的判定，返回 {engine: dsl|claude, reason, test_cmd, initial?}。规则：
+    """engine=auto 的判定，返回 {engine: dsl|claude, kind?: bugfix|task, reason, test_cmd, initial?, items?}。规则：
     1. 没给 project → claude（dsl 会直接改 project 里的文件，不替调用方猜目录）；
-    2. 没给 test_cmd，提示词里也没有失败测试 / Traceback 的说法 → claude（不像修 bug 任务）；
-    3. 测试命令（给的或探测的）跑不起来、或没跑到任何测试 → claude；
-    4. 初始测试全过 → claude（没有失败的测试可以对着修）；
-    5. 否则（有信号、能跑、确实有失败）→ dsl。"""
+    2. 测试命令（给的或探测的）没有、跑不起来、或没跑到任何测试 → claude（dsl 两条路径都靠测试验收）；
+    3. 初始有失败：给了 test_cmd 或提示词里有失败测试 / Traceback 的说法 → dsl 修 bug；没有 → claude（不像修 bug 的任务）；
+    4. 初始全过：提示词里有失败测试 / Traceback 的说法 → claude（说有 bug 但测试没覆盖到，不是 dsl 能验收的）；
+       否则用完成前核对的抽取器（reason.done_items）从任务文本里抽明确产物（新建/删除的路径、函数/类名、JSON 键、
+       行数约束、import 等），抽到 ≥1 个 → dsl 任务路径；一个都抽不到 → claude（开放式任务）。"""
     if not project:
         return {"engine": "claude", "reason": "没给 project", "test_cmd": test_cmd}
     hit = FAIL_SIGNAL.search(prompt or "")
-    if not test_cmd and not hit:
-        return {"engine": "claude", "reason": "没给 test_cmd，提示词里也没有失败测试/Traceback", "test_cmd": None}
-    why = "给了 test_cmd" if test_cmd else f"提示词里有「{hit.group(0)[:30]}」"
     cmd = test_cmd or detect_test_cmd(project)
     if not cmd:
-        return {"engine": "claude", "reason": f"{why}，但项目里探测不到测试（没有 tests/、test_*.py 或 pytest 配置）",
+        return {"engine": "claude", "reason": "项目里探测不到测试（没有 tests/、test_*.py 或 pytest 配置），dsl 没法验收",
                 "test_cmd": None}
     st = test_state(project, cmd, timeout)
     if not st["runnable"]:
-        return {"engine": "claude", "reason": f"{why}，但测试命令没跑到任何测试（{cmd}）：{st['summary'][:200]}",
+        return {"engine": "claude", "reason": f"测试命令没跑到任何测试（{cmd}）：{st['summary'][:200]}",
                 "test_cmd": cmd, "initial": st}
-    if not st["failing"]:
-        return {"engine": "claude", "reason": f"{why}，但初始测试全过，没有失败的测试可修", "test_cmd": cmd, "initial": st}
-    return {"engine": "dsl", "reason": f"{why}，测试能跑且初始有失败", "test_cmd": cmd, "initial": st}
+    if st["failing"]:
+        if test_cmd or hit:
+            why = "给了 test_cmd" if test_cmd else f"提示词里有「{hit.group(0)[:30]}」"
+            return {"engine": "dsl", "kind": "bugfix", "reason": f"{why}，测试能跑且初始有失败 → 修 bug 路径",
+                    "test_cmd": cmd, "initial": st}
+        return {"engine": "claude", "reason": "初始有失败测试，但没给 test_cmd、提示词里也没有失败测试/Traceback，不像修 bug 任务",
+                "test_cmd": cmd, "initial": st}
+    if hit:
+        return {"engine": "claude", "reason": f"提示词里有「{hit.group(0)[:30]}」，但初始测试全过（测试没覆盖到这个问题）",
+                "test_cmd": cmd, "initial": st}
+    from . import reason as R
+    items = R.done_items(prompt, R.all_files(project))
+    if not items:
+        return {"engine": "claude", "reason": "初始测试全过，任务文本里抽不出明确产物（路径/标识符/JSON 键/行数约束等），按开放式任务交 claude",
+                "test_cmd": cmd, "initial": st, "items": []}
+    desc = "；".join(_item_text(it) for it in items[:4]) + (f" 等 {len(items)} 项" if len(items) > 4 else "")
+    return {"engine": "dsl", "kind": "task", "reason": f"初始测试全过，任务文本里抽到明确产物：{desc} → 任务路径",
+            "test_cmd": cmd, "initial": st, "items": items}
+
+
+def _item_text(it):
+    k = it["kind"]
+    return {"exists": lambda: f"新建 {it['path']}", "absent": lambda: f"删除 {it['path']}",
+            "unchanged": lambda: f"不改 {it['path']}", "def": lambda: f"定义 {it['name']}",
+            "forbid": lambda: f"{it['dir']} 下不出现 {it['name']}", "keys": lambda: f"{it['path']} 键 {','.join(it['keys'][:4])}",
+            "lines": lambda: f"{it['path']} ≤{it['max']} 行", "import": lambda: f"from {it['mod']} import {it['name']}"}.get(
+        k, lambda: k)()
 
 
 # ------------------------------------------------------------ 快照、验收
@@ -159,6 +186,18 @@ def snapshot(project):
     return out
 
 
+def text_snapshot(files, max_bytes=200000):
+    """reason.all_files 的字节快照 → 能按 utf-8 解码、不太大的文本文件（任务路径的 diff 用，含 .json/.csv/.md）。"""
+    out = {}
+    for rel, b in files.items():
+        if len(b) <= max_bytes:
+            try:
+                out[rel] = b.decode("utf-8")
+            except UnicodeDecodeError:
+                pass
+    return out
+
+
 def _tests_hash(files):
     _defs()
     import _sandbox
@@ -169,9 +208,13 @@ def _tests_hash(files):
     return h.hexdigest()
 
 
-def diff_since(project, snap, limit=4000):
-    """相对 snap 的源码改动：(diff 文本, 改了的文件, 改动行数)。"""
-    now = snapshot(project)
+def diff_since(project, snap, limit=4000, every=False):
+    """相对 snap 的源码改动：(diff 文本, 改了的文件, 改动行数)。every：snap 是 text_snapshot（所有文本文件）。"""
+    if every:
+        from . import reason as R
+        now = text_snapshot(R.all_files(project))
+    else:
+        now = snapshot(project)
     lines, files, n = [], [], 0
     for rel in sorted(set(snap) | set(now)):
         a = snap.get(rel, "").splitlines()
@@ -246,7 +289,7 @@ def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True,
     inject = inject or {}
     test_cmd = test_cmd or detect_test_cmd(project)
     t_start = time.time()
-    res = {"project": str(project), "test_cmd": test_cmd, "fixed": False, "engine_used": None, "versions": 0,
+    res = {"project": str(project), "test_cmd": test_cmd, "kind": None, "fixed": False, "engine_used": None, "versions": 0,
            "calls": 0, "cost": 0.0, "seconds": 0, "stop": "", "dir": str(out), "calls_log": str(out / "calls.json"),
            "version_log": [], "subcalls": [], "changed_files": [], "handoff": "", "report": ""}
 
@@ -259,7 +302,7 @@ def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True,
         return res
 
     if not test_cmd:
-        res["stop"] = "项目里探测不到测试（没有 tests/、test_*.py 或 pytest 配置），dsl 只做有失败测试的修 bug 任务；可以传 test_cmd"
+        res["stop"] = "项目里探测不到测试（没有 tests/、test_*.py 或 pytest 配置），dsl 要靠测试验收；可以传 test_cmd"
         return finish()
     os.environ["DSLAGENT_STATE"] = str(state)
     os.environ["DSLAGENT_TEST_CMD"] = test_cmd
@@ -296,11 +339,23 @@ def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True,
     res["done_check"] = {"items": R.done_items(task, snap_all), "log": []}
     chk = {"redo": False, "confirm": False}
     res["initial"] = {"runnable": st0["runnable"], "failing": st0["failing"], "summary": test0[:2000]}
-    if not st0["failing"]:
+    if not st0["runnable"]:
         pool.kill()
-        res["stop"] = ("开局测试全部通过，没有失败的测试可修" if st0["runnable"]
-                       else f"测试命令没跑到任何测试：{test0[:300]}")
+        res["stop"] = f"测试命令没跑到任何测试：{test0[:300]}"
         return finish()
+    task_mode = not st0["failing"]
+    res["kind"] = "task" if task_mode else "bugfix"
+    snap_txt = text_snapshot(snap_all) if task_mode else None
+    if task_mode:
+        # 任务路径：不套模板、不用推理候选，直接模型规划；常驻进程换成规划的系统提示
+        kinds = ["plan"] * max(0, int(max_plan))
+        if template:
+            pool.kill()
+            if kinds:
+                prewarm(PR.SYSTEM)
+        if not kinds:
+            res["stop"] = "规划版数上限 0，什么都没做"
+            return finish()
     calls, subcalls = [], res["subcalls"]
     phase = {"v": "plan", "ver": 0}
     cap = {"plan_limit": 99}
@@ -329,7 +384,7 @@ def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True,
     client = llm_router.wrap(MockClient(handler=no_fallback, offline=False))
     lister = _verb_module("列文件")
     lister.WORKSPACE = project
-    files = lister.列文件()
+    files = lister.列文件("全部" if task_mode else "")
 
     def scripts_for(plan_dir, subs):
         m = {n: LIB / n for n in P.LIBS}
@@ -365,7 +420,8 @@ def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True,
                     vrec["template"] = tparams
                 else:
                     if prev is None:
-                        pr = PR.first_prompt(task, files, test0, left, plan_cap, versions_left, test_cmd)
+                        pr = (PR.task_first_prompt if task_mode else PR.first_prompt)(
+                            task, files, test0, left, plan_cap, versions_left, test_cmd)
                     else:
                         rb = ""
                         if R.enabled():
@@ -376,10 +432,16 @@ def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True,
                                 res["rollbacks"] += 1
                                 rb = (f"\n【安全约束】上一版改坏了原本通过的测试（{'；'.join(d['regress'][:3])}），"
                                       f"已把项目回滚到开局状态，下面的 diff/测试是回滚后的；别重复那条改法。")
-                        diff, _, _ = diff_since(project, snap, 3000)
-                        pr = PR.replan_prompt(task, files, test0, left, plan_cap, versions_left, ver - 1, prev["script"],
-                                              prev["out"][-5000:], prev["error"], test_state(project, test_cmd)["summary"],
-                                              diff, test_cmd, (PR.TEMPLATE_NOTE if prev["kind"] == "template" else "") + rb)
+                        if task_mode:
+                            diff, _, _ = diff_since(project, snap_txt, 3000, every=True)
+                            pr = PR.task_replan_prompt(task, files, test0, left, plan_cap, versions_left, ver - 1,
+                                                       prev["script"], prev["out"][-5000:], prev["error"],
+                                                       test_state(project, test_cmd)["summary"], diff, test_cmd, rb.strip())
+                        else:
+                            diff, _, _ = diff_since(project, snap, 3000)
+                            pr = PR.replan_prompt(task, files, test0, left, plan_cap, versions_left, ver - 1, prev["script"],
+                                                  prev["out"][-5000:], prev["error"], test_state(project, test_cmd)["summary"],
+                                                  diff, test_cmd, (PR.TEMPLATE_NOTE if prev["kind"] == "template" else "") + rb)
                     txt = client.chat(pr, system=PR.SYSTEM, model=MODEL)
             except Exception as e:
                 res["stop"] = f"第 {ver} 版规划失败：{type(e).__name__}: {str(e)[:300]}"
@@ -449,6 +511,9 @@ def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True,
             v = verify(project, snap, test_cmd)
             last_test = v["summary"]
             concl = re.findall(r"结论[:：]\s*(.+)", text)
+            if task_mode:
+                # 任务路径没有失败测试可对：完成＝测试全过且没动测试文件、脚本没报错、结论「修好」
+                v["fixed"] = v["fixed"] and not error and bool(concl) and concl[-1].strip().startswith("修好")
             vrec.update(calls=sum(1 for c in calls if c["ver"] == ver), error=error[:400],
                         conclusion=concl[-1][:200] if concl else "", fixed_after=v["fixed"], out_tail=text[-800:])
             res["version_log"].append(vrec)
@@ -478,27 +543,31 @@ def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True,
                     break
             if v["fixed"]:
                 res["fixed"] = True
-                res["engine_used"] = kind
+                res["engine_used"] = "plan_task" if task_mode else kind
                 break
             if not v["tests_untouched"]:
                 res["stop"] = "测试文件被改了，停（需要人看）"
                 break
         else:
             if not res["fixed"]:
-                res["stop"] = res["stop"] or (f"{len(kinds)} 版都没修好" if kinds else "模板关了、规划版数上限 0，什么都没做")
+                res["stop"] = res["stop"] or ((f"{len(kinds)} 版都没完成（按测试/报错/结论判断）" if task_mode
+                                               else f"{len(kinds)} 版都没修好") if kinds
+                                              else "模板关了、规划版数上限 0，什么都没做")
     finally:
         llm_router.ClaudeCLIClient._run_local = orig
         pool.close()
         (out / "calls.json").write_text(json.dumps(calls, ensure_ascii=False, indent=1), encoding="utf-8")
         res["versions"] = len(res["version_log"])
-        res["engine_used"] = res["engine_used"] or (res["version_log"][-1]["kind"] if res["version_log"] else None)
+        res["engine_used"] = res["engine_used"] or (("plan_task" if task_mode else res["version_log"][-1]["kind"])
+                                                    if res["version_log"] else None)
         res["calls"] = len(calls)
         res["cost"] = round(sum(c.get("cost") or 0 for c in calls), 4)
         res["calls_by_purpose"] = {k: sum(1 for c in calls if c["purpose"] == k) for k in {c["purpose"] for c in calls}}
         res["rule_fires"] = list(R.STATE["fires"])
         res["blocks"] = list(R.STATE["log"])
-        _, res["changed_files"], res["changed_lines"] = diff_since(project, snap)
-        res["diff"] = diff_since(project, snap, 3000)[0]
+        dsnap = snap_txt if task_mode else snap
+        _, res["changed_files"], res["changed_lines"] = diff_since(project, dsnap, every=task_mode)
+        res["diff"] = diff_since(project, dsnap, 3000, every=task_mode)[0]
         res["final_test"] = last_test[:2000]
     return finish()
 
@@ -528,8 +597,10 @@ def _autoclose(P, script, vrec):
 
 def report(res):
     """给 cbatch 任务 output 的几行人话。"""
-    how = {"template": "模板第 1 版", "plan": f"规划第 {res['versions']} 版"}.get(res["engine_used"], "")
-    head = (f"DSL 修好（{how}）" if res["fixed"] else f"DSL 没修好：{res['stop'] or '见记录'}") + \
+    how = {"template": "模板第 1 版", "plan": f"规划第 {res['versions']} 版",
+           "plan_task": f"任务路径规划第 {res['versions']} 版"}.get(res["engine_used"], "")
+    ok, ng = ("完成", "没完成") if res.get("kind") == "task" else ("修好", "没修好")
+    head = (f"DSL {ok}（{how}）" if res["fixed"] else f"DSL {ng}：{res['stop'] or '见记录'}") + \
         f"；{res['versions']} 版，{res['calls']} 次模型调用，${res['cost']:.4f}，{res['seconds']}s"
     lines = [head]
     if res.get("changed_files"):
@@ -543,7 +614,7 @@ def report(res):
 
 def handoff_note(res):
     """dsl 没修好时给兜底 claude 的交接说明：每版做了什么、定位/读改测的轨迹、已做的修改、当前测试。"""
-    parts = [f"【停下原因】{res['stop'] or '没修好'}"]
+    parts = [f"【停下原因】{res['stop'] or ('没完成' if res.get('kind') == 'task' else '没修好')}"]
     for v in res["version_log"]:
         parts.append(f"【第 {v['ver']} 版（{'固定模板' if v['kind'] == 'template' else '模型规划'}）】结论：{v.get('conclusion') or '无'}"
                      + (f"；报错：{v['error']}" if v.get("error") else ""))

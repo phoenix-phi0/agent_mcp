@@ -77,7 +77,9 @@ if "DSLCRASH" in task:
     print("炸了"); sys.exit(3)
 out = Path(arg("--out"))
 ok = "DSLOK" in task
-json.dump({{"fixed": ok, "engine_used": "template" if ok else "plan", "versions": 1 if ok else 3,
+kind = "task" if "DSLTASK" in task else "bugfix"
+eu = "plan_task" if kind == "task" else "template" if ok else "plan"
+json.dump({{"fixed": ok, "kind": kind, "engine_used": eu, "versions": 1 if ok else 3,
            "calls": 2 if ok else 9, "cost": 0.03, "seconds": 5, "stop": "" if ok else "3 版都没修好",
            "handoff": "HANDOFF-NOTE 定位到 a.py", "report": "DSL 报告" + ("修好" if ok else "没修好"),
            "calls_log": str(out / "calls.json"), "dir": str(out), "test_cmd": arg("--test-cmd") or "python3 -m unittest"}},
@@ -321,6 +323,42 @@ def main():
     check(t[1]["engine_used"] == "claude" and "auto → claude" in t[1]["engine_reason"], "没有信号 → claude", t[1])
     check(t[2]["engine_used"] == "claude" and "没给 project" in t[2]["engine_reason"], "没给 project → claude", t[2])
     check(len(DSL_LOG.read_text(encoding="utf-8").splitlines()) == 1, "只有分到 dsl 的那条起了 dsl 执行器")
+
+    print("engine=dsl / auto：开局全过的任务路径（plan_task），兜底同样生效")
+    ok = TMP / "proj_ok"
+    (ok / "tests").mkdir(parents=True)
+    (ok / "calc.py").write_text("def total(xs):\n    return sum(xs)\n", encoding="utf-8")
+    (ok / "tests" / "__init__.py").write_text("", encoding="utf-8")
+    (ok / "tests" / "test_calc.py").write_text((proj / "tests" / "test_calc.py").read_text(encoding="utf-8"),
+                                               encoding="utf-8")
+    bare = TMP / "proj_bare"
+    bare.mkdir()
+    (bare / "calc.py").write_text("x = 1\n", encoding="utf-8")
+    LOG.unlink()
+    DSL_LOG.unlink()
+    j = cbatch.submit([{"prompt": "DSLTASK DSLOK 新建 data/out.json", "engine": "dsl", "project": str(ok)},
+                       {"prompt": "DSLTASK DSLNO 新建 data/out.json", "engine": "dsl", "project": str(ok)},
+                       {"prompt": "DSLTASK DSLOK 新建 data/report.json，放汇总", "project": str(ok)},
+                       {"prompt": "DSLOK 把代码整理得好看一点", "project": str(ok)},
+                       {"prompt": "DSLOK 新建 data/report.json", "project": str(bare)},
+                       {"prompt": "DSLOK 新建 data/report.json，Traceback (most recent call last):", "project": str(ok)}],
+                      engine="auto", cwd=str(TMP))
+    j_dsl = j
+    d = cbatch.wait(j["job_id"], timeout=60, every=0.2)
+    t = d["tasks"]
+    check(t[0]["engine"] == "dsl" and t[0]["engine_used"] == "plan_task" and t[0]["status"] == "done"
+          and t[0]["dsl_kind"] == "task", "engine=dsl 开局全过 → 任务路径，engine_used=plan_task", t[0])
+    fb = [c for c in calls() if c["prompt"].startswith("DSLTASK DSLNO")]
+    check(t[1]["engine_used"] == "claude_fallback" and len(fb) == 1 and "没能完成" in fb[0]["prompt"]
+          and "HANDOFF-NOTE" in fb[0]["prompt"], "任务路径没完成 → claude 兜底，提示词说没完成、带交接说明",
+          fb[0]["prompt"][-300:] if fb else t[1])
+    check(t[2]["engine_used"] == "plan_task" and t[2]["engine_reason"].startswith("auto → dsl（task）")
+          and "data/report.json" in t[2]["engine_reason"], "auto：全过 + 抽到产物 → dsl 任务路径，理由列出产物", t[2])
+    check(t[3]["engine_used"] == "claude" and "抽不出明确产物" in t[3]["engine_reason"], "auto：全过、没有产物 → claude", t[3])
+    check(t[4]["engine_used"] == "claude" and "探测不到测试" in t[4]["engine_reason"], "auto：测试跑不起来 → claude", t[4])
+    check(t[5]["engine_used"] == "claude" and "初始测试全过" in t[5]["engine_reason"],
+          "auto：说有 Traceback 但测试全过 → claude", t[5])
+    check(len(DSL_LOG.read_text(encoding="utf-8").splitlines()) == 3, "只有 3 条起了 dsl 执行器", j_dsl)
     del os.environ["CBATCH_DSL"]
 
     print(f"\n{'=' * 50}\n通过 {PASS}，失败 {FAIL}")

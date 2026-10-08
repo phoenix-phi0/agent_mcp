@@ -95,6 +95,7 @@ run 批量claude  $PY tests/tools/test_cbatch.py
 run DSL修bug   $PY tests/tools/test_dslagent.py
 run DSL推理    $PY tests/tools/test_dslagent_infer.py
 run DSL规则    $PY tests/tools/test_dslagent_rules.py
+run DSL任务    $PY tests/tools/test_dslagent_task.py
 run 批量grok    $PY tests/tools/test_gbatch.py
 run grok权限    $PY tests/tools/test_gbatch_perm.py
 run 代理工作目录 $PY tests/tools/test_zcode_workdir.py

@@ -15,7 +15,7 @@ def _task(a):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m tools.dslagent")
     sp = ap.add_subparsers(dest="cmd", required=True)
-    r = sp.add_parser("run", help="模板 → 规划，在 project 里直接改文件")
+    r = sp.add_parser("run", help="开局有失败：模板 → 规划（修 bug）；全过：模型规划（任务路径）。在 project 里直接改文件")
     r.add_argument("--project", required=True)
     r.add_argument("--task")
     r.add_argument("--task-file")
@@ -46,7 +46,7 @@ def main(argv=None):
     res = runner.run(a.project, _task(a), a.out, test_cmd=a.test_cmd, max_plan=a.max_plan,
                      template=not a.no_template, wall=a.wall, inject=json.loads(a.inject or "{}"),
                      infer=False if a.no_infer else None)
-    print(json.dumps({k: res[k] for k in ("fixed", "engine_used", "versions", "calls", "cost", "seconds", "stop")},
+    print(json.dumps({k: res[k] for k in ("kind", "fixed", "engine_used", "versions", "calls", "cost", "seconds", "stop")},
                      ensure_ascii=False))
     return 0
 

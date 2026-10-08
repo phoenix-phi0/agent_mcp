@@ -52,23 +52,37 @@ cbatch.wait    job_id=... timeout=110 every=15
 **执行方式 `engine`**（job 级参数，tasks 里的字典可逐条覆盖）：
 
 - `claude`（默认）：上面说的 claude -p，行为完全不变。
-- `dsl`：交给 `tools/dslagent`（中文 DSL 修 bug 流程：固定模板一版 → 没修好再让模型写 .zs 计划，最多 2 版），
-  **在 `project` 目录里直接改文件**。字段：`project`（必填，规则同 cwd）、`test_cmd`（可选，缺省按项目探测
-  pytest / unittest）、`fallback`（默认 true：dsl 没修好就交 claude -p 兜底，cwd=project，提示词带上 dsl 的
-  交接说明和 diff；权限沿用这批的 permission_mode / allowed_tools，都没给就是 acceptEdits + 只放行测试命令）。
-- `auto`：执行时判定——给了 project，且（给了 test_cmd 或提示词里有「失败的测试」/Traceback/AssertionError 之类），
-  且测试能跑、初始确实有失败 → dsl；否则 → claude。理由记在任务的 `engine_reason`。
+- `dsl`：交给 `tools/dslagent`，**在 `project` 目录里直接改文件**，项目测试要能跑（两条路径都靠测试验收）。
+  按开局测试分两条路（result.json / 任务的 `dsl_kind` 记 bugfix / task）：
+  - **修 bug**（开局有失败）：固定模板一版 → 没修好再让模型写 .zs 计划，最多 2 版。
+  - **任务**（开局全过）：不套模板，模型直接写 .zs 计划，最多 2 版；一版算完成＝测试全过、测试文件没动、脚本没报错、
+    结论「修好」，再过完成前核对（任务点名的新建/删除文件、函数/类名、JSON 键、行数、import 逐条查，不满足补做一版，
+    仍不满足问模型确认一次）；退回规划前回归已坏先回滚到开局快照。`engine_used=plan_task`。
+  字段：`project`（必填，规则同 cwd）、`test_cmd`（可选，缺省按项目探测 pytest / unittest）、`fallback`（默认 true：
+  dsl 没成就交 claude -p 兜底，两条路径都适用，cwd=project，提示词带上 dsl 的交接说明和改动 diff；权限沿用这批的
+  permission_mode / allowed_tools，都没给就是 acceptEdits + 只放行测试命令）。
+- `auto`：执行时判定（`python -m tools.dslagent auto --project … --task …` 可单独试）——没给 project、测试探测不到/
+  跑不起来 → claude；初始有失败且（给了 test_cmd 或提示词里有「失败的测试」/Traceback/AssertionError 之类）→ dsl 修 bug
+  （有失败但没这些说法 → claude）；初始全过且提示词没有报错说法、并且完成前核对的抽取器（`reason.done_items`）能从任务文本里
+  抽出 ≥1 个明确产物（新建/删除的路径、函数/类名、JSON 键、行数约束、import 等）→ dsl 任务路径；抽不到 → claude。
+  理由（含抽到的产物）记在任务的 `engine_reason`，如 `auto → dsl（task）：…`。
 
 ```
 cbatch.submit  engine="dsl" tasks=[{"prompt": "用户报告…失败的测试：tests.test_x…", "project": "/home/ysc/proj"}]
 cbatch.submit  engine="auto" project="/home/ysc/proj" tasks=["…Traceback…", "给 README 加一节"]
 ```
 
-每条任务多记 `engine_used`（template / plan / claude_fallback / claude）、`versions`、`calls`、`cost_usd`、
+每条任务多记 `engine_used`（template / plan / plan_task / claude_fallback / claude）、`versions`、`calls`、`cost_usd`、
 `seconds`、`calls_log`（任务目录 `task_<n>/calls.json`，同目录有每版的 .zs、打印输出、result.json）。
-**适用范围**：只在「项目有测试、要让失败的测试通过」的修 bug 任务上验证过（shopkit N1–N10，回归 10/10）；
-**限制**：dsl 只有 code 动词包的能力——读/搜 .py、精确替换改文件、跑测试、跑 ≤30 行只读 Python，
-不能装依赖、不能改测试、不能跑别的命令；不像修 bug 的活别用 dsl。dsl 在独立进程里跑（`python -m tools.dslagent run`），
+**适用范围**：修 bug 路径在 shopkit N1–N10 上验证过；任务路径在 plan8 S1–S8、blind_V V5–V10（加功能、多文件批量改、
+数据迁移、查询汇总、带约束重构、混合任务）上验证过。
+**动词**（code 包，规划提示的动词速查里都有）：列文件 [全部]（全部＝另列 .json/.csv/.md 等）、搜索代码、读片段、运行代码、
+改文件（精确替换）、**写文件**（新建/整份覆盖非测试文件，父目录自动建）、**删文件**（项目内非测试文件）、
+**改模块名**（挪模块并更新 import/调用，可留只重新导出的兼容层）、跑测试。改/写/删/改模块名都先过安全约束
+（rules/安全.dl：越界、写删测试、删仍被引用或没等价迁移的数据、覆盖任务没点名且与开局不一致的数据文件 → 拦，ok=否 带原因）。
+**规则开关** `DSLAGENT_RULES=0`：关掉测试变化/完成核对/安全约束三组规则（只剩越界、测试文件检查）。
+**已知局限**：dsl 不能装依赖、不能改测试、不能跑测试以外的命令、不联网；开放式任务（「优化一下」「整理代码」这类抽不出
+明确产物的）和需要动词表外能力的仍应交 claude（auto 会这么分）。dsl 在独立进程里跑（`python -m tools.dslagent run`），
 临时目录默认 `~/.cache/dslagent/tmp`（`DSLAGENT_TMP` 可改），不用 /tmp。改了 cbatch.py 后 `tool_call … reset=True`
 就能让 submit 认新参数（执行器每批都是新进程，本来就用磁盘上的新代码），不用重启 zmcp。
 真模型集成测试：`tests/tools/dslagent_live.py paths|regress`（手动跑，花钱）。

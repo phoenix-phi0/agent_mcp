@@ -340,13 +340,18 @@ def main():
         ("测试 test_total 失败了，修一下", fail, None, "dsl", "提示词有信号 + 初始失败"),
         (f"报错如下\n{tb}", fail, None, "dsl", "提示词有 Traceback + 初始失败"),
         ("加个功能", fail, R.detect_test_cmd(fail), "dsl", "给了 test_cmd + 初始失败"),
-        (f"报错\n{tb}", ok, None, "claude", "初始测试全过"),
+        (f"报错\n{tb}", ok, None, "claude", "有 Traceback 但初始测试全过"),
+        ("新建 pkg/report.json，写进合计", ok, None, "dsl", "初始全过 + 抽到产物（新建路径）"),
+        ("把 total 改叫 sum_all", ok, None, "dsl", "初始全过 + 抽到产物（标识符）"),
+        ("把代码整理得好看一点", ok, None, "claude", "初始全过、抽不出产物"),
         (f"报错\n{tb}", empty, None, "claude", "探测不到测试"),
+        ("新建 pkg/report.json", empty, None, "claude", "有产物但探测不到测试"),
         ("x", empty, f"{R._python()} -m unittest discover -s tests", "claude", "测试命令没跑到测试"),
     ]
     for prompt, proj, cmd, want, why in cases:
         d = R.decide_auto(prompt, str(proj) if proj else None, cmd)
-        check(d["engine"] == want and d["reason"], f"auto：{why} → {want}", d)
+        check(d["engine"] == want and d["reason"] and (want == "claude" or d["kind"] == ("task" if proj == ok else "bugfix")),
+              f"auto：{why} → {want}", d)
 
     print("模板抽参")
     t = T.extract("用户报告：合计少算了。失败的测试：tests.test_calc.CalcTest.test_total", st["summary"], fail)
@@ -456,9 +461,12 @@ def main():
 
     test_hedge()
 
-    print("执行器：开局全过 / 探测不到测试时不动手")
-    r = R.run(ok, "x", TMP / "out_ok")
-    check(not r["fixed"] and "全部通过" in r["stop"] and r["calls"] == 0, "开局全过 → 不调模型", r["stop"])
+    print("执行器：开局全过走任务路径 / 有失败走修 bug / 探测不到测试时不动手")
+    r = R.run(ok, "x", TMP / "out_ok", max_plan=0)
+    check(r["kind"] == "task" and not r["fixed"] and "上限 0" in r["stop"] and r["calls"] == 0,
+          "开局全过 → kind=task（规划 0 版就不调模型）", r)
+    r = R.run(fail, "x", TMP / "out_fail0", max_plan=0, template=False)
+    check(r["kind"] == "bugfix" and r["calls"] == 0, "开局有失败 → kind=bugfix", r)
     r = R.run(empty, "x", TMP / "out_empty")
     check(not r["fixed"] and "探测不到测试" in r["stop"] and (TMP / "out_empty" / "result.json").is_file(),
           "探测不到测试 → 直接交回，照样写 result.json", r["stop"])

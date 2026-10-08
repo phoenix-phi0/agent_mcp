@@ -49,15 +49,17 @@ CLAUDE_CODE_SESSION_ID 这些。原样传给子进程，claude -p 会以为自�
 
 默认 engine="claude"，就是上面说的 claude -p，行为不变。另外两种：
 
-- engine="dsl"：交给 tools/dslagent（中文 DSL 的修 bug 流程：固定模板 → 模型规划最多 2 版），
-  在任务的 project 目录里**直接改文件**。只适合「项目有测试、要让失败的测试通过」的任务。
-  没修好且 fallback（默认 true）就交给 claude -p 兜底：cwd=project，提示词带上 dsl 的记录摘要；
+- engine="dsl"：交给 tools/dslagent，在任务的 project 目录里**直接改文件**，要求项目测试能跑。按开局测试分两条路：
+  有失败 → 修 bug 路径（固定模板 → 模型规划最多 2 版）；全过 → 任务路径（模型规划最多 2 版，
+  可写/删文件、改模块名，完成＝测试全过 + 结论修好 + 完成前核对）。
+  没成且 fallback（默认 true）就交给 claude -p 兜底：cwd=project，提示词带上 dsl 的记录摘要和改动 diff；
   兜底的权限沿用这批的 permission_mode / allowed_tools，都没给就是 acceptEdits + 只放行测试命令。
-- engine="auto"：执行时判定（tools.dslagent.runner.decide_auto）：给了 project，且（给了 test_cmd 或
-  提示词里有失败测试 / Traceback），且测试能跑、初始确实有失败 → dsl；否则 → claude。判定理由记在 engine_reason。
+- engine="auto"：执行时判定（tools.dslagent.runner.decide_auto）：给了 project 且测试能跑时——初始有失败且
+  （给了 test_cmd 或提示词里有失败测试 / Traceback）→ dsl 修 bug；初始全过、提示词没有报错说法、且任务文本里
+  能抽出 ≥1 个明确产物（路径/标识符/JSON 键/行数约束等）→ dsl 任务路径；否则 → claude。判定理由记在 engine_reason。
 
 dsl 在独立进程里跑（python -m tools.dslagent run），记录在任务目录 task_<n>/ 下；每条任务的
-engine_used（template / plan / claude_fallback / claude）、versions、calls、cost_usd、seconds、calls_log
+engine_used（template / plan / plan_task / claude_fallback / claude）、versions、calls、cost_usd、seconds、calls_log
 都写在 job.json 里。
 """
 
@@ -588,7 +590,7 @@ def _decide(t: dict) -> str:
         r = decide_auto(t["prompt"], t.get("project"), t.get("test_cmd"))
     except Exception as e:   # 判定本身坏了不该让任务卡住，退回默认
         r = {"engine": "claude", "reason": f"判定出错（{type(e).__name__}: {e}），用 claude", "test_cmd": None}
-    t["engine_reason"] = "auto → " + r["engine"] + "：" + r["reason"]
+    t["engine_reason"] = "auto → " + r["engine"] + (f"（{r['kind']}）" if r.get("kind") else "") + "：" + r["reason"]
     if r["engine"] == "dsl" and r.get("test_cmd"):
         t["test_cmd"] = r["test_cmd"]
     return r["engine"]
@@ -640,7 +642,9 @@ def _run_dsl(d: dict, t: dict, i: int) -> dict:
 def _fallback_prompt(t: dict, r: dict) -> str:
     note = r.get("handoff") or r.get("stop") or "（没有记录）"
     cmd = r.get("test_cmd") or t.get("test_cmd")
-    return (f"{t['prompt']}\n\n【交接说明】另一个自动修复流程（中文 DSL agent）已经先试过，没能修好。"
+    what = "自动执行流程（中文 DSL agent）已经先试过，没能完成" if r.get("kind") == "task" else \
+        "自动修复流程（中文 DSL agent）已经先试过，没能修好"
+    return (f"{t['prompt']}\n\n【交接说明】另一个{what}。"
             f"它对项目做的修改还在（见下面的 diff），对的留着、不对的改回去；它的判断不一定对，请自己核实。"
             f"测试文件不要改。\n\n{note}"
             + (f"\n\n跑测试用：{cmd}" if cmd else ""))
@@ -654,6 +658,8 @@ def _run_engine(d: dict, t: dict, i: int, resume: str = None) -> None:
         t["engine_used"] = "claude"
         return
     r = _run_dsl(d, t, i)
+    if r.get("kind"):
+        t["dsl_kind"] = r["kind"]
     t.update(versions=r.get("versions"), calls=r.get("calls"), cost_usd=r.get("cost"),
              calls_log=r.get("calls_log") or t.get("calls_log"), dsl_dir=r.get("dir"),
              dsl_fixed=bool(r.get("fixed")), dsl_stop=r.get("stop", ""),

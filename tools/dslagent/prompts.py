@@ -31,8 +31,8 @@ CHEAT = """【DSL 速查（只能用这里列出的语句）】
 所有模型调用固定用平衡档，不要写「用 …」后缀，也不要写「模型」语句。"""
 
 VERBS = """【可用动词（白名单，别的动词和语句一律判错）】
-code 包（只能读写要修的项目，不能改测试文件）：
-- 列文件 → 文本：所有 .py 文件和行数
+code 包（只能读写项目里的文件，不能改测试文件）：
+- 列文件 [全部] → 文本：所有 .py 文件和行数；写「列文件 全部」另外列出 .json/.csv/.md 等数据、文档文件
 - 搜索代码 正则 → 文本，每行「文件:行号: 那一行」；正则里空格写 \\s。例：设 hits = 搜索代码 def\\s+is_valid
     命中超过 30 条时返回：「共 N 条命中，分布在 M 个文件」+ 每个文件一行命中数 + 前 30 条 + 「结果太多，请换更精确的关键词」
     ——这时该换具体的标识符/编号/函数名再搜（比如 SKU 编号、函数名），或直接读整个文件。
@@ -48,6 +48,16 @@ code 包（只能读写要修的项目，不能改测试文件）：
     （含缩进，不带「  12| 」行号前缀，在文件里只出现一次），new 是替换后的文本；任何一处对不上整体不改，msg 说明哪处错。
     e 用 问JSON 产出再传入：问JSON e = …把要改的原文给模型看… 格式 edits:列表 note:文本，然后 设 res = 改文件 {e}
 - 跑测试 → 结构 {passed: 是/否, summary}，summary 是失败摘要（测试名、调用位置、异常行）或「全部通过：…」
+- 写文件 {e} → 结构 {ok: 是/否, msg, n}。e 是 {file, content} 或 {files:[{file, content}, …]}：新建文件或整份覆盖已有文件
+    （任何类型：.py / .json / .md 都行，父目录不存在会自动建；不许写测试文件）。content 是完整的新文件内容。
+    e 用 问JSON 产出：问JSON e = …把要写的内容要求说清楚… 格式 files:列表 note:文本，提示词里写明「每项字段名固定为 file（相对路径）、content（完整内容）」，然后 设 res = 写文件 {e}。
+    改已有文件的局部仍优先用 改文件（old/new 精确替换）；新建文件、或要整份重写某个文件时用 写文件。
+- 删文件 路径 → 结构 {ok: 是/否, msg}。删掉项目里的一个非测试文件（不存在也算成功）。例：设 d = 删文件 pkg/data/old.csv
+- 改模块名 旧路径 新路径 兼容 导出名 → 结构 {ok: 是/否, msg, left}。确定性地把模块 旧路径(.py) 挪到 新路径，范围内非测试 .py 里的
+    import 和 模块名.函数 调用按词边界全部换成新模块名；兼容=是 时在旧路径留兼容模块，只从新模块重新导出 导出名（逗号分隔，空=全部公开名字）。
+    例：设 m = 改模块名 pkg/textutil.py pkg/textnorm.py 是 strip_punct,normalize
+- 安全约束（改文件/写文件/删文件/改模块名 动作前自动检查）：删仍被非测试代码引用、或还没生成记录数一致的新数据文件的源数据、
+    覆盖任务没点名且与开局不一致的数据文件、写改删 tests/、越出项目 → 被拦（ok=否，msg 说明原因）——按原因调整顺序/做法。
 text 包：
 - 匹配 文本 正则 → {matched: 是/否, all, groups}；找全部 文本 正则 → 列表；替换 文本 正则 [替换为] → 文本
 - 截取 文本 起 [长度]；相等 甲 乙 → 是/否；挑行 文本 正则 → {hits, rest}；按正则切分 文本 正则 → 列表
@@ -145,6 +155,32 @@ def replan_prompt(desc, files, test0, budget, plan_cap, versions_left, ver, prev
             f"【上一版脚本】\n{prev_script}\n\n【上一版的打印输出】\n{prev_out or '（没有输出）'}\n\n"
             + (f"【上一版的报错】\n{prev_err}\n\n" if prev_err else "")
             + f"【当前测试结果】\n{test_now}\n\n【已做的修改（diff）】\n{diff or '（还没有改动源码）'}\n\n"
+            f"【预算】这一版脚本里的模型调用最多 {plan_cap} 次（总预算还剩 {budget} 次；这一版之后还能再写 {versions_left} 版）。\n"
+            f"吸取上一版的输出，输出第 {ver + 1} 版脚本。")
+
+
+def task_first_prompt(desc, files, test, budget, plan_cap, versions_left, test_cmd):
+    """任务路径（开局测试全过、不是修 bug）的第 1 版规划提示；系统提示同 SYSTEM。"""
+    return (f"你要写一段中文 DSL 脚本（.zs），让它自动完成一个{_intro(test_cmd)}里的任务。"
+            f"这不是修 bug：开局测试全部通过，做完后测试也必须全部通过；任务是否真的完成另有验收（你看不到）。"
+            f"脚本会被直接执行；执行完如果测试没全过、脚本报错、或者最后的结论不是「修好」，你会看到这版脚本的打印输出、测试结果和已做的修改，再写下一版。"
+            f"最后一行打印「结论：修好」表示任务全部做完（这里「修好」＝任务完成），没做完就打印「结论：没修好」并说明还差什么。{SEE}\n\n"
+            f"【任务】\n{desc}\n\n【开局测试】\n{test}\n\n【文件清单】\n{files}\n\n"
+            f"【预算】这一版脚本里的模型调用最多 {plan_cap} 次（总预算还剩 {budget} 次，含之后再规划；还能再写 {versions_left} 版）。\n"
+            f"现在输出第 1 版脚本。")
+
+
+def task_replan_prompt(desc, files, test0, budget, plan_cap, versions_left, ver, prev_script, prev_out, prev_err, test_now,
+                       diff, test_cmd, note=""):
+    return (f"你在写中文 DSL 脚本（.zs）自动完成一个{_intro(test_cmd)}里的任务（不是修 bug，开局测试全过）。"
+            f"上一版（第 {ver} 版）脚本跑完没有完成（测试没全过、报错、结论不是「修好」、或完成核对没过），现在写第 {ver + 1} 版。"
+            f"项目里的修改会保留（下面的 diff 是相对开局的全部修改），新脚本在这个基础上接着做。"
+            f"最后一行打印「结论：修好」表示任务全部做完。{SEE}\n\n"
+            + (f"{note}\n\n" if note else "")
+            + f"【任务】\n{desc}\n\n【开局测试】\n{test0}\n\n【文件清单】\n{files}\n\n"
+            f"【上一版脚本】\n{prev_script}\n\n【上一版的打印输出】\n{prev_out or '（没有输出）'}\n\n"
+            + (f"【上一版的报错】\n{prev_err}\n\n" if prev_err else "")
+            + f"【当前测试结果】\n{test_now}\n\n【已做的修改（diff）】\n{diff or '（还没有改动）'}\n\n"
             f"【预算】这一版脚本里的模型调用最多 {plan_cap} 次（总预算还剩 {budget} 次；这一版之后还能再写 {versions_left} 版）。\n"
             f"吸取上一版的输出，输出第 {ver + 1} 版脚本。")
 
