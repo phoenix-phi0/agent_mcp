@@ -30,6 +30,19 @@
     {{内容}}                   字面的 {内容}，不展开（正则里找「{name}」这种）。
                                \\d{4}、{2,3} 这类量词不用转义：没定义的 {…} 原样留
     逐项 word 于 列表 … 结束    自动加标题和输出
+    当 条件 最多 N 次 … 结束    条件成立就跑一轮，每轮开头重新求值（条件写法同「如果」）。
+                               必须写上限：N 是 1–1000 的整数或 {变量}，不写报错。
+                               跑满 N 轮条件仍成立：不报错，接着往下执行，
+                               {loop_full} 设成「是」（正常结束是「否」），trace 记一条
+        当 {done} 不等于 是 且 {n} 小于 5 最多 6 次
+    重复 N 次 … 结束           固定 N 轮（0–1000，可以是 {变量}，0 就一轮不跑）
+    重复 N 次 计数 i           i 从 1 开始
+    跳出 / 继续                结束最内层循环 / 跳到它的下一轮。当、重复、遍历、逐项
+                               都认；嵌套时只管最内层；写在循环外（含子脚本里没套
+                               循环）运行前就报错。在事务里跳出算正常结束（提交）；
+                               「返回」在循环里照样结束整个脚本
+                               每轮迭代、跳出、跑满记在 engine.trace（不进输出），
+                               命令行 python -m tools.dsl x.zs --trace 打到 stderr
     如果 条件 … 否则如果 条件 … 否则 … 结束
                                只跑第一个成立的分支，「否则如果」可以多个，
                                「否则」可选；「否则 如果」「否则若」同义
@@ -197,7 +210,8 @@ from .dsl_model import ModelMixin
 # 重新导出，保持 `from tools.dsl import X` 的老写法能用
 from .dsl_core import (  # noqa: F401
     BLOCK_OPENERS, CALL_PARAM_RE, DSLError, EMPTY_FORMS, ESC_OR_VAR_RE,
-    IN_WORDS, KEYWORDS, MAX_CALL_DEPTH, PACK_SEP_RE, RESERVED, RET_STATUS_RE,
+    IN_WORDS, KEYWORDS, LOOP_HEADS, LOOP_MAX, LoopBreak, LoopContinue,
+    LoopControl, MAX_CALL_DEPTH, REPEAT_RE, WHILE_LIMIT_RE, PACK_SEP_RE, RESERVED, RET_STATUS_RE,
     ScriptReturn, TX_BEGIN, TX_COMMIT, TX_ROLLBACK, VAR_RE, VERB_LIKE_RE,
     as_number, check_name, dig, eval_cond_expr, eval_parts, is_empty,
     iter_items, msg_size, normalize, parse_cond_expr, parse_condition, put,
@@ -210,6 +224,10 @@ import re
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
+
+# engine.trace 最多记这么多条，再多只记一条「省略」：一千轮的循环套一千轮的
+# 循环不能把内存吃光
+TRACE_MAX = 2000
 
 # 「用包」加载动词包时持有。动词表可能被多个线程共用（见 _do_use）。
 # 只在真加载时才会等：包加载过一次之后，后面的「用包」查一下就跳过了。
@@ -299,6 +317,9 @@ class DSLEngine(ModelMixin, HistoryMixin):
         # 逐项块的自动输出用它。必须是实例属性——类属性会让父子引擎
         # 共享初值，嵌套调用时读到上一轮的残留。
         self._last_result: str = ""
+        # 循环的执行记录（每轮迭代、跳出、继续、跑满上限），不进 output——
+        # 输出是脚本的结果，接口会把它当消息给人看。子脚本共用父脚本这份
+        self.trace: list = []
 
     # ------------------------------------------------------------------
     # 变量
@@ -397,6 +418,12 @@ class DSLEngine(ModelMixin, HistoryMixin):
     # 输出与路径
     # ------------------------------------------------------------------
 
+    def _trace(self, text: str) -> None:
+        if len(self.trace) < TRACE_MAX:
+            self.trace.append("  " * self._depth + text)
+        elif len(self.trace) == TRACE_MAX:
+            self.trace.append(f"…trace 超过 {TRACE_MAX} 条，后面的不记了")
+
     def _emit(self, text: str) -> None:
         self.output.append(text)
         if self.verbose:
@@ -446,6 +473,7 @@ class DSLEngine(ModelMixin, HistoryMixin):
         sub.temperature = self.temperature
         sub.model = self.model
         sub.strict_verbs = self.strict_verbs
+        sub.trace = self.trace
         return sub
 
     def _is_verb(self, head: str) -> bool:
@@ -472,12 +500,84 @@ class DSLEngine(ModelMixin, HistoryMixin):
 
     def run(self, script: str) -> str:
         lines = [normalize(ln).rstrip() for ln in script.splitlines()]
+        self._check_loops(lines)
         try:
             self._exec_block(lines, 0, len(lines))
         except ScriptReturn as r:
             # 不是错误，是脚本主动收尾。调用方读 self.returned。
             self.returned = (r.value, r.status)
+        except LoopControl as e:   # _check_loops 挡过，到这里是引擎的 bug
+            raise DSLError(f"「跳出 / 继续」跑到了循环外面：{e}") from None
         return "\n".join(self.output)
+
+    def _check_loops(self, lines: list) -> None:
+        """运行之前过一遍：「跳出」「继续」要在循环里，「当」「重复」的头要写对。
+
+        只认这几样，块配不配对还是跑到那里再报（老脚本的行为不变）。放在运行
+        之前，是为了不走到的分支里写错了也能在空跑、语法检查时就看到。
+        """
+        stack = []
+        for i, raw in enumerate(lines):
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            head, rest = split_head(line)
+            if head in BLOCK_OPENERS:
+                stack.append(head)
+                if head == "while":
+                    self._parse_while(rest, i)
+                elif head == "repeat":
+                    self._parse_repeat(rest, i)
+            elif head == "end":
+                if stack:
+                    stack.pop()
+            elif head in ("break", "continue"):
+                word = "跳出" if head == "break" else "继续"
+                if rest:
+                    raise DSLError(f"第 {i + 1} 行：「{word}」后面不能跟别的（「{rest}」）")
+                if not any(h in LOOP_HEADS for h in stack):
+                    raise DSLError(f"第 {i + 1} 行：「{word}」只能写在循环"
+                                   f"（当 / 重复 / 遍历 / 逐项）里面")
+
+    @staticmethod
+    def _parse_while(rest: str, lineno: int):
+        """「当 条件 最多 N 次」→ (条件原文, N 的原文)。"""
+        m = WHILE_LIMIT_RE.search(rest)
+        if not m:
+            raise DSLError(f"第 {lineno + 1} 行：「当」必须写上限，写法：当 条件 最多 N 次"
+                           f"（N 是 1–{LOOP_MAX} 的整数或 {{变量}}）")
+        cond = rest[:m.start()].strip()
+        if not cond:
+            raise DSLError(f"第 {lineno + 1} 行：「当」后面要跟条件")
+        return cond, m.group(1)
+
+    @staticmethod
+    def _parse_repeat(rest: str, lineno: int):
+        """「重复 N 次 [计数 i]」→ (N 的原文, 计数变量名或空)。"""
+        m = REPEAT_RE.match(rest)
+        if not m:
+            raise DSLError(f"第 {lineno + 1} 行：「重复」的写法：重复 N 次，"
+                           f"可选「计数 i」（N 是 0–{LOOP_MAX} 的整数或 {{变量}}）")
+        return m.group(1), (check_name(m.group(2), lineno) if m.group(2) else "")
+
+    def _loop_limit(self, raw: str, word: str, low: int, lineno: int) -> int:
+        """展开上限、查是不是 low–LOOP_MAX 的整数。"""
+        text = to_text(self._resolve_items(raw)).strip()
+        if not text.isdigit() or not low <= int(text) <= LOOP_MAX:
+            shown = text if raw == text else f"{raw} → {text}"
+            raise DSLError(f"第 {lineno + 1} 行：「{word}」的次数要是 {low}–{LOOP_MAX} "
+                           f"的整数，现在是「{shown}」")
+        return int(text)
+
+    def _loop_body(self, lines: list, start: int, end: int) -> bool:
+        """跑一轮循环体。「继续」在这里接住；「跳出」接住并回 True。"""
+        try:
+            self._exec_block(lines, start, end)
+        except LoopContinue:
+            pass
+        except LoopBreak:
+            return True
+        return False
 
     def run_file(self, path) -> str:
         p = Path(path)
@@ -552,22 +652,34 @@ class DSLEngine(ModelMixin, HistoryMixin):
                 else_at, end = self._find_block(lines, i, stop)
                 if else_at is not None:
                     raise DSLError(f"第 {else_at + 1} 行：循环里不能直接写「否则」")
+                word = "遍历" if head == "each" else "逐项"
                 for n, item in enumerate(iter_items(items), 1):
                     self.vars[name] = item
                     if seq:
                         self.vars[seq] = n
+                    self._trace(f"第 {i + 1} 行：{word} 第 {n} 轮 {name}={to_text(item)[:40]}")
                     if head == "foreach":
                         self._emit(f"── {to_text(item)} ──")
                         mark = len(self.output)
                         self._last_result = ""
-                        self._exec_block(lines, i + 1, end)
+                        if self._loop_body(lines, i + 1, end):
+                            break
                         # 块内没打印任何东西时，自动输出最后一次生成结果
                         if len(self.output) == mark and self._last_result:
                             self._emit(self._last_result)
-                    else:
-                        self._exec_block(lines, i + 1, end)
+                    elif self._loop_body(lines, i + 1, end):
+                        break
                 i = end + 1
                 continue
+
+            if head in ("while", "repeat"):
+                i = self._run_loop(head, rest, lines, i, stop) + 1
+                continue
+
+            if head in ("break", "continue"):
+                # 位置和写法在 _check_loops 里查过了
+                self._trace(f"第 {i + 1} 行：{'跳出' if head == 'break' else '继续'}")
+                raise (LoopBreak if head == "break" else LoopContinue)(f"第 {i + 1} 行")
 
             if head == "tx":
                 else_at, end = self._find_block(lines, i, stop)
@@ -616,6 +728,46 @@ class DSLEngine(ModelMixin, HistoryMixin):
             except Exception as e:
                 raise DSLError(f"第 {i + 1} 行执行失败：{e}") from e
             i += 1
+
+    def _run_loop(self, head: str, rest: str, lines: list, i: int, stop: int) -> int:
+        """「当 条件 最多 N 次」「重复 N 次 [计数 i]」。返回「结束」的行号。"""
+        word = "当" if head == "while" else "重复"
+        else_at, end = self._find_block(lines, i, stop)
+        if else_at is not None:
+            raise DSLError(f"第 {else_at + 1} 行：循环里不能直接写「否则」")
+
+        if head == "repeat":
+            raw, counter = self._parse_repeat(rest, i)
+            limit = self._loop_limit(raw, word, 0, i)
+            for n in range(1, limit + 1):
+                if counter:
+                    self.vars[counter] = n
+                self._trace(f"第 {i + 1} 行：重复 第 {n}/{limit} 轮")
+                if self._loop_body(lines, i + 1, end):
+                    break
+            return end
+
+        cond, raw = self._parse_while(rest, i)
+        limit = self._loop_limit(raw, word, 1, i)
+        # 结构只认一次，每轮重新展开、求值
+        tree = parse_cond_expr(cond, i)
+        n, full, why = 0, False, "条件不成立"
+        while eval_cond_expr(tree, self.expand, i):
+            if n >= limit:
+                full = True
+                break
+            n += 1
+            self._trace(f"第 {i + 1} 行：当 第 {n} 轮")
+            if self._loop_body(lines, i + 1, end):
+                why = "跳出"
+                break
+        self.vars["loop_full"] = full
+        if full:
+            self._trace(f"第 {i + 1} 行：当 跑满 {limit} 轮上限，条件仍成立，"
+                        f"接着往下执行（{{loop_full}}=是）")
+        else:
+            self._trace(f"第 {i + 1} 行：当 结束（{why}，跑了 {n} 轮）")
+        return end
 
     def _parse_each(self, rest: str, lineno: int):
         """循环头。返回 (变量名, 要遍历的东西, 序号变量名或空)。
@@ -687,7 +839,8 @@ class DSLEngine(ModelMixin, HistoryMixin):
         self._call_tx_verb(TX_BEGIN, target)
         try:
             self._exec_block(lines, start, end)
-        except ScriptReturn:
+        except (ScriptReturn, LoopControl):
+            # 跳出 / 继续 也是正常的流程控制，不是出错：块里已经做的写入留下
             self._call_tx_verb(TX_COMMIT, target)
             raise
         except Exception:
@@ -941,6 +1094,10 @@ class DSLEngine(ModelMixin, HistoryMixin):
         fail_path = script_of(on_error) if on_error else None
         main = self._sub_engine()
         fail = self._sub_engine() if fail_path else None
+        # 后台跑的时候请求早就结束了，不往请求那份 trace 里记
+        main.trace = []
+        if fail is not None:
+            fail.trace = []
         text = path.read_text(encoding="utf-8")
 
         def job():
@@ -1134,7 +1291,15 @@ def run_script(path, verbs: VerbRegistry | None = None, **kwargs) -> str:
 if __name__ == "__main__":
     import sys
 
-    if len(sys.argv) < 2:
-        print("用法: python -m tools.dsl 脚本.zs")
+    args = [a for a in sys.argv[1:] if a != "--trace"]
+    if not args:
+        print("用法: python -m tools.dsl 脚本.zs [--trace]")
         sys.exit(1)
-    run_script(sys.argv[1])
+    p = Path(args[0])
+    eng = DSLEngine(workdir=p.parent)
+    try:
+        eng.run_file(p)
+    finally:
+        if "--trace" in sys.argv[1:]:
+            for t in eng.trace:
+                print(f"[trace] {t}", file=sys.stderr)

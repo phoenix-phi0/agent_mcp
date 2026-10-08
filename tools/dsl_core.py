@@ -43,6 +43,8 @@ KEYWORDS = {
     "后台执行": "call_bg",
     "判定": "verdict",
     "返回": "ret",
+    "当": "while", "重复": "repeat",
+    "跳出": "break", "继续": "continue",
 }
 
 # 动词不能用这些名字
@@ -70,7 +72,16 @@ OP_BY_WORD = dict(CONDITION_OPS)
 # 「为空」要认的几种形态：空串，以及结构转文本后的空数组、空对象
 EMPTY_FORMS = ("", "[]", "{}")
 
-BLOCK_OPENERS = {"each", "if", "foreach", "tx"}
+BLOCK_OPENERS = {"each", "if", "foreach", "tx", "while", "repeat"}
+# 「跳出」「继续」认的循环：最内层的这几种块
+LOOP_HEADS = {"each", "foreach", "while", "repeat"}
+# 「当」「重复」的全局硬上限。「当」必须自己写上限（最多 N 次），N 也不能超过它：
+# 条件写错时宁可停在一千轮，不能把一个请求挂死
+LOOP_MAX = 1000
+# 「当 条件 最多 N 次」的尾巴；N 是整数或一个 {变量}。「次」可以贴着写
+WHILE_LIMIT_RE = re.compile(r"(?:^|\s+)最多\s+(\{[^{}]+\}|\S+?)\s*次\s*$")
+# 「重复 N 次 [计数 i]」
+REPEAT_RE = re.compile(r"^(\{[^{}]+\}|\S+?)\s*次(?:\s+计数\s+(\S+))?\s*$")
 
 CJK = re.compile(r"[\u4e00-\u9fff]")
 KEYWORDS_BY_LEN = sorted(KEYWORDS, key=len, reverse=True)
@@ -127,6 +138,23 @@ class ScriptReturn(Exception):
         super().__init__("script returned")
         self.value = value
         self.status = status
+
+
+class LoopControl(Exception):
+    """「跳出」「继续」抛出来的，由最内层的循环接住。不是错误。
+
+    跟 ScriptReturn 一样用异常：语句可能在循环里任意深度的「如果」「事务」
+    里面。循环外写「跳出」在运行之前的检查（DSLEngine._check_loops）就报了，
+    所以正常情况下它出不了循环。
+    """
+
+
+class LoopBreak(LoopControl):
+    pass
+
+
+class LoopContinue(LoopControl):
+    pass
 
 
 # ----------------------------------------------------------------------

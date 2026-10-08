@@ -100,6 +100,9 @@ def scan_zs(text: str, allowed=()):
             m = re.search(r"\s序号\s+(\S+)\s*$", rest)
             if m:
                 names.append(("序号", m.group(1)))
+        m = re.match(r"^重复\s.*\s计数\s+(\S+)\s*$", line)
+        if m:
+            names.append(("计数", m.group(1)))
         # 「设 x = 执行 …」「执行 …」
         body = line
         if "=" in line:
@@ -126,7 +129,7 @@ def scan_zs(text: str, allowed=()):
                 continue
             if not name.isascii():
                 hits.append((no, where, name))
-            elif where in ("赋值", "遍历", "序号", "引用", "脚本参数") and name in ASCII_RESERVED:
+            elif where in ("赋值", "遍历", "序号", "计数", "引用", "脚本参数") and name in ASCII_RESERVED:
                 hits.append((no, where + "（关键字）", name))
     return hits
 
