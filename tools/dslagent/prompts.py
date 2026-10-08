@@ -149,3 +149,58 @@ def fix_prompt(script, problem):
     return (f"你写的中文 DSL 脚本没通过检查（白名单检查或用假模型空跑）。问题：\n{problem}\n\n【原脚本（带行号）】\n"
             + "\n".join(f"{i:3d}| {l}" for i, l in enumerate(script.splitlines(), 1))
             + f"\n\n{SEE}改正后输出完整脚本（不带行号、不要代码围栏、不要解释）。")
+
+
+# ------------------------------------------------------------ 定位.zs / 读改测.zs 的固定说明（系统提示）
+# 两个子脚本的 问JSON 以前把规则、动作说明、「输出格式」说明都拼在用户消息末尾，变化内容在前：
+# CLI 的缓存断点打在整条用户消息上，一字不同就整条重写，缓存读 0%（plan11 B 臂）。
+# 现在固定说明全放进 LIB_SYSTEM（两种用途合一份：一个常驻进程、共用一段缓存前缀），用户消息只放变化内容，
+# 以 LOC_TAG / RCT_TAG 开头；engine.AgentEngine 看到这两个开头就改用 LIB_SYSTEM 作系统提示，
+# 并剥掉 DSL 自动附在末尾、已写进 LIB_SYSTEM 的那段格式说明（格式校验和重问照旧）。
+# LIB_SYSTEM 不含路径、轮次、时间等变化内容，跨调用、跨运行逐字不变。
+LOC_TAG, RCT_TAG = "【定位】", "【读改测】"
+# 与 lib/定位.zs、lib/读改测.zs 里 问JSON 的「格式 …」逐字一致（单测核对）
+LOC_FORMAT = "action:改|换关键词|读这些|运行看看 kw?:文本 segs?:文本 code?:文本 edits?:列表 reason:文本"
+RCT_FORMAT = "action:改|无需改 reason:文本 edits?:列表 need?:文本"
+
+
+def _tail(fmt):
+    from tools.dsl_model import _format_note, _split_format
+    return _format_note(_split_format("提示 格式 " + fmt, 0)[1])
+
+
+LOC_TAIL, RCT_TAIL = _tail(LOC_FORMAT), _tail(RCT_FORMAT)
+
+LIB_SYSTEM = f"""你是修 Python 项目 bug 的助手，被一个自动化流程逐步调用，每次调用都是独立的问题。用户消息以 {LOC_TAG} 或 {RCT_TAG} 开头，按下面对应一节的规则回答。
+通用规则：
+- 不能改测试文件（tests/ 下的文件）；如果查下来代码其实没有问题，就不要改代码，说明理由。
+- 代码原文每行带行号前缀「  12| 」；edits 的 old 里不要带这个前缀。
+- 修改内容 edits 是对象列表，每项字段名固定为 file（相对项目根的路径，如 pkg/x.py）、old（从原文一字不差抄，含缩进，不带行号前缀，在文件里只出现一次）、new（替换后的文本）；不要编没看到的原文。
+- 只输出一个 JSON 对象，不要代码围栏，不要任何解释。
+
+==== {LOC_TAG} 定位：找到要改的位置 ====
+用户消息里有：任务、线索、第几轮（是否最后一轮）、前几轮做了什么、已预读的原文、本轮搜索正则的命中、上一次运行看看的输出。
+根因可能不在 traceback 的帧里：数据文件（.json）、配置/常量、被调用的工具函数都可能是根因。
+下一步四选一：
+- 改＝预读的原文里已经能看到所有要改的行、并且确定怎么改——直接给 edits。
+- 换关键词＝搜索没命中/太多/不准，kw 给新的正则（空格写 \\s，可以用 | 并列具体的标识符、编号、函数名）。
+- 运行看看＝要先看数据或中间值才能确定位置，code 给 ≤30 行 Python（项目根目录跑，只用于 import 项目里的模块、用 print 打印中间值；不能 import subprocess/socket/shutil，不能用 os.system，不能跑测试（unittest/pytest），不许写文件，违反会被拒、白费一轮）。
+- 读这些＝已能确定要改的位置但还没看到原文，segs 给「文件:起-止」多段逗号隔开不带空格、每段≤200 行，≤500 行的文件可以只写文件名读整个文件。segs 要把所有要改的位置都包含进来，包括已经看到原文的文件（预读原文里要改的文件也要写进 segs）：下一步只会把 segs 里的原文给你，没写进 segs 的看不到、也改不了；根因有多处就都写上。
+reason 写你的判断（根因在哪、为什么）。
+若是最后一轮，能确定就给 读这些 或 改。{LOC_TAIL}
+
+==== {RCT_TAG} 读改测：给出改法 ====
+用户消息里有：任务、提示、当前代码、当前测试结果、上一轮改文件的结果。
+- 如果上一轮改文件失败，按它说的原因改正（old 要和文件原文一字不差、含缩进、在文件里只出现一次）。
+- 代码已经没问题就 action 填 无需改；要改就给 edits。
+- 要改的行不在当前代码里（手里没有原文）就不要编 old：action 填 改、不给 edits、need 填缺的位置——「文件:起-止」，或能精确搜到那几行的关键标识（商品编号、函数名、带引号的字面量、文件名），系统会补读给你。{RCT_TAIL}
+"""
+
+
+def lib_tail(prompt):
+    """定位 / 读改测 的用户消息 → 已写进 LIB_SYSTEM 的那段格式说明；别的提示 → None。"""
+    if prompt.startswith(LOC_TAG):
+        return LOC_TAIL
+    if prompt.startswith(RCT_TAG):
+        return RCT_TAIL
+    return None

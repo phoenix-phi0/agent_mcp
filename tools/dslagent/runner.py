@@ -266,7 +266,7 @@ def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True,
         except OSError:
             pass        # 起不来就算了，第一次调用时会再起一次并把错误记进 calls.json
     if kinds:
-        prewarm(llm_router.DEFAULT_SYSTEM if kinds[0] == "template" else PR.SYSTEM)
+        prewarm(PR.LIB_SYSTEM if kinds[0] == "template" else PR.SYSTEM)   # 模板只调 定位/读改测（系统提示 LIB_SYSTEM）
 
     snap = snapshot(project)
     st0 = test_state(project, test_cmd)

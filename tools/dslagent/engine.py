@@ -1,13 +1,19 @@
-"""AgentEngine：DSLEngine 的子类，给 dslagent 用。比基类多三件事，都不改基类、不打全局补丁：
+"""AgentEngine：DSLEngine 的子类，给 dslagent 用。比基类多四件事，都不改基类、不打全局补丁：
 
 - 系统子脚本不进项目：「执行 定位.zs / 读改测.zs / _plan/名字.zs」映射到 dslagent/lib 和任务目录里的计划，
   项目目录里不放任何临时脚本（实验装置是拷进项目再删，崩了会留垃圾）。
 - 语句白名单：计划里只许用 ALLOWED_HEADS 里的语句（静态检查之外的运行期兜底，子引擎同样生效）。
 - 子脚本调用记录：on_call 回调拿到每次 定位.zs / 读改测.zs 的参数、耗时和返回的 outcome/log。
+- 固定系统提示：定位.zs / 读改测.zs 的 问JSON（提示以 prompts.LOC_TAG / RCT_TAG 开头）改用 prompts.LIB_SYSTEM 作系统提示，
+  并剥掉 DSL 自动附在末尾、LIB_SYSTEM 里已有的格式说明——用户消息只剩变化内容，系统提示跨调用不变能读缓存。
+  格式校验和重问还是基类那一套。
 """
 import time
 
 from tools.dsl import DSLEngine, DSLError
+from tools.dsl_model import _format_note
+
+from . import prompts as PR
 
 ALLOWED_HEADS = {"use", "set", "ask", "ask_json", "if", "elif", "else", "end", "each", "print", "compute", "call", "ret"}
 LIB_SCRIPTS = ("定位.zs", "读改测.zs")
@@ -56,3 +62,13 @@ class AgentEngine(DSLEngine):
                 item.update({k: str(v.get(k))[:600] for k in ("outcome", "rounds", "segs", "note", "log", "reason", "need")
                              if k in v})
             self.on_call(item)
+
+    def _ask_json_format(self, prompt, spec, reasks, model, lineno):
+        tail = PR.lib_tail(prompt)
+        if self.system or not tail or not prompt.endswith(tail) or _format_note(spec) != tail:
+            return super()._ask_json_format(prompt, spec, reasks, model, lineno)
+        self.system = PR.LIB_SYSTEM
+        try:
+            return super()._ask_json_format(prompt[:-len(tail)], spec, reasks, model, lineno)
+        finally:
+            self.system = None

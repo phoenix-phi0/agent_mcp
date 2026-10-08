@@ -14,6 +14,7 @@ import shutil
 import signal
 from pathlib import Path
 
+from . import prompts as PR
 from .engine import ALLOWED_HEADS, AgentEngine
 
 PKG = Path(__file__).resolve().parent
@@ -214,6 +215,8 @@ def fake_handler_factory(repo, stats):
                           f"说明上一轮的结果——改文件失败的原因 {{res.msg}}、跑测试的摘要 {{t.summary}}——没有带进这一轮的提示词，"
                           f"或者这一问根本没有新信息。改法：每轮 设 last = 【上轮】{{res.msg}}｜{{t.summary}}，下一轮提示词里嵌 {{last}}；"
                           f"让模型给 edits 时写明字段名固定为 file、old、new。提示词开头：{prompt[:120]}")
+        if system == PR.LIB_SYSTEM:      # 定位/读改测：格式说明在系统提示里，按开头标记补回来解析
+            prompt = prompt + (PR.lib_tail(prompt) or "")
         if "输出格式：只输出一个 JSON 对象" not in prompt:
             return f"（模拟回复 {k}）"
         if LOC_MARK in prompt:
