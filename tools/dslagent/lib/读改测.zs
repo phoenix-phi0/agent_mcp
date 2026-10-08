@@ -6,6 +6,8 @@
 #         最多补读 2 次；补读不到新内容（或补读次数用完仍缺）才停，outcome=缺原文，need 里是缺的位置。
 # first：定位.zs 里模型直接给的改法（{edits:[…]}）：开头直接改文件+跑测试（不调模型），过了就返回 修好；
 #        没过就把改文件结果/测试摘要带进第 1 轮照常问。
+# 测试变化规则（rules/测试变化.dl，动词 推理）：每次改文件+跑测试后判一次——失败变多→撤回本次改动并带新失败重问；
+#   变少→保留继续；失败集合换了→带新失败重问；同一错误连续 2 次→升级（outcome=没修好，交回上层退回规划/放弃）。DSLAGENT_RULES=0 关。
 # 规则和输出格式这些固定说明在系统提示里（prompts.LIB_SYSTEM，提示以【读改测】开头时 AgentEngine 自动换上），这里只放变化内容，好命中缓存。
 设 n = {rounds 或 3}
 设 hint = {hint 或 无}
@@ -17,7 +19,10 @@
 设 need = 无
 设 nbk = 0
 设 log = 【读改测】
+设 sigs = 无
 如果 {first.edits 或} 不为空
+  设 t0 = 跑测试
+  设 bk = 留底
   设 res = 改文件 {first}
   设 msg = 【定位时直接给的改法】{res.msg}
   设 reason = {first.reason 或 无}
@@ -26,10 +31,20 @@
   如果 {t.passed} 等于 是
     设 done = 是
     设 outcome = 修好
+  否则
+    设 d = 推理 规则=测试变化.dl {t0} {t} {sigs}
+    设 sigs = {d.sigs 或 无}
+    如果 {d.action} 等于 undo_reask
+      设 u = 撤回 {bk.id}
+      设 msg = 【定位时直接给的改法】{res.msg}｜但失败变多（新失败：{d.new_fail}），这次改动已撤回，代码回到改之前，请换个改法
+      设 t = {t0}
+      设 log = {log}｜第 0 轮：失败变多 → 撤回
+    结束
   结束
 否则
   设 t = 跑测试
 结束
+设 tprev = {t}
 设 tsum = {t.summary}
 遍历 i 于 1，2，3，4，5，6，7
   如果 {done} 等于 否 且 {i} 不大于 {n}
@@ -58,15 +73,32 @@
         设 log = {log}｜第 {i} 轮：说要改但没给 edits，补读不到新内容，停下交回（need：{need}）：{r.reason}
       结束
     否则
+      设 bk = 留底
       设 res = 改文件 {r}
       设 msg = 【第{i}轮改文件】{res.msg}
       设 t = 跑测试
-      设 tsum = {t.summary}
       设 log = {log}｜第 {i} 轮：{res.msg}；测试通过={t.passed}
       如果 {t.passed} 等于 是
         设 done = 是
         设 outcome = 修好
+      否则
+        设 d = 推理 规则=测试变化.dl {tprev} {t} {sigs}
+        设 sigs = {d.sigs 或 无}
+        如果 {d.action} 等于 undo_reask
+          设 u = 撤回 {bk.id}
+          设 msg = {msg}｜但失败变多（新失败：{d.new_fail}），这次改动已撤回，代码回到改之前，请换个改法
+          设 t = {tprev}
+          设 log = {log}｜第 {i} 轮：失败变多 → 撤回
+        否则如果 {d.action} 等于 escalate
+          设 done = 是
+          设 reason = 【升级】同一错误连续2次：{reason}
+          设 log = {log}｜第 {i} 轮：同一错误连续 2 次 → 升级交回
+        否则如果 {d.action} 等于 reask
+          设 msg = {msg}｜失败有变化（新失败：{d.new_fail}）
+        结束
       结束
+      设 tprev = {t}
+      设 tsum = {t.summary}
     结束
   结束
 结束

@@ -1,0 +1,10 @@
+% 规则 1 测试变化（读改测每次改文件+跑测试之后）。事实由 reason.test_facts 给出：
+%   after_pass(yes|no)  delta(more|less|changed|same)  same_err2(yes|no)  can_undo(yes|no)
+% decide(动作, 优先级, 原因码)：优先级最高的胜出。
+decide(done,"100",all_pass) :- after_pass(yes).
+decide(undo_reask,"90",more_fail) :- after_pass(no), delta(more), can_undo(yes).
+decide(escalate,"80",same_err2) :- after_pass(no), same_err2(yes).
+decide(keep,"60",less_fail) :- after_pass(no), delta(less).
+decide(reask,"50",set_changed) :- after_pass(no), delta(changed).
+decide(reask,"40",no_change) :- after_pass(no), delta(same).
+decide(reask,"10",more_fail_no_undo) :- after_pass(no), delta(more).

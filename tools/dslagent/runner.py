@@ -12,6 +12,9 @@
   4. 每次模型调用走常驻 claude 进程（pool.py；首 token 超过 DSLAGENT_HEDGE_SEC 秒、或出首 token 后流停住
      DSLAGENT_STALL_SEC 秒，就换个会话对冲重发），
      记进 calls.json（用途、耗时、费用、token、是否对冲）。
+  5. 执行中的小分支交给逻辑规则（reason.py + rules/*.dl，动词 推理；DSLAGENT_RULES=0 关）：读改测里每次改完看测试变化
+     （变多撤回 / 同错两次升级）、改文件前查安全约束、退回规划前回归已坏先回滚、宣布修好前核对任务点名的产物
+     （不满足再做一轮，仍不满足问模型确认一次）。
 预算：总模型调用 ≤ MAX_CALLS（含规划、重写、计划内的问）；墙钟超过 wall 不再开新一版。
 
 **要在独立进程里跑**（python -m tools.dslagent run …，cbatch 就是这么调的）：它把 llm_router 的
@@ -231,6 +234,7 @@ def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True,
     from . import prompts as PR
     from . import infer as I
     from . import template as T
+    from . import reason as R
     from .engine import AgentEngine
     from .pool import Pool, child_env
 
@@ -283,8 +287,14 @@ def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True,
     ijob = I.start(project) if template and I.enabled(infer) else None
     res["infer"] = {"on": ijob is not None}
     snap = snapshot(project)
+    snap_all = R.all_files(project)
+    R.setup(project, snap_all, task)
     st0 = test_state(project, test_cmd)
     test0 = st0["summary"]
+    fail0 = R.fail_set(test0)
+    res["rollbacks"] = 0
+    res["done_check"] = {"items": R.done_items(task, snap_all), "log": []}
+    chk = {"redo": False, "confirm": False}
     res["initial"] = {"runnable": st0["runnable"], "failing": st0["failing"], "summary": test0[:2000]}
     if not st0["failing"]:
         pool.kill()
@@ -357,10 +367,19 @@ def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True,
                     if prev is None:
                         pr = PR.first_prompt(task, files, test0, left, plan_cap, versions_left, test_cmd)
                     else:
+                        rb = ""
+                        if R.enabled():
+                            d = R.replan_check(fail0, test_state(project, test_cmd)["summary"],
+                                               R.all_files(project) != snap_all)
+                            if d["action"] == "rollback":
+                                R.restore(project, snap_all)
+                                res["rollbacks"] += 1
+                                rb = (f"\n【安全约束】上一版改坏了原本通过的测试（{'；'.join(d['regress'][:3])}），"
+                                      f"已把项目回滚到开局状态，下面的 diff/测试是回滚后的；别重复那条改法。")
                         diff, _, _ = diff_since(project, snap, 3000)
                         pr = PR.replan_prompt(task, files, test0, left, plan_cap, versions_left, ver - 1, prev["script"],
                                               prev["out"][-5000:], prev["error"], test_state(project, test_cmd)["summary"],
-                                              diff, test_cmd, PR.TEMPLATE_NOTE if prev["kind"] == "template" else "")
+                                              diff, test_cmd, (PR.TEMPLATE_NOTE if prev["kind"] == "template" else "") + rb)
                     txt = client.chat(pr, system=PR.SYSTEM, model=MODEL)
             except Exception as e:
                 res["stop"] = f"第 {ver} 版规划失败：{type(e).__name__}: {str(e)[:300]}"
@@ -434,6 +453,29 @@ def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True,
                         conclusion=concl[-1][:200] if concl else "", fixed_after=v["fixed"], out_tail=text[-800:])
             res["version_log"].append(vrec)
             prev = {"kind": kind, "script": script, "out": text, "error": error}
+            if v["fixed"] and R.enabled():
+                # 完成前核对（rules/完成核对.dl）：任务点名的产物逐条查；不满足 → 再做一轮 → 仍不满足问模型确认一次
+                unmet = R.done_unmet(project, res["done_check"]["items"], snap_all)
+                d = R.infer("完成核对", R.done_facts(True, unmet, not chk["redo"] and max_calls - len(calls) >= 2,
+                                                     not chk["confirm"] and max_calls - len(calls) >= 1))
+                res["done_check"]["log"].append({"ver": ver, "unmet": unmet, "action": d["action"]})
+                if d["action"] == "redo":
+                    chk["redo"] = True
+                    prev["error"] = ("【完成核对】测试全过，但任务点名的这些要求还没满足，这一版只补这些（已完成的保留）：\n- "
+                                     + "\n- ".join(unmet))
+                    if ver == len(kinds):
+                        kinds.append("plan")
+                    continue
+                if d["action"] == "confirm":
+                    chk["confirm"] = True
+                    still = _confirm(client, task, unmet, phase)
+                    res["done_check"]["log"].append({"confirm": "仍未满足" if still else "模型确认不是要求"})
+                    if still:
+                        res["stop"] = "完成核对：" + "；".join(unmet)[:300]
+                        break
+                elif d["action"] != "done":
+                    res["stop"] = "完成核对：" + "；".join(unmet)[:300]
+                    break
             if v["fixed"]:
                 res["fixed"] = True
                 res["engine_used"] = kind
@@ -453,10 +495,28 @@ def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True,
         res["calls"] = len(calls)
         res["cost"] = round(sum(c.get("cost") or 0 for c in calls), 4)
         res["calls_by_purpose"] = {k: sum(1 for c in calls if c["purpose"] == k) for k in {c["purpose"] for c in calls}}
+        res["rule_fires"] = list(R.STATE["fires"])
+        res["blocks"] = list(R.STATE["log"])
         _, res["changed_files"], res["changed_lines"] = diff_since(project, snap)
         res["diff"] = diff_since(project, snap, 3000)[0]
         res["final_test"] = last_test[:2000]
     return finish()
+
+
+def _confirm(client, task, unmet, phase):
+    """完成核对补做后仍不满足：交模型对照任务确认一次。返回 True＝仍算未完成（调用失败也按未完成）。"""
+    items = "\n".join(f"{i}. {u}" for i, u in enumerate(unmet, 1))
+    pr = (f"一个自动执行的代理宣布完成了下面的任务，但机械核对（从任务文字里抽取点名的文件/名字/键）发现有几项未满足。"
+          f"抽取可能有误（比如把任务里举例或已有的名字当成必须新建的）。请只对照任务原文判断：每一项是不是任务确实要求、"
+          f"且按核对结果确实没做到。\n\n【任务】\n{task}\n\n【未满足项】\n{items}\n\n"
+          f"只输出一行 JSON：{{\"still_required\": [确实是要求且没做到的序号], \"reason\": \"一句话\"}}")
+    phase.update(v="confirm")
+    try:
+        txt = client.chat(pr, model=MODEL)
+        m = re.search(r"\{.*\}", txt, re.S)
+        return bool((json.loads(m.group(0)) if m else {}).get("still_required", [1]))
+    except Exception:
+        return True
 
 
 def _autoclose(P, script, vrec):

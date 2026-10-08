@@ -104,6 +104,11 @@ def _do(改法, notes) -> dict:
         if old == new:
             return fail(f"{rel}：old 和 new 一样，没有改动")
         texts[rel] = texts[rel].replace(old, new)
+    import 推理 as T
+    for rel, t in texts.items():
+        why = T._R().check("改写", root, rel, t)
+        if why:
+            return fail(why)
     for rel, t in texts.items():
         (root / rel).write_text(t, encoding="utf-8")
     st = _notes.load(WORKSPACE)

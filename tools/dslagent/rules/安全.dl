@@ -1,0 +1,15 @@
+% 规则 3 安全约束（写/删/退回规划之前）。事实由 reason.safety_facts 给出：
+%   op(delete|write|replan)  outside(yes|no)  is_test(yes|no)  exists(yes|no)  referenced(yes|no)  data_file(yes|no)
+%   has_snap(yes|no)  new_data(yes|no)  records_match(yes|no)  in_snap(yes|no)  equal_snap(yes|no)  mentioned(yes|no)
+%   regress(yes|no)  dirty(yes|no)
+decide(block,"100",outside) :- outside(yes).
+decide(block,"95",test_file) :- is_test(yes), op(delete).
+decide(block,"95",test_file) :- is_test(yes), op(write).
+decide(allow,"90",absent) :- op(delete), exists(no).
+decide(block,"80",still_referenced) :- op(delete), exists(yes), referenced(yes).
+decide(block,"70",no_new_data) :- op(delete), exists(yes), data_file(yes), has_snap(yes), new_data(no).
+decide(block,"65",records_mismatch) :- op(delete), exists(yes), data_file(yes), has_snap(yes), new_data(yes), records_match(no).
+decide(allow,"60",equal_snapshot) :- op(write), in_snap(yes), equal_snap(yes).
+decide(block,"55",overwrite_data) :- op(write), in_snap(yes), data_file(yes), equal_snap(no), mentioned(no).
+decide(rollback,"50",regress_dirty) :- op(replan), regress(yes), dirty(yes).
+decide(allow,"0",ok) :- op(X).

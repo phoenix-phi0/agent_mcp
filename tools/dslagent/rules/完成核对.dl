@@ -1,0 +1,7 @@
+% 规则 2 完成前核对（宣布完成之前）。事实由 reason.done_facts 给出：
+%   tests_pass(yes|no)  unmet_any(yes|no)  redo_left(yes|no)  confirm_left(yes|no)
+decide(not_done,"100",tests_fail) :- tests_pass(no).
+decide(done,"90",all_met) :- tests_pass(yes), unmet_any(no).
+decide(redo,"80",unmet) :- tests_pass(yes), unmet_any(yes), redo_left(yes).
+decide(confirm,"70",unmet_after_redo) :- tests_pass(yes), unmet_any(yes), redo_left(no), confirm_left(yes).
+decide(not_done,"60",unmet_final) :- tests_pass(yes), unmet_any(yes), redo_left(no), confirm_left(no).
