@@ -32,6 +32,24 @@ with open({str(LOG)!r}, "a", encoding="utf-8") as f:
                          "leak": sorted(k for k in os.environ
                                         if k == "CLAUDECODE" or k.startswith("CLAUDE_CODE_"))}},
                        ensure_ascii=False) + "\\n")
+if "--system-prompt" in a and "分流" in a[a.index("--system-prompt") + 1]:
+    # engine=auto 的短分类：按任务里的暗号给 route。RT_JUNK 输出不是 JSON，RT_SLEEP 睡到超时
+    task = prompt.split("【任务】")[-1]
+    if "RT_SLEEP" in task:
+        time.sleep(30)
+    if "RT_JUNK" in task:
+        out = "这个嘛，看情况"
+    else:
+        route = "dsl_task" if "RT_TASK" in task or "RT_NEEDS" in task else "dsl_bugfix" if "RT_BUG" in task else "claude"
+        out = json.dumps({{"route": route, "needs": ["要装 openpyxl"] if "RT_NEEDS" in task else [],
+                          "reason": "因为" + route}}, ensure_ascii=False)
+    print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
+                      "result": out, "session_id": "route", "total_cost_usd": 0.001}}))
+    sys.exit(0)
+if "NAP" in prompt:
+    t0 = time.time(); time.sleep(1)
+    with open({str(TMP / "nap.jsonl")!r}, "a") as f:
+        f.write(json.dumps({{"who": "claude", "p": prompt[:20], "t0": t0, "t1": time.time()}}) + "\\n")
 if "--tools" in a:
     # 难度评估：按每条任务里的暗号分模型。JUNK 让输出不是 JSON，GAP 让那条缺席
     if "JUNK" in prompt:
@@ -75,14 +93,20 @@ with open({str(DSL_LOG)!r}, "a", encoding="utf-8") as f:
     f.write(json.dumps({{"argv": a, "task": task}}, ensure_ascii=False) + "\\n")
 if "DSLCRASH" in task:
     print("炸了"); sys.exit(3)
+if "DSLNAP" in task:
+    import time
+    t0 = time.time(); time.sleep(1.2)
+    with open({str(TMP / "nap.jsonl")!r}, "a") as f:
+        f.write(json.dumps({{"who": "dsl", "p": arg("--project"), "t0": t0, "t1": time.time()}}) + "\\n")
 out = Path(arg("--out"))
-ok = "DSLOK" in task
+ok = "DSLOK" in task or "DSLNAP" in task
 kind = "task" if "DSLTASK" in task else "bugfix"
 eu = "plan_task" if kind == "task" else "template" if ok else "plan"
 json.dump({{"fixed": ok, "kind": kind, "engine_used": eu, "versions": 1 if ok else 3,
            "calls": 2 if ok else 9, "cost": 0.03, "seconds": 5, "stop": "" if ok else "3 版都没修好",
            "handoff": "HANDOFF-NOTE 定位到 a.py", "report": "DSL 报告" + ("修好" if ok else "没修好"),
-           "calls_log": str(out / "calls.json"), "dir": str(out), "test_cmd": arg("--test-cmd") or "python3 -m unittest"}},
+           "calls_log": str(out / "calls.json"), "dir": str(out), "test_cmd": arg("--test-cmd") or "python3 -m unittest",
+           "early_exit": "计划自报缺能力：要装 openpyxl" if "DSLEARLY" in task else None}},
           open(out / "result.json", "w"), ensure_ascii=False)
 """
 fake_dsl = TMP / "fake_dsl.py"
@@ -146,6 +170,8 @@ def main():
     check(all(c["cwd"] == str(TMP) for c in cs), "在指定 cwd 里跑")
     check(all("--model" in c["argv"] and "--append-system-prompt" in c["argv"] for c in cs),
           "带上 --model 和环境交代")
+    pre = cs[0]["argv"][cs[0]["argv"].index("--append-system-prompt") + 1]
+    check("前台跑完" in pre and "不得放到后台" in pre and "轮询" in pre, "交代里有「前台跑完、不得放后台、前台轮询」", pre)
     check(all("--permission-mode" not in c["argv"] for c in cs), "默认不放开权限")
     check(all(not c["leak"] for c in cs), "CLAUDECODE / CLAUDE_CODE_* 没漏给子进程",
           cs[0]["leak"])
@@ -359,6 +385,117 @@ def main():
     check(t[5]["engine_used"] == "claude" and "初始测试全过" in t[5]["engine_reason"],
           "auto：说有 Traceback 但测试全过 → claude", t[5])
     check(len(DSL_LOG.read_text(encoding="utf-8").splitlines()) == 3, "只有 3 条起了 dsl 执行器", j_dsl)
+
+    print("engine=auto：规则拿不准时短分类（假模型），能力检查")
+    LOG.unlink()
+    dec = lambda p, pj: cbatch.decide(p, str(pj))   # noqa: E731
+    r = dec("RT_TASK 把代码整理一下", ok)
+    check(r["engine"] == "dsl" and r["kind"] == "task" and r["source"] == "短分类" and r["classify"]["ok"]
+          and "拿不准" in r["reason"] and "dsl_task" in r["reason"] and "s：" in r["reason"],
+          "全过 + 抽不出产物 → 短分类 dsl_task → dsl 任务路径，理由带分类耗时", r)
+    r = dec("RT_BUG 让它对", proj)
+    check(r["engine"] == "dsl" and r["kind"] == "bugfix", "有失败没说法 → 短分类 dsl_bugfix → dsl 修 bug", r["reason"])
+    r = dec("RT_BUG 让它对", ok)
+    check(r["engine"] == "claude" and "没有失败测试" in r["reason"], "分类说修 bug 但测试全过 → claude", r["reason"])
+    r = dec("RT_TASK 加个功能", proj)
+    check(r["engine"] == "claude" and "修 bug 路径" in r["reason"], "分类说任务但测试有失败 → claude", r["reason"])
+    r = dec("随便看看", ok)
+    check(r["engine"] == "claude" and r["classify"]["route"] == "claude", "分类给 claude → claude", r["reason"])
+    r = dec("RT_NEEDS 导出", ok)
+    check(r["engine"] == "claude" and r["needs"] == ["要装 openpyxl"] and "做不到" in r["reason"],
+          "分类 needs 非空 → claude（能力检查）", r["reason"])
+    r = dec("RT_JUNK 弄一下", ok)
+    check(r["engine"] == "claude" and not r["classify"]["ok"] and "解析不了" in r["reason"], "分类输出不是 JSON → 回落 claude", r["reason"])
+    old_to = cbatch.ROUTE_TIMEOUT
+    cbatch.ROUTE_TIMEOUT = 1
+    r = dec("RT_SLEEP 弄一下", ok)
+    cbatch.ROUTE_TIMEOUT = old_to
+    check(r["engine"] == "claude" and "超过 1 秒" in r["reason"], "分类超时 → 回落 claude", r["reason"])
+    n_before = len(calls())
+    r = dec("RT_TASK 先 pip install openpyxl，再新建 data/out.xlsx", ok)
+    check(r["engine"] == "claude" and r["source"] == "能力检查" and len(calls()) == n_before,
+          "能力检查命中 → claude，不跑分类", r)
+    r = dec("新建 data/report.json", ok)
+    check(r["engine"] == "dsl" and r["source"] == "规则" and r["classify"] is None, "规则确定的不调分类", r)
+    r = cbatch.decide("RT_TASK 整理", str(ok), classify=False)
+    check(r["engine"] == "claude", "classify=False：拿不准照规则给 claude", r)
+
+    print("submit：auto 走短分类、engine=dsl 能力警告、早退回兜底、分流日志")
+    LOG.unlink()
+    DSL_LOG.unlink()
+    rl = Path(os.environ["CBATCH_HOME"]).parent / "routing.jsonl"
+    rl.unlink(missing_ok=True)
+    j = cbatch.submit([{"prompt": "DSLTASK DSLOK RT_TASK 把代码整理一下", "project": str(ok)},
+                       {"prompt": "DSLOK RT_JUNK 弄一下", "project": str(ok)},
+                       {"prompt": "DSLTASK DSLOK 先 pip install x，再新建 data/out.json", "project": str(ok), "engine": "dsl"},
+                       {"prompt": "DSLTASK DSLEARLY 新建 data/out.xlsx", "project": str(ok), "engine": "dsl"},
+                       "普通"], engine="auto", cwd=str(TMP))
+    d = cbatch.wait(j["job_id"], timeout=60, every=0.2)
+    t = d["tasks"]
+    check(t[0]["engine_used"] == "plan_task" and "［短分类］" in t[0]["engine_reason"]
+          and t[0]["route"]["classify"]["route"] == "dsl_task" and t[0]["cost_usd"] == 0.031,
+          "auto 拿不准 → 短分类 → dsl；route 记分类细节，费用含分类", t[0])
+    check(t[1]["engine_used"] == "claude" and "回落 claude" in t[1]["engine_reason"], "分类坏了回落 claude", t[1]["engine_reason"])
+    c1 = [c for c in calls() if c["prompt"] == "DSLOK RT_JUNK 弄一下"]
+    check(c1 and c1[0]["cwd"] == str(ok) and "acceptEdits" in c1[0]["argv"],
+          "auto 判给 claude 且有 project：在 project 里跑，权限同兜底", c1[0]["argv"] if c1 else calls())
+    check(t[2]["engine_used"] == "plan_task" and "pip install" in t[2].get("engine_warning", ""),
+          "engine=dsl 命中能力检查：只记警告，照跑 dsl", t[2])
+    fb = [c for c in calls() if "DSLEARLY" in c["prompt"]]
+    check(t[3]["engine_used"] == "claude_fallback" and "缺能力" in t[3].get("dsl_early_exit", "") and len(fb) == 1,
+          "dsl 早退回 → 直接兜底 claude，记原因", t[3])
+    rows = [json.loads(x) for x in rl.read_text(encoding="utf-8").splitlines()]
+    check(len(rows) == 5 and {r["i"] for r in rows} == {1, 2, 3, 4, 5}
+          and all(len(r["hash"]) == 12 and "prompt" not in r for r in rows), "每条结束写一行分流日志（只记哈希）", rows[:1])
+    r1 = [r for r in rows if r["i"] == 1][0]
+    check(r1["decision"] == "dsl/task" and r1["source"] == "短分类" and r1["classify_route"] == "dsl_task"
+          and r1["ok"] and r1["engine_used"] == "plan_task" and r1["cost_usd"] == 0.031 and r1["classify_sec"] is not None,
+          "日志字段：判定、来源、分类、engine_used、成功、费用", r1)
+    check([r for r in rows if r["i"] == 3][0]["warning"] and [r for r in rows if r["i"] == 4][0]["early_exit"],
+          "日志里记警告和早退回")
+    st = cbatch.routing_stats()
+    check(st["total"]["n"] == 5 and st["classify"]["n"] == 2 and st["classify"]["failed"] == 1
+          and st["early_exit"] == 1 and st["warnings"] == 1
+          and st["by_engine_used"]["plan_task"]["n"] == 2 and st["by_engine_used"]["plan_task"]["rate"] == 1.0,
+          "routing_stats 汇总：条数、成功率、分类次数、早退回、警告", st)
+    check(cbatch.routing_stats(since="2999")["total"]["n"] == 0, "routing_stats since 过滤")
+
+    print("并发：dsl 道默认 3、可覆盖，claude 道单独计，同一 project 互斥")
+    check(raises(cbatch.submit, ["x"], dsl_concurrency=0) and raises(cbatch.submit, ["x"], concurrency=9),
+          "并发参数越界报错")
+    nap = TMP / "nap.jsonl"
+    projs = []
+    for k in range(5):
+        pk = TMP / f"pnap{k}"
+        pk.mkdir(exist_ok=True)
+        projs.append(str(pk))
+
+    def overlap(rows):
+        ev = sorted([(r["t0"], 1) for r in rows] + [(r["t1"], -1) for r in rows])
+        cur = best = 0
+        for _, x in ev:
+            cur += x
+            best = max(best, cur)
+        return best
+
+    def run_nap(tasks, **kw):
+        nap.unlink(missing_ok=True)
+        j = cbatch.submit(tasks, engine="dsl", cwd=str(TMP), **kw)
+        d = cbatch.wait(j["job_id"], timeout=60, every=0.2)
+        rows = [json.loads(x) for x in nap.read_text().splitlines()]
+        return d, [r for r in rows if r["who"] == "dsl"], [r for r in rows if r["who"] == "claude"]
+
+    d, dr, _ = run_nap([{"prompt": "DSLNAP", "project": p} for p in projs])
+    check(d["status"] == "done" and len(dr) == 5 and overlap(dr) == 3, "5 条 dsl 默认最多同时 3 条", overlap(dr))
+    d, dr, _ = run_nap([{"prompt": "DSLNAP", "project": p} for p in projs[:4]], dsl_concurrency=2)
+    check(overlap(dr) == 2, "dsl_concurrency=2 覆盖", overlap(dr))
+    d, dr, cr = run_nap([{"prompt": "DSLNAP", "project": projs[0]}, {"prompt": "DSLNAP", "project": projs[0]},
+                         {"prompt": "NAP 一", "engine": "claude"}, {"prompt": "NAP 二", "engine": "claude"}])
+    allr = dr + cr
+    check(overlap(dr) == 1 and overlap(cr) == 1 and overlap(allr) == 2 and [r["p"] for r in cr] == ["NAP 一", "NAP 二"],
+          "同一 project 的 dsl 不并发；claude 道并发 1 按顺序，和 dsl 道同时跑", (overlap(dr), overlap(cr), overlap(allr)))
+    d, _, cr = run_nap([{"prompt": "NAP 一", "engine": "claude"}, {"prompt": "NAP 二", "engine": "claude"}], concurrency=2)
+    check(overlap(cr) == 2, "concurrency=2 时 claude 道两条同时跑", overlap(cr))
     del os.environ["CBATCH_DSL"]
 
     print(f"\n{'=' * 50}\n通过 {PASS}，失败 {FAIL}")

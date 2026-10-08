@@ -50,6 +50,31 @@ FAIL_SIGNAL = re.compile(r"Traceback \(most recent call last\)|失败的测试|�
                          r"failing tests?|tests? (?:fail|failed|failing)\b|^FAILED\b|^FAIL:|^ERROR: test|AssertionError",
                          re.I | re.M)
 
+# 能力检查：任务文本里明显超出 dsl 动词能力的需求（动词只能读写项目内文件、跑项目测试、跑≤30 行不联网的只读 Python）。
+# 宁可漏判（漏了还有短分类的 needs、早退回兜着），不要误判：词都写得窄，plan15–21 的场景文本上不该命中。
+CAPABILITY_GAPS = [
+    ("装依赖", re.compile(r"\b(?:pip3?|npm|yarn|pnpm|conda|apt(?:-get)?|brew)\s+(?:install|add|i)\b|"
+                       r"安装(?:新的?|第三方)?(?:依赖|库|包|模块)|装(?:上|一?个)?(?:新的?|第三方)?(?:依赖|库|包)|"
+                       r"(?:加|添加)(?:新的?|第三方)?依赖", re.I)),
+    ("联网", re.compile(r"联网|上网|从网(?:上|络)|网上(?:抓|下载|查|获取)|在线(?:抓|获取|查询|拉取)|抓取网页|爬取|爬虫|"
+                      r"\b(?:curl|wget)\b|https?://(?!localhost|127\.0\.0\.1)", re.I)),
+    ("任意 shell 命令", re.compile(r"(?:shell|bash|sh)\s*脚本|部署脚本|\.sh\b|执行(?:这个|该)?(?:shell|bash)?\s*(?:命令|脚本)并|"
+                               r"(?:并|然后)(?:执行|运行)(?:它|这个脚本|部署)|systemctl|crontab|docker\b|定时任务", re.I)),
+    ("改仓库外文件", re.compile(r"仓库外|项目外|项目之外|另一个仓库|其他仓库|跨仓库|(?:两|多)个仓库|/etc/|~/\.")),
+    ("浏览器/GUI", re.compile(r"浏览器|网页上点|截图|\bGUI\b|selenium|playwright", re.I)),
+    ("交互式调试", re.compile(r"交互式(?:调试|地)|调试器|单步调试|断点调试|\bpdb\b|\bgdb\b", re.I)),
+]
+
+
+def capability_gaps(text):
+    """任务文本里命中的超能力需求：["装依赖（pip install）", …]，没有就空列表。"""
+    out = []
+    for name, rx in CAPABILITY_GAPS:
+        m = rx.search(text or "")
+        if m:
+            out.append(f"{name}（「{m.group(0).strip()[:20]}」）")
+    return out
+
 
 def _defs():
     if str(DEFS) not in sys.path:
@@ -124,13 +149,20 @@ def test_state(project, test_cmd, timeout=120):
 
 
 def decide_auto(prompt, project, test_cmd=None, timeout=120):
-    """engine=auto 的判定，返回 {engine: dsl|claude, kind?: bugfix|task, reason, test_cmd, initial?, items?}。规则：
+    """engine=auto 的判定，返回 {engine: dsl|claude, kind?: bugfix|task, reason, test_cmd, initial?, items?, needs?, uncertain?}。
+    规则拿不准的两种情况（3 的「有失败没说法」、4 的「抽不出产物」）照旧给 engine=claude，另带 uncertain=bugfix|task，
+    cbatch 见到它会再做一次短分类（cbatch.decide）。规则：
+    0. 任务文本命中能力检查（capability_gaps：装依赖/联网/任意 shell/改仓库外文件/浏览器/交互式调试）→ claude，needs 列出命中项；
     1. 没给 project → claude（dsl 会直接改 project 里的文件，不替调用方猜目录）；
     2. 测试命令（给的或探测的）没有、跑不起来、或没跑到任何测试 → claude（dsl 两条路径都靠测试验收）；
     3. 初始有失败：给了 test_cmd 或提示词里有失败测试 / Traceback 的说法 → dsl 修 bug；没有 → claude（不像修 bug 的任务）；
     4. 初始全过：提示词里有失败测试 / Traceback 的说法 → claude（说有 bug 但测试没覆盖到，不是 dsl 能验收的）；
        否则用完成前核对的抽取器（reason.done_items）从任务文本里抽明确产物（新建/删除的路径、函数/类名、JSON 键、
        行数约束、import 等），抽到 ≥1 个 → dsl 任务路径；一个都抽不到 → claude（开放式任务）。"""
+    gaps = capability_gaps(prompt)
+    if gaps:
+        return {"engine": "claude", "reason": "能力检查：任务需要 dsl 动词做不到的事——" + "、".join(gaps),
+                "test_cmd": test_cmd, "needs": gaps}
     if not project:
         return {"engine": "claude", "reason": "没给 project", "test_cmd": test_cmd}
     hit = FAIL_SIGNAL.search(prompt or "")
@@ -148,7 +180,7 @@ def decide_auto(prompt, project, test_cmd=None, timeout=120):
             return {"engine": "dsl", "kind": "bugfix", "reason": f"{why}，测试能跑且初始有失败 → 修 bug 路径",
                     "test_cmd": cmd, "initial": st}
         return {"engine": "claude", "reason": "初始有失败测试，但没给 test_cmd、提示词里也没有失败测试/Traceback，不像修 bug 任务",
-                "test_cmd": cmd, "initial": st}
+                "test_cmd": cmd, "initial": st, "uncertain": "bugfix"}
     if hit:
         return {"engine": "claude", "reason": f"提示词里有「{hit.group(0)[:30]}」，但初始测试全过（测试没覆盖到这个问题）",
                 "test_cmd": cmd, "initial": st}
@@ -156,7 +188,7 @@ def decide_auto(prompt, project, test_cmd=None, timeout=120):
     items = R.done_items(prompt, R.all_files(project))
     if not items:
         return {"engine": "claude", "reason": "初始测试全过，任务文本里抽不出明确产物（路径/标识符/JSON 键/行数约束等），按开放式任务交 claude",
-                "test_cmd": cmd, "initial": st, "items": []}
+                "test_cmd": cmd, "initial": st, "items": [], "uncertain": "task"}
     desc = "；".join(_item_text(it) for it in items[:4]) + (f" 等 {len(items)} 项" if len(items) > 4 else "")
     return {"engine": "dsl", "kind": "task", "reason": f"初始测试全过，任务文本里抽到明确产物：{desc} → 任务路径",
             "test_cmd": cmd, "initial": st, "items": items}
@@ -506,6 +538,15 @@ def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True,
             else:
                 error = "检查没通过，这一版没有执行：" + (vrec["fix_problems"][-1] if vrec["fix_problems"] else "")
             (out / f"plan_v{ver}_out.txt").write_text(text + (f"\n\n[报错] {error}" if error else ""), encoding="utf-8")
+            gap = _capability_stop(task_mode, ver, ok_check, vrec, text)
+            if gap:
+                # 早退回：任务路径第 1 版就卡在「缺能力 / 白名单外动词」上，第 2 版多半一样，直接交回兜底
+                vrec.update(calls=sum(1 for c in calls if c["ver"] == ver), error=error[:400], fixed_after=False,
+                            conclusion=gap[:200], out_tail=text[-800:])
+                res["version_log"].append(vrec)
+                res["early_exit"] = gap
+                res["stop"] = "早退回（不再写第 2 版）：" + gap
+                break
             if ver < len(kinds) and kinds[ver] == "plan" and not re.search(r"结论[:：]\s*修好", text):
                 prewarm(PR.SYSTEM)      # 这版自己都说没修好、下一版要规划：先起进程，和下面的验收测试重叠
             v = verify(project, snap, test_cmd)
@@ -586,6 +627,21 @@ def _confirm(client, task, unmet, phase):
         return bool((json.loads(m.group(0)) if m else {}).get("still_required", [1]))
     except Exception:
         return True
+
+
+CAP_PROBLEM = re.compile(r"不在白名单里|只能用包 common text code|缺能力")
+
+
+def _capability_stop(task_mode, ver, ok_check, vrec, text):
+    """任务路径第 1 版：检查（含重写）仍卡在白名单外动词/语句、或脚本自己打印「结论：缺能力」→ 返回原因，否则空串。"""
+    if not task_mode or ver != 1:
+        return ""
+    m = re.findall(r"结论[:：]\s*(缺能力.*)", text or "")
+    if ok_check and m:
+        return "计划自报" + m[-1].strip()[:200]
+    if not ok_check and vrec["fix_problems"] and CAP_PROBLEM.search(vrec["fix_problems"][-1]):
+        return f"计划检查（重写 {vrec['fix_rounds']} 次后）仍卡在能力上：" + vrec["fix_problems"][-1][:300]
+    return ""
 
 
 def _autoclose(P, script, vrec):

@@ -110,6 +110,8 @@ _CALLABLE = {
     "cbatch.wait":     ("tools.cbatch", "wait"),
     "cbatch.jobs":     ("tools.cbatch", "jobs"),
     "cbatch.cancel":   ("tools.cbatch", "cancel"),
+    "cbatch.routing_stats": ("tools.cbatch", "routing_stats"),   # 分流日志汇总（engine=auto 调参用）
+    "cbatch.decide":   ("tools.cbatch", "decide"),     # engine=auto 只判不跑（跑开局测试 + 可能一次短分类）
     # GBatch：同样的批量，执行端换成 Grok Build 的无头模式（grok -p）。
     # 要批准的工具调用会中断整条（不是拒掉接着干），记成 error——见
     # gbatch.py 模块文档。不收 bypassPermissions、单次上限 10 条。

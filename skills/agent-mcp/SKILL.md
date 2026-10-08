@@ -48,6 +48,8 @@ cbatch.wait    job_id=... timeout=110 every=15
 默认不放开权限：需要批准的工具调用会被直接拒掉，被拒的工具记在任务的 `denied`
 字段里。要让它改文件就传 `permission_mode="acceptEdits"`，或者用 `allowed_tools`
 指定具体工具。`bypassPermissions` 不收。
+每条 claude 任务都带一段交代（`PREAMBLE`，`preamble=False` 关）：失败两次就停下报告、别改没让改的文件、最后一段写结论，
+以及**运行/测试必须在前台跑完再汇报，不得放后台后就结束，要等就前台轮询**（之前多次出现 worker 放后台就结束、结果丢失）。
 
 **执行方式 `engine`**（job 级参数，tasks 里的字典可逐条覆盖）：
 
@@ -61,15 +63,43 @@ cbatch.wait    job_id=... timeout=110 every=15
   字段：`project`（必填，规则同 cwd）、`test_cmd`（可选，缺省按项目探测 pytest / unittest）、`fallback`（默认 true：
   dsl 没成就交 claude -p 兜底，两条路径都适用，cwd=project，提示词带上 dsl 的交接说明和改动 diff；权限沿用这批的
   permission_mode / allowed_tools，都没给就是 acceptEdits + 只放行测试命令）。
-- `auto`：执行时判定（`python -m tools.dslagent auto --project … --task …` 可单独试）——没给 project、测试探测不到/
-  跑不起来 → claude；初始有失败且（给了 test_cmd 或提示词里有「失败的测试」/Traceback/AssertionError 之类）→ dsl 修 bug
-  （有失败但没这些说法 → claude）；初始全过且提示词没有报错说法、并且完成前核对的抽取器（`reason.done_items`）能从任务文本里
-  抽出 ≥1 个明确产物（新建/删除的路径、函数/类名、JSON 键、行数约束、import 等）→ dsl 任务路径；抽不到 → claude。
-  理由（含抽到的产物）记在任务的 `engine_reason`，如 `auto → dsl（task）：…`。
+- `auto`：执行时判定（`cbatch.decide(prompt, project, test_cmd)` 只判不跑，可单独调；`python -m tools.dslagent auto …`
+  只跑规则部分）。顺序：
+  1. **能力检查**（`runner.capability_gaps`，窄关键词）：装依赖（pip/npm install、安装依赖）、联网（网上抓、爬取、http 链接、
+     curl/wget）、任意 shell（shell/部署脚本、.sh、systemctl、docker）、改仓库外文件（另一个仓库、跨仓库）、浏览器/GUI、
+     交互式调试（调试器、单步/断点、pdb）→ claude。
+  2. **规则**（`runner.decide_auto`）：没 project、测试探测不到/跑不起来 → claude；初始有失败且（给了 test_cmd 或提示词有
+     「失败的测试」/Traceback/AssertionError 之类）→ dsl 修 bug；初始全过、没有报错说法、`reason.done_items` 抽得出明确产物
+     → dsl 任务路径；初始全过但提示词说有报错 → claude。
+  3. **规则拿不准**（全过但抽不出产物；有失败但没报错说法）→ **一次短分类**（`ROUTE_JUDGE` sonnet/low，不开工具，
+     输入任务文本 + dsl 动词能力清单 `DSL_ABILITY` + 开局测试 + 项目文件概况，输出 `{route: dsl_task|dsl_bugfix|claude,
+     needs: [超出能力的需求], reason}`）：needs 非空 / route=claude → claude；dsl_task 要求开局全过、dsl_bugfix 要求开局有失败，
+     对不上 → claude；超时（`ROUTE_TIMEOUT` 60 秒，`CBATCH_ROUTE_TIMEOUT` 可改）、输出不是要的 JSON → 回落 claude。
+     平均 5–8 秒、约 $0.01/次。
+  理由、来源、分类耗时记在 `engine_reason`（如 `auto → dsl（task）［短分类］：规则拿不准（…）→ 短分类 5.2s：dsl_task → …`），
+  细节在任务的 `route`（decision、source、needs、classify）。分类费用计入该任务的 `cost_usd`。
+  判给 claude 且给了 project 的，claude -p 在 project 里跑（权限同兜底）；没给 project 的照旧在 cwd 里跑。
+  `engine="dsl"` 也做能力检查，命中只在 `engine_warning` 记警告、照跑 dsl（尊重显式选择）。
+- **早退回**：dsl 任务路径第 1 版计划卡在能力上——检查（含 2 次重写）仍报白名单外动词/语句，或计划自己打印
+  `结论：缺能力：…`（任务路径首版提示里允许）——就不写第 2 版，`stop` 记「早退回…」、任务记 `dsl_early_exit`，
+  直接交 claude 兜底（fallback=false 时记 error）。
+- **并发**（isolated 模式）：claude 道 `concurrency`（默认 1，按提交顺序）和 dsl 道 `dsl_concurrency`（engine=dsl/auto，
+  默认 3，机器 3.8G）分开计，上限各 5；auto 判给 claude 的那条判完后到 claude 道排队。同一 project 的 dsl/auto 任务按
+  提交顺序一条接一条。share 模式照旧逐条。`seconds` 从拿到名额算起（排队不算）。
+- **分流日志**：每条任务结束追加一行到 `~/.claude-batch/routing.jsonl`（`CBATCH_ROUTING` 可改）：提示词 sha256 前 12 位
+  （不存原文）、请求的 engine、decision / source / reason / needs、classify_route / classify_ok / classify_sec、engine_used、
+  dsl_kind、early_exit、warning、ok、seconds、cost_usd。`cbatch.routing_stats(since="2026-10-08")`（MCP 白名单函数）按
+  路线（`auto:dsl/task→plan_task` 这种）、按判定+来源、按 engine_used 汇总条数/成功率/平均耗时/平均与总费用，另给短分类
+  次数/失败数/平均耗时、早退回和警告条数——以后调 auto 看这个。
+- **验证**（plan22）：N/B/S/T/U/V 52 个场景 + 6 个应交 claude 的负例只判不跑，按「dsl 实测能做成」打标 54/58 一致；
+  错的 4 个（T7、U1、U2、V7）是 dsl 实测过半失败、规则/分类仍判给 dsl 的（有 claude 兜底）。原先被保守判给 claude 的
+  S1/S4/S5/S8/V10 及 T1/T3/T5/U4 走短分类判到 dsl_task。
 
 ```
 cbatch.submit  engine="dsl" tasks=[{"prompt": "用户报告…失败的测试：tests.test_x…", "project": "/home/ysc/proj"}]
 cbatch.submit  engine="auto" project="/home/ysc/proj" tasks=["…Traceback…", "给 README 加一节"]
+cbatch.decide  prompt="…" project="/home/ysc/proj"        # 只判不跑，看 auto 会怎么分
+cbatch.routing_stats  since="2026-10-08"                  # 各路线成功率/耗时/费用
 ```
 
 每条任务多记 `engine_used`（template / plan / plan_task / claude_fallback / claude）、`versions`、`calls`、`cost_usd`、
@@ -81,8 +111,8 @@ cbatch.submit  engine="auto" project="/home/ysc/proj" tasks=["…Traceback…", 
 **改模块名**（挪模块并更新 import/调用，可留只重新导出的兼容层）、跑测试。改/写/删/改模块名都先过安全约束
 （rules/安全.dl：越界、写删测试、删仍被引用或没等价迁移的数据、覆盖任务没点名且与开局不一致的数据文件 → 拦，ok=否 带原因）。
 **规则开关** `DSLAGENT_RULES=0`：关掉测试变化/完成核对/安全约束三组规则（只剩越界、测试文件检查）。
-**已知局限**：dsl 不能装依赖、不能改测试、不能跑测试以外的命令、不联网；开放式任务（「优化一下」「整理代码」这类抽不出
-明确产物的）和需要动词表外能力的仍应交 claude（auto 会这么分）。dsl 在独立进程里跑（`python -m tools.dslagent run`），
+**已知局限**：dsl 不能装依赖、不能改测试、不能跑测试以外的命令、不联网；开放式任务（「优化一下」「整理代码」这类没有
+具体目标的）和需要动词表外能力的仍应交 claude（auto 的能力检查 + 短分类会这么分）。dsl 在独立进程里跑（`python -m tools.dslagent run`），
 临时目录默认 `~/.cache/dslagent/tmp`（`DSLAGENT_TMP` 可改），不用 /tmp。改了 cbatch.py 后 `tool_call … reset=True`
 就能让 submit 认新参数（执行器每批都是新进程，本来就用磁盘上的新代码），不用重启 zmcp。
 真模型集成测试：`tests/tools/dslagent_live.py paths|regress`（手动跑，花钱）。

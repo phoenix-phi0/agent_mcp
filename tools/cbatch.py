@@ -54,21 +54,43 @@ CLAUDE_CODE_SESSION_ID 这些。原样传给子进程，claude -p 会以为自�
   可写/删文件、改模块名，完成＝测试全过 + 结论修好 + 完成前核对）。
   没成且 fallback（默认 true）就交给 claude -p 兜底：cwd=project，提示词带上 dsl 的记录摘要和改动 diff；
   兜底的权限沿用这批的 permission_mode / allowed_tools，都没给就是 acceptEdits + 只放行测试命令。
-- engine="auto"：执行时判定（tools.dslagent.runner.decide_auto）：给了 project 且测试能跑时——初始有失败且
-  （给了 test_cmd 或提示词里有失败测试 / Traceback）→ dsl 修 bug；初始全过、提示词没有报错说法、且任务文本里
-  能抽出 ≥1 个明确产物（路径/标识符/JSON 键/行数约束等）→ dsl 任务路径；否则 → claude。判定理由记在 engine_reason。
+- engine="auto"：执行时判定（decide()）。先做能力检查（runner.capability_gaps：装依赖/联网/任意 shell/改仓库外
+  文件/浏览器/交互式调试）→ 命中就 claude。再走规则（runner.decide_auto）：没 project / 测试跑不起来 → claude；
+  初始有失败且（给了 test_cmd 或提示词里有失败测试 / Traceback）→ dsl 修 bug；初始全过、没有报错说法、任务文本里
+  抽得出明确产物 → dsl 任务路径。规则拿不准的两种（全过但抽不出产物；有失败但没报错说法）再做**一次**短分类
+  （ROUTE_JUDGE，问 JSON {route, needs, reason}，见 ROUTE_PROMPT）：needs 非空或 route=claude → claude；超时、
+  格式不对 → claude。判定理由、来源（能力检查/规则/短分类）和分类耗时记在 engine_reason、route。
+  判给 claude 且给了 project 的，claude -p 在 project 里跑（权限同下面的兜底）；没给 project 的照旧在 cwd 里跑。
+- engine="dsl" 也做能力检查，但只在 engine_warning 里记警告，不改道（尊重调用方的显式选择）。
+- 早退回：dsl 任务路径第 1 版计划卡在「缺能力 / 白名单外动词」上时 dslagent 不写第 2 版，直接交 claude 兜底
+  （dsl_early_exit 记原因）。
 
 dsl 在独立进程里跑（python -m tools.dslagent run），记录在任务目录 task_<n>/ 下；每条任务的
 engine_used（template / plan / plan_task / claude_fallback / claude）、versions、calls、cost_usd、seconds、calls_log
 都写在 job.json 里。
+
+## 并发
+
+isolated 模式下 claude 任务和 dsl 任务分两条道：claude 道并发 concurrency（默认 1，按提交顺序），dsl 道
+（engine=dsl/auto）并发 dsl_concurrency（默认 DSL_CONCURRENCY=3：机器 3.8G，每条 dsl 常驻 1–2 个 claude 进程）。
+auto 判给 claude 的那条在 dsl 道里判完后排到 claude 道的名额上跑。同一个 project 的 dsl/auto 任务按提交顺序
+一条接一条（直接改同一批文件）。
+share 模式照旧逐条跑。
+
+## 分流日志
+
+每条任务结束追加一行到 ROUTING_LOG（~/.claude-batch/routing.jsonl）：提示词哈希、请求的 engine、auto 判定
+（路线、来源、理由、分类耗时）、engine_used、成功与否、耗时、费用。routing_stats() 按路线汇总成功率/耗时/费用。
 """
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -90,6 +112,13 @@ CLAUDE_BIN = (os.environ.get("CBATCH_CLAUDE") or shutil.which("claude")
               or str(Path.home() / ".local" / "bin" / "claude"))
 
 MAX_TASKS = 10
+
+# 并发，见模块文档「并发」
+DSL_CONCURRENCY = 3
+MAX_CONCURRENCY = 5
+
+# 分流日志，见模块文档「分流日志」
+ROUTING_LOG = Path(os.environ.get("CBATCH_ROUTING") or JOBS.parent / "routing.jsonl")
 
 # 执行方式，见模块文档「执行方式 engine」
 ENGINES = ("claude", "dsl", "auto")
@@ -136,6 +165,47 @@ AUTO_PROMPT = """下面是一批要交给编程助手（Claude Code，能读写�
 
 """
 
+# engine=auto 规则拿不准时的短分类（每条至多一次）。跟 model=auto 的评估同一套做法：不开工具、不连 MCP、
+# 只看提示词；超时或输出不对就回落 claude——判给 claude 只是贵一点，判错给 dsl 要白跑一趟再兜底。
+ROUTE_JUDGE = ("sonnet", "low")
+ROUTE_TIMEOUT = int(os.environ.get("CBATCH_ROUTE_TIMEOUT") or 60)
+ROUTE_PEEK = 3000
+ROUTES = ("dsl_task", "dsl_bugfix", "claude")
+
+# 给分类看的 dsl 能力清单（动词细节见 tools/dslagent/prompts.py 的 VERBS）
+DSL_ABILITY = """dsl 执行端只能用这些动词，在项目目录里自动完成任务，靠项目测试验收：
+- 列文件 / 搜索代码（正则）/ 读片段：读项目里的任何文本文件
+- 改文件：按原文精确替换（可一次改多个文件多处）
+- 写文件：新建或整份覆盖项目内的非测试文件（.py/.json/.csv/.md 等）
+- 删文件：删项目内非测试文件
+- 改模块名：挪模块并更新所有 import / 调用，可留兼容层
+- 运行代码：跑 ≤30 行只读 Python 看中间值（10 秒、不联网、不许写文件、不许子进程）
+- 跑测试：只能跑项目的测试命令
+- 问模型：每步可以让模型读代码后给出修改（模型本身会写代码、会分析）
+做不到：装依赖、联网、跑测试以外的命令或 shell 脚本、改项目外的文件、改测试文件、浏览器/GUI、交互式调试。
+验收方式：测试全过、测试文件没动，再逐条核对任务点名的产物（文件/函数名/JSON 键等）；
+所以任务目标要能落到具体文件和代码改动上。没有具体目标的开放式要求（「看看哪里能优化」「整理一下代码」）验收不了。"""
+
+ROUTE_PROMPT = """你负责给一条编程任务分流，二选一的执行端：
+A. dsl：下面这个受限的自动执行端，便宜快，但只会用列出的动词；
+B. claude：通用编程助手（能跑任意命令、装依赖、联网、自己判断开放式需求），贵一些。
+
+{ability}
+
+【项目开局测试】{state}
+【项目文件概况】
+{files}
+
+【任务】
+{task}
+
+判断：
+- route=dsl_task：测试全过、任务是加功能/改代码/改数据文件/重构等，目标能落到具体文件或函数上，dsl 动词够用；
+- route=dsl_bugfix：测试有失败，任务就是让这些失败的测试通过（修 bug、按测试补实现），dsl 动词够用；
+- route=claude：需要动词做不到的事，或目标开放、验收不了，或拿不准。
+needs 列出任务里超出 dsl 能力的需求（没有就空列表）。
+只输出一行 JSON，不要别的文字、不要代码块：{{"route": "dsl_task|dsl_bugfix|claude", "needs": ["…"], "reason": "一句话"}}"""
+
 # 单条任务的时间上限（秒）。超时就杀掉这一条，接着跑下一条。
 TASK_TIMEOUT = 600
 
@@ -149,7 +219,8 @@ PREAMBLE = """这是批量任务里的一条，没有人在旁边看着，也没
 1. 同一件事失败两次就停下来报告：失败在哪一步、报的什么错、本来想做什么。
 2. 单条任务有时间上限，超时会被直接杀掉。输出很长时先停下来说明。
 3. 没让你改文件的任务就别改，只报告。
-4. 最后一段回复就是这条任务的结果，写清楚结论。"""
+4. 最后一段回复就是这条任务的结果，写清楚结论。
+5. 运行程序、跑测试必须在前台跑完、看到结果再汇报，不得放到后台后就结束这条任务；需要等待就在前台轮询（sleep 后再查），直到拿到结果。"""
 
 # 要从子进程环境里去掉的变量，见模块文档「环境变量要洗掉一层」
 _ENV_DROP_PREFIX = ("CLAUDE_CODE_",)
@@ -262,7 +333,8 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
            allowed_tools=None, timeout: int = TASK_TIMEOUT,
            preamble: bool = True, engine: str = "claude", project: str = None,
            test_cmd: str = None, fallback: bool = True,
-           dsl_options: dict = None) -> dict:
+           dsl_options: dict = None, concurrency: int = 1,
+           dsl_concurrency: int = DSL_CONCURRENCY) -> dict:
     """提交一批任务，立刻返回，不等跑完。
 
     tasks：提示词列表，或 {prompt, outfile} 字典列表。outfile 给了的话，
@@ -284,6 +356,8 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
         （{"prompt": …, "engine": "dsl", "project": "/path", "test_cmd": "…", "fallback": false}）。
         engine=dsl 必须有 project（任务里或这里）；test_cmd 缺省按项目探测 pytest / unittest。
         dsl_options 是调试用的：{"max_plan": 2, "template": true, "inject": {...}}。
+    concurrency / dsl_concurrency：isolated 模式下 claude 道、dsl 道（engine=dsl/auto）各自的并发上限，
+        默认 1 / DSL_CONCURRENCY（3），最多 MAX_CONCURRENCY；见模块文档「并发」。share 模式逐条跑，不看这两个。
 
     返回 {"job_id", "status", "tasks", "dir"}。
     """
@@ -312,6 +386,9 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
     if permission_mode == "bypassPermissions":
         raise CBatchError("不收 bypassPermissions：批量任务没人看着，"
                           "要放开就用 acceptEdits 或 allowed_tools 指定到具体工具")
+    for k, v in (("concurrency", concurrency), ("dsl_concurrency", dsl_concurrency)):
+        if not isinstance(v, int) or isinstance(v, bool) or not 1 <= v <= MAX_CONCURRENCY:
+            raise CBatchError(f"{k} 要是 1–{MAX_CONCURRENCY} 的整数，收到：{v!r}")
     if shutil.which(CLAUDE_BIN) is None:
         raise CBatchError(f"找不到 {CLAUDE_BIN}，Claude Code 装了吗？")
     for i, it in enumerate(items, 1):
@@ -339,7 +416,8 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
         "options": {"model": model, "permission_mode": permission_mode,
                     "allowed_tools": list(allowed_tools or []),
                     "timeout": int(timeout), "preamble": bool(preamble),
-                    "engine": engine},
+                    "engine": engine, "concurrency": concurrency,
+                    "dsl_concurrency": dsl_concurrency},
         "auto": None,
         "tasks": [dict(it, status="pending", output="", error="",
                        model=None if model == "auto" else (model or None),
@@ -454,6 +532,147 @@ def describe() -> str:
         lines.append(f"  {j['id']}  {j['status']:10} {j['progress']:6} "
                      f"{j['name'][:30]}")
     return "\n".join(lines)
+
+
+def decide(prompt: str, project: str = None, test_cmd: str = None, classify: bool = True,
+           cwd: str = None) -> dict:
+    """engine=auto 的判定（只判不跑，可单独调用）：能力检查 → 规则 → 规则拿不准时一次短分类。
+
+    返回 {engine: dsl|claude, kind, reason, source: 能力检查|规则|短分类|出错, test_cmd, needs,
+    classify: {route, needs, reason, seconds, ok, error, cost_usd} 或 None}。classify=False 时拿不准就照规则给 claude。
+    """
+    from .dslagent import runner
+    try:
+        r = runner.decide_auto(prompt, project, test_cmd)
+    except Exception as e:   # 判定本身坏了不该让任务卡住，退回默认
+        return {"engine": "claude", "kind": None, "source": "出错", "test_cmd": None, "needs": [], "classify": None,
+                "reason": f"判定出错（{type(e).__name__}: {e}），用 claude"}
+    out = {"engine": r["engine"], "kind": r.get("kind"), "reason": r["reason"], "test_cmd": r.get("test_cmd"),
+           "needs": list(r.get("needs") or []), "classify": None,
+           "source": "能力检查" if r.get("needs") else "规则"}
+    unsure = r.get("uncertain")
+    if not unsure or not classify:
+        return out
+    failing = bool((r.get("initial") or {}).get("failing"))
+    c = _route_classify(prompt, project, r.get("initial") or {}, cwd)
+    out.update(classify=c, source="短分类", needs=c["needs"])
+    head = f"规则拿不准（{r['reason']}）→ 短分类 {c['seconds']}s："
+    if not c["ok"]:
+        out.update(engine="claude", kind=None, reason=head + f"失败（{c['error']}），回落 claude")
+    elif c["needs"]:
+        out.update(engine="claude", kind=None,
+                   reason=head + f"{c['route']}，但需要 dsl 做不到的：{'、'.join(c['needs'])} → claude；{c['reason']}")
+    elif c["route"] == "dsl_task" and not failing:
+        out.update(engine="dsl", kind="task", reason=head + f"dsl_task → 任务路径；{c['reason']}")
+    elif c["route"] == "dsl_bugfix" and failing:
+        out.update(engine="dsl", kind="bugfix", reason=head + f"dsl_bugfix → 修 bug 路径；{c['reason']}")
+    elif c["route"] == "claude":
+        out.update(engine="claude", kind=None, reason=head + f"claude；{c['reason']}")
+    else:
+        why = "测试有失败，dsl 会走修 bug 路径、不是这个任务" if failing else "测试全过，没有失败测试可按修 bug 验收"
+        out.update(engine="claude", kind=None, reason=head + f"{c['route']}，但{why} → claude；{c['reason']}")
+    return out
+
+
+def _project_overview(project, limit: int = 60) -> str:
+    """给分类看的项目文件清单：相对路径 + 行数，跳过隐藏目录、虚拟环境、缓存。"""
+    skip = {"__pycache__", "node_modules", "venv", ".venv", "env", "site-packages", "build", "dist"}
+    rows = []
+    for dp, dns, fns in os.walk(project):
+        dns[:] = sorted(x for x in dns if not x.startswith(".") and x not in skip)
+        for fn in sorted(fns):
+            if fn.startswith(".") or fn.endswith((".pyc", ".pyo")):
+                continue
+            f = Path(dp) / fn
+            try:
+                n = f.read_bytes().count(b"\n") if f.stat().st_size < 2_000_000 else -1
+            except OSError:
+                continue
+            rows.append(f"{f.relative_to(project)}（{n} 行）" if n >= 0 else f"{f.relative_to(project)}（大文件）")
+    more = f"\n…还有 {len(rows) - limit} 个文件" if len(rows) > limit else ""
+    return "\n".join(rows[:limit]) + more if rows else "（空）"
+
+
+def _route_classify(prompt: str, project, initial: dict, cwd: str = None) -> dict:
+    """规则拿不准时的一次短分类，见 ROUTE_PROMPT。不抛异常：超时、格式不对都记在 error 里，ok=False。"""
+    st = ("有失败：" if initial.get("failing") else "全部通过：") + (initial.get("summary") or "")[:600]
+    body = ROUTE_PROMPT.format(ability=DSL_ABILITY, state=st, files=_project_overview(project) if project else "（没给项目）",
+                               task=(prompt or "")[:ROUTE_PEEK])
+    jm, je = ROUTE_JUDGE
+    cmd = [CLAUDE_BIN, "-p", body, "--output-format", "json", "--model", jm] + (["--effort", je] if je else []) + \
+        ["--tools", "", "--strict-mcp-config", "--system-prompt", "你负责给编程任务分流。只输出 JSON。"]
+    c = {"route": "claude", "needs": [], "reason": "", "seconds": 0.0, "ok": False, "error": "", "cost_usd": None,
+         "judge": "/".join(x for x in ROUTE_JUDGE if x)}
+    if not cwd:
+        from .dslagent.runner import tmp_dir
+        cwd = str(tmp_dir())
+    t0 = time.time()
+    try:
+        p = subprocess.run(cmd, cwd=cwd, env=_child_env(), stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True, timeout=ROUTE_TIMEOUT)
+        r = json.loads(p.stdout)
+        c["cost_usd"] = r.get("total_cost_usd")
+        text = (r.get("result") or "").strip()
+        m = re.search(r"\{.*\}", text, re.S)
+        x = json.loads(m.group(0) if m else text)
+        if x.get("route") not in ROUTES:
+            raise ValueError(f"route 不认识：{x.get('route')!r}")
+        needs = x.get("needs") or []
+        if not isinstance(needs, list):
+            raise ValueError(f"needs 不是列表：{needs!r}")
+        c.update(route=x["route"], needs=[str(n)[:80] for n in needs if str(n).strip()][:6],
+                 reason=str(x.get("reason") or "")[:200], ok=True)
+    except subprocess.TimeoutExpired:
+        c["error"] = f"超过 {ROUTE_TIMEOUT} 秒"
+    except (json.JSONDecodeError, ValueError, TypeError, KeyError, AttributeError) as e:
+        c["error"] = f"输出解析不了（{type(e).__name__}: {str(e)[:100]}）"
+    except OSError as e:
+        c["error"] = f"起不来（{e}）"
+    c["seconds"] = round(time.time() - t0, 1)
+    return c
+
+
+def routing_stats(since: str = None, path: str = None) -> dict:
+    """分流日志汇总：按路线（auto 判定 → 实际执行端）给条数、成功率、平均耗时、平均/总费用，另给短分类的次数和平均耗时。
+
+    since：只算这个时间之后的（ISO 格式前缀比较，如 "2026-10-08"）。path：日志文件，默认 ROUTING_LOG。
+    """
+    f = Path(path) if path else ROUTING_LOG
+    rows = []
+    if f.is_file():
+        for line in f.read_text(encoding="utf-8").splitlines():
+            try:
+                x = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not since or (x.get("ts") or "") >= since:
+                rows.append(x)
+
+    def agg(xs):
+        n = len(xs)
+        secs = [x["seconds"] for x in xs if isinstance(x.get("seconds"), (int, float))]
+        costs = [x["cost_usd"] for x in xs if isinstance(x.get("cost_usd"), (int, float))]
+        ok = sum(1 for x in xs if x.get("ok"))
+        return {"n": n, "ok": ok, "rate": round(ok / n, 3) if n else None,
+                "avg_sec": round(sum(secs) / len(secs), 1) if secs else None,
+                "avg_cost": round(sum(costs) / len(costs), 4) if costs else None,
+                "total_cost": round(sum(costs), 4)}
+
+    def group(key):
+        g = {}
+        for x in rows:
+            g.setdefault(key(x), []).append(x)
+        return {k: agg(v) for k, v in sorted(g.items())}
+
+    cl = [x for x in rows if x.get("classify_sec") is not None]
+    return {"log": str(f), "total": agg(rows),
+            "by_route": group(lambda x: f"{x.get('engine')}:{x.get('decision') or x.get('engine')}→{x.get('engine_used')}"),
+            "by_decision": group(lambda x: f"{x.get('decision') or x.get('engine')}（{x.get('source') or '-'}）"),
+            "by_engine_used": group(lambda x: x.get("engine_used") or "?"),
+            "classify": {"n": len(cl), "failed": sum(1 for x in cl if not x.get("classify_ok")),
+                         "avg_sec": round(sum(x["classify_sec"] for x in cl) / len(cl), 1) if cl else None},
+            "early_exit": sum(1 for x in rows if x.get("early_exit")),
+            "warnings": sum(1 for x in rows if x.get("warning"))}
 
 
 # ----------------------------------------------------------------------
@@ -583,14 +802,16 @@ def _run_one(d: dict, t: dict, resume: str = None) -> None:
 # ---- engine=dsl / auto
 
 
-def _decide(t: dict) -> str:
-    """engine=auto：按 dslagent 的规则判一次，理由记进 t。返回 dsl 或 claude。"""
-    from .dslagent.runner import decide_auto
-    try:
-        r = decide_auto(t["prompt"], t.get("project"), t.get("test_cmd"))
-    except Exception as e:   # 判定本身坏了不该让任务卡住，退回默认
-        r = {"engine": "claude", "reason": f"判定出错（{type(e).__name__}: {e}），用 claude", "test_cmd": None}
-    t["engine_reason"] = "auto → " + r["engine"] + (f"（{r['kind']}）" if r.get("kind") else "") + "：" + r["reason"]
+def _decide(d: dict, t: dict) -> str:
+    """engine=auto：decide() 判一次，理由记进 t["engine_reason"]、判定细节记进 t["route"]。返回 dsl 或 claude。"""
+    r = decide(t["prompt"], t.get("project"), t.get("test_cmd"), cwd=str(_job_dir(d["id"])))
+    t["engine_reason"] = f"auto → {r['engine']}" + (f"（{r['kind']}）" if r.get("kind") else "") + \
+        f"［{r['source']}］：{r['reason']}"
+    c = r.get("classify")
+    t["route"] = {"decision": r["engine"] + (f"/{r['kind']}" if r.get("kind") else ""), "source": r["source"],
+                  "needs": r["needs"], "classify": c}
+    if c and c.get("cost_usd"):
+        t["route_cost_usd"] = c["cost_usd"]
     if r["engine"] == "dsl" and r.get("test_cmd"):
         t["test_cmd"] = r["test_cmd"]
     return r["engine"]
@@ -650,30 +871,54 @@ def _fallback_prompt(t: dict, r: dict) -> str:
             + (f"\n\n跑测试用：{cmd}" if cmd else ""))
 
 
-def _run_engine(d: dict, t: dict, i: int, resume: str = None) -> None:
-    """engine=dsl / auto 的一条：auto 先判定；dsl 没修好且 fallback 就交 claude 兜底。结果写回 t。"""
-    t0 = time.time()
-    if t["engine"] == "auto" and _decide(t) == "claude":
-        _run_one(d, t, resume)
-        t["engine_used"] = "claude"
-        return
+def _run_engine(d: dict, t: dict, i: int, resume: str = None, gate=None) -> None:
+    """engine=dsl / auto 的一条：auto 先判定；dsl 没修好且 fallback 就交 claude 兜底。结果写回 t。
+
+    gate(道) 返回占并发名额的上下文（"dsl" / "claude"），见 _run_lanes；逐条跑时不占。
+    """
+    from contextlib import nullcontext
+    gate = gate or (lambda lane: nullcontext())
+    with gate("dsl"):
+        t0 = time.time()      # 从拿到名额算起，排队不算进 seconds
+        if t["engine"] == "auto":
+            eng = _decide(d, t)
+        else:
+            from .dslagent.runner import capability_gaps
+            gaps = capability_gaps(t["prompt"])
+            if gaps:   # 调用方显式选了 dsl：只记警告，不改道
+                t["engine_warning"] = "能力检查：任务像是需要 dsl 做不到的事——" + "、".join(gaps) + "；按 engine=dsl 照跑"
+            eng = "dsl"
+        if eng == "dsl":
+            _run_dsl_and_fallback(d, t, i, t0)
+    if eng == "claude":
+        with gate("claude"):
+            t1 = time.time()
+            # 给了 project 就在 project 里跑，权限同兜底（这批没给权限时 acceptEdits + 只放行测试命令）
+            _run_one(_in_project(d, t, t.get("test_cmd")) if t.get("project") else d, t, resume)
+            t["engine_used"] = "claude"
+            # 耗时含判定（跑开局测试、短分类）
+            t["seconds"] = round((t.get("seconds") or 0) + (t1 - t0), 1)
+            if t.get("route_cost_usd"):
+                t["cost_usd"] = round((t.get("cost_usd") or 0) + t["route_cost_usd"], 4)
+
+
+def _run_dsl_and_fallback(d: dict, t: dict, i: int, t0: float) -> None:
     r = _run_dsl(d, t, i)
     if r.get("kind"):
         t["dsl_kind"] = r["kind"]
+    if r.get("early_exit"):
+        t["dsl_early_exit"] = r["early_exit"]
     t.update(versions=r.get("versions"), calls=r.get("calls"), cost_usd=r.get("cost"),
              calls_log=r.get("calls_log") or t.get("calls_log"), dsl_dir=r.get("dir"),
              dsl_fixed=bool(r.get("fixed")), dsl_stop=r.get("stop", ""),
              engine_used=r.get("engine_used") or "dsl", output=r.get("report") or r.get("stop", ""))
+    route_cost = t.get("route_cost_usd") or 0
     if r.get("fixed"):
         t.update(status="done", seconds=round(time.time() - t0, 1))
+        if route_cost:
+            t["cost_usd"] = round((t["cost_usd"] or 0) + route_cost, 4)
     elif t.get("fallback", True) and t.get("project"):
-        o = d["options"]
-        tools = list(o["allowed_tools"])
-        if not o["permission_mode"] and not tools:
-            cmd = r.get("test_cmd") or t.get("test_cmd")
-            tools = ["Read", "Grep", "Glob", "Edit"] + ([f"Bash({cmd}*)"] if cmd else [])
-        d2 = dict(d, cwd=t["project"],
-                  options=dict(o, permission_mode=o["permission_mode"] or "acceptEdits", allowed_tools=tools))
+        d2 = _in_project(d, t, r.get("test_cmd") or t.get("test_cmd"))
         t2 = dict(t, prompt=_fallback_prompt(t, r), outfile="")
         _run_one(d2, t2)
         dsl_out = t["output"]
@@ -681,11 +926,13 @@ def _run_engine(d: dict, t: dict, i: int, resume: str = None) -> None:
             if k in t2:
                 t[k] = t2[k]
         t["output"] = (t["output"] or "") + f"\n\n——（先跑的 DSL）{dsl_out}"
-        t["cost_usd"] = round((r.get("cost") or 0) + (t2.get("cost_usd") or 0), 4)
+        t["cost_usd"] = round((r.get("cost") or 0) + (t2.get("cost_usd") or 0) + route_cost, 4)
         t["engine_used"] = "claude_fallback"
         t["seconds"] = round(time.time() - t0, 1)
     else:
         t.update(status="error", error=r.get("stop") or "dsl 没修好", seconds=round(time.time() - t0, 1))
+        if route_cost:
+            t["cost_usd"] = round((t["cost_usd"] or 0) + route_cost, 4)
     if t["outfile"] and t["output"]:
         f = Path(d["cwd"]) / t["outfile"]
         try:
@@ -693,6 +940,42 @@ def _run_engine(d: dict, t: dict, i: int, resume: str = None) -> None:
             f.write_text(t["output"], encoding="utf-8")
         except OSError as e:
             t["error"] = (t["error"] + f" 写 outfile 失败：{e}").strip()
+
+
+def _in_project(d: dict, t: dict, test_cmd) -> dict:
+    """在 t 的 project 里跑 claude 用的 d：cwd=project；这批没给权限就 acceptEdits + 只放行测试命令。"""
+    o = d["options"]
+    tools = list(o["allowed_tools"])
+    if not o["permission_mode"] and not tools:
+        tools = ["Read", "Grep", "Glob", "Edit"] + ([f"Bash({test_cmd}*)"] if test_cmd else [])
+    return dict(d, cwd=t["project"],
+                options=dict(o, permission_mode=o["permission_mode"] or "acceptEdits", allowed_tools=tools))
+
+
+def _log_route(d: dict, t: dict, i: int) -> None:
+    """分流日志一行，见模块文档「分流日志」。写不了就算了，不影响任务。"""
+    import hashlib
+    rt = t.get("route") or {}
+    c = rt.get("classify") or {}
+    row = {"ts": _now(), "job": d["id"], "i": i,
+           "hash": hashlib.sha256(t["prompt"].encode("utf-8")).hexdigest()[:12],
+           "engine": t.get("engine", "claude"), "decision": rt.get("decision"), "source": rt.get("source"),
+           "reason": (t.get("engine_reason") or "")[:300], "needs": rt.get("needs") or [],
+           "classify_route": c.get("route"), "classify_ok": c.get("ok") if c else None,
+           "classify_sec": c.get("seconds") if c else None,
+           "engine_used": t.get("engine_used"), "dsl_kind": t.get("dsl_kind"),
+           "early_exit": t.get("dsl_early_exit"), "warning": t.get("engine_warning"),
+           "ok": t.get("status") == "done", "status": t.get("status"),
+           "seconds": t.get("seconds"), "cost_usd": t.get("cost_usd")}
+    try:
+        ROUTING_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with _LOG_LOCK, open(ROUTING_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+_LOG_LOCK = threading.Lock()
 
 
 def _detach(job_id: str) -> None:
@@ -721,22 +1004,20 @@ def _run(job_id: str) -> None:
             return
         _save(d)
 
-    prev_session = None
-    for i, t in enumerate(d["tasks"], 1):
-        if cancelled():
-            break
-        t["status"] = "running"
-        _save(d)
-        resume = prev_session if d["mode"] == "share" else None
-        if t.get("engine", "claude") == "claude":
-            _run_one(d, t, resume)
-            t["engine_used"] = "claude"
-        else:
-            _run_engine(d, t, i, resume)
-        prev_session = t["session_id"] if t["status"] == "done" else None
-        if cancelled():
-            return          # cancel() 负责收尾，这里再写会盖掉它
-        _save(d)
+    if d["mode"] == "share":
+        prev_session = None
+        for i, t in enumerate(d["tasks"], 1):
+            if cancelled():
+                break
+            t["status"] = "running"
+            _save(d)
+            _exec(d, t, i, prev_session)
+            prev_session = t["session_id"] if t["status"] == "done" else None
+            if cancelled():
+                return          # cancel() 负责收尾，这里再写会盖掉它
+            _save(d)
+    else:
+        _run_lanes(d, cancelled)
 
     if cancelled():
         return
@@ -744,6 +1025,93 @@ def _run(job_id: str) -> None:
     st = {t["status"] for t in d["tasks"]}
     d["status"] = "done" if st == {"done"} else "partial" if "done" in st else "failed"
     _save(d)
+
+
+def _exec(d: dict, t: dict, i: int, resume: str = None, gate=None) -> None:
+    """跑一条（按 engine 分），跑完记分流日志。"""
+    if t.get("engine", "claude") == "claude":
+        if gate:
+            with gate("claude"):
+                _run_one(d, t, resume)
+        else:
+            _run_one(d, t, resume)
+        t["engine_used"] = "claude"
+    else:
+        _run_engine(d, t, i, resume, gate)
+    _log_route(d, t, i)
+
+
+def _run_lanes(d: dict, cancelled) -> None:
+    """isolated 模式：claude 道和 dsl 道各自限并发（见模块文档「并发」）。
+
+    每条在自己的线程里改一份拷贝，跑完在锁里写回 d 再存盘——json.dumps(d) 时不会碰上别的线程正在改的字典。
+    claude 道按提交顺序发名额（并发 1 时跟原来逐条跑一样的顺序）。
+    """
+    o = d["options"]
+    lock = threading.Lock()
+    lanes = {"claude": max(1, int(o.get("concurrency") or 1)),
+             "dsl": max(1, int(o.get("dsl_concurrency") or DSL_CONCURRENCY))}
+    sems = {k: threading.Semaphore(v) for k, v in lanes.items()}
+    from contextlib import contextmanager
+
+    @contextmanager
+    def gate(lane):
+        sems[lane].acquire()
+        try:
+            yield
+        finally:
+            sems[lane].release()
+
+    def save():
+        with lock:
+            if not cancelled():
+                _save(d)
+
+    def work(i, t):
+        if cancelled():
+            return
+        w = dict(t, status="running")
+        with lock:
+            t["status"] = "running"
+        save()
+        try:
+            _exec(d, w, i, None, gate)
+        except Exception as e:   # 一条坏了不拖垮整批
+            w.update(status="error", error=f"执行器出错：{type(e).__name__}: {e}")
+        with lock:
+            t.clear()
+            t.update(w)
+        save()
+
+    # claude 道：按顺序一条接一条地占名额（Semaphore 不保证先来先得，所以 claude 任务由几个工作线程按序取）
+    claude_q = [(i, t) for i, t in enumerate(d["tasks"], 1) if t.get("engine", "claude") == "claude"]
+    other = [(i, t) for i, t in enumerate(d["tasks"], 1) if t.get("engine", "claude") != "claude"]
+    q_lock = threading.Lock()
+
+    def claude_worker():
+        while True:
+            with q_lock:
+                if not claude_q:
+                    return
+                i, t = claude_q.pop(0)
+            work(i, t)
+
+    # dsl 道：同一个 project 的按提交顺序一条接一条（直接改同一批文件，互斥且顺序有意义），不同 project 的各一个线程，
+    # 同时在跑的条数由 gate("dsl") 卡（auto 判给 claude 的那条还要到 claude 道排队）
+    groups = {}
+    for i, t in other:
+        groups.setdefault(t.get("project") or f"_{i}", []).append((i, t))
+
+    def group_worker(items):
+        for i, t in items:
+            work(i, t)
+
+    threads = [threading.Thread(target=claude_worker, daemon=True) for _ in range(lanes["claude"])]
+    threads += [threading.Thread(target=group_worker, args=(g,), daemon=True) for g in groups.values()]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
 
 
 if __name__ == "__main__":

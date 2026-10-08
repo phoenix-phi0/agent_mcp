@@ -217,10 +217,53 @@ def test_task_path():
         os.environ["CBATCH_CLAUDE"] = old
 
 
+def test_early_exit_and_caps():
+    print("早退回：任务路径第 1 版计划自报缺能力 / 卡在白名单外动词 → 不写第 2 版；能力检查与 auto 拿不准标记")
+    fake = TMP / "fake_claude.py"
+    fake.write_text(FAKE, encoding="utf-8")
+    fake.chmod(0o755)
+    plan = TMP / "plan.zs"
+    old = os.environ["CBATCH_CLAUDE"]
+    os.environ.update(CBATCH_CLAUDE=str(fake), FAKE_PLAN=str(plan))
+    try:
+        plan.write_text("用包 common text code\n打印 结论：缺能力：要用 pip 装 openpyxl", encoding="utf-8")
+        pj = project("early1", BASE)
+        r = R.run(pj, "导出 xlsx：新建 pkg/export.py", TMP / "out_early1")
+        check(not r["fixed"] and r["versions"] == 1 and r["calls"] == 1 and r["stop"].startswith("早退回")
+              and "openpyxl" in r["early_exit"], "计划自报缺能力 → 1 版 1 次调用就交回，记 early_exit", (r["stop"], r["calls"]))
+        plan.write_text("用包 common text code\n设 x = 撤回\n打印 结论：修好", encoding="utf-8")
+        pj = project("early2", BASE)
+        r = R.run(pj, "新建 pkg/report.md", TMP / "out_early2")
+        check(not r["fixed"] and r["versions"] == 1 and "不在白名单里" in r.get("early_exit", "")
+              and r["version_log"][0]["fix_rounds"] == 2, "白名单外动词重写 2 次仍不过 → 早退回，不写第 2 版",
+              (r["stop"], r["versions"]))
+        plan.write_text("用包 common text code\n打印 结论：没修好 还差一步", encoding="utf-8")
+        pj = project("early3", BASE)
+        r = R.run(pj, "新建 pkg/report.md", TMP / "out_early3")
+        check(r["versions"] == 2 and not r.get("early_exit"), "普通没完成照旧写第 2 版", r["stop"])
+    finally:
+        os.environ["CBATCH_CLAUDE"] = old
+
+    gaps = R.capability_gaps
+    check(gaps("先 pip install openpyxl 再导出") and gaps("请到网上抓一下今天的汇率") and gaps("写个 deploy.sh 并执行")
+          and gaps("把另一个仓库里的调用也改了") and gaps("在浏览器里点一下看看") and gaps("开调试器单步跟一下"),
+          "能力检查：装依赖 / 联网 / shell / 仓库外 / 浏览器 / 交互式调试 都能认出")
+    check(not gaps("新建 pkg/report.md，定义 build_report(cart)；测试要全部通过，tests/ 下别动")
+          and not gaps("修复失败的测试：AssertionError in test_total"), "普通任务不误判")
+    d = R.decide_auto("用 pip install requests 抓数据", None)
+    check(d["engine"] == "claude" and d["needs"] and d["reason"].startswith("能力检查"), "decide_auto：能力检查先于一切", d)
+    pj = project("auto_ok", BASE)
+    d = R.decide_auto("把代码整理得好看一点", str(pj))
+    check(d["engine"] == "claude" and d.get("uncertain") == "task", "全过、抽不出产物 → claude 并标 uncertain=task", d["reason"])
+    d = R.decide_auto("新建 pkg/report.md", str(pj))
+    check(d["engine"] == "dsl" and not d.get("uncertain"), "规则确定的不标 uncertain", d["reason"])
+
+
 def main():
     test_verbs()
     test_whitelist_prompts()
     test_task_path()
+    test_early_exit_and_caps()
     shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n{'=' * 50}\n通过 {PASS}，失败 {FAIL}")
     return 0 if FAIL == 0 else 1
