@@ -84,13 +84,14 @@ fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
 # 假的 dsl 执行器（engine=dsl/auto 时 cbatch 起它，代替 python -m tools.dslagent）：
 # 按任务文本里的暗号写 result.json——DSLOK 修好，DSLNO 没修好（带交接说明），DSLCRASH 什么都不写就退出。
 DSL_LOG = TMP / "dsl_calls.jsonl"
-FAKE_DSL = f"""import json, sys
+FAKE_DSL = f"""import json, os, sys
 from pathlib import Path
 a = sys.argv[1:]
 arg = lambda k: a[a.index(k) + 1] if k in a else None
 task = Path(arg("--task-file")).read_text(encoding="utf-8")
 with open({str(DSL_LOG)!r}, "a", encoding="utf-8") as f:
-    f.write(json.dumps({{"argv": a, "task": task}}, ensure_ascii=False) + "\\n")
+    f.write(json.dumps({{"argv": a, "task": task, "planner": os.environ.get("DSLAGENT_PLANNER")}},
+                       ensure_ascii=False) + "\\n")
 if "DSLCRASH" in task:
     print("炸了"); sys.exit(3)
 if "DSLNAP" in task:
@@ -364,6 +365,24 @@ def main():
           and "--test-cmd" in dl[1]["argv"] and "--test-cmd" not in dl[0]["argv"],
           "dsl 执行器拿到 project、给了才传 test_cmd", [x["argv"] for x in dl])
     check(d["options"]["engine"] == "claude", "job 级 engine 记在 options 里", d["options"])
+    check(all(x["planner"] is None for x in dl) and d["options"]["dsl_planner"] is None,
+          "没设 DSLAGENT_PLANNER：dsl 进程拿不到它（走缺省路径）", [x["planner"] for x in dl])
+
+    print("engine=dsl：DSLAGENT_PLANNER / dsl_options.planner 透传给 dsl 进程")
+    DSL_LOG.unlink()
+    os.environ["DSLAGENT_PLANNER"] = "v2"
+    try:
+        j = cbatch.submit([{"prompt": "DSLOK 规划 v2", "engine": "dsl", "project": str(proj)}], cwd=str(TMP))
+    finally:
+        del os.environ["DSLAGENT_PLANNER"]
+    d = cbatch.wait(j["job_id"], timeout=60, every=0.2)
+    j = cbatch.submit([{"prompt": "DSLOK 逐条 v2", "engine": "dsl", "project": str(proj),
+                        "dsl_options": {"planner": "v2"}}], cwd=str(TMP))
+    d2 = cbatch.wait(j["job_id"], timeout=60, every=0.2)
+    dl = [json.loads(x) for x in DSL_LOG.read_text(encoding="utf-8").splitlines()]
+    check([x["planner"] for x in dl] == ["v2", "v2"] and d["options"]["dsl_planner"] == "v2"
+          and d["tasks"][0]["dsl_planner"] == "v2" and d2["tasks"][0]["dsl_planner"] == "v2",
+          "提交时的环境变量 / 单条 dsl_options.planner 都传到 dsl 进程", ([x["planner"] for x in dl], d["options"]))
 
     print("engine：显式给了权限就照用户的，不套默认放行")
     LOG.unlink()

@@ -67,6 +67,9 @@ CLAUDE_CODE_SESSION_ID 这些。原样传给子进程，claude -p 会以为自�
 - 早退回：dsl 任务路径第 1 版计划卡在「缺能力 / 白名单外动词」上时 dslagent 不写第 2 版，直接交 claude 兜底
   （dsl_early_exit 记原因）。
 
+规划路径：提交时环境变量 DSLAGENT_PLANNER（如 v2）记进这批的 options.dsl_planner，起 dsl 进程时原样设给它
+（dsl_options 的 planner 逐条覆盖）；不设就是 dslagent 的缺省路径。
+
 dsl 在独立进程里跑（python -m tools.dslagent run），记录在任务目录 task_<n>/ 下；每条任务的
 engine_used（template / plan / plan_task / claude_fallback / claude）、versions、calls、cost_usd、seconds、calls_log
 都写在 job.json 里。
@@ -357,7 +360,7 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
         project、test_cmd、fallback、dsl_options 是这批的默认值，tasks 里的字典可以逐条覆盖
         （{"prompt": …, "engine": "dsl", "project": "/path", "test_cmd": "…", "fallback": false}）。
         engine=dsl 必须有 project（任务里或这里）；test_cmd 缺省按项目探测 pytest / unittest。
-        dsl_options 是调试用的：{"max_plan": 2, "template": true, "inject": {...}}。
+        dsl_options 是调试用的：{"max_plan": 2, "template": true, "inject": {...}, "planner": "v2"}。
     concurrency / dsl_concurrency：isolated 模式下 claude 道、dsl 道（engine=dsl/auto）各自的并发上限，
         默认 1 / DSL_CONCURRENCY（3），最多 MAX_CONCURRENCY；见模块文档「并发」。share 模式逐条跑，不看这两个。
 
@@ -419,7 +422,8 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
                     "allowed_tools": list(allowed_tools or []),
                     "timeout": int(timeout), "preamble": bool(preamble),
                     "engine": engine, "concurrency": concurrency,
-                    "dsl_concurrency": dsl_concurrency},
+                    "dsl_concurrency": dsl_concurrency,
+                    "dsl_planner": os.environ.get("DSLAGENT_PLANNER") or None},
         "auto": None,
         "tasks": [dict(it, status="pending", output="", error="",
                        model=None if model == "auto" else (model or None),
@@ -840,8 +844,13 @@ def _run_dsl(d: dict, t: dict, i: int) -> dict:
     if o.get("inject"):
         cmd += ["--inject", json.dumps(o["inject"], ensure_ascii=False)]
     t["calls_log"] = str(tdir / "calls.json")
+    env = _child_env()
+    planner = o.get("planner") or d["options"].get("dsl_planner")
+    if planner:
+        env["DSLAGENT_PLANNER"] = str(planner)
+        t["dsl_planner"] = str(planner)
     with open(tdir / "runner.log", "ab") as log:
-        p = subprocess.Popen(cmd, cwd=str(ROOT), env=_child_env(), stdin=subprocess.DEVNULL,
+        p = subprocess.Popen(cmd, cwd=str(ROOT), env=env, stdin=subprocess.DEVNULL,
                              stdout=log, stderr=log)
         try:
             p.wait(timeout=timeout)

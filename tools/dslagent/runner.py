@@ -22,6 +22,8 @@
      （不满足再做一轮，仍不满足问模型确认一次）。
 预算：总模型调用 ≤ MAX_CALLS（含规划、重写、计划内的问）；墙钟超过 wall 不再开新一版。
 
+DSLAGENT_PLANNER=v2：run() 整条转到 v2.py 的规划路径（见那里的说明）；缺省（不设 / 别的值）走上面的路径。
+
 **要在独立进程里跑**（python -m tools.dslagent run …，cbatch 就是这么调的）：它把 llm_router 的
 ClaudeCLIClient._run_local 换成常驻进程池、设 DSLAGENT_STATE 等环境变量，都是进程级的。
 """
@@ -301,7 +303,11 @@ def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True,
         max_calls=MAX_CALLS, infer=None):
     """跑一次。project 里直接改文件；记录写进 out_dir（calls.json、result.json、plan_v*.zs/out.txt、state/）。
     inject：测试用，{"template": "fail"} 让模板这一版什么都不做（触发转规划 / 兜底的路径）。
-    infer：模板预读并入推理候选（infer.py）；None＝看 DSLAGENT_INFER（默认开）。返回结果字典（同 result.json）。"""
+    infer：模板预读并入推理候选（infer.py）；None＝看 DSLAGENT_INFER（默认开）。返回结果字典（同 result.json）。
+    环境变量 DSLAGENT_PLANNER=v2 时整条转到规划路径 v2（v2.py：数据包 → 补查 → .zs 计划 → 执行 → 验收 → 边界复核）。"""
+    from . import v2
+    if v2.enabled():
+        return v2.run(project, task, out_dir, test_cmd=test_cmd, wall=wall)
     from tools import llm_router
     from tools.mock import MockClient
 

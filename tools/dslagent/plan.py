@@ -269,9 +269,9 @@ def fake_handler_factory(repo, stats):
     return handler
 
 
-def dry_run(project, work, script, subs, desc, scripts_for, model):
+def dry_run(project, work, script, subs, desc, scripts_for, model, engine_cls=None):
     """在项目的一份拷贝里（work/repo）用假模型跑一遍。返回 (问题文本或空, 假模型调用数, 输出)。
-    状态目录临时切到 work/，不弄脏真跑的笔记状态。"""
+    状态目录临时切到 work/，不弄脏真跑的笔记状态。engine_cls：引擎类（缺省 AgentEngine；v2 传带测试闸门的子类）。"""
     from tools.mock import MockClient
     shutil.rmtree(work, ignore_errors=True)
     shutil.copytree(project, work / "repo", ignore=COPY_IGNORE, symlinks=True)
@@ -279,8 +279,8 @@ def dry_run(project, work, script, subs, desc, scripts_for, model):
     write_subs(plan_dir, subs)
     st = {}
     mock = MockClient(handler=fake_handler_factory(work / "repo", st), offline=True)
-    eng = AgentEngine(client=mock, workdir=work / "repo", verbose=False, verbs_root=PKG / "verbs",
-                      scripts=scripts_for(plan_dir, subs))
+    eng = (engine_cls or AgentEngine)(client=mock, workdir=work / "repo", verbose=False, verbs_root=PKG / "verbs",
+                                      scripts=scripts_for(plan_dir, subs))
     eng.model = model
     eng.dry_run = True
     eng.vars["task"] = desc

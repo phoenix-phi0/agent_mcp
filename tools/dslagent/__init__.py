@@ -9,6 +9,8 @@
   engine.py    AgentEngine（DSLEngine 子类）：系统子脚本映射、语句白名单、子脚本调用记录
   runner.py    执行器：开局有失败 → 模板 → 规划（≤2 版）；全过 → 任务路径（模型规划 ≤2 版）；→ 交回（没成时附交接说明，
                cbatch 决定要不要 claude 兜底）；auto 判定
+  v2.py        规划路径 v2（DSLAGENT_PLANNER=v2 时 runner.run 转过去）：确定性数据包（v2pack.py）→ 补查 → 一次规划 .zs
+               → 引擎执行（计划内的 跑测试 只在影响走向时真跑）→ 验收（全量测试 / 清单 / 旧写法残留，缺口补改 1 次）→ 边界复核
   lib/         定位.zs、读改测.zs 两个系统子脚本
   verbs/       私有动词根：code 包（读、搜、改、写/删文件、改模块名、跑测试、运行看看），common/text 转发到仓库 verbs/，不污染全局动词
 
