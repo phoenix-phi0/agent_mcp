@@ -172,15 +172,15 @@ def parse_json(text):
 # ------------------------------------------------------------------ 模型调用
 
 
-def call_claude(system, user, timeout=300):
-    """claude -p，自定系统提示，无工具 / MCP / 技能，单轮，流式（记首 token）。返回 text / sec / ttft / cost / usage / rc / stderr。"""
+def call_claude(system, user, timeout=300, model=None):
+    """claude -p（model 缺省 MODEL），自定系统提示，无工具 / MCP / 技能，单轮，流式（记首 token）。返回 text / sec / ttft / cost / usage / rc / stderr。"""
     from tools.cbatch import CLAUDE_BIN
     from .pool import child_env
     from .runner import tmp_dir
     tmp = tmp_dir()
     cwd = tmp / "v2_empty"
     cwd.mkdir(parents=True, exist_ok=True)
-    cmd = [os.environ.get("CBATCH_CLAUDE") or CLAUDE_BIN, "-p", "--model", MODEL, "--output-format", "stream-json",
+    cmd = [os.environ.get("CBATCH_CLAUDE") or CLAUDE_BIN, "-p", "--model", model or MODEL, "--output-format", "stream-json",
            "--verbose", "--include-partial-messages", "--max-turns", "1", "--tools", "", "--setting-sources", "",
            "--strict-mcp-config", "--disable-slash-commands", "--system-prompt", system]
     t0 = time.time()
@@ -242,17 +242,17 @@ def call_claude(system, user, timeout=300):
 
 class Model:
     """全部模型调用的入口：计数、墙钟、费用、逐次记录（calls/NN_tag.*.txt、self.log）。
-    backend(system, user, tag, timeout) → dict（text, cost, …）或 str。"""
+    backend(system, user, tag, timeout) → dict（text, cost, …）或 str；只有指定了非 MODEL 的模型（规划那次）才多传 model=。"""
 
     def __init__(self, out, backend=None, max_calls=MAX_CALLS, deadline=None):
         self.out = Path(out)
-        self.backend = backend or (lambda s, u, tag, timeout: call_claude(s, u, timeout))
+        self.backend = backend or (lambda s, u, tag, timeout, model=None: call_claude(s, u, timeout, model))
         self.max_calls, self.deadline = max_calls, deadline
         self.n, self.cost, self.log = 0, 0.0, []
         self.lock = threading.Lock()
         (self.out / "calls").mkdir(parents=True, exist_ok=True)
 
-    def __call__(self, system, user, tag):
+    def __call__(self, system, user, tag, model=None):
         with self.lock:
             if self.n >= self.max_calls:
                 raise Stop(f"总模型调用已满 {self.max_calls} 次（{tag}）")
@@ -262,12 +262,13 @@ class Model:
             n = self.n
         left = (self.deadline - time.time()) if self.deadline else 300
         t0 = time.time()
-        r = self.backend(system, user, tag, max(30, min(300, left + 5)))
+        kw = {"model": model} if model and model != MODEL else {}
+        r = self.backend(system, user, tag, max(30, min(300, left + 5)), **kw)
         if isinstance(r, str):
             r = {"text": r}
         rec = {"n": n, "tag": tag, "sec": r.get("sec", round(time.time() - t0, 2)), "ttft": r.get("ttft"),
                "cost": r.get("cost") or 0.0, "usage": r.get("usage"), "rc": r.get("rc"),
-               "sys_chars": len(system), "user_chars": len(user), "t_start": round(t0, 3)}
+               "model": model or MODEL, "sys_chars": len(system), "user_chars": len(user), "t_start": round(t0, 3)}
         with self.lock:
             self.cost += rec["cost"]
             self.log.append(rec)
@@ -900,9 +901,11 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
         # ---- 3 规划
         t0 = time.time()
         problem = ""
+        plan_model = os.environ.get("DSLAGENT_PLAN_MODEL") or MODEL
+        info["规划模型"] = res["plan_model"] = plan_model
         for k in range(2):
             raw = M(plan_system(), plan_user(task, full_pack) if k == 0 else DPR.fix_prompt(script, problem),
-                    "plan" if k == 0 else "plan_fix")
+                    "plan" if k == 0 else "plan_fix", model=plan_model)
             (out / f"plan_v{k + 1}.raw.txt").write_text(raw, encoding="utf-8")
             script, _ = DP.strip_prose(raw)
             script, n_close, _ = DP.autoclose(script)

@@ -849,6 +849,8 @@ def _run_dsl(d: dict, t: dict, i: int) -> dict:
     if planner:
         env["DSLAGENT_PLANNER"] = str(planner)
         t["dsl_planner"] = str(planner)
+    if t.get("model"):
+        env["DSLAGENT_PLAN_MODEL"] = str(t["model"])
     with open(tdir / "runner.log", "ab") as log:
         p = subprocess.Popen(cmd, cwd=str(ROOT), env=env, stdin=subprocess.DEVNULL,
                              stdout=log, stderr=log)

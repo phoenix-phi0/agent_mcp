@@ -90,7 +90,8 @@ a = sys.argv[1:]
 arg = lambda k: a[a.index(k) + 1] if k in a else None
 task = Path(arg("--task-file")).read_text(encoding="utf-8")
 with open({str(DSL_LOG)!r}, "a", encoding="utf-8") as f:
-    f.write(json.dumps({{"argv": a, "task": task, "planner": os.environ.get("DSLAGENT_PLANNER")}},
+    f.write(json.dumps({{"argv": a, "task": task, "planner": os.environ.get("DSLAGENT_PLANNER"),
+                       "plan_model": os.environ.get("DSLAGENT_PLAN_MODEL")}},
                        ensure_ascii=False) + "\\n")
 if "DSLCRASH" in task:
     print("炸了"); sys.exit(3)
@@ -383,6 +384,17 @@ def main():
     check([x["planner"] for x in dl] == ["v2", "v2"] and d["options"]["dsl_planner"] == "v2"
           and d["tasks"][0]["dsl_planner"] == "v2" and d2["tasks"][0]["dsl_planner"] == "v2",
           "提交时的环境变量 / 单条 dsl_options.planner 都传到 dsl 进程", ([x["planner"] for x in dl], d["options"]))
+
+    print("engine=dsl：提交时的 model 透传成 DSLAGENT_PLAN_MODEL")
+    DSL_LOG.unlink()
+    j = cbatch.submit([{"prompt": "DSLOK 带 model", "engine": "dsl", "project": str(proj)}], cwd=str(TMP), model="opus")
+    cbatch.wait(j["job_id"], timeout=60, every=0.2)
+    j = cbatch.submit([{"prompt": "DSLOK 没给 model", "engine": "dsl", "project": str(proj)}], cwd=str(TMP),
+                      model=None)
+    cbatch.wait(j["job_id"], timeout=60, every=0.2)
+    dl = [json.loads(x) for x in DSL_LOG.read_text(encoding="utf-8").splitlines()]
+    check([x["plan_model"] for x in dl] == ["opus", None],
+          "给了 model → dsl 进程有 DSLAGENT_PLAN_MODEL；没给就没有", [x["plan_model"] for x in dl])
 
     print("engine：显式给了权限就照用户的，不套默认放行")
     LOG.unlink()

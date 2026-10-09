@@ -175,9 +175,11 @@ class Fake:
                         "bound": BOUND_OK}
         self.replies.update(replies)
         self.log = []
+        self.models = []
 
-    def __call__(self, system, user, tag, timeout):
+    def __call__(self, system, user, tag, timeout, model=None):
         self.log.append((tag, system, user))
+        self.models.append((tag, model))
         key = next((k for k in sorted(self.replies, key=len, reverse=True) if tag.startswith(k)), None)
         r = self.replies.get(key)
         if callable(r):
@@ -268,6 +270,21 @@ def t_flow():
     check((out / "result.json").is_file() and (out / "calls.json").is_file() and (out / "boundary" / "test_boundary_v2.py").is_file()
           and not (p / "test_boundary_v2.py").exists(), "记录写进任务目录，用例文件不进项目")
     check("x + x" in r["diff"] and "DSL v2 成功" in r["report"], "diff / report")
+
+    f = Fake()
+    os.environ["DSLAGENT_PLAN_MODEL"] = "opus"
+    try:
+        r, p, out = go("planmodel", f)
+    finally:
+        del os.environ["DSLAGENT_PLAN_MODEL"]
+    calls = json.loads((out / "calls.json").read_text(encoding="utf-8"))
+    check(f.models == [("preq", None), ("plan", "opus"), ("bound", None)] and r["plan_model"] == "opus"
+          and r["v2"]["规划模型"] == "opus" and [c["model"] for c in calls] == ["sonnet", "opus", "sonnet"],
+          "DSLAGENT_PLAN_MODEL：规划用指定模型，补查 / 边界复核仍 sonnet，记录里写规划模型", (f.models, r.get("plan_model"), calls))
+    f = Fake()
+    r, p, out = go("planmodel0", f)
+    check(f.models == [("preq", None), ("plan", None), ("bound", None)] and r["plan_model"] == "sonnet",
+          "没设 DSLAGENT_PLAN_MODEL：规划用 sonnet，backend 不多传 model", f.models)
 
     f = Fake(preq={"查引用": ["twice"], "查文本": [r"x \* 2$"], "读文件": ["pkg/other.py:1-9"], "够了": False})
     r, p, out = go("query", f)
@@ -393,7 +410,7 @@ def t_switch():
     fake = Fake()
     sysmap = {V.PRE_SYS: "preq", V.BOUND_SYS: "bound"}
     old = V.call_claude
-    V.call_claude = lambda s, u, timeout=300: fake(s, u, sysmap.get(s, "plan"), timeout)
+    V.call_claude = lambda s, u, timeout=300, model=None: fake(s, u, sysmap.get(s, "plan"), timeout)
     os.environ["DSLAGENT_PLANNER"] = "v2"
     try:
         check(V.enabled(), "DSLAGENT_PLANNER=v2 → 走 v2")
