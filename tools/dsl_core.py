@@ -45,6 +45,7 @@ KEYWORDS = {
     "返回": "ret",
     "当": "while", "重复": "repeat",
     "跳出": "break", "继续": "continue",
+    "终止": "halt",
 }
 
 # 动词不能用这些名字
@@ -155,6 +156,23 @@ class LoopBreak(LoopControl):
 
 class LoopContinue(LoopControl):
     pass
+
+
+# 「终止 状态 原因」的状态只能是这三个
+HALT_STATES = ("成功", "失败", "超出预期")
+
+
+class ScriptHalt(ScriptReturn):
+    """「终止 成功|失败|超出预期 原因」抛出来的：结束整个流程，带状态和原因。
+
+    做成 ScriptReturn 的子类，是要它在别处的待遇跟「返回」完全一样：穿透循环、
+    事务里算正常结束（提交）、run() 接住不当错误。值是 {状态, 原因, 停在}——
+    子脚本里终止时，调用方「设 r = 执行 子.zs」拿到的就是这个字典，由调用方决定
+    接着走还是自己也终止。顶层脚本终止时引擎的 halted 记着它。
+    """
+
+    def __init__(self, state: str, reason: str, where: str):
+        super().__init__({"状态": state, "原因": reason, "停在": where})
 
 
 # ----------------------------------------------------------------------

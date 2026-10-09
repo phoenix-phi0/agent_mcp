@@ -66,6 +66,14 @@
                                放到后台线程跑，马上往下走（见 _do_call_bg）
     判定 verdict_of = 提示词 键→输出 … 否则→输出
     返回 值 [状态码]           结束脚本并交出一个值
+    终止 成功|失败|超出预期 原因
+                               结束整个流程（多深的循环、如果、事务里都行，事务算提交），
+                               带状态和原因。顶层：脚本正常结束，engine.halted =
+                               {状态, 原因, 停在}，输出末尾一行「[终止] 状态：原因」；
+                               子脚本里：只结束子脚本，「设 r = 执行 子.zs」拿到的
+                               就是 {状态, 原因, 停在}（停在 = 「子.zs 第 N 行」），
+                               调用方决定接着走还是 终止 {r.状态} {r.原因}。
+                               状态可以是 {变量}，展开后不是这三个之一就报错
 
 命名约定：变量名、脚本参数（「执行 x.zs key=值」的 key）、SQL 参数
 （.sql 里的 :limit）用英文 snake_case；关键字（设、如果、遍历、问…）、动词名、
@@ -210,7 +218,7 @@ from .dsl_model import ModelMixin
 # 重新导出，保持 `from tools.dsl import X` 的老写法能用
 from .dsl_core import (  # noqa: F401
     BLOCK_OPENERS, CALL_PARAM_RE, DSLError, EMPTY_FORMS, ESC_OR_VAR_RE,
-    IN_WORDS, KEYWORDS, LOOP_HEADS, LOOP_MAX, LoopBreak, LoopContinue,
+    HALT_STATES, ScriptHalt, IN_WORDS, KEYWORDS, LOOP_HEADS, LOOP_MAX, LoopBreak, LoopContinue,
     LoopControl, MAX_CALL_DEPTH, REPEAT_RE, WHILE_LIMIT_RE, PACK_SEP_RE, RESERVED, RET_STATUS_RE,
     ScriptReturn, TX_BEGIN, TX_COMMIT, TX_ROLLBACK, VAR_RE, VERB_LIKE_RE,
     as_number, check_name, dig, eval_cond_expr, eval_parts, is_empty,
@@ -232,6 +240,15 @@ TRACE_MAX = 2000
 # 「用包」加载动词包时持有。动词表可能被多个线程共用（见 _do_use）。
 # 只在真加载时才会等：包加载过一次之后，后面的「用包」查一下就跳过了。
 _USE_LOCK = threading.RLock()
+
+# 正在调 Python 动词的引擎（按线程）。动词是普通函数，拿不到引擎；要调模型的
+# 动词（派任务）用 current_engine() 取，沿用这个引擎的客户端、系统提示和模型
+_CURRENT = threading.local()
+
+
+def current_engine():
+    """当前线程里正在调 Python 动词的那个引擎；不在动词里返回 None。"""
+    return getattr(_CURRENT, "engine", None)
 
 
 # 「后台执行」的线程池：全进程一个，懒建。见 DSLEngine._do_call_bg
@@ -314,6 +331,10 @@ class DSLEngine(ModelMixin, HistoryMixin):
         # 「返回」交出来的东西：(值, 状态码)。没返回过就是 None——
         # 调用方靠这个区分「脚本主动返回了」和「跑完了什么也没说」
         self.returned: tuple | None = None
+        # 「终止」交出来的 {状态, 原因, 停在}；没终止过是 None
+        self.halted: dict | None = None
+        # 空跑（dslagent 规划检查）：派任务这类要调模型的动词直接给假结果
+        self.dry_run = False
         # 逐项块的自动输出用它。必须是实例属性——类属性会让父子引擎
         # 共享初值，嵌套调用时读到上一轮的残留。
         self._last_result: str = ""
@@ -473,6 +494,7 @@ class DSLEngine(ModelMixin, HistoryMixin):
         sub.temperature = self.temperature
         sub.model = self.model
         sub.strict_verbs = self.strict_verbs
+        sub.dry_run = self.dry_run
         sub.trace = self.trace
         return sub
 
@@ -506,6 +528,11 @@ class DSLEngine(ModelMixin, HistoryMixin):
         except ScriptReturn as r:
             # 不是错误，是脚本主动收尾。调用方读 self.returned。
             self.returned = (r.value, r.status)
+            if isinstance(r, ScriptHalt):
+                self.halted = r.value
+                if self._depth == 0:
+                    self._emit(f"[终止] {r.value['状态']}：{r.value['原因']}"
+                               f"（停在 {r.value['停在']}）")
         except LoopControl as e:   # _check_loops 挡过，到这里是引擎的 bug
             raise DSLError(f"「跳出 / 继续」跑到了循环外面：{e}") from None
         return "\n".join(self.output)
@@ -538,6 +565,19 @@ class DSLEngine(ModelMixin, HistoryMixin):
                 if not any(h in LOOP_HEADS for h in stack):
                     raise DSLError(f"第 {i + 1} 行：「{word}」只能写在循环"
                                    f"（当 / 重复 / 遍历 / 逐项）里面")
+            elif head == "halt":
+                self._parse_halt(rest, i)
+
+    @staticmethod
+    def _parse_halt(rest: str, lineno: int):
+        """「终止 状态 原因」→ (状态原文, 原因原文)。状态是 {变量} 的留到运行时查。"""
+        state, _, reason = rest.strip().partition(" ")
+        if not state:
+            raise DSLError(f"第 {lineno + 1} 行：「终止」的写法：终止 成功|失败|超出预期 原因")
+        if state not in HALT_STATES and not VAR_RE.fullmatch(state):
+            raise DSLError(f"第 {lineno + 1} 行：「终止」的状态只能是 "
+                           f"{' / '.join(HALT_STATES)}，现在是「{state}」")
+        return state, reason.strip()
 
     @staticmethod
     def _parse_while(rest: str, lineno: int):
@@ -932,7 +972,12 @@ class DSLEngine(ModelMixin, HistoryMixin):
         kind, impl = self.verbs.resolve(name)
 
         if kind == "python":
-            result = impl(**params)
+            prev = current_engine()
+            _CURRENT.engine = self
+            try:
+                result = impl(**params)
+            finally:
+                _CURRENT.engine = prev
             # 结构原样留着——str() 一个 dict 会得到 Python 字面量
             # （单引号、True 而不是 true），拿去 json.loads 都解析不了
             if result is None:
@@ -1042,7 +1087,21 @@ class DSLEngine(ModelMixin, HistoryMixin):
         sub = self._sub_engine()
         sub.vars.update(params)
         text = sub.run(path.read_text(encoding="utf-8"))
+        if sub.halted is not None:
+            # 子脚本「终止」了：交给调用方的是 {状态, 原因, 停在}，停在带上脚本名（照「执行」里写的）
+            sub.halted["停在"] = f"{self.expand(fname)} {sub.halted['停在']}"
         self._deliver(sub.returned[0] if sub.returned else text, assign_to)
+
+    def _do_halt(self, rest: str, lineno: int) -> None:
+        """终止 成功|失败|超出预期 原因 —— 见 dsl_core.ScriptHalt。"""
+        raw_state, raw_reason = self._parse_halt(rest, lineno)
+        state = to_text(self._resolve_items(raw_state)).strip()
+        if state not in HALT_STATES:
+            raise DSLError(f"第 {lineno + 1} 行：「终止」的状态只能是 "
+                           f"{' / '.join(HALT_STATES)}，{raw_state} 展开后是「{state}」")
+        reason = self.expand(raw_reason).strip()
+        self._trace(f"第 {lineno + 1} 行：终止 {state} {reason[:40]}")
+        raise ScriptHalt(state, reason, f"第 {lineno + 1} 行")
 
     def _do_call_bg(self, rest: str, lineno: int) -> None:
         """后台执行 子脚本.zs 键=值 ... [on_error=出错时.zs]
@@ -1129,6 +1188,9 @@ class DSLEngine(ModelMixin, HistoryMixin):
 
         elif head == "ret":
             self._do_return(rest, lineno)
+
+        elif head == "halt":
+            self._do_halt(rest, lineno)
 
         elif head == "model":
             self.model = resolve_model(self.expand(rest))

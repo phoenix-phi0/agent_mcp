@@ -16,7 +16,7 @@ from tools.dsl_model import _format_note
 from . import prompts as PR
 
 ALLOWED_HEADS = {"use", "set", "ask", "ask_json", "if", "elif", "else", "end", "each", "print", "compute", "call", "ret",
-                 "while", "repeat", "break", "continue"}
+                 "while", "repeat", "break", "continue", "halt"}
 LIB_SCRIPTS = ("定位.zs", "读改测.zs")
 
 
@@ -35,6 +35,7 @@ class AgentEngine(DSLEngine):
         sub.temperature = self.temperature
         sub.model = self.model
         sub.strict_verbs = self.strict_verbs
+        sub.dry_run = self.dry_run
         return sub
 
     def _safe_path(self, name):

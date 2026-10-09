@@ -4,8 +4,8 @@
 - split_subs：「#子脚本 名字.zs」分出子脚本（主脚本里用 执行 _plan/名字.zs 调）。
 - whitelist_check：语句头、动词、「设 x = 动词」右边、问 的后缀、执行 的目标都要在白名单里。
 - autoclose：只差末尾的「结束」时自动补上（plan5 起：模型常漏最后一两个「结束」，补上省一次重写）。
-- dry_run：在项目的一份拷贝里用假模型跑一遍：报错、没打印「结论：」、同一提示词原样问两次（上一轮结果没带进下一轮）
-  都算没过，带着问题回去让模型重写（最多 2 次）。
+- dry_run：在项目的一份拷贝里用假模型跑一遍：报错、没打印「结论：」（也没「终止」）、同一提示词原样问两次（上一轮结果没带进下一轮）
+  都算没过，带着问题回去让模型重写（最多 2 次）。空跑时 派任务 / 并行派任务 不调假模型，直接给结构合法的假结果。
 """
 import json
 import os
@@ -23,7 +23,8 @@ SUB, LOC = "读改测.zs", "定位.zs"
 LIBS = (SUB, LOC)
 ALLOWED_VERBS = {"列文件", "搜索代码", "读片段", "运行代码", "改文件", "跑测试", "写文件", "删文件", "改模块名",
                  "匹配", "找全部", "替换", "截取", "相等", "挑行", "按正则切分", "列表加项", "归一化",
-                 "解析JSON", "列表长度", "转数字", "取字段", "相加", "算比例"}
+                 "解析JSON", "列表长度", "转数字", "取字段", "相加", "算比例",
+                 "派任务", "并行派任务", "查引用"}
 # 所有包里的动词名（白名单外的也要认出来，才能判「用了白名单外的动词」）
 ALL_VERBS = {p.stem for p in (PKG / "verbs").rglob("defs/*.py") if not p.stem.startswith("_")} | \
             {p.stem for p in (ROOT / "verbs").rglob("defs/*.py") if not p.stem.startswith("_")}
@@ -264,6 +265,7 @@ def dry_run(project, work, script, subs, desc, scripts_for, model):
     eng = AgentEngine(client=mock, workdir=work / "repo", verbose=False, verbs_root=PKG / "verbs",
                       scripts=scripts_for(plan_dir, subs))
     eng.model = model
+    eng.dry_run = True
     eng.vars["task"] = desc
     old_state = os.environ.get("DSLAGENT_STATE")
     os.environ["DSLAGENT_STATE"] = str(work / "state")
@@ -289,7 +291,7 @@ def dry_run(project, work, script, subs, desc, scripts_for, model):
         else:
             os.environ["DSLAGENT_STATE"] = old_state
     out = "\n".join(eng.output)
-    if not err and not re.search(r"结论[:：]", out):
+    if not err and eng.halted is None and not re.search(r"结论[:：]", out):
         err = "空跑跑完了，但没有打印「结论：…」这一行（最后要打印 结论：修好/没修好/需要更多信息）"
     return err, len(mock.calls), out
 
