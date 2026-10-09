@@ -17,9 +17,23 @@
 import json
 import re
 
-import requests
-
 from . import config
+
+
+# requests 用到时才导入（连 urllib3 约 0.25 秒）：tools 下很多入口导入本模块只为
+# strip_json 之类，不发请求。zhipu.requests 照旧能取到（测试替换 requests.post 靠它）。
+def __getattr__(name):
+    if name == "requests":
+        import requests
+        globals()["requests"] = requests
+        return requests
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _requests():
+    # 取模块全局的 requests：测试把 zhipu.requests 整个换掉时也认
+    return globals().get("requests") or __getattr__("requests")
+
 
 # 模型很爱把 JSON 裹进代码围栏，即使提示词里说了不要。
 # 开启 response_format 之后仍然可能出现，所以剥围栏这层一直留着。
@@ -97,7 +111,7 @@ class ZhipuClient:
         return spec.model
 
     def _post(self, path: str, payload: dict) -> dict:
-        r = requests.post(
+        r = _requests().post(
             f"{self.base_url}{path}",
             headers=self._headers,
             json=payload,
@@ -269,7 +283,7 @@ class ZhipuClient:
         **kwargs,
     ):
         """流式多轮对话，逐段 yield 文本片段。"""
-        r = requests.post(
+        r = _requests().post(
             f"{self.base_url}/chat/completions",
             headers=self._headers,
             json={

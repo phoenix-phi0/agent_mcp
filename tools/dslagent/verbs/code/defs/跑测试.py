@@ -3,7 +3,7 @@
 返回 {passed: 是/否, summary}。summary 只留失败摘要——每个失败的测试名、
 项目内的调用位置（相对路径:行号 + 那一行）、最后的异常行，和统计行。
 认 unittest 的输出，也认 pytest --tb=native 的输出（runner 探测到 pytest 时就这么跑）。
-结果同时写进笔记状态的【当前测试】。不写 .pyc（PYTHONDONTWRITEBYTECODE=1），不往项目里留 __pycache__。
+结果同时写进笔记状态的【当前测试】。.pyc 写到项目外的缓存目录（PYTHONPYCACHEPREFIX，缺省 ~/.cache/dslagent-pycache），不往项目里留 __pycache__。
 例如 设 t = 跑测试
 """
 
@@ -35,11 +35,21 @@ def default_cmd() -> str:
     return f"{py} -m unittest discover -s tests"
 
 
+def test_env():
+    """跑测试用的环境：.pyc 写到项目外的缓存目录（PYTHONPYCACHEPREFIX），
+    项目里不留 __pycache__，又不用每次重新编译。已设了 PYTHONPYCACHEPREFIX 就沿用。"""
+    env = dict(os.environ)
+    env.pop("PYTHONDONTWRITEBYTECODE", None)
+    env.setdefault("PYTHONPYCACHEPREFIX", os.environ.get("DSLAGENT_PYCACHE")
+                   or str(Path.home() / ".cache" / "dslagent-pycache"))
+    return env
+
+
 def run_raw(root, cmd=None, timeout=None):
     """跑一次测试命令，返回 (退出码或 None=超时/起不来, 合并后的输出)。"""
     cmd = cmd or os.environ.get("DSLAGENT_TEST_CMD") or default_cmd()
     timeout = int(timeout or os.environ.get("DSLAGENT_TEST_TIMEOUT") or 120)
-    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    env = test_env()
     try:
         p = subprocess.run(shlex.split(cmd), cwd=root, capture_output=True, text=True,
                            timeout=timeout, env=env, stdin=subprocess.DEVNULL)

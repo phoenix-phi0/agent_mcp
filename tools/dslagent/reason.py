@@ -309,12 +309,21 @@ def done_unmet(root, items, snap=None):
             try:
                 p = subprocess.run([sys.executable, "-c", f"from {it['mod']} import {it['name']}"], cwd=root,
                                    capture_output=True, text=True, timeout=30,
-                                   env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+                                   env=_pycache_env())
                 if p.returncode != 0:
                     out.append(f"from {it['mod']} import {it['name']} 失败：{(p.stderr.strip().splitlines() or [''])[-1][:120]}")
             except subprocess.TimeoutExpired:
                 out.append(f"from {it['mod']} import {it['name']} 超时")
     return out
+
+
+def _pycache_env():
+    """子进程环境：.pyc 写到项目外（PYTHONPYCACHEPREFIX），项目里不留 __pycache__。"""
+    env = dict(os.environ)
+    env.pop("PYTHONDONTWRITEBYTECODE", None)
+    env.setdefault("PYTHONPYCACHEPREFIX", os.environ.get("DSLAGENT_PYCACHE")
+                   or str(Path.home() / ".cache" / "dslagent-pycache"))
+    return env
 
 
 def done_facts(tests_pass, unmet, redo_left, confirm_left):
