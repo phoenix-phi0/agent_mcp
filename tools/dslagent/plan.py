@@ -6,6 +6,8 @@
 - autoclose：只差末尾的「结束」时自动补上（plan5 起：模型常漏最后一两个「结束」，补上省一次重写）。
 - dry_run：在项目的一份拷贝里用假模型跑一遍：报错、没打印「结论：」（也没「终止」）、同一提示词原样问两次（上一轮结果没带进下一轮）
   都算没过，带着问题回去让模型重写（最多 2 次）。空跑时 派任务 / 并行派任务 不调假模型，直接给结构合法的假结果。
+- 脚本末尾的「#改法 名」「#清单」段（tools/dsl_sections，多行字面量）：strip_prose 整段留着、split_subs 归到主脚本、
+  autoclose 不看段内、whitelist_check 跳过段内并报段写错的地方；执行和空跑时引擎自己把段拿出来（{名} 交给 改文件）。
 """
 import json
 import os
@@ -13,6 +15,8 @@ import re
 import shutil
 import signal
 from pathlib import Path
+
+from tools.dsl_sections import EDIT_HEAD, LIST_HEAD, split_sections
 
 from . import prompts as PR
 from .engine import ALLOWED_HEADS, AgentEngine
@@ -53,21 +57,30 @@ def strip_prose(text):
         return h in set(KW.values()) or h in ALL_VERBS
     first = next((i for i, l in enumerate(lines) if l.strip() and is_code(l) and not l.strip().startswith("#")), 0)
     last = max((i for i, l in enumerate(lines) if l.strip() and is_code(l)), default=len(lines) - 1)
+    sec = next((i for i, l in enumerate(lines) if EDIT_HEAD.match(l) or LIST_HEAD.match(l)), None)
+    if sec is not None:
+        # #改法 / #清单 段里是代码原文和清单行，不按语句认：一直留到最后一个非空行；
+        # 只有段、没写主脚本时从第一个段开始（段里的代码行不能当成「第一行代码」）
+        first = min(first, sec)
+        last = max(i for i, l in enumerate(lines) if l.strip())
     kept = lines[first:last + 1]
     return "\n".join(kept).strip("\n"), len([l for l in lines if l.strip()]) - len([l for l in kept if l.strip()])
 
 
 def split_subs(script):
-    """「#子脚本 名字.zs」分出子脚本。返回 (主脚本, {名字.zs: 内容})。"""
-    main, subs, cur = [], {}, None
+    """「#子脚本 名字.zs」分出子脚本。返回 (主脚本, {名字.zs: 内容})。
+    「#改法」「#清单」段不管写在哪个子脚本后面，都归到主脚本末尾（{名} 在主脚本里用）。"""
+    main, subs, cur, secs, in_sec = [], {}, None, [], False
     for l in script.splitlines():
         m = re.match(r"^\s*#\s*子脚本\s+(\S+?)(?:\.zs)?\s*$", l)
         if m:
-            cur = m.group(1) + ".zs"
+            cur, in_sec = m.group(1) + ".zs", False
             subs[cur] = []
             continue
-        (subs[cur] if cur else main).append(l)
-    return "\n".join(main), {k: "\n".join(v) for k, v in subs.items()}
+        if EDIT_HEAD.match(l) or LIST_HEAD.match(l):
+            in_sec = True
+        (secs if in_sec else subs[cur] if cur else main).append(l)
+    return "\n".join(main + secs), {k: "\n".join(v) for k, v in subs.items()}
 
 
 def whitelist_check(script, subs, libs=LIBS):
@@ -76,6 +89,8 @@ def whitelist_check(script, subs, libs=LIBS):
     from tools.dsl_core import normalize
     probs = []
     for name, body in [("主脚本", script)] + [(f"子脚本 {k}", v) for k, v in subs.items()]:
+        body, _, _, sec_probs = split_sections(body)
+        probs += [f"{name}：{x}" for x in sec_probs]
         for i, raw in enumerate(body.splitlines(), 1):
             s = normalize(raw).strip()
             if not s or s.startswith("#"):
@@ -124,13 +139,15 @@ def autoclose(script):
     只有末尾剩下没闭合的块时，在该段末尾按缩进补上相应个数的「结束」。返回 (新脚本, 补了几个, 说明)。"""
     from tools.dsl_core import BLOCK_OPENERS, normalize, split_head
     lines = script.splitlines()
+    # #改法 / #清单 段换成空行再看结构（段里的代码原文不是语句），行号不变
+    bare = split_sections(script)[0].split("\n")
     sections, cur = [], [0, []]
     for i, l in enumerate(lines):
         if re.match(r"^\s*#\s*子脚本\s+\S+", l):
             sections.append(cur)
             cur = [i + 1, []]
             continue
-        cur[1].append((i, l))
+        cur[1].append((i, bare[i] if i < len(bare) else ""))
     sections.append(cur)
     inserts, total, notes = {}, 0, []
     for start, body in sections:

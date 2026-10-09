@@ -74,6 +74,26 @@
                                就是 {状态, 原因, 停在}（停在 = 「子.zs 第 N 行」），
                                调用方决定接着走还是 终止 {r.状态} {r.原因}。
                                状态可以是 {变量}，展开后不是这三个之一就报错
+    预算 调用 N 秒 M           整个流程最多调 N 次模型、跑 M 秒墙钟（可只写其一，
+                               N、M 是正整数或 {变量}）。从顶层脚本开始累计，含
+                               派任务 / 并行派任务、子脚本、重问；超出按「终止 超出预期
+                               预算用完：…」结束（第 N+1 次调用不发出去；秒数在每条
+                               语句开头和每次调模型前查）。再写一次覆盖。见 dsl_budget
+    #改法 名 … / #清单 …       脚本末尾的多行段（见 dsl_sections）：
+                                   #改法 e1
+                                   @@ 改 pkg/a.py
+                                   <<<<<<< 原文
+                                   …原文…
+                                   =======
+                                   …新文…
+                                   >>>>>>> 新文
+                                   @@ 新建 pkg/b.py
+                                   <<<<<<< 内容
+                                   …整份内容…
+                                   >>>>>>> 新文
+                               运行前拿出来：{e1} = {edits:[{file,old,new}…],
+                               files:[{file,content}…]}，交给 改文件 {e1}；#清单 的
+                               {items, hint} 放在 engine.checklist。段写错运行前就报
 
 命名约定：变量名、脚本参数（「执行 x.zs key=值」的 key）、SQL 参数
 （.sql 里的 :limit）用英文 snake_case；关键字（设、如果、遍历、问…）、动词名、
@@ -213,6 +233,8 @@ from .zhipu import ZhipuClient
 from .llm_router import wrap as wrap_client
 from .verbs import VerbRegistry, VerbError
 from .dsl_history import HistoryMixin
+from .dsl_budget import CountingClient, Usage
+from .dsl_sections import split_sections
 from .dsl_model import ModelMixin
 
 # 重新导出，保持 `from tools.dsl import X` 的老写法能用
@@ -309,8 +331,13 @@ class DSLEngine(ModelMixin, HistoryMixin):
                  verbs: VerbRegistry | None = None,
                  verbs_root: Path | str | None = None,
                  _depth: int = 0):
-        # 套一层按模型通道分派的（cli:claude/… / cli:zcode 走本机 CLI），见 llm_router
-        self.client = wrap_client(client or ZhipuClient())
+        # 套一层按模型通道分派的（cli:claude/… / cli:zcode 走本机 CLI），见 llm_router；
+        # 外面再套一层计数的（「预算」）。拿父引擎的客户端建的（子引擎）共用父引擎的用量
+        if isinstance(client, CountingClient):
+            self.client, self.usage = client, client.usage
+        else:
+            self.usage = Usage()
+            self.client = CountingClient(wrap_client(client or ZhipuClient()), self.usage)
         self.workdir = (Path(workdir) if workdir else Path.cwd()).resolve()
         self.verbose = verbose
         self.verbs = verbs
@@ -333,6 +360,10 @@ class DSLEngine(ModelMixin, HistoryMixin):
         self.returned: tuple | None = None
         # 「终止」交出来的 {状态, 原因, 停在}；没终止过是 None
         self.halted: dict | None = None
+        # 「#清单」段：{items: [[改|新建|删, 路径, 位置]], hint}；没写是 None
+        self.checklist: dict | None = None
+        # 正在跑的语句的行号（0 起）。预算在调模型时拦下，「停在」由它补
+        self._at = 0
         # 空跑（dslagent 规划检查）：派任务这类要调模型的动词直接给假结果
         self.dry_run = False
         # 逐项块的自动输出用它。必须是实例属性——类属性会让父子引擎
@@ -521,14 +552,19 @@ class DSLEngine(ModelMixin, HistoryMixin):
     # ------------------------------------------------------------------
 
     def run(self, script: str) -> str:
+        script = self._take_sections(script)
         lines = [normalize(ln).rstrip() for ln in script.splitlines()]
         self._check_loops(lines)
+        if self._depth == 0:
+            self.usage.reset()
         try:
             self._exec_block(lines, 0, len(lines))
         except ScriptReturn as r:
             # 不是错误，是脚本主动收尾。调用方读 self.returned。
             self.returned = (r.value, r.status)
             if isinstance(r, ScriptHalt):
+                if not r.value["停在"]:      # 预算在调模型时拦下的，不知道行号
+                    r.value["停在"] = f"第 {self._at + 1} 行"
                 self.halted = r.value
                 if self._depth == 0:
                     self._emit(f"[终止] {r.value['状态']}：{r.value['原因']}"
@@ -536,6 +572,17 @@ class DSLEngine(ModelMixin, HistoryMixin):
         except LoopControl as e:   # _check_loops 挡过，到这里是引擎的 bug
             raise DSLError(f"「跳出 / 继续」跑到了循环外面：{e}") from None
         return "\n".join(self.output)
+
+    def _take_sections(self, script: str) -> str:
+        """「#改法 名」段放进同名变量、「#清单」段放进 self.checklist，原位置换成空行（行号不变）。"""
+        rest, edits, checklist, probs = split_sections(script)
+        if probs:
+            raise DSLError("；".join(probs[:5]) + (f"；还有 {len(probs) - 5} 处" if len(probs) > 5 else ""))
+        for name, obj in edits.items():
+            self.vars[check_name(name)] = obj
+        if checklist is not None:
+            self.checklist = checklist
+        return rest
 
     def _check_loops(self, lines: list) -> None:
         """运行之前过一遍：「跳出」「继续」要在循环里，「当」「重复」的头要写对。
@@ -567,6 +614,24 @@ class DSLEngine(ModelMixin, HistoryMixin):
                                    f"（当 / 重复 / 遍历 / 逐项）里面")
             elif head == "halt":
                 self._parse_halt(rest, i)
+            elif head == "budget":
+                self._parse_budget(rest, i)
+
+    @staticmethod
+    def _parse_budget(rest: str, lineno: int) -> dict:
+        """「预算 调用 N 秒 M」→ {"调用": N 原文, "秒": M 原文}，至少一项，顺序随意。"""
+        words = rest.split()
+        how = f"第 {lineno + 1} 行：「预算」的写法：预算 调用 N 秒 M（可只写其一，N、M 是正整数或 {{变量}}）"
+        if not words or len(words) % 2 or len(words) > 4:
+            raise DSLError(how)
+        got = {}
+        for k, v in zip(words[::2], words[1::2]):
+            if k not in ("调用", "秒") or k in got:
+                raise DSLError(how)
+            if not (v.isdigit() and int(v) > 0) and not VAR_RE.fullmatch(v):
+                raise DSLError(f"{how}，「{k}」后面是「{v}」")
+            got[k] = v
+        return got
 
     @staticmethod
     def _parse_halt(rest: str, lineno: int):
@@ -684,6 +749,12 @@ class DSLEngine(ModelMixin, HistoryMixin):
             if not line or line.startswith("#"):
                 i += 1
                 continue
+
+            self._at = i
+            if self.usage.limited:
+                spent = self.usage.over()
+                if spent:
+                    raise ScriptHalt("超出预期", f"预算用完：{spent}", f"第 {i + 1} 行")
 
             head, rest = split_head(line)
 
@@ -1103,6 +1174,18 @@ class DSLEngine(ModelMixin, HistoryMixin):
         self._trace(f"第 {lineno + 1} 行：终止 {state} {reason[:40]}")
         raise ScriptHalt(state, reason, f"第 {lineno + 1} 行")
 
+    def _do_budget(self, rest: str, lineno: int) -> None:
+        """预算 调用 N 秒 M —— 见 dsl_budget。"""
+        got = {}
+        for k, raw in self._parse_budget(rest, lineno).items():
+            v = to_text(self._resolve_items(raw)).strip()
+            if not (v.isdigit() and int(v) > 0):
+                raise DSLError(f"第 {lineno + 1} 行：「预算」的{k}要是正整数，{raw} 展开后是「{v}」")
+            got[k] = int(v)
+        self.usage.set_limits(got.get("调用"), got.get("秒"))
+        self._trace(f"第 {lineno + 1} 行：预算 调用 {self.usage.max_calls} 秒 {self.usage.max_secs}"
+                    f"（已用 {self.usage.calls} 次、{self.usage.elapsed():.1f} 秒）")
+
     def _do_call_bg(self, rest: str, lineno: int) -> None:
         """后台执行 子脚本.zs 键=值 ... [on_error=出错时.zs]
 
@@ -1191,6 +1274,9 @@ class DSLEngine(ModelMixin, HistoryMixin):
 
         elif head == "halt":
             self._do_halt(rest, lineno)
+
+        elif head == "budget":
+            self._do_budget(rest, lineno)
 
         elif head == "model":
             self.model = resolve_model(self.expand(rest))

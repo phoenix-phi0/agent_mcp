@@ -46,6 +46,7 @@ KEYWORDS = {
     "当": "while", "重复": "repeat",
     "跳出": "break", "继续": "continue",
     "终止": "halt",
+    "预算": "budget",
 }
 
 # 动词不能用这些名字

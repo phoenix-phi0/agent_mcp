@@ -2,9 +2,13 @@
 精确替换，v4 支持一次多处：收 {file, old, new} 或 {edits: [{file, old, new}, …]}
 （脚本里传 {r}，引擎转成 JSON 文本）。
 
+脚本末尾「#改法 名」段（tools/dsl_sections）解析出的 {edits:[…], files:[{file, content}]} 也直接收：
+改文件 {e1} 一次套全部条目——files 是「@@ 新建」的新文件（目标已存在不覆盖），edits 是替换。
+
 返回 {ok: 是/否, msg, n}。逐处在内存里依次应用（同一文件的多处按顺序叠加），
-每处 old 必须在当时的文本里恰好出现 1 次；任何一处失败就整体不改（原子），
-msg 说明是第几处、为什么。测试文件（tests/ 下、test_*.py 等）不许改。
+每处 old 必须在当时的文本里恰好出现 1 次（否则 ok=否，msg 报出现了几次）；任何一处失败就整体不改（原子），
+msg 说明是第几处、为什么。测试文件（tests/ 下、test_*.py 等）不许改。写之前每个文件过安全约束（reason.check）。
+CRLF 的文件按原换行写回：old/new 只用 LF 对不上原文时换成 CRLF 再找，没动到的行一字不变。
 成功后把笔记【代码】区里这些文件的片段刷新成改后的内容。
 例如 设 res = 改文件 {r}
 """
@@ -34,8 +38,27 @@ def _norm(ed, notes):
 def _list(e, notes):
     if isinstance(e.get("edits"), list) and e["edits"]:
         return [_norm(x, notes) for x in e["edits"]]
+    if e.get("old") is None:
+        return []
     e = _norm(e, notes)
     return [{"file": e.get("file"), "old": e.get("old"), "new": e.get("new")}]
+
+
+def _read(p):
+    """按原样读（不转换换行）：CRLF 文件写回时还是 CRLF。"""
+    with open(p, encoding="utf-8", newline="") as f:
+        return f.read()
+
+
+def _locate(text, old, new):
+    """old 在 text 里的出现次数；text 是 CRLF 而 old 只用 LF 时换成 CRLF 再数。返回 (次数, old, new)。"""
+    n = text.count(old)
+    if n == 0 and "\r\n" in text and "\n" in old and "\r\n" not in old:
+        crlf = old.replace("\n", "\r\n")
+        k = text.count(crlf)
+        if k:
+            return k, crlf, new.replace("\r\n", "\n").replace("\n", "\r\n")
+    return n, old, new
 
 
 def _log(rec):
@@ -67,16 +90,38 @@ def _do(改法, notes) -> dict:
         return {"ok": "否", "msg": f"改法不是 JSON 对象：{ex}", "n": 0}
     if not isinstance(e, dict):
         return {"ok": "否", "msg": "改法要是 {file, old, new} 或 {edits:[…]} 对象", "n": 0}
-    if not (isinstance(e.get("edits"), list) and e["edits"]) and e.get("old") is None:
+    news = e.get("files") if isinstance(e.get("files"), list) else []
+    if not (isinstance(e.get("edits"), list) and e["edits"]) and e.get("old") is None and not news:
         return {"ok": "否", "msg": "没有给 edits（缺失或空列表），这一轮没改任何文件", "n": 0}
     edits = _list(e, notes)
+    total = len(edits) + len(news)
     root = Path(WORKSPACE).resolve()
-    texts, orig = {}, {}
-    many = len(edits) > 1
+    texts, orig, created = {}, {}, []
+    many = total > 1
+    where = ""
+
+    def fail(m):
+        return {"ok": "否", "n": total,
+                "msg": (f"{where + '：' if where else ''}{m}；整体没有改动，所有文件保持原样" if many else m)}
+    for k, it in enumerate(news, 1):
+        where = f"新建第 {k} 个（共 {total} 处）" if many else ""
+        if not isinstance(it, dict):
+            return fail("新建的每项要是 {file, content} 对象")
+        f, c = str(it.get("file") or ""), it.get("content")
+        if not f or not isinstance(c, str):
+            return fail(f"新建项缺 file 或 content（给的键：{'、'.join(map(str, it)) or '无'}）")
+        p, err = resolve(root, f)
+        if err:
+            return fail(err)
+        if is_test_path(root, p):
+            return fail(f"不许写测试文件：{f}")
+        rel = str(p.relative_to(root))
+        if p.exists() or rel in texts:
+            return fail(f"{rel} 已存在，@@ 新建 只建新文件（改已有文件用 @@ 改）")
+        texts[rel], orig[rel] = c, ""
+        created.append(rel)
     for k, ed in enumerate(edits, 1):
-        where = f"第 {k} 处（共 {len(edits)} 处）" if many else ""
-        fail = lambda m: {"ok": "否", "n": len(edits),  # noqa: E731
-                          "msg": (f"{where}：{m}；整体没有改动，所有文件保持原样" if many else m)}
+        where = f"第 {k} 处（共 {total} 处）" if many else ""
         if not isinstance(ed, dict):
             return fail("每处要是 {file, old, new} 对象")
         f, old, new = str(ed.get("file") or ""), ed.get("old"), ed.get("new")
@@ -88,31 +133,35 @@ def _do(改法, notes) -> dict:
         p, err = resolve(root, f)
         if err:
             return fail(err)
-        if not p.is_file():
+        rel = str(p.relative_to(root))
+        if rel not in texts and not p.is_file():
             return fail(f"没有这个文件：{f}")
         if is_test_path(root, p):
             return fail(f"不许改测试文件：{f}")
-        rel = str(p.relative_to(root))
         if rel not in texts:
-            texts[rel] = orig[rel] = p.read_text(encoding="utf-8")
-        n = texts[rel].count(old)
+            texts[rel] = orig[rel] = _read(p)
+        n, old, new = _locate(texts[rel], old, new)
         if n != 1:
             why = "没找到（注意别带行号前缀「  12| 」、缩进要一致" + \
                   ("；同一文件前面几处改过之后的文本才是这里的对照" if many else "") + "）" \
                 if n == 0 else f"出现了 {n} 次，要多带几行上下文让它唯一"
+            why = f"出现 0 次，{why}" if n == 0 else why
             return fail(f"old 在 {rel} 里{why}")
         if old == new:
             return fail(f"{rel}：old 和 new 一样，没有改动")
         texts[rel] = texts[rel].replace(old, new)
     import 推理 as T
+    where = ""
     for rel, t in texts.items():
-        why = T._R().check("改写", root, rel, t)
+        why = T._R().check("写入" if rel in created else "改写", root, rel, t)
         if why:
             return fail(why)
     for rel, t in texts.items():
-        (root / rel).write_text(t, encoding="utf-8")
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        with open(root / rel, "w", encoding="utf-8", newline="") as f:
+            f.write(t)
     st = _notes.load(WORKSPACE)
-    st["stats"]["edits"].append(len(edits))
+    st["stats"]["edits"].append(total)
     for rel, t in texts.items():
         lines = t.splitlines()
         delta = len(lines) - len(orig[rel].splitlines())
@@ -128,6 +177,7 @@ def _do(改法, notes) -> dict:
     parts = []
     for rel in texts:
         a, b = orig[rel].splitlines(), texts[rel].splitlines()
-        parts.append(f"{rel}（{len(a)} 行 → {len(b)} 行）")
-    return {"ok": "是", "n": len(edits),
-            "msg": f"已改 {len(edits)} 处：" + "、".join(parts) + "；【代码】区已刷新为改后内容"}
+        parts.append(f"{rel}（新建，{len(b)} 行）" if rel in created else f"{rel}（{len(a)} 行 → {len(b)} 行）")
+    head = f"已改 {len(edits)} 处" + (f"、新建 {len(created)} 个文件" if created else "")
+    return {"ok": "是", "n": total,
+            "msg": f"{head}：" + "、".join(parts) + "；【代码】区已刷新为改后内容"}

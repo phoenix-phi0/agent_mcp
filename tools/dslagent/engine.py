@@ -16,7 +16,7 @@ from tools.dsl_model import _format_note
 from . import prompts as PR
 
 ALLOWED_HEADS = {"use", "set", "ask", "ask_json", "if", "elif", "else", "end", "each", "print", "compute", "call", "ret",
-                 "while", "repeat", "break", "continue", "halt"}
+                 "while", "repeat", "break", "continue", "halt", "budget"}
 LIB_SCRIPTS = ("定位.zs", "读改测.zs")
 
 

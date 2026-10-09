@@ -21,6 +21,9 @@
 每一项是「文件:起-止」「文件:行」或工作目录里存在的文件名时，由动词读出那几行
 （带「  12| 」行号前缀，最多 MAX_LINES 行）附上；别的原样附上。
 
+预算（「预算 调用 N 秒 M」）用完时客户端抛 ScriptHalt：不当成子任务失败，原样往外抛，
+由引擎按「终止 超出预期」结束；并行派任务里一项撞上，整组跟着结束。
+
 空跑（引擎的 dry_run，dslagent 规划检查时开着）：不调模型，给一个结构合法的假结果
 （状态=成功，结果按格式字段填占位值），带 空跑=是。
 """
@@ -30,7 +33,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from .dsl_core import HALT_STATES, to_text
+from .dsl_core import HALT_STATES, ScriptReturn, to_text
 
 STATES = HALT_STATES
 DEFAULT_PARALLEL = 3
@@ -207,6 +210,8 @@ def dispatch(engine, task, inputs="", logic="", fmt="") -> dict:
         try:
             reply = engine.client.chat_messages(msgs, temperature=engine.temperature,
                                                 model=engine.model)
+        except ScriptReturn:       # 预算用完：交给引擎终止
+            raise
         except Exception as e:
             first = (str(e).strip().splitlines() or [type(e).__name__])[0]
             return _failed(f"模型没有回应：{first}"[:200])
@@ -260,6 +265,8 @@ def dispatch_many(engine, items, limit=DEFAULT_PARALLEL) -> list:
     def one(x):
         try:
             return dispatch(engine, *_item_of(x))
+        except ScriptReturn:
+            raise
         except Exception as e:     # dispatch 自己不抛；这里兜住意外，不让一项拖垮整组
             return _failed(f"{type(e).__name__}: {e}"[:200])
 
