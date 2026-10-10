@@ -103,6 +103,7 @@ run DSL任务    $PY tests/tools/test_dslagent_task.py
 run DSL分支规划 $PY tests/tools/test_dslagent_branch.py
 run DSL改法段   $PY tests/tools/test_dslagent_edits.py
 run DSL工具子任务 $PY tests/tools/test_dslagent_tool.py
+run 批量opencode $PY tests/tools/test_obatch.py
 run 批量grok    $PY tests/tools/test_gbatch.py
 run grok权限    $PY tests/tools/test_gbatch_perm.py
 run 代理工作目录 $PY tests/tools/test_zcode_workdir.py

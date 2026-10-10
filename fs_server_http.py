@@ -121,6 +121,14 @@ _CALLABLE = {
     "gbatch.wait":     ("tools.gbatch", "wait"),
     "gbatch.jobs":     ("tools.gbatch", "jobs"),
     "gbatch.cancel":   ("tools.gbatch", "cancel"),
+    # OBatch：同样的批量，执行端换成 opencode run（默认 glm-5.3）。lean 缺省开：
+    # 短系统提示、关工具、限轮数——见 obatch.py 模块文档。单次上限 10 条。
+    "obatch.describe": ("tools.obatch", "describe"),
+    "obatch.submit":   ("tools.obatch", "submit"),
+    "obatch.status":   ("tools.obatch", "status"),
+    "obatch.wait":     ("tools.obatch", "wait"),
+    "obatch.jobs":    ("tools.obatch", "jobs"),
+    "obatch.cancel":   ("tools.obatch", "cancel"),
     # 精确编辑：改几行不用重写整个文件。
     #
     # write_file 只能整个覆盖，改 ui.py（1132 行）里的两行要把一千一百行
