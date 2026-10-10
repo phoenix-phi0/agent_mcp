@@ -245,7 +245,16 @@ def _failed(reason: str, **extra) -> dict:
 
 def dispatch(engine, task, inputs="", logic="", fmt="") -> dict:
     """派一个子任务，返回 {结果, 状态, 原因}（失败时可能多 问题 / 回复）。不抛错。"""
-    from .zhipu import strip_json
+    value = _dispatch(engine, task, inputs, logic, fmt)
+    log = getattr(engine, "sublog", None)
+    if isinstance(log, list) and not value.get("空跑"):
+        log.append({"模式": "工具" if getattr(engine, "subtask_mode", "json") == "tool" else "json",
+                    "任务": to_text(task).strip()[:200], **{k: v for k, v in value.items() if k != "结果"},
+                    "结果": to_text(value.get("结果"))[:500]})
+    return value
+
+
+def _dispatch(engine, task, inputs, logic, fmt) -> dict:
     if not to_text(task).strip():
         return _failed("没写任务描述")
     try:
@@ -256,14 +265,23 @@ def dispatch(engine, task, inputs="", logic="", fmt="") -> dict:
         return _failed("拿不到引擎（派任务只能在脚本里调）")
     if getattr(engine, "dry_run", False):
         return _fake(task, spec)
-    prompt = build_prompt(task, collect_inputs(inputs, engine.workdir), logic, spec)
+    if getattr(engine, "subtask_mode", "json") == "tool" and getattr(engine, "run_subtask_tool", None):
+        return engine.run_subtask_tool(task, collect_inputs(inputs, engine.workdir), logic, spec)
+    return dispatch_json(engine, task, collect_inputs(inputs, engine.workdir), logic, spec)
+
+
+def dispatch_json(engine, task, inputs: list, logic, spec: list, client=None) -> dict:
+    """json 模式的一次子任务（子任务回 JSON，edits 交主流程套用）。inputs 已经是 collect_inputs 的结果。client 缺省用引擎的。"""
+    from .zhipu import strip_json
+    client = client or engine.client
+    prompt = build_prompt(task, inputs, logic, spec)
     msgs = ([{"role": "system", "content": engine.system}] if engine.system else []) + \
         [{"role": "user", "content": prompt}]
     problems, last = [], ""
     for attempt in range(2):
         try:
-            reply = engine.client.chat_messages(msgs, temperature=engine.temperature,
-                                                model=engine.model)
+            reply = client.chat_messages(msgs, temperature=engine.temperature,
+                                        model=engine.model)
         except ScriptReturn:       # 预算用完：交给引擎终止
             raise
         except Exception as e:

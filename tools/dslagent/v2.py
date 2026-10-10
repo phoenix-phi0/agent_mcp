@@ -16,6 +16,7 @@
     跑；失败带失败信息派 1 次补改（BFIX_SYS），再跑用例和全量测试；仍失败 → 状态 超出预期（不报成功），原因写明用例；
     补改弄坏现有测试 → 撤回补改，同样 超出预期。用例文件跑不起来（语法错、导入错）记下来，不算代码的问题。
   7 回复：reply = {结果, 状态, 原因}；v2 记各步耗时、调用次数、费用（calls.json 逐次）。
+子任务回复格式：缺省 json；DSLAGENT_SUBTASK=tool 时子任务挂 dslmcp 的 dsl 工具读 / 搜 / 改文件（toolsub.py），每个子任务的结果记在 v2.子任务。
 模型调用：claude CLI，--system-prompt 替换默认提示，--tools "" --strict-mcp-config --setting-sources "" --disable-slash-commands
 （同 plan35 proto），单轮流式；run(model=…) 可换成假模型（测试用）。
 """
@@ -32,6 +33,7 @@ import threading
 import time
 from pathlib import Path
 
+from . import dslcheck as DC
 from . import v2pack as K
 
 PKG = Path(__file__).resolve().parent
@@ -176,11 +178,14 @@ def parse_json(text):
 # ------------------------------------------------------------------ 模型调用
 
 
-def call_claude(system, user, timeout=300, model=None, reply_path=None, idle=None):
+def call_claude(system, user, timeout=300, model=None, reply_path=None, idle=None, mcp_config=None, max_turns=1, allow_tool=None):
     """claude -p（model 缺省 MODEL），自定系统提示，无工具 / MCP / 技能，单轮，流式（记首 token）。返回 text / sec / ttft / cost / usage / rc / stderr / reason。
     首 token 之后 idle 秒没有任何新流事件 → killpg（reason=空闲超时）；首 token 前只受总超时管。
     流式累计文本出现 <invoke / <function_calls → killpg（reason=输出工具调用格式）；累计超过 MAX_OUT 字符 → killpg（reason=输出超长）。
-    reply_path：边收流边把文本增量追加进该文件，被杀时已收到的内容也在；返回的 partial 是已收到的流文本。"""
+    reply_path：边收流边把文本增量追加进该文件，被杀时已收到的内容也在；返回的 partial 是已收到的流文本。
+    mcp_config（DSLAGENT_SUBTASK=tool）：多挂一个 MCP（--mcp-config + --strict-mcp-config，内置工具仍 --tools ""，只许 allow_tool 那一个），
+    --max-turns 用 max_turns；text 是最后一轮的最终回复（中途轮次里的文字、真实工具调用不算），「输出工具调用格式」只查当前这一轮的文字，
+    返回里多 num_turns / tool_calls / subtype。"""
     from tools.cbatch import CLAUDE_BIN
     from .pool import child_env
     from .runner import tmp_dir
@@ -188,8 +193,10 @@ def call_claude(system, user, timeout=300, model=None, reply_path=None, idle=Non
     cwd = tmp / "v2_empty"
     cwd.mkdir(parents=True, exist_ok=True)
     cmd = [os.environ.get("CBATCH_CLAUDE") or CLAUDE_BIN, "-p", "--model", model or MODEL, "--output-format", "stream-json",
-           "--verbose", "--include-partial-messages", "--max-turns", "1", "--tools", "", "--setting-sources", "",
+           "--verbose", "--include-partial-messages", "--max-turns", str(max_turns), "--tools", "", "--setting-sources", "",
            "--strict-mcp-config", "--disable-slash-commands", "--system-prompt", system]
+    if mcp_config:
+        cmd += ["--mcp-config", str(mcp_config), "--allowedTools", allow_tool or "mcp__dsl__dsl"]
     idle = idle or IDLE_SEC
     t0 = time.time()
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -225,6 +232,8 @@ def call_claude(system, user, timeout=300, model=None, reply_path=None, idle=Non
     timer = threading.Timer(timeout, kill)
     timer.start()
     text, result, ttft, streamed = "", None, None, ""
+    turn_text, total_chars = "", 0          # mcp 模式：当前这一轮的流文本 / 全部轮的累计字数
+    msgs, tool_calls, tool_ids = {}, 0, set()                # mcp 模式：消息 id → {text, tool}（按出现顺序），真实工具调用块数
     done = threading.Event()
 
     def watch():
@@ -244,16 +253,20 @@ def call_claude(system, user, timeout=300, model=None, reply_path=None, idle=Non
             ty = ev.get("type")
             if ty == "stream_event":
                 se = ev.get("event") or {}
+                if se.get("type") == "message_start":
+                    turn_text = ""
                 if se.get("type") == "content_block_delta":
                     if ttft is None:
                         ttft = round(time.time() - t0, 2)
                     d = se.get("delta") or {}
                     if d.get("type") == "text_delta" and d.get("text"):
                         streamed += d["text"]
+                        turn_text += d["text"]
+                        total_chars += len(d["text"])
                         if not killed:
-                            if any(m in streamed for m in TOOL_MARKS):
+                            if any(m in (turn_text if mcp_config else streamed) for m in TOOL_MARKS):
                                 kill("输出工具调用格式")
-                            elif len(streamed) > MAX_OUT:
+                            elif (total_chars if mcp_config else len(streamed)) > MAX_OUT:
                                 kill("输出超长")
                         if fh:
                             try:
@@ -262,6 +275,16 @@ def call_claude(system, user, timeout=300, model=None, reply_path=None, idle=Non
                             except OSError:
                                 pass
             elif ty == "assistant":
+                if mcp_config:
+                    m = msgs.setdefault(ev["message"].get("id") or f"m{len(msgs)}", {"text": "", "tool": False})
+                    for b in ev["message"].get("content", []):
+                        if b.get("type") == "text":
+                            m["text"] += b["text"]
+                        elif b.get("type") == "tool_use":
+                            m["tool"] = True
+                            tool_ids.add(b.get("id") or len(tool_ids))
+                            tool_calls = len(tool_ids)
+                    continue
                 for b in ev["message"].get("content", []):
                     if b.get("type") == "text":
                         text += b["text"]
@@ -276,6 +299,10 @@ def call_claude(system, user, timeout=300, model=None, reply_path=None, idle=Non
         if fh:
             fh.close()
     reason = killed[0] if killed else None
+    if mcp_config:
+        last_msg = list(msgs.values())[-1] if msgs else None
+        text = (last_msg["text"] if last_msg and not last_msg["tool"] else "") if result is None or result.get("is_error") \
+            else (result.get("result") or "")
     err = "".join(x or "" for x in err_buf) + (f"\n[{reason}被杀]" if killed else "")
     res = result or {}
     u = res.get("usage", {}) or {}
@@ -283,7 +310,8 @@ def call_claude(system, user, timeout=300, model=None, reply_path=None, idle=Non
              "cache_read": u.get("cache_read_input_tokens"), "cache_creation": u.get("cache_creation_input_tokens")}
     return {"text": text, "sec": round(time.time() - t0, 1), "rc": p.returncode, "ttft": ttft,
             "cost": res.get("total_cost_usd") or 0.0, "usage": usage, "stderr": err[-500:], "reason": reason,
-            "partial": streamed}
+            "partial": streamed, "num_turns": res.get("num_turns"), "tool_calls": tool_calls,
+            "subtype": res.get("subtype")}
 
 
 class Model:
@@ -352,6 +380,51 @@ class Model:
         return r["text"]
 
 
+def _tool_call(self, system, user, tag, mcp_config, max_turns=6):
+    """DSLAGENT_SUBTASK=tool：一次带 MCP 的多轮调用（计 1 次调用数，费用、逐次记录同 _once）。不重试、不抛模型失败——
+    失败原因（保险触发 / rc≠0 / 空回复）放在返回的 failed 里，由 toolsub 决定重试还是兜底。返回 backend 的 dict。"""
+    with self.lock:
+        if self.n >= self.max_calls:
+            raise Stop(f"总模型调用已满 {self.max_calls} 次（{tag}）")
+        if self.deadline and time.time() > self.deadline:
+            raise Stop(f"墙钟用完（{tag} 前）")
+        self.n += 1
+        n = self.n
+    left = (self.deadline - time.time()) if self.deadline else 300
+    t0 = time.time()
+    rp = self.out / "calls" / f"{n:02d}_{tag}.reply.txt"
+    kw = {"reply_path": rp} if self.real else {}
+    r = self.backend(system, user, tag, max(30, min(300, left + 5)), mcp_config=str(mcp_config), max_turns=max_turns, **kw)
+    if isinstance(r, str):
+        r = {"text": r}
+    rec = {"n": n, "tag": tag, "sec": r.get("sec", round(time.time() - t0, 2)), "ttft": r.get("ttft"),
+           "cost": r.get("cost") or 0.0, "usage": r.get("usage"), "rc": r.get("rc"), "tool": 1,
+           "num_turns": r.get("num_turns"), "tool_calls": r.get("tool_calls"), "subtype": r.get("subtype"),
+           "sys_chars": len(system), "user_chars": len(user), "t_start": round(t0, 3)}
+    with self.lock:
+        self.cost += rec["cost"]
+        self.log.append(rec)
+    try:
+        (self.out / "calls" / f"{n:02d}_{tag}.prompt.txt").write_text(f"[system]\n{system}\n\n[user]\n{user}", encoding="utf-8")
+        rp.write_text((r.get("text") or r.get("partial") or "") + ("\n\n[stderr]\n" + r["stderr"] if r.get("stderr") else ""),
+                      encoding="utf-8")
+    except OSError:
+        pass
+    if r.get("reason") in GUARD_REASONS:
+        rec["failed"] = r["failed"] = r["reason"]
+    elif r.get("subtype") == "error_max_turns":
+        rec["failed"] = r["failed"] = "轮数用尽"
+    elif r.get("rc") not in (None, 0):
+        rec["failed"] = r["failed"] = f"rc={r.get('rc')}"
+    elif not (r.get("text") or "").strip():
+        rec["failed"] = r["failed"] = "空回复"
+    r["call_n"] = n
+    return r
+
+
+Model.tool_call = _tool_call
+
+
 class Client:
     """DSL 引擎的模型客户端：问 / 问JSON / 派任务 / 并行派任务 都走 Model（同一套计数和记录）。"""
     offline = True       # llm_router 见 offline=True 不分派
@@ -371,6 +444,37 @@ class Client:
             return self.M(system or SUB_SYS, prompt, f"dsl{k:02d}")
         except Stop as e:
             raise RuntimeError(str(e)) from None
+
+    def run_tool(self, system, user, workdir, label, max_turns=6):
+        """DSLAGENT_SUBTASK=tool：起一个只挂 dsl 工具的 MCP（stdio，进程由 claude CLI 拉起，随这次调用结束），调一次多轮 claude。
+        返回 Model.tool_call 的 dict，外加 tool_log（MCP 追加的每次工具调用日志行，文件在任务目录 toollogs/）。"""
+        with self.lock:
+            self.k += 1
+            k = self.k
+        d = self.M.out / "toollogs"
+        d.mkdir(parents=True, exist_ok=True)
+        tag = f"dsl{k:02d}_{label}"
+        log = d / f"{tag}.jsonl"
+        cfg = d / f"{tag}.mcp.json"
+        cfg.write_text(json.dumps({"mcpServers": {"dsl": {"command": sys.executable, "args": [
+            str(PKG / "dslmcp.py"), "--workdir", str(workdir), "--log", str(log), "--verbs-root", str(VERBS),
+            "--state", str(d / f"{tag}_state")]}}},
+            ensure_ascii=False), encoding="utf-8")
+        try:
+            r = self.M.tool_call(system, user, tag, cfg, max_turns)
+        except Stop as e:
+            raise RuntimeError(str(e)) from None
+        rows = []
+        try:
+            for line in log.read_text(encoding="utf-8").splitlines():
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    pass
+        except OSError:
+            pass
+        r["tool_log"] = rows
+        return r
 
     def chat(self, prompt, system=None, temperature=None, model=None, **kw):
         msgs = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
@@ -590,7 +694,25 @@ def _engine_cls():
         project = None
         tests = None
 
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.subtask_mode = DC.env_mode()
+
+        def _no_edits(self, rest):
+            """tool 模式：子任务在工具里改完了文件，结果里没有 edits——计划里的 改文件 {r.结果} 当空操作。"""
+            args = [self.expand(a) for a in rest.split()]
+            if len(args) != 1:
+                return False
+            try:
+                e = args[0] if isinstance(args[0], dict) else json.loads(args[0])
+            except (TypeError, json.JSONDecodeError):
+                return False
+            return (isinstance(e, dict) and isinstance(e.get("edits"), list) and not e["edits"]
+                    and e.get("old") is None and not e.get("files"))
+
         def _do_verb(self, name, rest, lineno, assign_to=None):
+            if name == "改文件" and self.subtask_mode == "tool" and not self.dry_run and self._no_edits(rest):
+                return self._deliver({"ok": "是", "msg": "（结果里没有 edits：子任务在工具里已改好，空操作）", "n": 0}, assign_to)
             if name != "跑测试":
                 return super()._do_verb(name, rest, lineno, assign_to)
             if self.dry_run:
@@ -961,7 +1083,8 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
     t_start = time.time()
     test_cmd = test_cmd or detect_test_cmd(project)
     M = Model(out, backend=model, max_calls=max_calls, deadline=t_start + wall)
-    steps, info = {}, {"补查": None, "够了": None, "补查项": 0, "数据包字符": 0, "检查": [], "重写": False}
+    steps, info = {}, {"补查": None, "够了": None, "补查项": 0, "数据包字符": 0, "检查": [], "重写": False,
+                       "子任务模式": DC.env_mode(), "子任务": []}
     res = {"project": str(project), "test_cmd": test_cmd, "kind": "task", "planner": "v2", "fixed": False,
            "engine_used": "v2", "versions": 0, "calls": 0, "cost": 0.0, "seconds": 0, "stop": "", "dir": str(out),
            "calls_log": str(out / "calls.json"), "version_log": [], "subcalls": [], "changed_files": [], "handoff": "",
@@ -1040,6 +1163,7 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
                   scripts=scripts_for(plan_dir, subs), on_call=res["subcalls"].append)
         eng.gate, eng.project, eng.tests = gate, project, []
         eng.model = MODEL
+        eng.sublog = info["子任务"]
         eng.vars["task"] = task
         err = ""
         try:

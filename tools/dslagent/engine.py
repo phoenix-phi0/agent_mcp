@@ -26,6 +26,8 @@ class AgentEngine(DSLEngine):
         self.scripts = dict(scripts or {})
         self.guard = guard
         self.on_call = on_call
+        self.subtask_mode = "json"
+        self.sublog = None
 
     def _sub_engine(self):
         sub = AgentEngine(client=self.client, workdir=self.workdir, verbose=False, verbs=self.verbs,
@@ -36,7 +38,13 @@ class AgentEngine(DSLEngine):
         sub.model = self.model
         sub.strict_verbs = self.strict_verbs
         sub.dry_run = self.dry_run
+        sub.subtask_mode = self.subtask_mode
+        sub.sublog = self.sublog
         return sub
+
+    def run_subtask_tool(self, task, inputs, logic, spec):
+        from . import toolsub
+        return toolsub.run(self, task, inputs, logic, spec)
 
     def _safe_path(self, name):
         key = str(name).strip()
