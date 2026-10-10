@@ -522,6 +522,38 @@ def t_idle_retry():
         V.IDLE_SEC = old_idle
 
 
+def t_fix_input():
+    print("补改入参：缺口所在函数代码不为空")
+    G = [{"说明": "全量测试没过（失败摘要见下）"}]
+    HDR = "【缺口所在函数的完整当前代码】"
+
+    def case(name, summary, extra=None):
+        p = make_proj(name)
+        before = V.snapshot(p)
+        (p / "pkg" / "util.py").write_text(UTIL.replace("return x * 2", "return x + x"), encoding="utf-8")
+        for rel, txt in (extra or {}).items():
+            (p / rel).parent.mkdir(parents=True, exist_ok=True)
+            (p / rel).write_text(txt, encoding="utf-8")
+        after = V.snapshot(p)
+        u = V._fix_user(p, TASK, G, before, after, summary)
+        return u.split(HDR, 1)[1]
+
+    sec = case("fx_src", "  pkg/util.py:10 double: return x + x\n  AssertionError: 4 != 5\n")
+    check("def double" in sec and "x + x" in sec, "失败指向源码函数 → 给该函数完整当前代码", sec[:300])
+    sec = case("fx_test", "  tests/acc/test_existing.py:18 test_existing: assert p.returncode == 0\n  AssertionError: 一、查引用\n")
+    check(sec.strip() and "未能定位" not in sec and "x + x" in sec, "只指向测试文件 → 退到本次改动所在函数", sec[:300])
+    zs = "\n".join(f"行{i}" for i in range(1, 100)) + "\n"
+    sec = case("fx_zs", "  脚本报错 scripts/a.zs:50 变量未定义\n  AssertionError\n", {"scripts/a.zs": zs})
+    check("行50" in sec and "行20" in sec and "行80" in sec and "行19\n" not in sec and "行82" not in sec,
+          ".zs 文件 → 行号前后各 30 行", sec[:200])
+    p = make_proj("fx_none")
+    snap = V.snapshot(p)
+    sec = V._fix_user(p, TASK, G, snap, snap, "  tests/acc/test_existing.py:18 x\n").split(HDR, 1)[1]
+    check("未能定位，附 diff" in sec, "什么都定位不到 → 写明未能定位而不是空", sec[:200])
+    sec = case("fx_txt", "FAILED something", {"notes.txt": "hello\n"})
+    check("未能定位" not in sec and "x + x" in sec, "无栈信息 → 给改动函数", sec[:200])
+
+
 def main():
     try:
         t_pack()
@@ -529,6 +561,7 @@ def main():
         t_flow()
         t_switch()
         t_idle_retry()
+        t_fix_input()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n{'=' * 50}\n通过 {PASS}，失败 {FAIL}")

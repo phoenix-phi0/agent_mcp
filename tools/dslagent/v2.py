@@ -722,6 +722,45 @@ def checklist_gaps(project, cl, changed_files):
 TB_LOC = re.compile(r"^\s+([\w./-]+\.py):(\d+)\s")
 
 
+TRACE_REF = re.compile(r"(?:File \"([^\"\n]+)\", line (\d+)|([\w./-]+\.(?:py|zs|ui|entity)):(\d+))")
+
+
+def _trace_refs(project, summary):
+    """失败摘要里出现的 (项目内相对路径, 行号)，按出现顺序去重。"""
+    root = str(Path(project).resolve()) + os.sep
+    out = []
+    for m in TRACE_REF.finditer(summary or ""):
+        rel, ln = (m.group(1), m.group(2)) if m.group(1) else (m.group(3), m.group(4))
+        if rel.startswith(root):
+            rel = rel[len(root):]
+        if (rel, int(ln)) not in out:
+            out.append((rel, int(ln)))
+    return out
+
+
+def _fix_fallback(project, before, after, summary):
+    """定位不到被改的源码函数时的退路：失败栈涉及的、本次改过的文件里行号前后各 30 行 → 本次改动所在函数 → diff。"""
+    ch = set(changed(before, after))
+    blks, total = [], 0
+    for rel, ln in _trace_refs(project, summary):
+        t = after.get(rel) if rel in ch else None
+        if t is None:
+            continue
+        n = len(t.splitlines())
+        s = K.snippet(project, rel, max(1, ln - 30), min(n, ln + 30), text=t)
+        if total + len(s) > FIX_CAP:
+            break
+        total += len(s)
+        blks.append(s)
+    if blks:
+        return "（没定位到函数；失败栈涉及的、本次改过的文件里相关片段，按行号前后各 30 行）\n\n" + "\n\n".join(blks)
+    fn = _changed_funcs(project, before, after)
+    if fn:
+        return "（没定位到函数；本次改动所在函数的完整当前代码）\n\n" + fn
+    diff = diff_text(before, after)
+    return "未能定位，附 diff：\n" + (diff or "（本次没有任何文件改动）")
+
+
 def _fix_user(project, task, gaps, before, after, test_summary=""):
     """补改入参：任务原文、新模块接口、缺口列表、每处缺口所在函数全文（当前代码）、文件开头。"""
     parts = [f"【任务原文】\n{task}"]
@@ -745,7 +784,7 @@ def _fix_user(project, task, gaps, before, after, test_summary=""):
         if m and not K.is_test(m.group(1)):
             locs.append((m.group(1), int(m.group(2)), None))
     parts.append("【缺口所在函数的完整当前代码】")
-    seen, total = set(), 0
+    seen, total, got = set(), 0, False
     for rel in dict.fromkeys(x[0] for x in locs):
         t = K.read(project, rel)
         if t is None:
@@ -762,12 +801,15 @@ def _fix_user(project, task, gaps, before, after, test_summary=""):
                 continue
             seen.add((rel, a))
             blk.append(K.snippet(project, rel, a, b, text=t))
-        s = "\n\n".join(blk)
-        if total + len(s) > FIX_CAP:
+        s2 = "\n\n".join(blk)
+        if total + len(s2) > FIX_CAP:
             parts.append(f"（{rel} 等后面的代码超出长度上限，略）")
             break
-        total += len(s)
-        parts.append(s)
+        total += len(s2)
+        got = got or len(blk) > 1
+        parts.append(s2)
+    if not got:
+        parts.append(_fix_fallback(project, before, after, test_summary))
     return "\n\n".join(parts)
 
 
