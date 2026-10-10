@@ -91,7 +91,8 @@ arg = lambda k: a[a.index(k) + 1] if k in a else None
 task = Path(arg("--task-file")).read_text(encoding="utf-8")
 with open({str(DSL_LOG)!r}, "a", encoding="utf-8") as f:
     f.write(json.dumps({{"argv": a, "task": task, "planner": os.environ.get("DSLAGENT_PLANNER"),
-                       "plan_model": os.environ.get("DSLAGENT_PLAN_MODEL")}},
+                       "plan_model": os.environ.get("DSLAGENT_PLAN_MODEL"),
+                       "pack": os.environ.get("DSLAGENT_PACK")}},
                        ensure_ascii=False) + "\\n")
 if "DSLCRASH" in task:
     print("炸了"); sys.exit(3)
@@ -395,6 +396,22 @@ def main():
     dl = [json.loads(x) for x in DSL_LOG.read_text(encoding="utf-8").splitlines()]
     check([x["plan_model"] for x in dl] == ["opus", None],
           "给了 model → dsl 进程有 DSLAGENT_PLAN_MODEL；没给就没有", [x["plan_model"] for x in dl])
+
+    print("engine=dsl：dsl_options.pack 透传成 DSLAGENT_PACK，写错在提交时报错并列出可用的")
+    DSL_LOG.unlink()
+    j = cbatch.submit([{"prompt": "DSLOK 带 pack", "engine": "dsl", "project": str(proj), "dsl_options": {"pack": "code"}},
+                       {"prompt": "DSLOK 没给 pack", "engine": "dsl", "project": str(proj)}], cwd=str(TMP))
+    d = cbatch.wait(j["job_id"], timeout=60, every=0.2)
+    dl = {json.loads(x)["task"]: json.loads(x) for x in DSL_LOG.read_text(encoding="utf-8").splitlines()}
+    check(dl["DSLOK 带 pack"]["pack"] == "code" and dl["DSLOK 没给 pack"]["pack"] is None
+          and d["tasks"][0]["dsl_pack"] == "code" and "dsl_pack" not in d["tasks"][1],
+          "给了 pack → dsl 进程有 DSLAGENT_PACK；没给就没有", [x["pack"] for x in dl.values()])
+    try:
+        cbatch.submit([{"prompt": "DSLOK 错 pack", "engine": "dsl", "project": str(proj), "dsl_options": {"pack": "docs"}}],
+                      cwd=str(TMP))
+        check(False, "pack=docs 提交时要报错")
+    except cbatch.CBatchError as e:
+        check("docs" in str(e) and "code" in str(e), "pack 取值不对：提交时报错并列出可用的", str(e))
 
     print("engine：显式给了权限就照用户的，不套默认放行")
     LOG.unlink()
