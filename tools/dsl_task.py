@@ -19,7 +19,8 @@
     JSON 数组            每项单独附上
     别的                 按逗号拆成几项
 每一项是「文件:起-止」「文件:行」或工作目录里存在的文件名时，由动词读出那几行
-（带「  12| 」行号前缀，最多 MAX_LINES 行）附上；别的原样附上。
+（带「  12| 」行号前缀，每段最多 MAX_LINES 行）附上；项里别处出现「文件:起-止」（多段 a-b,c-d、
+夹在句子中间）也一样，原文附在该项后面；文件不存在、行号越界附一行说明，不静默丢弃；别的原样附上。
 
 预算（「预算 调用 N 秒 M」）用完时客户端抛 ScriptHalt：不当成子任务失败，原样往外抛，
 由引擎按「终止 超出预期」结束；并行派任务里一项撞上，整组跟着结束。
@@ -42,6 +43,9 @@ MAX_LINES = 400
 FORMAT_BAD = "格式不合格"
 # 文件:起-止 / 文件:行 / 文件（带扩展名）
 FILE_REF_RE = re.compile(r"^([^\s:,，]+\.[A-Za-z0-9_]+)(?::(\d+)(?:-(\d+))?)?$")
+# 文本里任意位置的 文件:区间[,区间…]，区间 起-止 或 单行；逗号后允许空格
+INLINE_REF_RE = re.compile(r"([^\s:,，;；\"'“”()（）\[\]{}<>|=]+\.[A-Za-z][A-Za-z0-9_]*):"
+                           r"(\d+(?:-\d+)?(?:[,，]\s*\d+(?:-\d+)?)*)")
 _REASK = ("你上次的回复不合格：{}。请改正后重新输出：只输出一个 JSON 对象，"
           "顶层字段 结果、状态、原因，不要代码围栏，不要任何解释。")
 
@@ -61,24 +65,67 @@ def parse_format(fmt) -> list:
 
 
 def _read_ref(workdir: Path, ref: str):
-    """「文件:起-止」读出带行号的那几行；不是文件引用返回 None。"""
+    """整个入参就是一个「文件:起-止」（或带扩展名的文件名）→ 带行号的那几行；不是文件引用返回 None。"""
     m = FILE_REF_RE.match(ref.strip())
     if not m:
         return None
+    if m.group(2) is None:
+        p = (Path(workdir).resolve() / m.group(1))
+        if not p.is_file():
+            return None
+    return _read_range(workdir, m.group(1), m.group(2), m.group(3))
+
+
+def _read_range(workdir: Path, name: str, start, end) -> str:
+    """name 的第 start-end 行（都可空＝整份）。读不到、越界时返回一行说明，不返回 None。"""
+    ref = name if start is None else f"{name}:{start}" + (f"-{end}" if end else "")
     root = Path(workdir).resolve()
-    p = (root / m.group(1)).resolve()
+    p = (root / name).resolve()
     if p != root and root not in p.parents:
         return f"[读不到 {ref}：越出工作目录]"
     if not p.is_file():
-        return None if m.group(2) is None else f"[读不到 {ref}：文件不存在]"
+        return f"[读不到 {ref}：文件不存在]"
     lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-    a = int(m.group(2) or 1)
-    b = int(m.group(3) or (m.group(2) or len(lines)))
-    a, b = max(a, 1), min(b, len(lines))
+    a = int(start or 1)
+    b = int(end or (start or len(lines)))
+    if a < 1 or a > len(lines) or b < a:
+        why = "起止写反了" if 1 <= a <= len(lines) else "行号越界"
+        return f"[读不到 {ref}：{why}，文件共 {len(lines)} 行]"
+    note = f"（要求到第 {b} 行，文件只有 {len(lines)} 行，读到末尾）\n" if b > len(lines) else ""
+    b = min(b, len(lines))
     if b - a + 1 > MAX_LINES:
         b = a + MAX_LINES - 1
     body = "\n".join(f"{i:4d}| {lines[i - 1]}" for i in range(a, b + 1))
-    return f"（{m.group(1)} 第 {a}-{b} 行，共 {len(lines)} 行）\n{body}"
+    return f"{note}（{name} 第 {a}-{b} 行，共 {len(lines)} 行）\n{body}"
+
+
+def _inline_refs(workdir: Path, text: str) -> list:
+    """文本里出现的所有「文件:起-止」（含 a-b,c-d 多段、逗号后带空格、出现在句子中间）→ 原文块列表，同一段只读一次。"""
+    out, seen = [], set()
+    for m in INLINE_REF_RE.finditer(text):
+        name = m.group(1)
+        if name.startswith("//"):  # 网址的 host:port
+            continue
+        for seg in re.split(r"[,，]\s*", m.group(2)):
+            a, _, b = seg.partition("-")
+            key = (name, a, b)
+            if key not in seen:
+                seen.add(key)
+                out.append(_read_range(workdir, name, a, b or None))
+    return out
+
+
+def _split_items(text: str) -> list:
+    """按逗号拆项；但 a.py:1-5,9-12 里跟在区间后面的纯区间（9-12）属于上一项，不拆。"""
+    items = []
+    for x in (x.strip() for x in re.split(r"[,，]", text)):
+        if not x:
+            continue
+        if items and re.fullmatch(r"\d+(-\d+)?", x) and re.search(r":\d+(-\d+)?(,\d+(-\d+)?)*$", items[-1]):
+            items[-1] += "," + x
+        else:
+            items.append(x)
+    return items
 
 
 def collect_inputs(inputs, workdir) -> list:
@@ -96,12 +143,19 @@ def collect_inputs(inputs, workdir) -> list:
             except json.JSONDecodeError:
                 data = None
         if data is None:
-            data = [x.strip() for x in re.split(r"[,，]", text) if x.strip()]
+            data = _split_items(text)
     pairs = list(data.items()) if isinstance(data, dict) else \
         [(str(i), v) for i, v in enumerate(data if isinstance(data, list) else [data], 1)]
     out = []
     for name, value in pairs:
         got = _read_ref(workdir, value) if isinstance(value, str) else None
+        if got is None and isinstance(value, str):
+            blocks = _inline_refs(workdir, value)
+            if blocks:
+                got = value.strip() + "\n" + "\n".join(blocks)
+                title = name if isinstance(data, dict) else f"第 {name} 项"
+                out.append((title, got))
+                continue
         title = name if isinstance(data, dict) else (value if got is not None else f"第 {name} 项")
         out.append((title, got if got is not None else to_text(value)))
     return out

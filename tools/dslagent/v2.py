@@ -40,6 +40,10 @@ VERBS = PKG / "verbs"
 MODEL = "sonnet"
 MAX_CALLS = 20           # 补查 1 + 规划 1（+重写 1）+ 计划内 ≤12 + 补改 1 + 边界 1 + 边界补改 1，留余量
 WALL = 900
+IDLE_SEC = 60            # 首 token 之后这么久没有新流事件就杀掉该次调用
+MAX_OUT = 20000          # 单次调用累计输出超过这么多字符就杀掉（reason=输出超长）
+TOOL_MARKS = ("<invoke", "<function_calls")   # 流里出现这些 = 模型在写工具调用格式（reason=输出工具调用格式）
+GUARD_REASONS = ("空闲超时", "输出工具调用格式", "输出超长")
 TEST_TIMEOUT = 600
 BOUND_TIMEOUT = 120
 FN_CAP = 250             # 补改入参：单个函数最多给多少行
@@ -172,8 +176,11 @@ def parse_json(text):
 # ------------------------------------------------------------------ 模型调用
 
 
-def call_claude(system, user, timeout=300, model=None):
-    """claude -p（model 缺省 MODEL），自定系统提示，无工具 / MCP / 技能，单轮，流式（记首 token）。返回 text / sec / ttft / cost / usage / rc / stderr。"""
+def call_claude(system, user, timeout=300, model=None, reply_path=None, idle=None):
+    """claude -p（model 缺省 MODEL），自定系统提示，无工具 / MCP / 技能，单轮，流式（记首 token）。返回 text / sec / ttft / cost / usage / rc / stderr / reason。
+    首 token 之后 idle 秒没有任何新流事件 → killpg（reason=空闲超时）；首 token 前只受总超时管。
+    流式累计文本出现 <invoke / <function_calls → killpg（reason=输出工具调用格式）；累计超过 MAX_OUT 字符 → killpg（reason=输出超长）。
+    reply_path：边收流边把文本增量追加进该文件，被杀时已收到的内容也在；返回的 partial 是已收到的流文本。"""
     from tools.cbatch import CLAUDE_BIN
     from .pool import child_env
     from .runner import tmp_dir
@@ -183,10 +190,18 @@ def call_claude(system, user, timeout=300, model=None):
     cmd = [os.environ.get("CBATCH_CLAUDE") or CLAUDE_BIN, "-p", "--model", model or MODEL, "--output-format", "stream-json",
            "--verbose", "--include-partial-messages", "--max-turns", "1", "--tools", "", "--setting-sources", "",
            "--strict-mcp-config", "--disable-slash-commands", "--system-prompt", system]
+    idle = idle or IDLE_SEC
     t0 = time.time()
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                          cwd=cwd, env=child_env(tmp), start_new_session=True)
     err_buf, killed = [], []
+    last = [time.time()]
+    fh = None
+    if reply_path:
+        try:
+            fh = open(reply_path, "w", encoding="utf-8")
+        except OSError:
+            fh = None
 
     def feed():
         try:
@@ -198,8 +213,8 @@ def call_claude(system, user, timeout=300, model=None):
     def drain():
         err_buf.append(p.stderr.read())
 
-    def kill():
-        killed.append(1)
+    def kill(why="总超时"):
+        killed.append(why)
         try:
             os.killpg(p.pid, 9)
         except OSError:
@@ -209,17 +224,43 @@ def call_claude(system, user, timeout=300, model=None):
         t.start()
     timer = threading.Timer(timeout, kill)
     timer.start()
-    text, result, ttft = "", None, None
+    text, result, ttft, streamed = "", None, None, ""
+    done = threading.Event()
+
+    def watch():
+        while not done.wait(min(1.0, max(0.05, idle / 4))):
+            if ttft is not None and time.time() - last[0] > idle:
+                kill("空闲超时")
+                return
+    wd = threading.Thread(target=watch, daemon=True)
+    wd.start()
     try:
         for line in p.stdout:
+            last[0] = time.time()
             try:
                 ev = json.loads(line)
             except ValueError:
                 continue
             ty = ev.get("type")
             if ty == "stream_event":
-                if ttft is None and (ev.get("event") or {}).get("type") == "content_block_delta":
-                    ttft = round(time.time() - t0, 2)
+                se = ev.get("event") or {}
+                if se.get("type") == "content_block_delta":
+                    if ttft is None:
+                        ttft = round(time.time() - t0, 2)
+                    d = se.get("delta") or {}
+                    if d.get("type") == "text_delta" and d.get("text"):
+                        streamed += d["text"]
+                        if not killed:
+                            if any(m in streamed for m in TOOL_MARKS):
+                                kill("输出工具调用格式")
+                            elif len(streamed) > MAX_OUT:
+                                kill("输出超长")
+                        if fh:
+                            try:
+                                fh.write(d["text"])
+                                fh.flush()
+                            except OSError:
+                                pass
             elif ty == "assistant":
                 for b in ev["message"].get("content", []):
                     if b.get("type") == "text":
@@ -229,15 +270,20 @@ def call_claude(system, user, timeout=300, model=None):
         p.wait()
     finally:
         timer.cancel()
+        done.set()
         for t in th:
             t.join(timeout=5)
-    err = "".join(x or "" for x in err_buf) + ("\n[超时被杀]" if killed else "")
+        if fh:
+            fh.close()
+    reason = killed[0] if killed else None
+    err = "".join(x or "" for x in err_buf) + (f"\n[{reason}被杀]" if killed else "")
     res = result or {}
     u = res.get("usage", {}) or {}
     usage = {"input": u.get("input_tokens"), "output": u.get("output_tokens"),
              "cache_read": u.get("cache_read_input_tokens"), "cache_creation": u.get("cache_creation_input_tokens")}
     return {"text": text, "sec": round(time.time() - t0, 1), "rc": p.returncode, "ttft": ttft,
-            "cost": res.get("total_cost_usd") or 0.0, "usage": usage, "stderr": err[-500:]}
+            "cost": res.get("total_cost_usd") or 0.0, "usage": usage, "stderr": err[-500:], "reason": reason,
+            "partial": streamed}
 
 
 class Model:
@@ -246,13 +292,22 @@ class Model:
 
     def __init__(self, out, backend=None, max_calls=MAX_CALLS, deadline=None):
         self.out = Path(out)
-        self.backend = backend or (lambda s, u, tag, timeout, model=None: call_claude(s, u, timeout, model))
+        self.real = backend is None
+        self.backend = backend or (lambda s, u, tag, timeout, model=None, **kw: call_claude(s, u, timeout, model, **kw))
         self.max_calls, self.deadline = max_calls, deadline
         self.n, self.cost, self.log = 0, 0.0, []
         self.lock = threading.Lock()
         (self.out / "calls").mkdir(parents=True, exist_ok=True)
 
     def __call__(self, system, user, tag, model=None):
+        """一次调用；因空闲超时 / rc≠0 / 空回复失败时同输入重试 1 次（计入调用数和费用，记录 retry=1 和首次失败原因）。"""
+        try:
+            return self._once(system, user, tag, model)
+        except RuntimeError as e:
+            reason = getattr(e, "reason", None) or str(e)
+            return self._once(system, user, tag, model, retry=reason)
+
+    def _once(self, system, user, tag, model=None, retry=None):
         with self.lock:
             if self.n >= self.max_calls:
                 raise Stop(f"总模型调用已满 {self.max_calls} 次（{tag}）")
@@ -263,24 +318,37 @@ class Model:
         left = (self.deadline - time.time()) if self.deadline else 300
         t0 = time.time()
         kw = {"model": model} if model and model != MODEL else {}
+        rp = self.out / "calls" / f"{n:02d}_{tag}.reply.txt"
+        if self.real:
+            kw["reply_path"] = rp
         r = self.backend(system, user, tag, max(30, min(300, left + 5)), **kw)
         if isinstance(r, str):
             r = {"text": r}
         rec = {"n": n, "tag": tag, "sec": r.get("sec", round(time.time() - t0, 2)), "ttft": r.get("ttft"),
                "cost": r.get("cost") or 0.0, "usage": r.get("usage"), "rc": r.get("rc"),
                "model": model or MODEL, "sys_chars": len(system), "user_chars": len(user), "t_start": round(t0, 3)}
+        if retry:
+            rec["retry"] = 1
+            rec["first_fail"] = retry
         with self.lock:
             self.cost += rec["cost"]
             self.log.append(rec)
         try:
             (self.out / "calls" / f"{n:02d}_{tag}.prompt.txt").write_text(f"[system]\n{system}\n\n[user]\n{user}",
                                                                           encoding="utf-8")
-            (self.out / "calls" / f"{n:02d}_{tag}.reply.txt").write_text(
-                (r.get("text") or "") + ("\n\n[stderr]\n" + r["stderr"] if r.get("stderr") else ""), encoding="utf-8")
+            rp.write_text(
+                (r.get("text") or r.get("partial") or "") + ("\n\n[stderr]\n" + r["stderr"] if r.get("stderr") else ""), encoding="utf-8")
         except OSError:
             pass
-        if not (r.get("text") or "").strip():
-            raise RuntimeError(f"模型没有回应（rc={r.get('rc')}）：{(r.get('stderr') or '')[-200:]}")
+        bad = r.get("reason") in GUARD_REASONS or (r.get("rc") not in (None, 0)) or not (r.get("text") or "").strip()
+        if bad:
+            why = r.get("reason") or (f"rc={r.get('rc')}" if r.get("rc") not in (None, 0) else "空回复")
+            rec["failed"] = why
+            e = RuntimeError(f"模型没有回应（{why}，rc={r.get('rc')}）：{(r.get('stderr') or '')[-200:]}")
+            e.reason = why
+            if retry:
+                e.args = (f"{e.args[0]}；首次失败：{retry}",)
+            raise e
         return r["text"]
 
 

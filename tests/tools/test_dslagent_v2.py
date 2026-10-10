@@ -410,7 +410,7 @@ def t_switch():
     fake = Fake()
     sysmap = {V.PRE_SYS: "preq", V.BOUND_SYS: "bound"}
     old = V.call_claude
-    V.call_claude = lambda s, u, timeout=300, model=None: fake(s, u, sysmap.get(s, "plan"), timeout)
+    V.call_claude = lambda s, u, timeout=300, model=None, **kw: fake(s, u, sysmap.get(s, "plan"), timeout)
     os.environ["DSLAGENT_PLANNER"] = "v2"
     try:
         check(V.enabled(), "DSLAGENT_PLANNER=v2 → 走 v2")
@@ -423,12 +423,112 @@ def t_switch():
         os.environ.pop("DSLAGENT_PLANNER", None)
 
 
+FAKE_CLI = r'''#!/usr/bin/env python3
+import json, os, sys, time
+sys.stdin.read()
+cnt = os.environ["FAKE_CNT"]
+n = int(open(cnt).read()) + 1 if os.path.exists(cnt) else 1
+open(cnt, "w").write(str(n))
+mode = os.environ["FAKE_MODE"]
+def ev(o):
+    print(json.dumps(o), flush=True)
+def delta(t):
+    ev({"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": t}}})
+if mode == "invoke_ok" and n == 1:
+    delta("先说两句<inv")
+    delta("oke name=x>")
+    time.sleep(30)
+if mode == "long_always":
+    for _ in range(25):
+        delta("字" * 1000)
+    time.sleep(30)
+if mode == "angle":
+    delta("if a<b and c>d: <div>x</div> List<int> 1<2")
+if mode == "empty" or (mode == "idle_ok" and n == 1) or mode == "idle_always":
+    delta("半截")
+    delta("内容")
+    if mode == "empty":
+        sys.exit(3)
+    time.sleep(30)
+delta("好")
+ev({"type": "assistant", "message": {"content": [{"type": "text", "text": "好的回复"}]}})
+ev({"type": "result", "total_cost_usd": 0.01, "usage": {}})
+'''
+
+
+def t_idle_retry():
+    print("五、空闲超时 / 重试 / 流落盘（假 CLI 脚本）")
+    cli = TMP / "fake_cli.py"
+    cli.write_text(FAKE_CLI, encoding="utf-8")
+    cli.chmod(0o755)
+    old_env, old_idle = os.environ["CBATCH_CLAUDE"], V.IDLE_SEC
+    os.environ["CBATCH_CLAUDE"] = str(cli)
+    V.IDLE_SEC = 1.5
+
+    def go(mode, name):
+        cnt = TMP / f"cnt_{name}"
+        os.environ.update(FAKE_MODE=mode, FAKE_CNT=str(cnt))
+        out = TMP / f"out_{name}"
+        M = V.Model(out)
+        try:
+            return M, M("sys", "user", "t"), None, out
+        except RuntimeError as e:
+            return M, None, str(e), out
+    try:
+        M, text, err, out = go("idle_ok", "a")
+        check(text == "好的回复" and M.n == 2 and len(M.log) == 2, "空闲后被杀，重试 1 次成功（调用数 2）", (text, err, M.n))
+        check(M.log[0].get("failed") == "空闲超时" and M.log[1].get("retry") == 1 and M.log[1].get("first_fail") == "空闲超时",
+              "calls 记录 retry=1 和首次失败原因", M.log)
+        check(M.log[0]["sec"] < 20 and abs(M.cost - 0.01) < 1e-9, "空闲杀得快（没等满 30 秒），费用只计有结果的", M.log[0]["sec"])
+        r1 = (out / "calls" / "01_t.reply.txt").read_text(encoding="utf-8")
+        check(r1.startswith("半截内容") and "空闲超时" in r1, "被杀那次已收到的内容保留在 reply 文件", r1)
+        M, text, err, out = go("idle_always", "b")
+        check(text is None and M.n == 2 and "空闲超时" in (err or "") and "首次失败" in err, "重试仍失败 → 报原因（含首次失败）", err)
+        M, text, err, out = go("empty", "c")
+        check(text is None and M.n == 2 and "rc=3" in (err or ""), "rc≠0 也重试，仍失败报错", err)
+        # 止损：输出工具调用格式 / 输出超长 / 普通尖括号不误杀
+        M, text, err, out = go("invoke_ok", "e")
+        check(text == "好的回复" and M.n == 2 and M.log[0].get("failed") == "输出工具调用格式"
+              and M.log[1].get("retry") == 1 and M.log[1].get("first_fail") == "输出工具调用格式" and M.log[0]["sec"] < 20,
+              "出现 <invoke（跨增量拼接）→ 立即被杀，重试 1 次成功，calls 记录 reason", (text, err, M.log))
+        M, text, err, out = go("long_always", "f")
+        check(text is None and M.n == 2 and M.log[0].get("failed") == "输出超长" and "输出超长" in (err or "")
+              and M.log[0]["sec"] < 20, "累计超过 20000 字符 → 被杀（reason=输出超长），重试仍超长则报错", (err, M.log))
+        r1 = (out / "calls" / "01_t.reply.txt").read_text(encoding="utf-8")
+        check(r1.startswith("字" * 20000) and "输出超长" in r1, "超长被杀时已收到的内容保留在 reply 文件", len(r1))
+        M, text, err, out = go("angle", "g")
+        check(text == "好的回复" and M.n == 1 and not M.log[0].get("failed"), "普通尖括号（a<b、<div>、List<int>）不误杀", (text, err, M.log))
+        # 增量落盘：流还没结束时文件里已经有内容
+        cnt = TMP / "cnt_d"
+        os.environ.update(FAKE_MODE="idle_always", FAKE_CNT=str(cnt))
+        V.IDLE_SEC = 3
+        rp = TMP / "inc.reply.txt"
+        import threading
+        res = []
+        th = threading.Thread(target=lambda: res.append(V.call_claude("s", "u", 60, None, reply_path=rp)))
+        th.start()
+        import time as _t
+        seen = ""
+        for _ in range(20):
+            _t.sleep(0.2)
+            seen = rp.read_text(encoding="utf-8") if rp.exists() else ""
+            if seen:
+                break
+        check(seen == "半截内容" and th.is_alive(), "增量落盘：调用未结束时文件已有已收到的文本", seen)
+        th.join()
+        check(res[0]["reason"] == "空闲超时" and res[0]["partial"] == "半截内容", "被杀返回 reason 和 partial", res[0])
+    finally:
+        os.environ["CBATCH_CLAUDE"] = old_env
+        V.IDLE_SEC = old_idle
+
+
 def main():
     try:
         t_pack()
         t_gate()
         t_flow()
         t_switch()
+        t_idle_retry()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n{'=' * 50}\n通过 {PASS}，失败 {FAIL}")
