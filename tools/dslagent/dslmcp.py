@@ -9,7 +9,10 @@
 每次调用往 --log 文件追加一行 JSON：{ts, t, code_len, code, reply(出错时返回给模型的原文), edited(是否改了文件), files(改了哪些), sec, status(ok/check/dry/error)}，
 给父进程统计、计预算。
 
-    python dslmcp.py --workdir 项目目录 --log 日志文件 [--verbs-root 动词目录]
+    python dslmcp.py --workdir 项目目录 --log 日志文件 [--verbs-root 动词目录] [--readonly]
+
+--readonly（规划 plan_mode=read 用）：只读工具。白名单只留 读片段 / 搜索代码 / 查引用 + 用包 设 打印，改文件 / 写文件 / #改法 / 如果 一律检查不过；
+不做空跑和前后快照（不会改文件）。日志里每行多记 out_chars（返回给模型的字数）。
 """
 import argparse
 import json
@@ -80,15 +83,37 @@ DESC = r"""【dsl 工具】参数 code：一段中文 DSL 脚本；变量在多�
 =======
     return a + b + 1
 >>>>>>> 新文"""
+RO_DESC = r"""【dsl 只读工具】只能读代码，不能改任何文件。参数 code：一段中文 DSL 脚本；变量在多次调用之间保留
+
+规则
+- 一行一句
+- 参数按空格切分；带空格的文本先「设 名 = 文本」再用 {名} 传入
+- 读片段 返回的每行带「行号| 」前缀（如「  5|     return a」）
+- 正则里的空格写 \s
+
+语句
+- 设 名 = 值 | 设 名 = 动词 参数
+- 打印 文本
+- 引用 {名}，取字段 {名.字段}
+
+动词（路径相对项目根）
+- 读片段 文件:起-止 → 每行「行号| 内容」
+- 搜索代码 正则 [范围] → 每行「文件:行号: 内容」；范围＝文件或目录（逗号隔开多个，不要空格），不写搜全部 .py。例：搜索代码 正则 tools/dsl.py
+- 查引用 名字 py → {n, text}
+
+示例
+设 r = 读片段 pkg/calc.py:1-20
+打印 {r}"""
 SCHEMA = {"type": "object", "properties": {"code": {"type": "string", "description": "DSL 脚本文本（#改法 段写在最后）"}},
           "required": ["code"]}
 
 
 class Server:
-    def __init__(self, workdir, log, verbs_root=None):
+    def __init__(self, workdir, log, verbs_root=None, readonly=False):
         from tools.dslagent.engine import AgentEngine
         from tools.mock import MockClient
         self.workdir = Path(workdir)
+        self.readonly = readonly
         self.log = Path(log) if log else None
         self.engine = AgentEngine(client=MockClient(default="（本工具不调模型）", offline=True), workdir=self.workdir, verbose=False,
                                   verbs_root=verbs_root)
@@ -114,17 +139,17 @@ class Server:
         t0 = time.time()
         self.calls += 1
         info = {"n": self.calls, "code_len": len(code or ""), "code": code or "", "edited": False, "files": []}
-        script, probs = DC.check_call(code or "", first=False)
+        script, probs = DC.check_call(code or "", first=False, readonly=self.readonly)
         if probs:
             info.update(status="check", sec=round(time.time() - t0, 2))
             return ("【检查不过】\n" + "\n".join(f"- {p}" for p in probs[:12]) + "\n文件没有改动，请改正后重新调用。"), info
-        err = DC.dry_run(self.engine, script, dict(self.sub.vars))
+        err = "" if self.readonly else DC.dry_run(self.engine, script, dict(self.sub.vars))
         if err:
             info.update(status="dry", sec=round(time.time() - t0, 2))
             return f"【空跑没过】{err}\n文件没有改动，请改正后重新调用。", info
         del self.rec[:]
         mark = len(self.sub.output)
-        before = V2.snapshot(self.workdir)
+        before = None if self.readonly else V2.snapshot(self.workdir)
         err_text = ""
         try:
             self.sub.run(script)
@@ -132,7 +157,7 @@ class Server:
             err_text = "脚本里不能用 返回 / 终止"
         except Exception as e:  # noqa: BLE001
             err_text = f"脚本运行出错：{type(e).__name__}: {str(e)[:400]}"
-        files = V2.changed(before, V2.snapshot(self.workdir))
+        files = [] if self.readonly else V2.changed(before, V2.snapshot(self.workdir))
         printed = "\n".join(self.sub.output[mark:])
         recs = [r for r in self.rec if r.split("\n", 1)[-1] not in printed]      # 打印里已经有的读 / 搜结果不重复贴
         parts = [x for x in (printed and f"[打印]\n{printed}", "\n".join(recs), err_text) if x]
@@ -152,7 +177,7 @@ class Server:
         elif method == "ping":
             res = {}
         elif method == "tools/list":
-            res = {"tools": [{"name": TOOL, "description": DESC, "inputSchema": SCHEMA}]}
+            res = {"tools": [{"name": TOOL, "description": RO_DESC if self.readonly else DESC, "inputSchema": SCHEMA}]}
         elif method == "tools/call":
             p = msg.get("params") or {}
             if p.get("name") != TOOL:
@@ -166,6 +191,7 @@ class Server:
                 except Exception as e:  # noqa: BLE001
                     text, info = f"工具内部出错：{type(e).__name__}: {str(e)[:300]}", {
                         "status": "internal", "code_len": len(code), "code": code, "edited": False, "files": [], "sec": 0}
+            info["out_chars"] = len(text)
             if info.get("status") != "ok":
                 info["reply"] = text                      # 返回给模型的报错原文（检查不过 / 空跑没过 / 运行出错）
             self._log(**info)
@@ -197,11 +223,12 @@ def main(argv=None):
     ap.add_argument("--workdir", required=True)
     ap.add_argument("--log", default="")
     ap.add_argument("--verbs-root", default="")
+    ap.add_argument("--readonly", action="store_true")        # 规划用的只读工具
     ap.add_argument("--state", default="")       # 本进程自己的状态目录（笔记 / 日志），并行子任务各用各的
     a = ap.parse_args(argv)
     if a.state:
         os.environ["DSLAGENT_STATE"] = a.state
-    Server(a.workdir, a.log, a.verbs_root or str(ROOT / "tools" / "dslagent" / "verbs")).serve()
+    Server(a.workdir, a.log, a.verbs_root or str(ROOT / "tools" / "dslagent" / "verbs"), readonly=a.readonly).serve()
 
 
 if __name__ == "__main__":

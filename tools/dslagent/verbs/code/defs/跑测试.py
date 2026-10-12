@@ -35,10 +35,18 @@ def default_cmd() -> str:
     return f"{py} -m unittest discover -s tests"
 
 
+def clean_env(base=None, **extra):
+    """测试子进程的环境：拷 base（缺省 os.environ），去掉所有 DSLAGENT_ 开头的变量（那是 DSL 引擎自己的配置，
+    如 DSLAGENT_TEST_CMD，漏给被改项目的测试会让它里面的「跑测试」读到本题命令）。"""
+    env = {k: v for k, v in (os.environ if base is None else base).items() if not k.startswith("DSLAGENT_")}
+    env.update(extra)
+    return env
+
+
 def test_env():
     """跑测试用的环境：不写 .pyc。不能用 PYTHONPYCACHEPREFIX 缓存——.pyc 只按源文件 mtime（秒）+ 大小判新旧，
     同一秒内改成等长内容（如 a * b → a + b）会读到旧字节码，测试跑的是改前的代码。"""
-    return dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    return clean_env(PYTHONDONTWRITEBYTECODE="1")
 
 
 def run_raw(root, cmd=None, timeout=None):

@@ -4,6 +4,13 @@
   验收   verify/（DSLAGENT_VERIFY，缺省跟随 PACK）：验收、补改、边界复核（接口见 verify/__init__.py）
 旧路径兼容：tools.dslagent.v2pack 转发到 packs.code；搬走的名字（v2.PRE_SYS、v2._fix_user、v2.full_test …）仍可从 v2 取到。
 
+规划方式 DSLAGENT_PLAN_MODE（缺省 read；cbatch 透传 dsl_options.plan_mode）：
+  full  下面 1–3 的老流程：资料包 + 补查结果全塞进规划的 user（提示与改动前逐字一致）。
+  read  规划输入只有 任务原文 + 文件大纲（pack.plan_outline；包没实现就只有任务原文），system = 原 system 去掉讲资料包各节的那句 + 一小段
+        「用 dsl 工具读」；没有 1（collect）、没有 2（补查）；规划调用挂 dslmcp --readonly（读片段 / 搜索代码 / 查引用 / 设 / 打印），
+        workdir = 待改项目，--max-turns 12，保险同下（空闲超时、文本 invoke 拦截、超长输出、重试一次）；计划检查不过的那次重写也走 read。
+        每次规划的工具调用（工具名、参数、返回字数）写进运行目录 plan_tools.json。
+
 流程（流程本身与任务类型无关，细节由包 / 验收实现）：
   1 资料包：pack.collect 确定性收集（不调模型）。
   2 补查：一次短调用（pack.QUERY_SYS）列出要补查的项（≤8），pack.extra 执行后并入资料包；回「够了」就跳过。
@@ -16,6 +23,8 @@
   6 边界复核：verify.boundary（可选）；仍失败 → 状态 超出预期（不报成功）。
   7 回复：reply = {结果, 状态, 原因}；v2 记各步耗时、调用次数、费用（calls.json 逐次）。
 子任务回复格式：缺省 json；DSLAGENT_SUBTASK=tool 时子任务挂 dslmcp 的 dsl 工具读 / 搜 / 改文件（toolsub.py），每个子任务的结果记在 v2.子任务。
+按步骤指定模型：环境变量 DSLAGENT_MODELS（JSON，cbatch 透传 dsl_options.models）{plan, sub, fix, bound} → 模型串，见 engines.py（claude / codex / grok / opencode）；
+没写的步骤 sonnet；每次调用按 tag 选引擎（Model.spec），calls.json 逐条记 engine / model / effort，result.json 的 v2.models 记生效的四步。
 模型调用：claude CLI，--system-prompt 替换默认提示，--tools "" --strict-mcp-config --setting-sources "" --disable-slash-commands
 （同 plan35 proto），单轮流式；run(model=…) 可换成假模型（测试用）。
 """
@@ -29,7 +38,7 @@ import time
 from pathlib import Path
 
 from . import dslcheck as DC
-from . import packs, verify
+from . import engines, packs, verify
 from .snap import DIFF_CAP, changed, code_hash, diff_text, restore, snapshot  # noqa: F401  旧名仍从 v2 取
 
 PKG = Path(__file__).resolve().parent
@@ -41,7 +50,7 @@ WALL = 900
 IDLE_SEC = 60            # 首 token 之后这么久没有新流事件就杀掉该次调用
 MAX_OUT = 20000          # 单次调用累计输出超过这么多字符就杀掉（reason=输出超长）
 TOOL_MARKS = ("<invoke", "<function_calls")   # 流里出现这些 = 模型在写工具调用格式（reason=输出工具调用格式）
-GUARD_REASONS = ("空闲超时", "输出工具调用格式", "输出超长")
+GUARD_REASONS = ("首字前静默超时", "空闲超时", "输出工具调用格式", "输出超长", "尝试调用工具")
 SKIP_NOTE = "未跑（这次测试的结果不改变计划走向，验收时统一跑一次全量测试）"
 
 
@@ -67,7 +76,31 @@ RULES_STOP = r"""- 全部改完 终止 成功 一句话；做不到 终止 失�
 
 RULES_OUT = r"""- 只输出 .zs 脚本本身（含 #改法 / #清单 段），不要代码围栏，不要任何解释文字。"""
 
+PLAN_MODE_ENV = "DSLAGENT_PLAN_MODE"
+PLAN_MODES = ("read", "full")
+READ_MAX_TURNS = 12
+READ_TAIL = "需要看代码时用 dsl 工具读：读片段（按大纲里的 文件:起-止）、搜索代码、查引用。只读，不改文件。读够了直接输出完整 .zs。"
+# read 方式下 system 里与「按需读」矛盾的说法：(原文, 换成)。原文必须在 full 的 system 里出现（read_system 里断言）。
+READ_SUBS = (
+    ("你看不到别的文件，也不能运行任何东西。", "代码不在消息里，" + READ_TAIL + "你不能运行任何东西。"),
+    ("- 改法：数据包 / 补查结果里能看到原文的改动，", "- 改法：读到原文的改动，"),
+    ("- 子任务：数据包里没有原文、或要看运行结果才能决定怎么改的，", "- 子任务：没读到原文、或要看运行结果才能决定怎么改的，"),
+    ("脚本必须覆盖数据包和补查结果里查到的**每一个**位置", "先用 搜索代码 / 查引用 把所有位置找全，脚本必须覆盖找到的**每一个**位置"),
+    ("不用 定位.zs / 读改测.zs（数据包已给原文）。", "不用 定位.zs / 读改测.zs。"),
+    ("你看不到代码，只能靠脚本里的动词去读；读到的内容要嵌进 问JSON 的提示词里，模型才看得到",
+     "脚本里 问JSON / 派任务 调的模型看不到代码：要它看的内容用脚本里的动词读出来（派任务 可用入参「文件:起-止」），嵌进提示词里它才看得到"),
+)
+
 _PLAN_SYS = {}
+
+
+def plan_mode(value=None):
+    """规划方式：环境变量 DSLAGENT_PLAN_MODE（缺省 read）；不认识的取值报 ValueError。"""
+    v = (os.environ.get(PLAN_MODE_ENV) if value is None else value) or ""
+    v = v.strip().lower() or PLAN_MODES[0]
+    if v not in PLAN_MODES:
+        raise ValueError(f"{PLAN_MODE_ENV} 取值不对：{v!r}，可用：{'、'.join(PLAN_MODES)}")
+    return v
 
 
 def plan_rules(pack):
@@ -75,8 +108,11 @@ def plan_rules(pack):
     return "\n".join([RULES_HEAD, pack.PLAN_RULES, RULES_STOP, pack.PLAN_RULES_END, RULES_OUT])
 
 
-def plan_system(pack=None):
+def plan_system(pack=None, mode="full"):
+    """规划的 system。mode=full：原文；mode=read：去掉开头讲资料包各节的那句（换成一句话说明 user 里是什么），再按 READ_SUBS 换掉与按需读矛盾的说法（READ_TAIL 放在开头说明里）。"""
     pack = pack or packs.current()
+    if mode == "read":
+        return read_system(pack)
     if pack.NAME not in _PLAN_SYS:
         from . import prompts as DPR
         keep = ("赋值右边不要以", "一条语句只能写在一行", "修改内容的字段名固定为", "你看不到代码")
@@ -93,8 +129,30 @@ def plan_system(pack=None):
     return _PLAN_SYS[pack.NAME]
 
 
+def read_intro_cut(pack):
+    """read 方式下 system 里去掉的那一句（讲资料包各节 / 补查结果）→ 换成的那句。"""
+    old = f"用户消息会给你一个{pack.TASK_DESC}、一份{pack.PACK_DESC}，后面可能有「补查结果」，同等对待。"
+    return old, f"用户消息会给你一个{pack.TASK_DESC}，后面附候选文件的大纲。"
+
+
+def read_system(pack):
+    full = plan_system(pack, "full")
+    old, new = read_intro_cut(pack)
+    assert old in full, "规划 system 开头句变了，read 方式要同步改 read_intro_cut"
+    s = full.replace(old, new, 1)
+    for a, b in READ_SUBS:
+        assert a in s, f"规划 system 里找不到「{a[:20]}…」，read 方式要同步改 READ_SUBS"
+        s = s.replace(a, b, 1)
+    return s
+
+
 def plan_user(task, pack):
     return f"【任务原文】\n{task}\n\n【数据包】\n{pack}"
+
+
+def plan_user_read(task, outline=""):
+    """read 方式的 user：任务原文 + 文件大纲（包没有大纲就只有任务原文）。"""
+    return f"【任务原文】\n{task}" + (f"\n\n{outline}" if outline else "")
 
 
 def parse_json(text):
@@ -248,14 +306,24 @@ class Model:
     """全部模型调用的入口：计数、墙钟、费用、逐次记录（calls/NN_tag.*.txt、self.log）。
     backend(system, user, tag, timeout) → dict（text, cost, …）或 str；只有指定了非 MODEL 的模型（规划那次）才多传 model=。"""
 
-    def __init__(self, out, backend=None, max_calls=MAX_CALLS, deadline=None):
+    def __init__(self, out, backend=None, max_calls=MAX_CALLS, deadline=None, routes=None):
         self.out = Path(out)
         self.real = backend is None
+        self.routes = routes or {}          # 步骤 → 模型串（engines.STEPS；没写的步骤走 claude MODEL）
         self.backend = backend or (lambda s, u, tag, timeout, model=None, **kw: call_claude(s, u, timeout, model, **kw))
         self.max_calls, self.deadline = max_calls, deadline
         self.n, self.cost, self.log = 0, 0.0, []
         self.lock = threading.Lock()
         (self.out / "calls").mkdir(parents=True, exist_ok=True)
+
+    def spec(self, tag, model=None):
+        """这次调用用的 {engine, model, effort, spec}：DSLAGENT_MODELS 里写了该步骤就用它，否则 model 参数（旧的规划模型透传），再否则 sonnet。"""
+        step = engines.step_of(tag)
+        s = self.routes.get(step) if step else None
+        if s:
+            return engines.parse(s)
+        m = model or MODEL           # 旧的透传（DSLAGENT_PLAN_MODEL）：任意串当 claude 模型名，不校验
+        return {"engine": "claude", "model": m, "effort": None, "spec": m}
 
     def __call__(self, system, user, tag, model=None):
         """一次调用；因空闲超时 / rc≠0 / 空回复失败时同输入重试 1 次（计入调用数和费用，记录 retry=1 和首次失败原因）。"""
@@ -275,16 +343,22 @@ class Model:
             n = self.n
         left = (self.deadline - time.time()) if self.deadline else 300
         t0 = time.time()
-        kw = {"model": model} if model and model != MODEL else {}
+        sp = self.spec(tag, model)
+        kw = {"model": sp["spec"]} if sp["spec"] != MODEL else {}
         rp = self.out / "calls" / f"{n:02d}_{tag}.reply.txt"
         if self.real:
             kw["reply_path"] = rp
-        r = self.backend(system, user, tag, max(30, min(300, left + 5)), **kw)
+        tmo = max(30, min(300, left + 5))
+        if self.real and sp["engine"] != "claude":
+            r = engines.call(sp, system, user, tmo, reply_path=rp)
+        else:
+            r = self.backend(system, user, tag, tmo, **kw)
         if isinstance(r, str):
             r = {"text": r}
         rec = {"n": n, "tag": tag, "sec": r.get("sec", round(time.time() - t0, 2)), "ttft": r.get("ttft"),
                "cost": r.get("cost") or 0.0, "usage": r.get("usage"), "rc": r.get("rc"),
-               "model": model or MODEL, "sys_chars": len(system), "user_chars": len(user), "t_start": round(t0, 3)}
+               "engine": sp["engine"], "model": sp["model"] or ("默认" if sp["engine"] == "grok" else MODEL), "effort": sp["effort"],
+               "sys_chars": len(system), "user_chars": len(user), "t_start": round(t0, 3)}
         if retry:
             rec["retry"] = 1
             rec["first_fail"] = retry
@@ -310,7 +384,7 @@ class Model:
         return r["text"]
 
 
-def _tool_call(self, system, user, tag, mcp_config, max_turns=6):
+def _tool_call(self, system, user, tag, mcp_config, max_turns=6, model=None):
     """DSLAGENT_SUBTASK=tool：一次带 MCP 的多轮调用（计 1 次调用数，费用、逐次记录同 _once）。不重试、不抛模型失败——
     失败原因（保险触发 / rc≠0 / 空回复）放在返回的 failed 里，由 toolsub 决定重试还是兜底。返回 backend 的 dict。"""
     with self.lock:
@@ -323,14 +397,21 @@ def _tool_call(self, system, user, tag, mcp_config, max_turns=6):
     left = (self.deadline - time.time()) if self.deadline else 300
     t0 = time.time()
     rp = self.out / "calls" / f"{n:02d}_{tag}.reply.txt"
+    sp = self.spec(tag, model)
     kw = {"reply_path": rp} if self.real else {}
-    r = self.backend(system, user, tag, max(30, min(300, left + 5)), mcp_config=str(mcp_config), max_turns=max_turns, **kw)
+    if sp["spec"] != MODEL:
+        kw["model"] = sp["spec"]
+    tmo = max(30, min(300, left + 5))
+    if self.real and sp["engine"] != "claude":
+        r = engines.call(sp, system, user, tmo, reply_path=rp, mcp_config=str(mcp_config))
+    else:
+        r = self.backend(system, user, tag, tmo, mcp_config=str(mcp_config), max_turns=max_turns, **kw)
     if isinstance(r, str):
         r = {"text": r}
     rec = {"n": n, "tag": tag, "sec": r.get("sec", round(time.time() - t0, 2)), "ttft": r.get("ttft"),
            "cost": r.get("cost") or 0.0, "usage": r.get("usage"), "rc": r.get("rc"), "tool": 1,
            "num_turns": r.get("num_turns"), "tool_calls": r.get("tool_calls"), "subtype": r.get("subtype"),
-           "sys_chars": len(system), "user_chars": len(user), "t_start": round(t0, 3)}
+           "engine": sp["engine"], "model": sp["model"] or MODEL, "effort": sp["effort"], "sys_chars": len(system), "user_chars": len(user), "t_start": round(t0, 3)}
     with self.lock:
         self.cost += rec["cost"]
         self.log.append(rec)
@@ -353,6 +434,49 @@ def _tool_call(self, system, user, tag, mcp_config, max_turns=6):
 
 
 Model.tool_call = _tool_call
+
+
+def plan_read_call(M, system, user, tag, project, model, out, tools):
+    """plan_mode=read 的一次规划调用：挂只读 dslmcp（--readonly，workdir=待改项目）、--max-turns READ_MAX_TURNS，
+    保险同 call_claude（空闲超时 / 输出超长 / 输出工具调用格式）；失败（保险触发、rc≠0、空回复、轮数用尽）同输入重试 1 次，仍失败抛 RuntimeError。
+    每次尝试的工具调用（工具名、参数、返回字数）追加进 tools，并整份写到 out/plan_tools.json。返回最终回复文本。"""
+    d = out / "toollogs"
+    d.mkdir(parents=True, exist_ok=True)
+    first = None
+    for attempt in (1, 2):
+        base = f"{tag}_a{attempt}"
+        log, cfg = d / f"{base}.jsonl", d / f"{base}.mcp.json"
+        cfg.write_text(json.dumps({"mcpServers": {"dsl": {"command": sys.executable, "args": [
+            str(PKG / "dslmcp.py"), "--workdir", str(project), "--log", str(log), "--verbs-root", str(VERBS), "--readonly",
+            "--state", str(d / f"{base}_state")]}}}, ensure_ascii=False), encoding="utf-8")
+        r = M.tool_call(system, user, tag, cfg, READ_MAX_TURNS, model=model)
+        rows = []
+        try:
+            for line in log.read_text(encoding="utf-8").splitlines():
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    pass
+        except OSError:
+            pass
+        tools.extend({"调用": tag, "尝试": attempt, "序": i, "工具": "dsl", "参数": x.get("code"), "返回字数": x.get("out_chars"),
+                      "状态": x.get("status")} for i, x in enumerate(rows, 1))
+        try:
+            (out / "plan_tools.json").write_text(json.dumps(tools, ensure_ascii=False, indent=1), encoding="utf-8")
+        except OSError:
+            pass
+        text = (r.get("text") or "").strip()
+        why = r.get("failed")
+        if not why and any(m in text for m in TOOL_MARKS):
+            why = "输出工具调用格式"
+            for c in M.log:
+                if c["n"] == r.get("call_n"):
+                    c["failed"] = why
+        if not why:
+            return r["text"]
+        if attempt == 2:
+            raise RuntimeError(f"模型没有回应（{why}，rc={r.get('rc')}）：{(r.get('stderr') or '')[-200:]}；首次失败：{first}")
+        first = why
 
 
 class Client:
@@ -617,14 +741,17 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
     out = Path(out_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
     t_start = time.time()
+    mode, plan_tools, routes = PLAN_MODES[0], [], {}
     try:
         pack, ver = packs.current(), verify.current()
+        mode = plan_mode()
+        routes = engines.validate(engines.from_env(), mode, DC.env_mode())
     except ValueError as e:
         pack = ver = None
         pick_err = str(e)
     else:
         test_cmd = ver.detect_cmd(project, test_cmd)
-    M = Model(out, backend=model, max_calls=max_calls, deadline=t_start + wall)
+    M = Model(out, backend=model, max_calls=max_calls, deadline=t_start + wall, routes=routes)
     steps, info = {}, {"补查": None, "够了": None, "补查项": 0, "数据包字符": 0, "检查": [], "重写": False,
                        "子任务模式": DC.env_mode(), "子任务": []}
     res = {"project": str(project), "test_cmd": test_cmd, "kind": "task", "planner": "v2", "fixed": False,
@@ -643,43 +770,68 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
     if not test_cmd:
         state["原因"] = ver.MISSING_MSG
         return _finish(res, out, M, steps, state, accept, bound, {}, {}, t_start)
+    info["规划方式"] = mode
+    info["models"] = engines.effective({**routes, **({} if "plan" in routes or not os.environ.get("DSLAGENT_PLAN_MODEL")
+                                                     else {"plan": os.environ["DSLAGENT_PLAN_MODEL"]})})
     ver.setup(out, test_cmd)
     base = snapshot(project, pack)
     cur = base
     main, subs, script = "", {}, ""
     try:
-        # ---- 1 数据包
-        t0 = time.time()
-        coll = pack.collect(task, project)
-        info.update(coll["记录"])
-        step("1数据包", t0)
-        # ---- 2 补查
-        t0 = time.time()
-        txt = M(pack.QUERY_SYS, plan_user(task, coll["text"]), "preq")
-        try:
-            q = parse_json(txt)
-        except ValueError as e:
-            q = {"够了": True, "_err": str(e)}
-        info["补查"] = q
-        info["够了"] = bool(q.get("够了")) if isinstance(q, dict) else True
-        extra = ""
-        if not info["够了"]:
-            ex = pack.extra(project, q, coll)
-            extra, info["补查记录"] = ex["text"], ex["log"]
-            info["补查项"] = len(info["补查记录"])
-            info.update(ex.get("记录") or {})
-        full_pack = coll["text"] + ("\n\n" + extra if extra else "")
-        info["数据包字符"] = len(full_pack)
-        (out / "pack.md").write_text(full_pack, encoding="utf-8")
-        step("2补查", t0)
+        if mode == "full":
+            # ---- 1 数据包
+            t0 = time.time()
+            coll = pack.collect(task, project)
+            info.update(coll["记录"])
+            step("1数据包", t0)
+            # ---- 2 补查
+            t0 = time.time()
+            txt = M(pack.QUERY_SYS, plan_user(task, coll["text"]), "preq")
+            try:
+                q = parse_json(txt)
+            except ValueError as e:
+                q = {"够了": True, "_err": str(e)}
+            info["补查"] = q
+            info["够了"] = bool(q.get("够了")) if isinstance(q, dict) else True
+            extra = ""
+            if not info["够了"]:
+                ex = pack.extra(project, q, coll)
+                extra, info["补查记录"] = ex["text"], ex["log"]
+                info["补查项"] = len(info["补查记录"])
+                info.update(ex.get("记录") or {})
+            full_pack = coll["text"] + ("\n\n" + extra if extra else "")
+            info["数据包字符"] = len(full_pack)
+            (out / "pack.md").write_text(full_pack, encoding="utf-8")
+            step("2补查", t0)
+            first_user = plan_user(task, full_pack)
+        else:
+            # ---- 1 大纲（read 方式：没有资料包全文、没有补查）
+            t0 = time.time()
+            outline = ""
+            if hasattr(pack, "plan_outline"):
+                o = pack.plan_outline(task, project)
+                outline = o["text"]
+                info.update(o.get("记录") or {})
+            info["大纲字符"] = len(outline)
+            (out / "outline.md").write_text(outline, encoding="utf-8")
+            first_user = plan_user_read(task, outline)
+            step("1大纲", t0)
         # ---- 3 规划
         t0 = time.time()
         problem = ""
         plan_model = os.environ.get("DSLAGENT_PLAN_MODEL") or MODEL
+        if "plan" in routes:
+            if os.environ.get("DSLAGENT_PLAN_MODEL") and os.environ["DSLAGENT_PLAN_MODEL"] != routes["plan"]:
+                info["规划模型说明"] = f"models.plan={routes['plan']} 优先，没用 model={os.environ['DSLAGENT_PLAN_MODEL']}"
+            plan_model = routes["plan"]
         info["规划模型"] = res["plan_model"] = plan_model
         for k in range(2):
-            raw = M(plan_system(pack), plan_user(task, full_pack) if k == 0 else DPR.fix_prompt(script, problem),
-                    "plan" if k == 0 else "plan_fix", model=plan_model)
+            user = first_user if k == 0 else DPR.fix_prompt(script, problem)
+            if mode == "read":
+                raw = plan_read_call(M, plan_system(pack, "read"), user, "plan" if k == 0 else "plan_fix", project, plan_model, out,
+                                     plan_tools)
+            else:
+                raw = M(plan_system(pack), user, "plan" if k == 0 else "plan_fix", model=plan_model)
             (out / f"plan_v{k + 1}.raw.txt").write_text(raw, encoding="utf-8")
             script, _ = DP.strip_prose(raw)
             script, n_close, _ = DP.autoclose(script)
@@ -690,6 +842,8 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
                 break
             info["重写"] = True
         step("3规划", t0)
+        if mode == "read":
+            info["规划工具"] = {"次数": len(plan_tools), "返回字数": sum(x.get("返回字数") or 0 for x in plan_tools)}
         if problem:
             raise Stop("计划 .zs 重写 1 次仍没过检查：" + problem[:400])
         (out / "plan.zs").write_text(script, encoding="utf-8")

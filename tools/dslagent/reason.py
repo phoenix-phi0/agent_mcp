@@ -320,7 +320,8 @@ def done_unmet(root, items, snap=None):
 def _pycache_env():
     """子进程环境：不写 .pyc。不用 PYTHONPYCACHEPREFIX 缓存——.pyc 只按 mtime（秒）+ 大小判新旧，
     同一秒内的等长改动会读到旧字节码。"""
-    return dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    from .runner import _verb_module
+    return _verb_module("跑测试").clean_env(PYTHONDONTWRITEBYTECODE="1")
 
 
 def done_facts(tests_pass, unmet, redo_left, confirm_left):

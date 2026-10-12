@@ -11,6 +11,8 @@
              "refs": [引用列表：这份资料包选中的文件 / 条目，补查后做增补用],
              "info": 包自己的内部信息（交回给 extra）,
              "记录": 要并进结果记录 v2.* 的字段（如 {"候选": [...], "测试断言文件": [...]}）}
+  plan_outline(task, project) -> dict      （可选；规划 plan_mode=read 用，不实现就只给任务原文）
+      只产「文件大纲」：{"text": 大纲文本, "refs": [候选文件], "记录": {…并进 v2.*}}；不收代码片段 / 引用行 / 测试断言（规划自己用 dsl 工具读）。
   extra(project, query, collected) -> dict
       执行「补查」：query 是补查那次调用回的 JSON（字段由 QUERY_SYS 规定），collected 是 collect 的出参。
       出参：{"text": 附到资料包后面的补查结果文本（可含增补的资料）, "log": [每项补查的记录，条数记进 v2.补查项],

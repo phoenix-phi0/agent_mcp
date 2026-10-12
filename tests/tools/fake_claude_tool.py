@@ -11,7 +11,10 @@ import time
 
 args = sys.argv[1:]
 opt = lambda n, d=None: args[args.index(n) + 1] if n in args and args.index(n) + 1 < len(args) else d  # noqa: E731
-sys.stdin.read()
+stdin_text = sys.stdin.read()
+if __import__("os").environ.get("FAKE_REC"):      # 记下每次被调用的参数和 stdin（测试核对用）
+    with open(__import__("os").environ["FAKE_REC"], "a", encoding="utf-8") as _f:
+        _f.write(json.dumps({"argv": args, "stdin": stdin_text}, ensure_ascii=False) + "\n")
 path = __import__("os").environ["FAKE_STEPS"]
 cfg = json.load(open(path, encoding="utf-8"))
 n = cfg.get("n", 0)

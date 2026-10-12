@@ -182,8 +182,9 @@ def outline(project, files, src=None):
 # ------------------------------------------------------------ 数据包
 
 
-def build(project, task, opening="未跑（验收时统一跑一次全量测试）", budget=PACK_CHARS):
-    """返回 (数据包文本, 信息 {chars, cands, seeds, peers, test_files})。"""
+def build(project, task, opening="未跑（验收时统一跑一次全量测试）", budget=PACK_CHARS, outline_only=False):
+    """返回 (数据包文本, 信息 {chars, cands, seeds, peers, test_files})。
+    outline_only：选完候选文件就返回，文本只有「文件大纲」一节（全部候选，不按 budget 砍；规划 plan_mode=read 用）。"""
     project = Path(project)
     terms, peers = terms_of(task)
     src = {}
@@ -221,6 +222,10 @@ def build(project, task, opening="未跑（验收时统一跑一次全量测试�
         for m in sorted(imports_of(r, src[r], code_set)):
             if m not in cands and score.get(m, 0) > 0:
                 cands.append(m)
+    if outline_only:
+        text = outline(project, cands, src)
+        return text, {"chars": len(text), "cands": cands, "seeds": seeds, "peers": sorted(peers), "test_files": [],
+                      "n_terms": len(weight)}
     keys = set(weight)
 
     def cand_block(r):
@@ -475,6 +480,12 @@ def collect(task, project, limits=None):
     text, info = build(project, task, **({"budget": limits["budget"]} if limits and limits.get("budget") else {}))
     return {"text": text, "refs": list(info["cands"]), "info": info,
             "记录": {"候选": info["cands"], "测试断言文件": list(info["test_files"])}}
+
+
+def plan_outline(task, project):
+    """只产文件大纲（不收代码片段 / 引用行 / 测试断言；规划 plan_mode=read 的 user 用）。出参同 collect 的 text / refs / 记录。"""
+    text, info = build(project, task, outline_only=True)
+    return {"text": text, "refs": list(info["cands"]), "记录": {"候选": list(info["cands"])}}
 
 
 def extra(project, query, collected):

@@ -71,6 +71,13 @@ CLAUDE_CODE_SESSION_ID 这些。原样传给子进程，claude -p 会以为自�
 （dsl_options 的 planner 逐条覆盖）；不设就是 dslagent 的缺省路径。
 资料包：dsl_options 的 pack（如 code）设成 dsl 进程的 DSLAGENT_PACK（验收 DSLAGENT_VERIFY 缺省跟随它）；不设用环境里的 / 缺省 code。
 取值不认识在提交时就报错，列出可用的（见 tools/dslagent/packs/）。
+规划方式：dsl_options 的 plan_mode（read 缺省 / full）设成 dsl 进程的 DSLAGENT_PLAN_MODE（v2 规划用：read = 任务原文 + 文件大纲 + 只读 dsl 工具按需读代码，
+full = 资料包全文 + 补查）；取值不对在提交时报错。
+按步骤指定模型：dsl_options.models = {plan, sub, fix, bound}（或一个字符串 = 四步都用它），没写的步骤 sonnet。
+plan = 规划 / 规划重写 / 补查，sub = 计划里的 问 / 问JSON / 派任务 / 并行派任务，fix = 验收补改，bound = 边界复核及其补改。
+模型串：sonnet / opus / haiku（或完整 claude 模型名）；codex:<模型>[:<强度>]（强度缺省 medium）；grok[:<强度>]（low|medium|high|xhigh，缺省 low）；
+opencode:<provider/model>。提交时校验，不合格直接报错：read 规划只支持 claude / codex（grok / opencode 做 plan 要同时设 plan_mode=full），
+DSLAGENT_SUBTASK=tool 时 sub 只支持 claude。顶层 model 仍是执行任务那个 claude 的模型，也仍透传成规划模型，但 models.plan 写了以它为准。
 
 dsl 在独立进程里跑（python -m tools.dslagent run），记录在任务目录 task_<n>/ 下；每条任务的
 engine_used（template / plan / plan_task / claude_fallback / claude）、versions、calls、cost_usd、seconds、calls_log
@@ -337,6 +344,19 @@ def _engine_fields(it: dict, i: int, engine, project, test_cmd, fallback,
             _packs.pick(str(opts["pack"]))
         except ValueError as e:
             raise CBatchError(f"第 {i} 条：dsl_options.pack 不对：{e}") from None
+    if opts.get("plan_mode"):
+        from tools.dslagent import v2 as _v2
+        try:
+            _v2.plan_mode(str(opts["plan_mode"]))
+        except ValueError as e:
+            raise CBatchError(f"第 {i} 条：dsl_options.plan_mode 不对：{e}") from None
+    if opts.get("models"):
+        from tools.dslagent import engines as _eng
+        try:
+            _eng.validate(opts["models"], str(opts.get("plan_mode") or os.environ.get("DSLAGENT_PLAN_MODE") or "read").strip().lower(),
+                          (os.environ.get("DSLAGENT_SUBTASK") or "json").strip().lower())
+        except ValueError as e:
+            raise CBatchError(f"第 {i} 条：dsl_options.models 不对：{e}") from None
     it.update(project=proj or None, test_cmd=own.get("test_cmd", test_cmd) or None,
               fallback=bool(fb), dsl_options=opts, engine_reason="")
 
@@ -368,7 +388,8 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
         project、test_cmd、fallback、dsl_options 是这批的默认值，tasks 里的字典可以逐条覆盖
         （{"prompt": …, "engine": "dsl", "project": "/path", "test_cmd": "…", "fallback": false}）。
         engine=dsl 必须有 project（任务里或这里）；test_cmd 缺省按项目探测 pytest / unittest。
-        dsl_options 是调试用的：{"max_plan": 2, "template": true, "inject": {...}, "planner": "v2", "pack": "code"}。
+        dsl_options 是调试用的：{"max_plan": 2, "template": true, "inject": {...}, "planner": "v2", "pack": "code", "plan_mode": "read",
+        "models": {"plan": "opus", "sub": "codex:gpt-5.1:low", "fix": "sonnet", "bound": "grok"}}（models 见模块文档）。
     concurrency / dsl_concurrency：isolated 模式下 claude 道、dsl 道（engine=dsl/auto）各自的并发上限，
         默认 1 / DSL_CONCURRENCY（3），最多 MAX_CONCURRENCY；见模块文档「并发」。share 模式逐条跑，不看这两个。
 
@@ -860,8 +881,15 @@ def _run_dsl(d: dict, t: dict, i: int) -> dict:
     if o.get("pack"):
         env["DSLAGENT_PACK"] = str(o["pack"])
         t["dsl_pack"] = str(o["pack"])
+    if o.get("plan_mode"):
+        env["DSLAGENT_PLAN_MODE"] = str(o["plan_mode"])
+        t["dsl_plan_mode"] = str(o["plan_mode"])
     if t.get("model"):
         env["DSLAGENT_PLAN_MODEL"] = str(t["model"])
+    if o.get("models"):
+        from tools.dslagent import engines as _eng
+        t["dsl_models"] = _eng.normalize(o["models"])
+        env["DSLAGENT_MODELS"] = json.dumps(t["dsl_models"], ensure_ascii=False)
     with open(tdir / "runner.log", "ab") as log:
         p = subprocess.Popen(cmd, cwd=str(ROOT), env=env, stdin=subprocess.DEVNULL,
                              stdout=log, stderr=log)

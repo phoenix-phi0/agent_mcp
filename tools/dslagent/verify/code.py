@@ -360,8 +360,8 @@ FAIL_LINE = re.compile(r"^(FAIL|ERROR): (\w+) \(([^)]*)\)", re.M)
 def run_boundary(project, test_cmd, bdir):
     """跑用例文件 bdir/test_boundary_v2.py。返回 {ok, ran, failed: [名], broken, tail, sec}。
     broken：用例文件本身跑不起来（语法错 / 导入错 / 一个用例都没跑到）。"""
-    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PROJ=str(Path(project).resolve()),
-               PYTHONPATH=os.pathsep.join([str(bdir), str(Path(project).resolve())]))
+    env = _test_verb().clean_env(PYTHONDONTWRITEBYTECODE="1", PROJ=str(Path(project).resolve()),
+                                 PYTHONPATH=os.pathsep.join([str(bdir), str(Path(project).resolve())]))
     env.pop("PYTHONPYCACHEPREFIX", None)
     t0 = time.time()
     try:

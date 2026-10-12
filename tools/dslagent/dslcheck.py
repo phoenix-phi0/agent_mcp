@@ -18,10 +18,19 @@ from tools.dsl_sections import split_sections
 MODE_ENV = "DSLAGENT_SUBTASK"
 SCRIPT_VERBS = ("改文件", "写文件", "搜索代码", "读片段", "查引用")
 SCRIPT_HEADS = {"use", "set", "if", "elif", "else", "end", "halt", "print"}
+READ_ONLY_VERBS = ("读片段", "搜索代码", "查引用")      # 规划（plan_mode=read）挂的只读工具
+READ_ONLY_HEADS = {"use", "set", "print"}
+HEAD_NAMES = {"use": "用包", "set": "设", "if": "如果", "elif": "否则如果", "else": "否则", "end": "结束", "halt": "终止", "print": "打印"}
+HEAD_ORDER = ("use", "set", "if", "elif", "else", "end", "halt", "print")
 BANNED = ("派任务", "并行派任务")
 ROUND_OUT = 6000
 READ_VERBS = ("读片段", "搜索代码", "查引用")
 EDIT_VERBS = ("改文件", "写文件")
+
+
+def _all_verbs():
+    from . import plan as DP
+    return DP.ALL_VERBS
 
 
 def env_mode():
@@ -29,8 +38,9 @@ def env_mode():
     return v if v == "tool" else "json"
 
 
-def check(text, first=True):
-    """语法 + 白名单。first=False 是后面几轮的段（不要求以 用包 开头）。返回 (整理后的脚本, 问题列表)。"""
+def check(text, first=True, verbs=SCRIPT_VERBS, heads=SCRIPT_HEADS):
+    """语法 + 白名单。first=False 是后面几轮的段（不要求以 用包 开头）。verbs / heads：允许的动词 / 语句头（只读工具传 READ_ONLY_*）。
+    返回 (整理后的脚本, 问题列表)。"""
     from . import plan as DP
     script, _ = DP.strip_prose(to_text(text))
     script, _, _ = DP.autoclose(script)
@@ -58,17 +68,17 @@ def check(text, first=True):
             probs.append(f"{where}：脚本子任务不能再 派任务 / 并行派任务")
             continue
         if h == "跑测试" or (h == "set" and split_head(rest.partition("=")[2].strip())[0] == "跑测试"):
-            probs.append(f"{where}：「跑测试」不在白名单里（子任务不跑测试，由上层验收统一跑；只许 {'、'.join(SCRIPT_VERBS)}）")
+            probs.append(f"{where}：「跑测试」不在白名单里（子任务不跑测试，由上层验收统一跑；只许 {'、'.join(verbs)}）")
             continue
         if h == "call" or h == "call_bg":
             probs.append(f"{where}：脚本子任务不能用 执行")
             continue
         if h not in kw:
-            if h not in SCRIPT_VERBS:
-                probs.append(f"{where}：认不出的语句或白名单外的动词「{s[:40]}」（只许 {'、'.join(SCRIPT_VERBS)}）")
+            if h not in verbs:
+                probs.append(f"{where}：认不出的语句或白名单外的动词「{s[:40]}」（只许 {'、'.join(verbs)}）")
             continue
-        if h not in SCRIPT_HEADS:
-            probs.append(f"{where}：语句「{s.split()[0]}」不在白名单里（只许 用包 设 如果 否则如果 否则 结束 终止 打印）")
+        if h not in heads:
+            probs.append(f"{where}：语句「{s.split()[0]}」不在白名单里（只许 {' '.join(HEAD_NAMES[x] for x in HEAD_ORDER if x in heads)}）")
             continue
         if h == "use":
             bad = [x for x in re.split(r"[\s,，、]+", rest) if x and x not in ("common", "text", "code")]
@@ -81,6 +91,8 @@ def check(text, first=True):
                 probs.append(f"{where}：设 的写法是 设 名字 = 值")
             elif sh in kw:
                 probs.append(f"{where}：「设 x = {val.strip().split()[0]}」不允许（右边只能是值或白名单动词）")
+            elif verbs != SCRIPT_VERBS and sh in _all_verbs() and sh not in verbs:
+                probs.append(f"{where}：动词「{sh}」不在白名单里（只许 {'、'.join(verbs)}）")
         elif h == "if":
             depth += 1
         elif h in ("elif", "else"):
@@ -162,8 +174,14 @@ def record_reads(sub, rec):
     sub._do_verb = wrapped
 
 
-def check_call(text, first):
-    """语法 + 白名单（技能版：不许 终止）。返回 (脚本, 问题列表)。"""
+def check_call(text, first, readonly=False):
+    """语法 + 白名单（工具版：不许 终止）。readonly：规划挂的只读工具，只许 读片段 / 搜索代码 / 查引用 + 用包 设 打印，不许 #改法 段。
+    返回 (脚本, 问题列表)。"""
+    if readonly:
+        script, probs = check(text, first=first, verbs=READ_ONLY_VERBS, heads=READ_ONLY_HEADS)
+        if re.search(r"^\s*#\s*改法|^\s*@@\s*(改|新建)", text or "", re.M):
+            probs.append("只读工具：不能写 #改法 / @@ 改 / @@ 新建")
+        return script, probs
     script, probs = check(text, first=first)
     body = script.split("\n#改法", 1)[0]
     for i, raw in enumerate(body.splitlines(), 1):

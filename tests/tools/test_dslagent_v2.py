@@ -29,6 +29,7 @@ TMP = Path(tempfile.mkdtemp(prefix="dslagent_v2_"))
 os.environ["DSLAGENT_TMP"] = str(TMP / "tmp")
 os.environ["CBATCH_CLAUDE"] = "/bin/true"
 os.environ.pop("DSLAGENT_PLANNER", None)
+os.environ["DSLAGENT_PLAN_MODE"] = "full"      # 本文件测老流程（资料包 + 补查）；read 方式见 test_dslagent_planread.py
 
 from tools.dslagent import runner as RN      # noqa: E402
 from tools.dslagent import v2 as V            # noqa: E402
