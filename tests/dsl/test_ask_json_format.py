@@ -131,6 +131,14 @@ def main():
     check("问JSON 格式不对：回复不是合法 JSON；最后一次回复：胡说" in out,
           f"一直非法 JSON 最后报错：{out[:80]}")
 
+    print("五、确定性修复（只补末尾的 } / ]）")
+    out = run("问JSON r = 问 格式 a:文本 b:列表 重问 0 次\n打印 {r.a}", ['{"a":"好","b":[1,2]']) [0]
+    check(out == "好", f"少一个 }} → 补齐后通过：{out!r}")
+    out = run("问JSON r = 问 格式 a:文本 b:列表 重问 0 次\n打印 {r.a}", ['{"a":"有 } 在里面","b":[{"x":1}'])[0]
+    check(out == "有 } 在里面", f"少 ] 和 }} 两个、字符串里含 }} 不误判：{out!r}")
+    out, m = run("问JSON r = 问 格式 a:文本 重问 1 次\n打印 {r.a}", ['{"a":"好"} ]', '{"a":"二"}'])
+    check(out == "二" and "回复不是合法 JSON（" in sent(m, 1)[2] and "Extra data" in sent(m, 1)[2],
+          "修不好 → 重问提示里带解析报错原文")
     print("三、语法")
     out, m = run("问JSON r = 请注意格式 要规范\n打印 {r.a}", ['{"a":"x"}'])
     check(out == "x" and m.calls[0]["type"] == "chat_json"

@@ -416,7 +416,7 @@ def main():
           [x["plan_model"] for x in dl.values()])
     n_jobs = len(cbatch.jobs(1000))
     for bad, needle, opts in [({"plan": "gpt-9"}, "不认识", {}), ({"judge": "opus"}, "步骤名", {}), ({"fix": "codex:gpt-5:turbo"}, "强度", {}),
-                              ({"plan": "grok"}, "plan_mode=full", {}), ({"plan": "opencode:a/b"}, "plan_mode=full", {"plan_mode": "read"}),
+                              ({"plan": "opencode:a/b"}, "plan_mode=full", {}), ({"plan": "opencode:a/b"}, "plan_mode=full", {"plan_mode": "read"}),
                               ("grok:ultra", "强度", {}), (["plan"], "字典或字符串", {})]:
         try:
             cbatch.submit([{"prompt": "DSLOK 错 models", "engine": "dsl", "project": str(proj), "dsl_options": {"models": bad, **opts}}],
@@ -428,7 +428,11 @@ def main():
                         "dsl_options": {"models": {"plan": "grok"}, "plan_mode": "full"}}], cwd=str(TMP))
     cbatch.wait(j["job_id"], timeout=60, every=0.2)
     check(True, "plan_mode=full 时 grok 规划可以提交")
-    check(len(cbatch.jobs(1000)) == n_jobs + 1, "报错的提交没有入队（只多了最后那个能提交的）", (n_jobs, len(cbatch.jobs(1000))))
+    j = cbatch.submit([{"prompt": "DSLOK read 下 grok 规划", "engine": "dsl", "project": str(proj),
+                        "dsl_options": {"models": {"plan": "grok:medium"}, "plan_mode": "read"}}], cwd=str(TMP))
+    cbatch.wait(j["job_id"], timeout=60, every=0.2)
+    check(True, "plan_mode=read 时 grok 规划可以提交")
+    check(len(cbatch.jobs(1000)) == n_jobs + 2, "报错的提交没有入队（只多了最后两个能提交的）", (n_jobs, len(cbatch.jobs(1000))))
 
     print("engine=dsl：dsl_options.pack 透传成 DSLAGENT_PACK，写错在提交时报错并列出可用的")
     DSL_LOG.unlink()

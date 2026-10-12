@@ -6,6 +6,7 @@ FAKE_ENGINES = json 文件 {"codex": [attempt, …], "grok": […], "opencode": 
 FAKE_ENGINES.<引擎>.n，超过就重复最后一个）。attempt：{"text": "回复", "mode": …, "call": "<dsl 代码>"}，mode：
   ok（缺省）正常回复 / silent 一个事件都不出（挂着）/ idle 先出一点再挂着 / invoke 回复里写 <invoke / big 回复 25000 字
   rc 退出码 3 + stderr / tool 出一个工具 / 命令事件。
+  （只对 grok，read 规划用）reads 先发 at["reads"] = [[工具名, 参数, 返回字数], …] 这些工具调用（带返回内容）再回复 / write 发一个 write 工具调用后挂着。
 call（只对带 mcp_servers.dsl 的 codex）：真的拉起那个 MCP 调一次 dsl 工具，再回复。
 FAKE_REC：每次被调用记 {"engine", "argv", "stdin"} 一行。"""
 import json
@@ -20,7 +21,7 @@ if name == "grok" and "-p" in args:
     stdin_text = args[args.index("-p") + 1]
 if os.environ.get("FAKE_REC"):
     with open(os.environ["FAKE_REC"], "a", encoding="utf-8") as f:
-        f.write(json.dumps({"engine": name, "argv": args, "stdin": stdin_text}, ensure_ascii=False) + "\n")
+        f.write(json.dumps({"engine": name, "argv": args, "stdin": stdin_text, "cwd": os.getcwd()}, ensure_ascii=False) + "\n")
 path = os.environ["FAKE_ENGINES"]
 atts = json.load(open(path, encoding="utf-8")).get(name) or [{"text": "（假引擎没有配置回复）"}]
 cnt = path + f".{name}.n"
@@ -84,6 +85,13 @@ elif name == "grok":
     if mode == "idle":
         out({"type": "text", "data": "部分"})
         time.sleep(30)
+    if mode == "write":
+        out({"type": "tool_call", "toolName": "write", "toolCallId": "w1", "rawInput": {"path": "x.txt"}})
+        time.sleep(30)
+    for k, (tn, tin, tn_chars) in enumerate(at.get("reads") or [], 1):
+        out({"type": "text", "data": "我先看看。"})
+        out({"type": "tool_call", "toolName": tn, "toolCallId": f"r{k}", "rawInput": tin})
+        out({"type": "tool_call_update", "toolCallId": f"r{k}", "rawOutput": {"Content": {"content": "y" * tn_chars}}})
     for i in range(0, len(text), 200):
         out({"type": "text", "data": text[i:i + 200]})
     out({"type": "end", "stopReason": "end_turn", "total_cost_usd": 0.003, "usage": {"input_tokens": 9, "output_tokens": 5}})

@@ -218,6 +218,56 @@ def test_parallel():
     check(out == "0", f"空列表返回空列表：{out!r}")
 
 
+def test_repair():
+    print("二b、回复格式确定性修复")
+    S = "用包 common\n设 r = 派任务 做事 无 无 说明:文本\n打印 {r.状态}|{r.结果.说明}|{r.repaired}"
+    good = '{"结果":{"说明":"好"},"状态":"成功","原因":""}'
+
+    def once(text, script=S):
+        n = {"i": 0}
+
+        def h(prompt, system=None):
+            n["i"] += 1
+            return text
+        out, _, m = run(script, h)
+        return out, n["i"], m
+
+    # 少一个 }：结果 没闭合，状态 / 原因 写进了 结果 里
+    out, n, _ = once('{"结果":{"说明":"好","状态":"成功","原因":""}')
+    check(out == "成功|好|补括号+状态上提" and n == 1, f"少一个 }} → 补齐并把状态提到顶层，不重问：{out!r} 调用{n}")
+    # 少一个 }：只差末尾
+    out, n, _ = once('{"结果":{"说明":"好"},"状态":"成功","原因":""')
+    check(out == "成功|好|补括号" and n == 1, f"只差末尾一个 }} → 补齐：{out!r}")
+    # 少两个
+    out, n, _ = once('{"结果":{"说明":"好","列":[1,2],"状态":"成功"')
+    check(out == "成功|好|补括号+状态上提" and n == 1, f"少两个 }} → 补齐：{out!r}")
+    # 字符串里的括号不算
+    out, n, _ = once('{"结果":{"说明":"有 } 和 ] 和 { 在字符串里"},"状态":"成功","原因":""')
+    check(out == "成功|有 } 和 ] 和 { 在字符串里|补括号" and n == 1, f"字符串里含括号不误判：{out!r}")
+    # 状态/原因嵌在结果里，括号配平
+    out, n, _ = once('{"结果":{"说明":"没做成","状态":"失败","原因":"缺文件"}}',
+                     "用包 common\n设 r = 派任务 做事 无 无 说明:文本\n打印 {r.状态}|{r.原因}|{r.结果.说明}|{r.repaired}")
+    check(out == "失败|缺文件|没做成|状态上提" and n == 1, f"状态/原因嵌在结果里 → 提到顶层：{out!r}")
+    # 正常回复不标 repaired
+    out, n, _ = once(good, "用包 common\n设 r = 派任务 做事 无 无 说明:文本\n打印 [{r.repaired 或}]")
+    check(out == "[]" and n == 1, f"正常回复不标 repaired：{out!r}")
+    # 修好了照常走字段校验：类型不对仍重问
+    out, n, m = once('{"结果":{"说明":3,"状态":"成功"')
+    check(n == 2 and out.startswith("失败|"), f"修复后字段仍不合格 → 照常重问：{out!r} 调用{n}")
+    # 修不好 → 重问，重问提示里有报错原文
+    out, n, m = once('{"结果":{"说明":"好"} ]')
+    msgs = m.calls[-1].get("messages") or []
+    check(n == 2 and len(msgs) == 3 and "回复不是合法 JSON（" in msgs[2]["content"] and "Expecting" in msgs[2]["content"],
+          f"修不好 → 重问，提示里带解析报错原文：{msgs[2]['content'][:120] if len(msgs) > 2 else msgs}")
+    # 重问仍坏 → 失败 格式不合格
+    out, n, _ = once("胡说八道", "用包 common\n设 r = 派任务 做事 无 无 说明:文本\n打印 {r.状态}|{r.原因}")
+    check(out == "失败|格式不合格" and n == 2, f"重问仍坏 → 状态 失败、原因 格式不合格：{out!r}")
+    # 重问用字段问题：缺字段会点名
+    out, n, m = once('{"结果":{"说明":"好"},"状态":"成功","原因":""}', "用包 common\n设 r = 派任务 做事 无 无 说明:文本,数量:数字\n打印 {r.状态}")
+    msgs = m.calls[-1].get("messages") or []
+    check(n == 2 and "缺少字段 结果.数量" in msgs[2]["content"], "缺字段 → 重问提示里点名缺的字段")
+
+
 def test_values():
     print("四、条件取值与重试写法")
     out, _, _ = run('用包 common\n设 a = 列表长度 甲,乙，丙\n设 xs = 解析JSON [{"a":"x,y"},{"b":1}]\n'
@@ -236,6 +286,7 @@ def main():
         test_halt(tmp)
         test_dispatch(tmp)
         test_parallel()
+        test_repair()
         test_values()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

@@ -3,7 +3,7 @@
 
     cd /home/ysc/mcp && .venv/bin/python tests/tools/test_dslagent_models.py
 
-  一、解析 / 校验：模型串各格式、强度取值、步骤名、字符串简写；read 规划只支持 claude / codex、tool 子任务只支持 claude；tag → 步骤
+  一、解析 / 校验：模型串各格式、强度取值、步骤名、字符串简写；read 规划支持 claude / codex / grok（opencode 不行）、tool 子任务只支持 claude；tag → 步骤
   二、路由（假 Python backend 跑 v2.run）：每步走对模型、缺省 sonnet、字符串简写、旧 DSLAGENT_PLAN_MODEL 兼容、models.plan 优先并记一句、
      非法 DSLAGENT_MODELS 判失败不调模型、calls.json 记 engine / model / effort、result.json 记生效的 models
   三、各引擎（假 codex / grok / opencode / claude 可执行脚本）：argv / stdin；保险：首事件前静默、空闲超时、<invoke、超长、rc≠0、尝试调用工具
@@ -20,7 +20,7 @@ sys.path.insert(0, str(HERE))
 import test_dslagent_v2 as T                   # noqa: E402  复用它的假项目 / 计划 / 假 backend
 
 TMP, V = T.TMP, T.V
-from tools.dslagent import engines as E          # noqa: E402
+from tools.dslagent import engines as E, packs          # noqa: E402
 
 PASS = FAIL = 0
 
@@ -76,7 +76,8 @@ def t_parse():
     check(raises(lambda: n(["plan"]), "字典或字符串") is True, "类型不对 → 报错")
     V_ = E.validate
     check(V_({"plan": "codex:gpt-5"}, "read", "json") == {"plan": "codex:gpt-5"} and V_({"plan": "opus"}, "read", "tool"), "read 规划：claude / codex 可以")
-    for eng in ("grok", "opencode:a/b"):
+    check(V_({"plan": "grok:medium"}, "read", "json") == {"plan": "grok:medium"} and V_("grok", "read", "json"), "read 规划：grok 可以（含字符串简写）")
+    for eng in ("opencode:a/b",):
         r = raises(lambda: V_({"plan": eng}, "read", "json"), "plan_mode=full", "read")
         check(r is True, f"read 规划用 {eng} → 报错，说明要 plan_mode=full", r)
         check(V_({"plan": eng}, "full", "json") == {"plan": eng}, f"full 规划用 {eng} 可以")
@@ -85,7 +86,7 @@ def t_parse():
     check(r is True, "tool 子任务用 codex → 报错", r)
     check(V_({"sub": "opus"}, "read", "tool") == {"sub": "opus"}, "tool 子任务用 claude 可以")
     check(V_("grok", "full", "json") == {k: "grok" for k in E.STEPS}, "字符串简写同样走组合检查（full + json 通过）")
-    check(raises(lambda: V_("grok", "read", "json"), "plan_mode=full") is True, "字符串简写 grok + read → 报错（plan 也是 grok）")
+    check(raises(lambda: V_("opencode:a/b", "read", "json"), "plan_mode=full") is True, "字符串简写 opencode + read → 报错（plan 也是 opencode）")
     S = E.step_of
     check([S(x) for x in ("plan", "plan_fix", "preq", "dsl01", "dsl12_读", "fix", "fix_reask", "bound", "bfix", "bfix_reask", "zzz")]
           == ["plan", "plan", "plan", "sub", "sub", "fix", "fix", "bound", "bound", "bound", None], "tag → 步骤")
@@ -163,8 +164,11 @@ def t_routes():
     calls = json.loads((out / "calls.json").read_text(encoding="utf-8"))
     by = {c["tag"]: c for c in calls}
     check(by["plan"]["engine"] == "claude" and by["plan"]["model"] == "sonnet" and by["plan"]["effort"] is None, "calls.json：plan 记 claude / sonnet", by["plan"])
-    check((by["dsl01"]["engine"], by["dsl01"]["model"], by["dsl01"]["effort"]) == ("grok", "默认", "high"), "calls.json：grok 记 engine / effort", by["dsl01"])
+    check((by["dsl01"]["engine"], by["dsl01"]["model"], by["dsl01"]["effort"]) == ("grok", "grok", "high"), "calls.json：grok 记 model=grok / effort=high（不记成 sonnet）", by["dsl01"])
     check((by["bound"]["engine"], by["bound"]["model"], by["bound"]["effort"]) == ("codex", "gpt-5.1", "low"), "calls.json：codex 记 model / effort", by["bound"])
+    from tools.dslagent import v2 as _v2
+    check([_v2._rec_model(E.parse(x)) for x in ("grok:low", "codex:gpt-6-luna:high", "sonnet", "opencode:a/b")] == ["grok", "gpt-6-luna", "sonnet", "a/b"],
+          "calls.json 记的模型：grok → grok、codex → 模型名、claude 照旧、opencode → 模型名（tool 模式同一函数）")
     check(r["v2"]["models"] == {"plan": "sonnet", "sub": "grok:high", "fix": "sonnet", "bound": "codex:gpt-5.1:low"}, "result.json 的 v2.models 是生效的四步", r["v2"]["models"])
     saved = json.loads((out / "result.json").read_text(encoding="utf-8"))
     check(saved["v2"]["models"] == r["v2"]["models"], "写进了 result.json")
@@ -192,7 +196,7 @@ def t_routes():
     check("规划模型说明" not in r["v2"], "两者相同不用记说明")
     # 非法 DSLAGENT_MODELS
     for name, val, needle in [("rt_bad1", {"plan": "gpt-9"}, "不认识"), ("rt_bad2", {"judge": "opus"}, "步骤名"), ("rt_bad3", "{坏", "JSON"),
-                              ("rt_bad4", {"plan": "grok"}, "plan_mode=full")]:
+                              ("rt_bad4", {"plan": "opencode:a/b"}, "plan_mode=full")]:
         f = MFake()
         r, p, out = run_with(name, f, val, mode="read" if name == "rt_bad4" else "full")
         check(r["reply"]["状态"] == "失败" and needle in r["reply"]["原因"] and not f.log and not r["changed_files"],
@@ -364,7 +368,7 @@ def t_flow():
     check(len(tools) == 1 and "读片段" in tools[0]["参数"] and tools[0]["返回字数"] > 50 and tools[0]["状态"] == "ok", "plan_tools.json 照写（工具名、参数、返回字数）", tools)
     check(r["v2"]["规划工具"]["次数"] == 1, "result.json 有规划工具汇总", r["v2"].get("规划工具"))
     calls = json.loads((out / "calls.json").read_text(encoding="utf-8"))
-    check([(c["tag"], c["engine"], c["model"], c["effort"]) for c in calls] == [("plan", "codex", "gpt-5.1", "high"), ("bound", "grok", "默认", "high")]
+    check([(c["tag"], c["engine"], c["model"], c["effort"]) for c in calls] == [("plan", "codex", "gpt-5.1", "high"), ("bound", "grok", "grok", "high")]
           and calls[0]["tool"] == 1 and calls[0]["tool_calls"] == 1, "calls.json：engine / model / effort（codex 规划记工具调用 1 次）", calls)
     check(r["v2"]["models"] == {"plan": "codex:gpt-5.1:high", "sub": "sonnet", "fix": "sonnet", "bound": "grok:high"}, "v2.models 记生效的四步", r["v2"]["models"])
 
@@ -399,8 +403,75 @@ def t_flow():
     check([x["engine"] for x in rc] == ["claude", "claude", "codex", "grok"], "调用顺序：补查 / 规划 claude → 子任务 codex → 边界复核 grok", [x["engine"] for x in rc])
 
 
+def t_grok_read():
+    print("五、grok read 规划（自带只读工具）")
+    old = (V.IDLE_SEC, E.GROK_READ_CAP)
+    V.IDLE_SEC = 2
+    os.environ["DSLAGENT_GROK_FIRST_CAP"] = "5"
+    try:
+        sp = E.parse("grok:medium")
+        proj = TMP / "grok_read_cwd"
+        proj.mkdir(exist_ok=True)
+        setup_fake({"grok": [{"text": "OUT .zs", "reads": [["read_file", {"path": "a.py", "start": 1, "end": 5}, 120], ["grep", {"pattern": "def f"}, 30]]}]})
+        r = E.call(sp, "SYS", "USER", 20, read_cwd=str(proj))
+        a = recs()[0]
+        argv = a["argv"]
+        deny = [argv[i + 1] for i, x in enumerate(argv) if x == "--deny"]
+        dis = argv[argv.index("--disallowed-tools") + 1].split(",")
+        check(a["cwd"] == str(proj) and argv[argv.index("--tools") + 1] == "read_file,grep,list_dir" and argv[argv.index("--max-turns") + 1] == "20"
+              and argv[argv.index("--reasoning-effort") + 1] == "medium" and argv[argv.index("--permission-mode") + 1] == "dontAsk"
+              and "--no-subagents" in argv and "--disable-web-search" in argv, "grok read 参数：cwd=项目、只读三件套、max-turns 20、强度、dontAsk、无子代理 / 联网", (a["cwd"], argv))
+        check({"write", "Edit", "Bash", "run_terminal_command", "MCPTool"} <= set(deny)
+              and {"write", "search_replace", "run_terminal_command", "spawn_subagent", "web_search", "web_fetch"} <= set(dis)
+              and not ({"read_file", "grep", "list_dir"} & set(dis)), "grok read：写 / 编辑 / 命令 / 联网 / 子代理 deny，只读工具不在禁用表", (deny, dis))
+        check(r["text"] == "OUT .zs" and not r["reason"] and r["rc"] == 0 and r["tool_calls"] == 2, "读完后回复 = 最后一次工具调用之后的文本", r)
+        check(r["calls"] == [{"工具": "read_file", "参数": {"path": "a.py", "start": 1, "end": 5}, "返回字数": 120}, {"工具": "grep", "参数": {"pattern": "def f"}, "返回字数": 30}],
+              "calls 记工具名、参数、返回字数", r["calls"])
+        setup_fake({"grok": [{"text": "x"}]})
+        E.call(sp, "SYS", "USER", 20)
+        a = recs()[0]
+        check(a["cwd"] != str(proj) and a["argv"][a["argv"].index("--tools") + 1] == "read_file" and "--max-turns" not in a["argv"], "不带 read_cwd 时仍是老参数（空目录、无 max-turns）")
+        setup_fake({"grok": [{"mode": "write"}]})
+        r = E.call(sp, "s", "u", 30, read_cwd=str(proj))
+        check(r["reason"] == "调用被禁工具" and r["text"] == "" and r["sec"] < 10, "出现被禁工具调用（write）→ 杀（调用被禁工具）", r)
+        E.GROK_READ_CAP = 100
+        setup_fake({"grok": [{"text": "x", "reads": [["read_file", {"path": "a"}, 60], ["read_file", {"path": "b"}, 60]]}]})
+        r = E.call(sp, "s", "u", 30, read_cwd=str(proj))
+        check(r["reason"] == "读超限" and r["text"] == "", "累计读入超上限 → 杀（读超限）", r)
+        E.GROK_READ_CAP = old[1]
+        check("调用被禁工具" in V.GUARD_REASONS and "读超限" in V.GUARD_REASONS, "两种原因都算保险触发（失败重试）")
+        # 提示：grok 版那句；claude / codex 不变
+        pk = packs.current()
+        sg, sc = V.plan_system(pk, "read", "grok"), V.plan_system(pk, "read")
+        check(V.READ_TAIL_GROK in sg and V.READ_TAIL not in sg and "每次最多读 200 行" in sg and "每轮最多 3 个工具调用" in sg and "dsl 工具" not in sg
+              and "搜索代码 / 查引用" not in sg, "grok 的 read system：换成 grok 版那句，不再提 dsl 工具", sg[:400])
+        check(V.READ_TAIL in sc and V.READ_TAIL_GROK not in sc and sc == V.plan_system(pk, "read", "claude") == V.plan_system(pk, "read", "codex"),
+              "claude / codex 的 read system 不变")
+        check(len(sg) < len(sc) + 400, "没有复制整份 system")
+        # 整条流程：规划走 grok read，plan_tools.json 记录
+        setup_fake({"grok": [{"text": T.PLAN_OK, "reads": [["read_file", {"path": "pkg/util.py", "start": 1, "end": 9}, 88]]}], "claude": [{"text": T.BOUND_OK}]})
+        r, p, out = run_real("fl_grok_read", {"plan": "grok:high"}, "read")
+        rc = [x for x in recs() if x["engine"] == "grok"]
+        check(r["fixed"] and "x + x" in T.util(p), "read 规划走 grok：全流程成功", r.get("stop"))
+        check(rc[0]["cwd"] == str(p) and rc[0]["argv"][rc[0]["argv"].index("--reasoning-effort") + 1] == "high" and V.READ_TAIL_GROK in rc[0]["argv"][rc[0]["argv"].index("--system-prompt-override") + 1]
+              and rc[0]["stdin"].startswith("【任务原文】") and "## 文件大纲" in rc[0]["stdin"], "流程里 grok：cwd=项目、强度、grok 版 system、user=任务+大纲")
+        tools = json.loads((out / "plan_tools.json").read_text(encoding="utf-8"))
+        check(len(tools) == 1 and tools[0]["工具"] == "read_file" and tools[0]["参数"]["path"] == "pkg/util.py" and tools[0]["返回字数"] == 88
+              and tools[0]["调用"] == "plan" and tools[0]["尝试"] == 1 and "序" in tools[0], "plan_tools.json 记 工具 / 参数 / 返回字数", tools)
+        check(r["v2"]["规划工具"] == {"次数": 1, "返回字数": 88}, "result 里有规划工具汇总", r["v2"].get("规划工具"))
+        # 被禁工具 → 重试 1 次
+        setup_fake({"grok": [{"mode": "write"}, {"text": T.PLAN_OK}], "claude": [{"text": T.BOUND_OK}]})
+        r, p, out = run_real("fl_grok_ban", {"plan": "grok"}, "read")
+        calls = json.loads((out / "calls.json").read_text(encoding="utf-8"))
+        check(r["fixed"] and calls[0].get("failed") == "调用被禁工具" and not calls[1].get("failed") and T.util(p) != T.UTIL,
+              "被禁工具调用 → 同输入重试 1 次后成功", [(c["tag"], c.get("failed")) for c in calls])
+    finally:
+        V.IDLE_SEC, E.GROK_READ_CAP = old
+        os.environ.pop("DSLAGENT_GROK_FIRST_CAP", None)
+
+
 def main():
-    for t in (t_parse, t_routes, t_engines, t_flow):
+    for t in (t_parse, t_routes, t_engines, t_flow, t_grok_read):
         t()
     print(f"\n通过 {PASS}，失败 {FAIL}")
     return 1 if FAIL else 0

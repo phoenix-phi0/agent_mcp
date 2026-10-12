@@ -34,6 +34,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from . import json_repair as JR
 from .dsl_core import HALT_STATES, ScriptReturn, to_text
 
 STATES = HALT_STATES
@@ -287,20 +288,22 @@ def dispatch_json(engine, task, inputs: list, logic, spec: list, client=None) ->
         except Exception as e:
             first = (str(e).strip().splitlines() or [type(e).__name__])[0]
             return _failed(f"模型没有回应：{first}"[:200])
+        repaired, err = "", ""
         if isinstance(reply, (dict, list)):        # 假客户端可以直接回结构
             data, last = reply, to_text(reply)
         else:
             last = str(reply)
-            try:
-                data = json.loads(strip_json(last))
-            except json.JSONDecodeError:
-                data = None
+            data, repaired, err = JR.parse(strip_json(last))
+        data, lifted = JR.lift_status(data)
+        if lifted:
+            repaired = (repaired + "+" if repaired else "") + "状态上提"
         value, problems = check_reply(data, spec)
         if not problems:
-            return value
+            return dict(value, repaired=repaired, 原文=last[:500]) if repaired else value
+        feedback = [p + f"（{err}）" if err and data is None and p == "回复不是合法 JSON" else p for p in problems]
         if attempt == 0:
             msgs = msgs + [{"role": "assistant", "content": last},
-                           {"role": "user", "content": _REASK.format("；".join(problems))}]
+                           {"role": "user", "content": _REASK.format("；".join(feedback))}]
     return _failed(FORMAT_BAD, 问题="；".join(problems), 回复=last[:500])
 
 

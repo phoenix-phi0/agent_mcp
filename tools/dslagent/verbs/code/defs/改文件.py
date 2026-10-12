@@ -8,6 +8,7 @@
 返回 {ok: 是/否, msg, n}。逐处在内存里依次应用（同一文件的多处按顺序叠加），
 每处 old 必须在当时的文本里恰好出现 1 次（否则 ok=否，msg 报出现了几次）；任何一处失败就整体不改（原子），
 msg 说明是第几处、为什么。测试文件（tests/ 下、test_*.py 等）不许改。写之前每个文件过安全约束（reason.check）。
+edits 里某项 old 为空（或缺省）且目标文件不存在 = 新建（内容 = new，父目录自动建）；文件已存在而 old 为空仍报错。
 CRLF 的文件按原换行写回：old/new 只用 LF 对不上原文时换成 CRLF 再找，没动到的行一字不变。
 成功后把笔记【代码】区里这些文件的片段刷新成改后的内容。
 例如 设 res = 改文件 {r}
@@ -128,12 +129,22 @@ def _do(改法, notes) -> dict:
         if not f:
             return fail(f"缺 file 键（这处给的键：{'、'.join(map(str, ed)) or '无'}；"
                         f"old 开头「{str(old)[:24]}」）——每处要写成 {{file, old, new}}，file 是相对路径")
-        if not isinstance(old, str) or not isinstance(new, str) or not old:
-            return fail(f"{f or '?'}：old / new 要是文本，old 不能为空")
+        if old is None:
+            old = ""
+        if not isinstance(old, str) or not isinstance(new, str):
+            return fail(f"{f or '?'}：old / new 要是文本")
         p, err = resolve(root, f)
         if err:
             return fail(err)
         rel = str(p.relative_to(root))
+        if not old:
+            if is_test_path(root, p):
+                return fail(f"不许写测试文件：{f}")
+            if rel in texts or p.exists():
+                return fail(f"{rel} 已存在，old 不能为空；要整份重写用 写文件")
+            texts[rel], orig[rel] = new, ""
+            created.append(rel)
+            continue
         if rel not in texts and not p.is_file():
             return fail(f"没有这个文件：{f}")
         if is_test_path(root, p):
@@ -178,6 +189,79 @@ def _do(改法, notes) -> dict:
     for rel in texts:
         a, b = orig[rel].splitlines(), texts[rel].splitlines()
         parts.append(f"{rel}（新建，{len(b)} 行）" if rel in created else f"{rel}（{len(a)} 行 → {len(b)} 行）")
-    head = f"已改 {len(edits)} 处" + (f"、新建 {len(created)} 个文件" if created else "")
+    head = f"已改 {len(edits) - sum(1 for e in edits if not e.get('old'))} 处" + (f"、新建 {len(created)} 个文件" if created else "")
     return {"ok": "是", "n": total,
             "msg": f"{head}：" + "、".join(parts) + "；【代码】区已刷新为改后内容"}
+
+
+def _spots(text, old, cap=5):
+    """old 在 text 里各处的起点行号（最多 cap 处），每处带前后各 1 行：[(行号, 摘要)]。"""
+    lines, out, pos = text.split("\n"), [], text.find(old)
+    while pos >= 0 and len(out) < cap:
+        a = text.count("\n", 0, pos)
+        near = " ⏎ ".join(x.strip()[:60] for x in lines[max(0, a - 1):a + 2])
+        out.append((a + 1, near))
+        pos = text.find(old, pos + len(old))
+    return out
+
+
+def 核对计划(root, sections) -> list:
+    """计划检查用（只读，不改文件）：sections 是 split_sections 给的 {段名: {edits, files}}。
+    每段按 改文件 的实际行为在内存里顺序套用，返回问题文本列表：文件不存在 / old 出现 0 次或多次（报次数和行号）/
+    @@ 新建 的文件已存在 / 路径越界、测试文件。"""
+    sys.path.insert(0, str(Path(__file__).parent))
+    from _sandbox import is_test_path, resolve
+    root, probs = Path(root).resolve(), []
+    for name, e in sections.items():
+        notes = set()
+        news = e.get("files") if isinstance(e.get("files"), list) else []
+        edits = _list(e, notes)
+        pre = f"#改法 {name}"
+        texts, seen = {}, set()
+        for k, it in enumerate(news, 1):
+            p, err = resolve(root, str(it.get("file") or ""))
+            if err:
+                probs.append(f"{pre} 新建第 {k} 个：{err}")
+                continue
+            rel = str(p.relative_to(root))
+            if is_test_path(root, p):
+                probs.append(f"{pre} 新建第 {k} 个：不许写测试文件 {rel}")
+            elif p.exists() or rel in seen:
+                probs.append(f"{pre} 新建第 {k} 个：{rel} 已存在，@@ 新建 只建新文件（要改已有文件用 @@ 改，old 写原文）")
+            seen.add(rel)
+            texts[rel] = ""
+        for k, ed in enumerate(edits, 1):
+            f, old, new = str(ed.get("file") or ""), ed.get("old"), ed.get("new")
+            where = f"{pre} 第 {k} 处改（共 {len(edits)} 处改）"
+            p, err = resolve(root, f)
+            if err:
+                probs.append(f"{where}：{err}")
+                continue
+            rel = str(p.relative_to(root))
+            if is_test_path(root, p):
+                probs.append(f"{where}：不许改测试文件 {rel}")
+                continue
+            if rel not in texts:
+                if not p.is_file():
+                    probs.append(f"{where}：文件 {rel} 不存在")
+                    continue
+                texts[rel] = _read(p)
+            if not isinstance(old, str) or not old or not isinstance(new, str):
+                continue
+            n, old, new = _locate(texts[rel], old, new)
+            if n == 0:
+                probs.append(f"{where}：{rel} 里找不到 old（出现 0 次；原文要一字不差、缩进一致"
+                             + ("；前面几处改过之后的文本才是这里的对照" if k > 1 else "") + "）。开头：" + old.split("\n")[0].strip()[:60])
+                continue
+            if n > 1:
+                sp = _spots(texts[rel], old)
+                more = f"（只列前 {len(sp)} 处）" if n > len(sp) else ""
+                probs.append(f"{where}：old 在 {rel} 里出现 {n} 次，必须唯一{more}："
+                             + "；".join(f"第 {a} 行「{b}」" for a, b in sp)
+                             + "。建议在 old 前后多带几行上下文让它唯一")
+                continue
+            if new == old:
+                probs.append(f"{where}：{rel} 里 old 和 new 一样，没有改动")
+                continue
+            texts[rel] = texts[rel].replace(old, new)
+    return probs

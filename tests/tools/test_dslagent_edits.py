@@ -186,12 +186,100 @@ def test_plan():
     check("预算 调用" in ex and "#改法 e1" in ex and "改文件 {e1}" in ex and "#清单" in ex, "示例脚本用上 预算 和 #改法 / #清单")
 
 
+def test_check_plan():
+    print("计划检查：#改法 原文对着真实文件核对（只读）")
+    from tools.dslagent import dslcheck as DC
+    from tools.dslagent import v2 as V
+    files = dict(SRC, **{"pkg/m.py": "a = 1\nx = 0\nb = 2\nx = 0\nc = 3\nx = 0\n"})
+    p = project("chk", files)
+    snap = {f.relative_to(p): f.read_bytes() for f in p.rglob("*") if f.is_file()}
+
+    def probs(sec):
+        return DC.edit_problems(p, "用包 common text code\n预算 调用 1 秒 60\n终止 成功 好\n" + sec)
+    pr = probs("#改法 e1\n" + blk("pkg/a.py", "return x", "return x + 1"))
+    check(pr == [], f"唯一匹配没问题：{pr}")
+    pr = probs("#改法 e1\n" + blk("pkg/a.py", "没有这行", "x"))
+    check(len(pr) == 1 and "#改法 e1" in pr[0] and "第 1 处" in pr[0] and "pkg/a.py" in pr[0] and "出现 0 次" in pr[0], f"0 次：{pr}")
+    pr = probs("#改法 e1\n" + blk("pkg/m.py", "x = 0", "x = 1"))
+    check(len(pr) == 1 and "出现 3 次" in pr[0] and "第 2 行" in pr[0] and "第 4 行" in pr[0] and "第 6 行" in pr[0]
+          and "a = 1" in pr[0] and "b = 2" in pr[0] and "多带几行上下文" in pr[0], f"多次：次数、行号、前后各 1 行、建议：{pr}")
+    pr = probs("#改法 e1\n" + blk("pkg/nope.py", "x", "y"))
+    check(len(pr) == 1 and "pkg/nope.py 不存在" in pr[0], f"文件不存在：{pr}")
+    pr = probs("#改法 e1\n@@ 新建 pkg/a.py\n<<<<<<< 内容\nz = 1\n>>>>>>> 新文\n")
+    check(len(pr) == 1 and "pkg/a.py 已存在" in pr[0] and "新建" in pr[0], f"新建的文件已存在：{pr}")
+    # 顺序套用：第 1 处把 B = 1 改成 B = 2，第 2 处再找 B = 1 就找不到；第 2 处找 B = 2 才对
+    pr = probs("#改法 e1\n" + blk("pkg/a.py", "B = 1", "B = 2") + blk("pkg/a.py", "B = 1", "B = 3"))
+    check(len(pr) == 1 and "第 2 处" in pr[0] and "出现 0 次" in pr[0] and "前面几处改过之后" in pr[0], f"顺序套用（前一对改完再找）：{pr}")
+    pr = probs("#改法 e1\n" + blk("pkg/a.py", "import json", "import json\nimport os") + blk("pkg/a.py", "B = 1", "B = 2"))
+    check(pr == [], f"顺序套用：前一对改变了长度，后一对照样找得到、不误报重叠：{pr}")
+    # 后一对的 old 落在前一对的新文本里：改文件 顺序套用时能套上，检查也要通过
+    seq1 = blk("pkg/a.py", "B = 1", "B = 2") + blk("pkg/a.py", "B = 2", "B = 3")
+    seq2 = (blk("pkg/a.py", "def f(x):\n    return x", "def f(x):\n    return 0")
+            + blk("pkg/a.py", "return 0\n\n\nB", "return 0\n\nB"))
+    for tag, seq, want in (("seq1", seq1, "B = 3\n"), ("seq2", seq2, "    return 0\n\nB = 1\n")):
+        pr = probs("#改法 e1\n" + seq)
+        q = project("chk_" + tag)
+        res = apply(q, "#改法 e1\n" + seq)
+        check(pr == [] and res["ok"] == "是" and (q / "pkg/a.py").read_text(encoding="utf-8").endswith(want),
+              f"old 落在前一对新文本里：检查通过、改文件 也套得上（{tag}）：{pr} {res}")
+    pr = probs("#改法 e1\n" + blk("pkg/a.py", "没有", "x") + "#改法 e2\n" + blk("pkg/m.py", "x = 0", "x = 1"))
+    check(len(pr) == 2 and "#改法 e1" in pr[0] and "#改法 e2" in pr[1], f"每段各自核对、文案带段名：{pr}")
+    check(all(f.read_bytes() == snap[f.relative_to(p)] for f in p.rglob("*") if f.is_file()) and len(list(p.rglob("*"))) == len(snap) + 3,
+          "核对只读，项目文件不变")
+    # v2.check：静态过后接着核对，问题进检查错误（交给规划重写）
+    plan = "用包 common text code\n预算 调用 3 秒 60\n设 res = 改文件 {e1}\n终止 成功 好\n#改法 e1\n" + blk("pkg/m.py", "x = 0", "x = 1") + "#清单\n改 pkg/m.py:x\n"
+    problem, *_ = V.check(p, TMP / "dry_chk", plan, "改 x")
+    check("出现 3 次" in problem and "pkg/m.py" in problem and "第 2 行" in problem, f"v2.check 报出：{problem[:200]}")
+    # 复用 改文件 的匹配：CRLF 文件、old 只用 LF 也能唯一匹配
+    q = project("chk_crlf", {"pkg/a.py": "def f(x):\r\n    return x\r\n", "pkg/__init__.py": ""})
+    pr = DC.edit_problems(q, "#改法 e1\n" + blk("pkg/a.py", "def f(x):\n    return x", "def f(x):\n    return 1"))
+    check(pr == [], f"CRLF 文件按改文件的方式匹配：{pr}")
+
+
+def test_create_json():
+    print("改文件：old 为空且文件不存在 = 新建")
+    p = project("mk")
+    ed = lambda f, old, new: {"file": f, "old": old, "new": new}  # noqa: E731
+    apply_e = lambda e: apply_json(p, e)  # noqa: E731
+    r = apply_e({"edits": [ed("pkg/new/safe.py", "", "def s():\n    return 1\n")]})
+    check(r["ok"] == "是" and (p / "pkg/new/safe.py").read_text(encoding="utf-8") == "def s():\n    return 1\n" and "新建" in r["msg"],
+          f"old 空 + 文件不存在：新建（父目录自动建）：{r}")
+    r = apply_e({"edits": [ed("pkg/a.py", "", "x = 1\n")]})
+    check(r["ok"] == "否" and "已存在" in r["msg"] and "old 不能为空" in r["msg"] and "写文件" in r["msg"]
+          and (p / "pkg/a.py").read_text(encoding="utf-8") == SRC["pkg/a.py"], f"old 空 + 文件已存在：报错、不改：{r}")
+    r = apply_e({"edits": [{"file": "pkg/n2.py", "new": "k = 1\n"}]})
+    check(r["ok"] == "是" and (p / "pkg/n2.py").is_file(), f"old 缺省也算空：{r}")
+    # 混合原子性：新建 + 改，其中一处不行 → 一个文件都不建
+    r = apply_e({"edits": [ed("pkg/n3.py", "", "k = 1\n"), ed("pkg/a.py", "没有这行", "x")]})
+    check(r["ok"] == "否" and "整体没有改动" in r["msg"] and not (p / "pkg/n3.py").exists(), f"混合：后面的改失败，前面的新建也不落盘：{r}")
+    r = apply_e({"edits": [ed("pkg/n3.py", "", "k = 1\n"), ed("pkg/a.py", "B = 1", "B = 9"), ed("pkg/n3.py", "k = 1", "k = 2")]})
+    check(r["ok"] == "是" and (p / "pkg/n3.py").read_text(encoding="utf-8") == "k = 2\n" and "B = 9" in (p / "pkg/a.py").read_text(encoding="utf-8")
+          and "新建 1 个文件" in r["msg"], f"混合成功：新建 + 改，新建的文件后面还能接着改：{r}")
+    r = apply_e({"edits": [ed("pkg/n4.py", "", "a\n"), ed("pkg/n4.py", "", "b\n")]})
+    check(r["ok"] == "否" and not (p / "pkg/n4.py").exists(), f"同批两次新建同一文件：报错不落盘：{r}")
+    r = apply_e({"edits": [ed("tests/test_new.py", "", "x = 1\n")]})
+    check(r["ok"] == "否" and "测试文件" in r["msg"] and not (p / "tests/test_new.py").exists(), f"安全约束照旧：不许新建测试文件：{r}")
+    r = apply_e({"edits": [ed("../escape.py", "", "x = 1\n")]})
+    check(r["ok"] == "否" and not (p.parent / "escape.py").exists(), f"安全约束照旧：不许越出项目：{r}")
+
+
+def apply_json(proj, e):
+    import json
+    m = MockClient(handler=lambda p, s=None: "嗯", offline=True)
+    eng = AgentEngine(client=m, workdir=proj, verbose=False, verbs_root=P.PKG / "verbs")
+    eng.vars["e"] = json.dumps(e, ensure_ascii=False)
+    eng.run("用包 common text code\n设 res = 改文件 {e}\n")
+    return eng.vars["res"]
+
+
 def main():
     try:
         test_apply()
         test_crlf()
         test_reason()
         test_plan()
+        test_check_plan()
+        test_create_json()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n通过 {passed}，失败 {failed}")

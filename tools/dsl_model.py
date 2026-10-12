@@ -41,6 +41,7 @@ import re as _re
 from pathlib import Path
 
 from . import config
+from . import json_repair as _jr
 from .dsl_core import (ATTACH_RE, DEFAULT_TOOL_ROUNDS, DSLError,
                        MAX_CALL_DEPTH, MODEL_ID_RE, MODEL_RE, RETRY_RE,
                        TOOLS_RE, UNEXPANDED_RE, to_text)
@@ -497,22 +498,24 @@ class ModelMixin:
         for attempt in range(reasks + 1):
             reply = self.client.chat_messages(
                 msgs, temperature=self.temperature, model=model or self.model)
+            err = ""
             if isinstance(reply, (dict, list)):     # 假客户端的 handler 可直接回结构
                 data, last = reply, to_text(reply)
             else:
                 last = str(reply)
-                try:
-                    data = json.loads(strip_json(last))
-                except json.JSONDecodeError:
+                data, _, err = _jr.parse(strip_json(last))
+                if data is None:
                     data = _BAD_JSON
             value, problems = _check_format(data, spec)
             if not problems:
                 return value
             if attempt < reasks:
+                feedback = [p + f"（{err}）" if err and data is _BAD_JSON and p == "回复不是合法 JSON" else p
+                            for p in problems]
                 msgs = msgs + [
                     {"role": "assistant", "content": last},
                     {"role": "user", "content": _REASK.format(
-                        "；".join(problems))}]
+                        "；".join(feedback))}]
         raise DSLError(f"第 {lineno + 1} 行：问JSON 格式不对："
                        f"{'；'.join(problems)}；最后一次回复：{last[:200]}")
 

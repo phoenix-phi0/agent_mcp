@@ -5,164 +5,16 @@
 用户提示只放每次不同的部分（任务、测试摘要、文件清单、上一版脚本和输出）。
 """
 
-CHEAT = """【DSL 速查（只能用这里列出的语句）】
-一行一句，没有换行字面量；# 开头是注释。预置变量 {task}＝任务描述。变量 {name}、取字段 {r.action}、{x 或 默认}（取不到用默认）、{x 或}（取不到给空）。
-用包 common text code          第一行必须是这句
-设 name = 值                    文本赋值；右边整个是 {var} 时保留结构（字典/列表）
-设 name = 动词 参数…            调动词，返回值存进 name（可能是结构，用 {name.字段} 取）
-设 n = 计算 {a} + 1             算术：+ - * / // %、括号
-问 reply = 提示词               调模型，拿一段文本
-问JSON r = 提示词 格式 字段:类型 … [重问 N 次]
-                                调模型拿 JSON。类型：文本 数字 是否 列表 A|B|C（枚举），字段名后加 ? 可选。
-                                系统自动附格式说明，格式不对自动带着问题重问（默认 2 次），用完报错停脚本。
-                                例：问JSON v = 看测试结果判断下一步：{t.summary} 格式 action:改|查|停 reason:文本 code?:文本
-打印 文本                        输出一行（下一轮规划时你能看到全部打印输出）
-如果 条件 … 否则如果 条件 … 否则 … 结束
-   条件：甲 运算符 乙，运算符：等于 不等于 包含 不包含 为空 不为空 大于 小于 不小于 不大于 开头是 结尾是；
-   组合用 且 / 或 / 非 / 括号。例：如果 {t.passed} 等于 否 且 {k} 小于 3
-遍历 i 于 1，2，3 … 结束          按列表逐项循环（全角逗号分隔）；可用 跳出 / 继续 提前结束或跳过本轮
-当 条件 最多 N 次 … 结束           条件成立就再跑一轮（每轮开头重新判断，条件写法同 如果），必须写「最多 N 次」（N≤1000）；
-                                跑满 N 次条件仍成立就接着往下走，{loop_full} 为 是。例：当 {done} 不等于 是 最多 3 次
-重复 N 次 [计数 i] … 结束         固定次数循环，i 从 1 开始
-跳出 / 继续                      结束 / 跳过本轮最内层循环（当、重复、遍历里都能用），只能写在循环里
-执行 _plan/名字.zs key={var}     调子脚本（另有系统提供的 执行 定位.zs / 读改测.zs，见写法要点）（独立作用域，key 在子脚本里是 {key}）；设 x = 执行 _plan/名字.zs key={var} 拿子脚本「返回」的值
-返回 值                          结束当前脚本（在子脚本里只结束子脚本）并交出一个值
-终止 成功|失败|超出预期 原因      结束整个流程（循环、如果里都行），带状态和原因；在子脚本里只结束子脚本，
-                                调用方 设 r = 执行 _plan/x.zs 拿到 {r.状态} {r.原因} {r.停在}，再决定接着走还是 终止 {r.状态} {r.原因}
-预算 调用 N 秒 M                  整个流程最多调 N 次模型、跑 M 秒（可只写其一）；含 派任务/并行派任务、子脚本、重问。
-                                超出就按 终止 超出预期 结束，原因「预算用完：…」。写在开头，例：预算 调用 6 秒 300
-#改法 名 段（写在脚本末尾）        多行的代码原文不写进语句，写进段里，按字面、不转义；脚本里 {名} 就是这份改法，设 res = 改文件 {名} 一次套全部条目：
-    #改法 e1
-    @@ 改 pkg/calc.py
-    <<<<<<< 原文
-    …原文（一字不差，含缩进，不带「  12| 」行号前缀，在文件里只能出现一次）…
-    =======
-    …新文…
-    >>>>>>> 新文
-    @@ 新建 pkg/util.py
-    <<<<<<< 内容
-    …新文件的完整内容（文件已存在就不写）…
-    >>>>>>> 新文
-                                同一个 @@ 改 下可连写多对 <<<<<<< / ======= / >>>>>>>；可以有多段（e1、e2…）。
-                                原文出现 0 次或多次 → ok=否，msg 报出现几次，整体不改；CRLF 文件按原换行写回。
-#清单 段（可选，写在最后）          逐行「改 路径:函数名」「新建 路径」「删 路径」，可加一行「提示 …」，列出这次要动的全部文件。
-注意：动词参数按空格切——带空格的文本先放进变量，再写 {变量} 传；提示词里可以直接嵌 {变量}（多行内容也行）。
-所有模型调用固定用平衡档，不要写「用 …」后缀，也不要写「模型」语句。"""
+from . import promptfile as PF
 
-VERBS = """【可用动词（白名单，别的动词和语句一律判错）】
-code 包（只能读写项目里的文件，不能改测试文件）：
-- 列文件 [全部] → 文本：所有 .py 文件和行数；写「列文件 全部」另外列出 .json/.csv/.md 等数据、文档文件
-- 搜索代码 正则 → 文本，每行「文件:行号: 那一行」；正则里空格写 \\s。例：设 hits = 搜索代码 def\\s+is_valid
-    可选第二个参数「范围」：文件或目录（相对项目根），多个用逗号隔开、不要空格，只在范围内搜；不写搜全部 .py。
-    例：设 hits = 搜索代码 def\\s+is_valid tools/dsl.py　或　搜索代码 KEYWORDS tools/dsl_core.py,tools/dslagent
-    命中超过 30 条时返回：「共 N 条命中，分布在 M 个文件」+ 每个文件一行命中数 + 前 30 条 + 「结果太多，请换更精确的关键词」
-    ——这时该换具体的标识符/编号/函数名再搜（比如 SKU 编号、函数名），或直接读整个文件。
-- 读片段 段落 → 文本，带行号前缀「  12| 」。段落写「文件:起-止」，多段用逗号隔开、不要空格；写了区间的每段≤200 行。
-    只写文件名（不带行号）= 读整个文件：≤500 行的文件整份返回；更长的只给前 120 行 +「文件共 N 行，太长请指定区间」+ 该文件的函数/类及行号清单。
-    没写文件名的段沿用前一段的文件（pkg/a.py:1-20,80-95 = a.py 的两段）。
-    例：设 src = 读片段 pkg/coupon.py,tests/test_coupon.py:1-40
-- 运行代码 {code} → 结构 {ran: 是/否, text}。code 是一段≤30 行 Python（只能来自变量，比如 问JSON 的文本字段），
-    在项目根目录跑，只用于 import 项目里的模块、用 print 看中间值；10 秒超时、不联网、不许写文件。
-    限制：不能 import subprocess/socket/shutil，不能用 os.system，不能跑测试（unittest/pytest，测试用 跑测试 动词）——违反直接被拒（ran=否，text 是拒绝原因）。
-    让模型写 code 时把这些限制写进提示词；被拒时把 {ran.text} 带进下一轮提示词让它换写法。
-- 改文件 {e} → 结构 {ok: 是/否, msg, n}。e 是 {file, old, new} 或 {edits:[{file, old, new}, …]}：old 是文件原文一字不差
-    （含缩进，不带「  12| 」行号前缀，在文件里只出现一次），new 是替换后的文本；任何一处对不上整体不改，msg 说明哪处错。
-    e 用 问JSON 产出再传入：问JSON e = …把要改的原文给模型看… 格式 edits:列表 note:文本，然后 设 res = 改文件 {e}
-    原文已经看得到时直接写进脚本末尾的 #改法 段（见速查），设 res = 改文件 {e1}：段里的 @@ 改 / @@ 新建 一次全套上（原子，任何一处不行整体不改）。
-- 跑测试 → 结构 {passed: 是/否, summary}，summary 是失败摘要（测试名、调用位置、异常行）或「全部通过：…」
-- 写文件 {e} → 结构 {ok: 是/否, msg, n}。e 是 {file, content} 或 {files:[{file, content}, …]}：新建文件或整份覆盖已有文件
-    （任何类型：.py / .json / .md 都行，父目录不存在会自动建；不许写测试文件）。content 是完整的新文件内容。
-    e 用 问JSON 产出：问JSON e = …把要写的内容要求说清楚… 格式 files:列表 note:文本，提示词里写明「每项字段名固定为 file（相对路径）、content（完整内容）」，然后 设 res = 写文件 {e}。
-    改已有文件的局部仍优先用 改文件（old/new 精确替换）；新建文件、或要整份重写某个文件时用 写文件。
-- 删文件 路径 → 结构 {ok: 是/否, msg}。删掉项目里的一个非测试文件（不存在也算成功）。例：设 d = 删文件 pkg/data/old.csv
-- 改模块名 旧路径 新路径 兼容 导出名 → 结构 {ok: 是/否, msg, left}。确定性地把模块 旧路径(.py) 挪到 新路径，范围内非测试 .py 里的
-    import 和 模块名.函数 调用按词边界全部换成新模块名；兼容=是 时在旧路径留兼容模块，只从新模块重新导出 导出名（逗号分隔，空=全部公开名字）。
-    例：设 m = 改模块名 pkg/textutil.py pkg/textnorm.py 是 strip_punct,normalize
-- 安全约束（改文件/写文件/删文件/改模块名 动作前自动检查）：删仍被非测试代码引用、或还没生成记录数一致的新数据文件的源数据、
-    覆盖任务没点名且与开局不一致的数据文件、写改删 tests/、越出项目 → 被拦（ok=否，msg 说明原因）——按原因调整顺序/做法。
-- 查引用 名字 [py] → 结构 {n, files, refs:[{file, line, text}], text}：名字在项目里的所有引用（整词匹配，排除 .venv、__pycache__），
-    写 py 只看 .py。删/改名前先查：设 refs = 查引用 old_name py，如果 {refs.n} 大于 0 …
-text 包：
-- 匹配 文本 正则 → {matched: 是/否, all, groups}；找全部 文本 正则 → 列表；替换 文本 正则 [替换为] → 文本
-- 截取 文本 起 [长度]；相等 甲 乙 → 是/否；挑行 文本 正则 → {hits, rest}；按正则切分 文本 正则 → 列表
-common 包：
-- 解析JSON 文本 → 结构（解析不了给空字典）；列表长度 甲,乙 或 列表长度 {列表变量} → 数；转数字 文本；取字段 JSON文本 路径；相加 甲 乙
-- 派任务 任务 [入参] [逻辑] [格式] → 结构 {结果, 状态, 原因}：把一件子任务交给模型（算 1–2 次模型调用）。四个参数都先 设 进变量再传；
-    入参是对象 {名: 值}，值写「文件:起-止」时动词读出那几行附上；格式是 结果 的字段（字段:类型 逗号隔开，同 问JSON）。
-    状态只能是 成功|失败|超出预期；回复不合格重答 1 次，仍不合格返回 状态=失败 原因=格式不合格。
-    例：设 inp.src = pkg/calc.py:1-40 / 设 r = 派任务 {desc} {inp} {logic} edits:列表,note:文本 / 如果 {r.状态} 等于 成功 … 用 {r.结果.edits}
-- 并行派任务 {jobs} [并发] → 列表（顺序同 jobs），每项 {结果, 状态, 原因}。jobs 每项是 {任务, 入参, 逻辑, 格式}，用 列表加项 拼；
-    互不依赖的子任务才并行，并发缺省 3。"""
+CHEAT = PF.text("cheat.md")
+VERBS = PF.text("verbs.md")
+TIPS = PF.text("tips.md")
+SKELETON = PF.text("skeleton.md")
+SYSTEM = PF.tpl("system.tpl.txt", CHEAT=CHEAT, VERBS=VERBS, TIPS=TIPS, SKELETON=SKELETON)
+SEE = PF.text("see.txt")
 
-TIPS = """【写法要点】
-- 赋值右边不要以「词+空格」开头：设 h = 根因 在 catalog 里 会把「根因」当成动词去调用（报「没有名为…的动词」）。
-  文本赋值要么整段不含空格，要么第一个空格之前带「：」或 {变量}，例如 设 h = 线索：根因在 catalog 里，或 设 h = {d.reason} 待核实。
-- 一条语句只能写在一行：问/问JSON 的提示词里不能换行（换行后的半句会被当成新语句判错）；需要分段就用「；」或「|」隔开，「格式 …」也写在同一行末尾。
-- 修改内容的字段名固定为 {file, old, new}：edits 是这种对象的列表。问JSON 让模型给 edits 时，在提示词里写明「每项字段名固定为 file（相对路径）、old、new」——不写的话模型常给 path 或干脆不给文件名，改文件会失败。
-- 改文件失败的原因 {res.msg} 和测试摘要 {t.summary} 都必须带进下一轮的提示词（比如 设 last = 【上轮】{res.msg}｜{t.summary}，下一轮提示词里嵌 {last}）；否则下一轮模型看不到为什么失败，会原样重复同一个错误。
-- 你看不到代码，只能靠脚本里的动词去读；读到的内容要嵌进 问JSON 的提示词里，模型才看得到（模型每次调用都是全新的，不记得前面的调用）。
-- 用 问JSON 加「格式」做判断，再用 如果 按字段分支（比如 action:改|再查|停）。
-- 改代码：先 读片段 拿到原文（带行号），把原文和测试失败一起交给 问JSON 让它给出 edits（提醒它 old 不带行号前缀），然后 改文件 {e}，再 跑测试。
-- 要重做（改了还没过、改文件失败）用 遍历 固定次数 + 完成标志（如果 {done} 等于 否 … 结束），或者写子脚本用 返回 交回结果。
-- 用 打印 输出下一轮规划需要知道的东西：读到/查到的关键事实、每次修改的 msg、测试摘要。下一版计划只看得到这些打印和测试结果。
-- 最后一行打印「结论：修好」「结论：没修好」或「结论：需要更多信息」之一，后面跟一句理由。
-- 模型调用有预算（见下），每个 问/问JSON（含格式不对的重问）都算一次；动词不算。超出预算脚本会被强制停下。
-- 标准子脚本 读改测.zs（系统提供，可以直接 执行，也可以不用）：
-    设 r = 执行 读改测.zs task={task} segs=文件:起-止,文件:起-止 [rounds=3] [hint={h}]
-    内部循环 rounds 轮（默认 3，最多 5）：读片段 segs → 问JSON 给出 action:改|无需改 reason edits（字段名已规定好）→ 改文件 → 跑测试，
-    每轮把 res.msg 和测试摘要带进下一轮；返回 {outcome: 修好|没修好|无需改|缺原文, rounds, last:{msg, test}, reason, need, log}。
-    segs 没读到要改的地方时，模型会说缺哪里（need），子脚本内部自动补读（最多 2 次）、每次多给一轮接着改，不用你处理；
-    补读后仍缺才返回 outcome=缺原文，{r.need} 是缺的位置——打印出来，下一版直接把它放进 segs。
-    每轮算 1 次模型调用。{task} 已预置为任务描述，可直接用；hint 放你查到的线索（先 设 h = … 再 hint={h}）。
-    推荐用法：先用 搜索代码 / 读片段 / 问JSON 选出该改的段落（segs，每段 ≤200 行；≤500 行的文件也可以只写文件名整份给），再 设 r = 执行 读改测.zs task={task} segs=…，
-    然后 如果 {r.outcome} 等于 修好 … 否则 … 分支，打印 {r.log} 和 {r.last.msg}。
-    一行示例：设 r = 执行 读改测.zs task={task} segs=pkg/coupon.py:1-40 rounds=2
-- 标准子脚本 定位.zs（系统提供）：拿不准该改哪里时，让模型现场决定怎么找。
-    设 p = 执行 定位.zs task={task} kw=起始正则 [hint={h}] [rounds=3]
-    内部循环 rounds 轮（默认 3，最多 5），每轮：搜索代码 {kw} → 问JSON 三选一：换关键词（给新 kw 再搜）| 运行看看（跑一段 ≤30 行 Python，输出带进下一轮）| 读这些（给 segs，读片段后返回）。
-    每轮把前几轮的搜索摘要（含命中太多时的按文件命中数）和运行输出（被拒时是拒绝原因）带进提示。每轮算 1 次模型调用。
-    选「读这些」后会自动核对：模型理由/运行输出里提到的关键标识（编号、函数名、字面量、数字常量）不在 segs 里，就精确搜索补读进 segs，{p.note} 里注明。
-    返回 {outcome: 找到|没找到, segs, src, note, kw, rounds, log}：找到时 segs 是要改的「文件:起-止」，src 是读到的原文，note 是模型的判断。
-    一行示例：设 p = 执行 定位.zs task={task} kw=def\\s+parse_date|DATE_FMT rounds=3
-    可选 pre=文件:起-止,…（预读段落）：预读的原文放进每轮提示，模型已能看到要改的行时可直接选「改」给 edits（直连，省一次调用），
-    这时 {p.first} 是这份改法；接着 执行 读改测.zs … first={p.first}，读改测 会先直接应用它、跑测试，没过才问模型。
-- 组合用法（骨架 + 调整点）：
-    设 p = 执行 定位.zs task={task} kw=…
-    如果 {p.outcome} 等于 找到
-      设 r = 执行 读改测.zs task={task} segs={p.segs} hint={p.note}
-      …按 {r.outcome} 分支打印结论（缺原文 时打印 {r.need}）…
-    否则
-      打印 {p.log}，结论：需要更多信息
-    结束
-- 根因不确定时先用 定位.zs 交互（搜索 → 运行看看中间值 → 再决定读哪段），不要一次读一大堆文件：读得多既贵，又把要改的地方淹没在无关代码里。
-- 拿不准的地方写成小循环/调用 定位.zs 让模型现场决定，不要只搜一次就往下走：计划是固定骨架，搜索关键词、要读哪段、要不要先运行看数据这些「调整点」交给 定位.zs 在执行时决定。
-  已经确定位置（任务里点名了函数、开局测试摘要里直接指到出错行）就直接 读改测.zs，不必先定位。
-- 子脚本（可选）：在主脚本后面写一行「#子脚本 名字.zs」，后面直到下一个「#子脚本」「#改法」「#清单」都是这个子脚本的内容，主脚本里用 执行 _plan/名字.zs 调。
-- #改法 / #清单 段放在最后（主脚本、子脚本之后）；段里的 {名} 在主脚本里用，子脚本要用就传进去：执行 _plan/x.zs e={e1}。
-- 只输出 .zs 脚本本身（含 #子脚本 / #改法 / #清单 段），不要代码围栏，不要任何解释文字。"""
-
-SKELETON = """【语法示意（只示意写法，不是答案）】
-用包 common text code
-设 done = 否
-设 t = 跑测试
-遍历 k 于 1，2
-  如果 {done} 等于 否
-    问JSON v = 根据失败 {t.summary} 判断 格式 action:继续|停 reason:文本
-    如果 {v.action} 等于 停
-      设 done = 是
-    结束
-    打印 第 {k} 轮：{v.action} {v.reason}
-  结束
-结束
-打印 结论：没修好 示意而已"""
-
-SYSTEM = ("你是写中文 DSL 自动化脚本的工程师。只输出脚本本身。\n\n下面是写脚本要用的说明（每次都一样）。\n\n"
-          f"{CHEAT}\n\n{VERBS}\n\n{TIPS}\n\n{SKELETON}")
-SEE = "（DSL 速查、可用动词、写法要点、语法示意见系统提示。）"
-
-TEMPLATE_NOTE = ("【说明】第 1 版是系统按规则套的固定模板（跑测试 → 定位.zs 预读+搜索 → 读改测.zs → 按 outcome 分支），"
-                 "没有修好。下面「上一版脚本/打印输出」就是这份模板和它的执行记录（定位、读改测每轮在做什么、改文件结果、测试摘要），"
-                 "据此换思路写下一版：比如换关键词、换要读的段落、先运行看看数据、或直接针对没过的测试改。")
+TEMPLATE_NOTE = PF.text("template_note.txt")
 
 
 def _intro(test_cmd):
@@ -170,58 +22,39 @@ def _intro(test_cmd):
 
 
 def first_prompt(desc, files, test, budget, plan_cap, versions_left, test_cmd):
-    return (f"你要写一段中文 DSL 脚本（.zs），让它自动排查并修好一个{_intro(test_cmd)}里的问题。"
-            f"脚本会被直接执行，执行完系统跑完整测试验收；没修好时你会看到这版脚本的打印输出、测试结果和已做的修改，再写下一版。{SEE}\n\n"
-            f"【任务】\n{desc}\n\n【开局测试失败摘要】\n{test}\n\n【文件清单】\n{files}\n\n"
-            f"【预算】这一版脚本里的模型调用最多 {plan_cap} 次（总预算还剩 {budget} 次，含之后再规划；还能再写 {versions_left} 版）。\n"
-            f"现在输出第 1 版脚本。")
+    return PF.tpl("first_prompt.tpl.txt", intro=_intro(test_cmd), SEE=SEE, desc=desc, test=test, files=files,
+                  plan_cap=plan_cap, budget=budget, versions_left=versions_left)
 
 
 def replan_prompt(desc, files, test0, budget, plan_cap, versions_left, ver, prev_script, prev_out, prev_err, test_now, diff,
                   test_cmd, template_note=""):
-    return (f"你在写中文 DSL 脚本（.zs）自动修一个{_intro(test_cmd)}。上一版（第 {ver} 版）脚本跑完没修好，现在写第 {ver + 1} 版。"
-            f"项目里的修改会保留（下面的 diff 是相对原始代码的全部修改），新脚本在这个基础上接着做。{SEE}\n\n"
-            + (f"{template_note}\n\n" if template_note else "")
-            + f"【任务】\n{desc}\n\n【开局测试失败摘要】\n{test0}\n\n【文件清单】\n{files}\n\n"
-            f"【上一版脚本】\n{prev_script}\n\n【上一版的打印输出】\n{prev_out or '（没有输出）'}\n\n"
-            + (f"【上一版的报错】\n{prev_err}\n\n" if prev_err else "")
-            + f"【当前测试结果】\n{test_now}\n\n【已做的修改（diff）】\n{diff or '（还没有改动源码）'}\n\n"
-            f"【预算】这一版脚本里的模型调用最多 {plan_cap} 次（总预算还剩 {budget} 次；这一版之后还能再写 {versions_left} 版）。\n"
-            f"吸取上一版的输出，输出第 {ver + 1} 版脚本。")
+    return PF.tpl("replan_prompt.tpl.txt", intro=_intro(test_cmd), SEE=SEE, ver=ver, next_ver=ver + 1,
+                  note=f"{template_note}\n\n" if template_note else "", desc=desc, test0=test0, files=files,
+                  prev_script=prev_script, prev_out=prev_out or "（没有输出）",
+                  err=PF.tpl("replan_err.tpl.txt", prev_err=prev_err) if prev_err else "",
+                  test_now=test_now, diff=diff or "（还没有改动源码）", plan_cap=plan_cap, budget=budget,
+                  versions_left=versions_left)
 
 
 def task_first_prompt(desc, files, test, budget, plan_cap, versions_left, test_cmd):
     """任务路径（开局测试全过、不是修 bug）的第 1 版规划提示；系统提示同 SYSTEM。"""
-    return (f"你要写一段中文 DSL 脚本（.zs），让它自动完成一个{_intro(test_cmd)}里的任务。"
-            f"这不是修 bug：开局测试全部通过，做完后测试也必须全部通过；任务是否真的完成另有验收（你看不到）。"
-            f"脚本会被直接执行；执行完如果测试没全过、脚本报错、或者最后的结论不是「修好」，你会看到这版脚本的打印输出、测试结果和已做的修改，再写下一版。"
-            f"最后一行打印「结论：修好」表示任务全部做完（这里「修好」＝任务完成），没做完就打印「结论：没修好」并说明还差什么。"
-            f"只有任务明确要求动词做不到的事（装依赖、联网、跑测试以外的命令、改项目外的文件）时，脚本只写一行 "
-            f"打印 结论：缺能力：<缺什么>（会直接交给别的执行端）。{SEE}\n\n"
-            f"【任务】\n{desc}\n\n【开局测试】\n{test}\n\n【文件清单】\n{files}\n\n"
-            f"【预算】这一版脚本里的模型调用最多 {plan_cap} 次（总预算还剩 {budget} 次，含之后再规划；还能再写 {versions_left} 版）。\n"
-            f"现在输出第 1 版脚本。")
+    return PF.tpl("task_first_prompt.tpl.txt", intro=_intro(test_cmd), SEE=SEE, desc=desc, test=test, files=files,
+                  plan_cap=plan_cap, budget=budget, versions_left=versions_left)
 
 
 def task_replan_prompt(desc, files, test0, budget, plan_cap, versions_left, ver, prev_script, prev_out, prev_err, test_now,
                        diff, test_cmd, note=""):
-    return (f"你在写中文 DSL 脚本（.zs）自动完成一个{_intro(test_cmd)}里的任务（不是修 bug，开局测试全过）。"
-            f"上一版（第 {ver} 版）脚本跑完没有完成（测试没全过、报错、结论不是「修好」、或完成核对没过），现在写第 {ver + 1} 版。"
-            f"项目里的修改会保留（下面的 diff 是相对开局的全部修改），新脚本在这个基础上接着做。"
-            f"最后一行打印「结论：修好」表示任务全部做完。{SEE}\n\n"
-            + (f"{note}\n\n" if note else "")
-            + f"【任务】\n{desc}\n\n【开局测试】\n{test0}\n\n【文件清单】\n{files}\n\n"
-            f"【上一版脚本】\n{prev_script}\n\n【上一版的打印输出】\n{prev_out or '（没有输出）'}\n\n"
-            + (f"【上一版的报错】\n{prev_err}\n\n" if prev_err else "")
-            + f"【当前测试结果】\n{test_now}\n\n【已做的修改（diff）】\n{diff or '（还没有改动）'}\n\n"
-            f"【预算】这一版脚本里的模型调用最多 {plan_cap} 次（总预算还剩 {budget} 次；这一版之后还能再写 {versions_left} 版）。\n"
-            f"吸取上一版的输出，输出第 {ver + 1} 版脚本。")
+    return PF.tpl("task_replan_prompt.tpl.txt", intro=_intro(test_cmd), SEE=SEE, ver=ver, next_ver=ver + 1,
+                  note=f"{note}\n\n" if note else "", desc=desc, test0=test0, files=files,
+                  prev_script=prev_script, prev_out=prev_out or "（没有输出）",
+                  err=PF.tpl("replan_err.tpl.txt", prev_err=prev_err) if prev_err else "",
+                  test_now=test_now, diff=diff or "（还没有改动）", plan_cap=plan_cap, budget=budget,
+                  versions_left=versions_left)
 
 
 def fix_prompt(script, problem):
-    return (f"你写的中文 DSL 脚本没通过检查（白名单检查或用假模型空跑）。问题：\n{problem}\n\n【原脚本（带行号）】\n"
-            + "\n".join(f"{i:3d}| {l}" for i, l in enumerate(script.splitlines(), 1))
-            + f"\n\n{SEE}改正后输出完整脚本（不带行号、不要代码围栏、不要解释）。")
+    return PF.tpl("fix_prompt.tpl.txt", SEE=SEE, problem=problem,
+                  numbered="\n".join(f"{i:3d}| {l}" for i, l in enumerate(script.splitlines(), 1)))
 
 
 # ------------------------------------------------------------ 定位.zs / 读改测.zs 的固定说明（系统提示）
@@ -244,30 +77,7 @@ def _tail(fmt):
 
 LOC_TAIL, RCT_TAIL = _tail(LOC_FORMAT), _tail(RCT_FORMAT)
 
-LIB_SYSTEM = f"""你是修 Python 项目 bug 的助手，被一个自动化流程逐步调用，每次调用都是独立的问题。用户消息以 {LOC_TAG} 或 {RCT_TAG} 开头，按下面对应一节的规则回答。
-通用规则：
-- 不能改测试文件（tests/ 下的文件）；如果查下来代码其实没有问题，就不要改代码，说明理由。
-- 代码原文每行带行号前缀「  12| 」；edits 的 old 里不要带这个前缀。
-- 修改内容 edits 是对象列表，每项字段名固定为 file（相对项目根的路径，如 pkg/x.py）、old（从原文一字不差抄，含缩进，不带行号前缀，在文件里只出现一次）、new（替换后的文本）；不要编没看到的原文。
-- 只输出一个 JSON 对象，不要代码围栏，不要任何解释。
-
-==== {LOC_TAG} 定位：找到要改的位置 ====
-用户消息里有：任务、线索、第几轮（是否最后一轮）、前几轮做了什么、已预读的原文、本轮搜索正则的命中、上一次运行看看的输出。
-根因可能不在 traceback 的帧里：数据文件（.json）、配置/常量、被调用的工具函数都可能是根因。
-下一步四选一：
-- 改＝预读的原文里已经能看到所有要改的行、并且确定怎么改——直接给 edits。
-- 换关键词＝搜索没命中/太多/不准，kw 给新的正则（空格写 \\s，可以用 | 并列具体的标识符、编号、函数名）。
-- 运行看看＝要先看数据或中间值才能确定位置，code 给 ≤30 行 Python（项目根目录跑，只用于 import 项目里的模块、用 print 打印中间值；不能 import subprocess/socket/shutil，不能用 os.system，不能跑测试（unittest/pytest），不许写文件，违反会被拒、白费一轮）。
-- 读这些＝已能确定要改的位置但还没看到原文，segs 给「文件:起-止」多段逗号隔开不带空格、每段≤200 行，≤500 行的文件可以只写文件名读整个文件。segs 要把所有要改的位置都包含进来，包括已经看到原文的文件（预读原文里要改的文件也要写进 segs）：下一步只会把 segs 里的原文给你，没写进 segs 的看不到、也改不了；根因有多处就都写上。
-reason 写你的判断（根因在哪、为什么）。
-若是最后一轮，能确定就给 读这些 或 改。{LOC_TAIL}
-
-==== {RCT_TAG} 读改测：给出改法 ====
-用户消息里有：任务、提示、当前代码、当前测试结果、上一轮改文件的结果。
-- 如果上一轮改文件失败，按它说的原因改正（old 要和文件原文一字不差、含缩进、在文件里只出现一次）。
-- 代码已经没问题就 action 填 无需改；要改就给 edits。
-- 要改的行不在当前代码里（手里没有原文）就不要编 old：action 填 改、不给 edits、need 填缺的位置——「文件:起-止」，或能精确搜到那几行的关键标识（商品编号、函数名、带引号的字面量、文件名），系统会补读给你。{RCT_TAIL}
-"""
+LIB_SYSTEM = PF.tpl("lib_system.tpl.txt", LOC_TAG=LOC_TAG, RCT_TAG=RCT_TAG, LOC_TAIL=LOC_TAIL, RCT_TAIL=RCT_TAIL)
 
 
 def lib_tail(prompt):

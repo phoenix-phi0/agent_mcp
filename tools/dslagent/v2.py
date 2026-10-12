@@ -10,6 +10,8 @@
         「用 dsl 工具读」；没有 1（collect）、没有 2（补查）；规划调用挂 dslmcp --readonly（读片段 / 搜索代码 / 查引用 / 设 / 打印），
         workdir = 待改项目，--max-turns 12，保险同下（空闲超时、文本 invoke 拦截、超长输出、重试一次）；计划检查不过的那次重写也走 read。
         每次规划的工具调用（工具名、参数、返回字数）写进运行目录 plan_tools.json。
+        规划用 grok 时不挂 dsl 工具，用 grok 自带只读工具（read_file / grep / list_dir，cwd = 待改项目，写 / 命令 / 联网 / 子代理全禁，--max-turns 20），
+        system 里「用 dsl 工具读」那句换成 grok 版（READ_TAIL_GROK）；出现别的工具调用即杀（调用被禁工具），累计读入超 200000 字即杀（读超限）。
 
 流程（流程本身与任务类型无关，细节由包 / 验收实现）：
   1 资料包：pack.collect 确定性收集（不调模型）。
@@ -39,6 +41,7 @@ from pathlib import Path
 
 from . import dslcheck as DC
 from . import engines, packs, verify
+from . import promptfile as PF
 from .snap import DIFF_CAP, changed, code_hash, diff_text, restore, snapshot  # noqa: F401  旧名仍从 v2 取
 
 PKG = Path(__file__).resolve().parent
@@ -50,7 +53,7 @@ WALL = 900
 IDLE_SEC = 60            # 首 token 之后这么久没有新流事件就杀掉该次调用
 MAX_OUT = 20000          # 单次调用累计输出超过这么多字符就杀掉（reason=输出超长）
 TOOL_MARKS = ("<invoke", "<function_calls")   # 流里出现这些 = 模型在写工具调用格式（reason=输出工具调用格式）
-GUARD_REASONS = ("首字前静默超时", "空闲超时", "输出工具调用格式", "输出超长", "尝试调用工具")
+GUARD_REASONS = ("首字前静默超时", "空闲超时", "输出工具调用格式", "输出超长", "尝试调用工具", "调用被禁工具", "读超限")
 SKIP_NOTE = "未跑（这次测试的结果不改变计划走向，验收时统一跑一次全量测试）"
 
 
@@ -64,32 +67,30 @@ def enabled():
 
 # ------------------------------------------------------------------ 提示词
 
-SUB_SYS = ("你是子任务执行者，被一个自动化流程调用。只根据用户消息里给你的数据完成任务，不能读别的文件，也不能运行任何东西。"
-           "按用户消息末尾的输出格式只输出一个 JSON 对象（不要代码围栏、不要别的文字）。"
-           "修改内容 edits 每项字段名固定为 file（相对项目根路径）、old（从给你的原文一字不差抄，含缩进，不带「  12| 」行号前缀，"
-           "在文件里只出现一次）、new（替换后的文本）。不要改测试文件（tests/ 下、test_*.py）。")
+SUB_SYS = PF.text("sub_sys.txt")
 
-RULES_HEAD = r"""【规划规则（这次要写的脚本）】
-- 第一行 用包 common text code；第二行写 预算 调用 N 秒 M（N ≤ 12，含 问JSON / 派任务 / 并行派任务 里的每次调用和重问；M ≤ 600）。"""
+RULES_HEAD = PF.text("rules_head.md")
 
-RULES_STOP = r"""- 全部改完 终止 成功 一句话；做不到 终止 失败 原因；前提不符或范围远超描述 终止 超出预期 原因。不要打印「结论：」行。"""
+RULES_STOP = PF.text("rules_stop.md")
 
-RULES_OUT = r"""- 只输出 .zs 脚本本身（含 #改法 / #清单 段），不要代码围栏，不要任何解释文字。"""
+RULES_OUT = PF.text("rules_out.md")
 
 PLAN_MODE_ENV = "DSLAGENT_PLAN_MODE"
 PLAN_MODES = ("read", "full")
 READ_MAX_TURNS = 12
-READ_TAIL = "需要看代码时用 dsl 工具读：读片段（按大纲里的 文件:起-止）、搜索代码、查引用。只读，不改文件。读够了直接输出完整 .zs。"
+READ_TAIL = PF.text("read_tail.txt")
 # read 方式下 system 里与「按需读」矛盾的说法：(原文, 换成)。原文必须在 full 的 system 里出现（read_system 里断言）。
-READ_SUBS = (
-    ("你看不到别的文件，也不能运行任何东西。", "代码不在消息里，" + READ_TAIL + "你不能运行任何东西。"),
-    ("- 改法：数据包 / 补查结果里能看到原文的改动，", "- 改法：读到原文的改动，"),
-    ("- 子任务：数据包里没有原文、或要看运行结果才能决定怎么改的，", "- 子任务：没读到原文、或要看运行结果才能决定怎么改的，"),
-    ("脚本必须覆盖数据包和补查结果里查到的**每一个**位置", "先用 搜索代码 / 查引用 把所有位置找全，脚本必须覆盖找到的**每一个**位置"),
-    ("不用 定位.zs / 读改测.zs（数据包已给原文）。", "不用 定位.zs / 读改测.zs。"),
-    ("你看不到代码，只能靠脚本里的动词去读；读到的内容要嵌进 问JSON 的提示词里，模型才看得到",
-     "脚本里 问JSON / 派任务 调的模型看不到代码：要它看的内容用脚本里的动词读出来（派任务 可用入参「文件:起-止」），嵌进提示词里它才看得到"),
-)
+READ_TAIL_GROK = PF.text("read_tail_grok.txt")
+# grok 版：与 dsl 工具有关的两处说法按引擎换掉（READ_SUBS 里同下标的项）：下标 → 换成
+_subs = PF.js("read_subs.json")
+
+
+def _tails(t):
+    return t.replace("{READ_TAIL_GROK}", READ_TAIL_GROK).replace("{READ_TAIL}", READ_TAIL)
+
+
+READ_SUBS_GROK = {int(k): (a, _tails(b)) for k, (a, b) in _subs["grok"].items()}
+READ_SUBS = tuple((a, _tails(b)) for a, b in _subs["claude"])
 
 _PLAN_SYS = {}
 
@@ -108,40 +109,41 @@ def plan_rules(pack):
     return "\n".join([RULES_HEAD, pack.PLAN_RULES, RULES_STOP, pack.PLAN_RULES_END, RULES_OUT])
 
 
-def plan_system(pack=None, mode="full"):
+def plan_system(pack=None, mode="full", engine=None):
     """规划的 system。mode=full：原文；mode=read：去掉开头讲资料包各节的那句（换成一句话说明 user 里是什么），再按 READ_SUBS 换掉与按需读矛盾的说法（READ_TAIL 放在开头说明里）。"""
     pack = pack or packs.current()
     if mode == "read":
-        return read_system(pack)
+        return read_system(pack, engine)
     if pack.NAME not in _PLAN_SYS:
         from . import prompts as DPR
         keep = ("赋值右边不要以", "一条语句只能写在一行", "修改内容的字段名固定为", "你看不到代码")
-        tips = "【写法要点（节选）】\n" + "\n".join(
+        tips = PF.text("tips_head.txt") + "\n".join(
             "- " + b.strip() for b in DPR.TIPS.split("\n- ") if b.strip().startswith(keep))
         _PLAN_SYS[pack.NAME] = (
-            f"你是「分支式规划者」。用户消息会给你一个{pack.TASK_DESC}、一份{pack.PACK_DESC}，后面可能有「补查结果」，同等对待。"
-            "你看不到别的文件，也不能运行任何东西。"
-            "你要写一段中文 DSL 脚本（.zs），交给 DSL 引擎直接执行（不再改写）；脚本里的 派任务 / 问JSON 会调另一个模型，"
-            "它只看得到你写进提示词、入参里的数据。\n\n"
-            f"{DPR.CHEAT}\n\n{DPR.VERBS}\n\n{tips}\n\n{plan_rules(pack)}\n\n"
-            "【示例（分支式规划的写法示例，只示意写法，不是答案）】\n"
+            PF.tpl("plan_intro.tpl.txt", TASK_DESC=pack.TASK_DESC, PACK_DESC=pack.PACK_DESC)
+            + f"{DPR.CHEAT}\n\n{DPR.VERBS}\n\n{tips}\n\n{plan_rules(pack)}\n\n"
+            + PF.text("plan_example_head.txt")
             + (LIB / "示例_分支规划.zs").read_text(encoding="utf-8"))
     return _PLAN_SYS[pack.NAME]
 
 
 def read_intro_cut(pack):
     """read 方式下 system 里去掉的那一句（讲资料包各节 / 补查结果）→ 换成的那句。"""
-    old = f"用户消息会给你一个{pack.TASK_DESC}、一份{pack.PACK_DESC}，后面可能有「补查结果」，同等对待。"
-    return old, f"用户消息会给你一个{pack.TASK_DESC}，后面附候选文件的大纲。"
+    return (PF.tpl("plan_intro_cut.tpl.txt", TASK_DESC=pack.TASK_DESC, PACK_DESC=pack.PACK_DESC),
+            PF.tpl("plan_intro_read.tpl.txt", TASK_DESC=pack.TASK_DESC, PACK_DESC=pack.PACK_DESC))
 
 
-def read_system(pack):
+def read_system(pack, engine=None):
+    """engine=grok 时把 READ_SUBS 里下标在 READ_SUBS_GROK 的项换成 grok 版（自带只读工具），其余同 claude / codex。"""
     full = plan_system(pack, "full")
     old, new = read_intro_cut(pack)
     assert old in full, "规划 system 开头句变了，read 方式要同步改 read_intro_cut"
     s = full.replace(old, new, 1)
-    for a, b in READ_SUBS:
+    for i, (a, b) in enumerate(READ_SUBS):
         assert a in s, f"规划 system 里找不到「{a[:20]}…」，read 方式要同步改 READ_SUBS"
+        if engine == "grok" and i in READ_SUBS_GROK:
+            assert READ_SUBS_GROK[i][0] == a, "READ_SUBS_GROK 的原文要与 READ_SUBS 同下标项一致"
+            b = READ_SUBS_GROK[i][1]
         s = s.replace(a, b, 1)
     return s
 
@@ -357,7 +359,7 @@ class Model:
             r = {"text": r}
         rec = {"n": n, "tag": tag, "sec": r.get("sec", round(time.time() - t0, 2)), "ttft": r.get("ttft"),
                "cost": r.get("cost") or 0.0, "usage": r.get("usage"), "rc": r.get("rc"),
-               "engine": sp["engine"], "model": sp["model"] or ("默认" if sp["engine"] == "grok" else MODEL), "effort": sp["effort"],
+               "engine": sp["engine"], "model": _rec_model(sp), "effort": sp["effort"],
                "sys_chars": len(system), "user_chars": len(user), "t_start": round(t0, 3)}
         if retry:
             rec["retry"] = 1
@@ -384,7 +386,12 @@ class Model:
         return r["text"]
 
 
-def _tool_call(self, system, user, tag, mcp_config, max_turns=6, model=None):
+def _rec_model(sp):
+    """calls.json 记的模型：实际模型串（grok 没有模型名，记 grok；effort 另记）。"""
+    return sp["model"] or sp["engine"]
+
+
+def _tool_call(self, system, user, tag, mcp_config, max_turns=6, model=None, read_cwd=None):
     """DSLAGENT_SUBTASK=tool：一次带 MCP 的多轮调用（计 1 次调用数，费用、逐次记录同 _once）。不重试、不抛模型失败——
     失败原因（保险触发 / rc≠0 / 空回复）放在返回的 failed 里，由 toolsub 决定重试还是兜底。返回 backend 的 dict。"""
     with self.lock:
@@ -402,7 +409,9 @@ def _tool_call(self, system, user, tag, mcp_config, max_turns=6, model=None):
     if sp["spec"] != MODEL:
         kw["model"] = sp["spec"]
     tmo = max(30, min(300, left + 5))
-    if self.real and sp["engine"] != "claude":
+    if self.real and sp["engine"] == "grok" and read_cwd:
+        r = engines.call(sp, system, user, tmo, reply_path=rp, read_cwd=str(read_cwd))     # grok 自带只读工具，不挂 dsl MCP
+    elif self.real and sp["engine"] != "claude":
         r = engines.call(sp, system, user, tmo, reply_path=rp, mcp_config=str(mcp_config))
     else:
         r = self.backend(system, user, tag, tmo, mcp_config=str(mcp_config), max_turns=max_turns, **kw)
@@ -411,7 +420,7 @@ def _tool_call(self, system, user, tag, mcp_config, max_turns=6, model=None):
     rec = {"n": n, "tag": tag, "sec": r.get("sec", round(time.time() - t0, 2)), "ttft": r.get("ttft"),
            "cost": r.get("cost") or 0.0, "usage": r.get("usage"), "rc": r.get("rc"), "tool": 1,
            "num_turns": r.get("num_turns"), "tool_calls": r.get("tool_calls"), "subtype": r.get("subtype"),
-           "engine": sp["engine"], "model": sp["model"] or MODEL, "effort": sp["effort"], "sys_chars": len(system), "user_chars": len(user), "t_start": round(t0, 3)}
+           "engine": sp["engine"], "model": _rec_model(sp), "effort": sp["effort"], "sys_chars": len(system), "user_chars": len(user), "t_start": round(t0, 3)}
     with self.lock:
         self.cost += rec["cost"]
         self.log.append(rec)
@@ -449,7 +458,7 @@ def plan_read_call(M, system, user, tag, project, model, out, tools):
         cfg.write_text(json.dumps({"mcpServers": {"dsl": {"command": sys.executable, "args": [
             str(PKG / "dslmcp.py"), "--workdir", str(project), "--log", str(log), "--verbs-root", str(VERBS), "--readonly",
             "--state", str(d / f"{base}_state")]}}}, ensure_ascii=False), encoding="utf-8")
-        r = M.tool_call(system, user, tag, cfg, READ_MAX_TURNS, model=model)
+        r = M.tool_call(system, user, tag, cfg, READ_MAX_TURNS, model=model, read_cwd=project)
         rows = []
         try:
             for line in log.read_text(encoding="utf-8").splitlines():
@@ -459,8 +468,12 @@ def plan_read_call(M, system, user, tag, project, model, out, tools):
                     pass
         except OSError:
             pass
-        tools.extend({"调用": tag, "尝试": attempt, "序": i, "工具": "dsl", "参数": x.get("code"), "返回字数": x.get("out_chars"),
-                      "状态": x.get("status")} for i, x in enumerate(rows, 1))
+        if r.get("calls") is not None:          # grok：事件流里记的内置工具调用
+            tools.extend({"调用": tag, "尝试": attempt, "序": i, "工具": x["工具"], "参数": x["参数"], "返回字数": x["返回字数"], "状态": None}
+                         for i, x in enumerate(r["calls"], 1))
+        else:
+            tools.extend({"调用": tag, "尝试": attempt, "序": i, "工具": "dsl", "参数": x.get("code"), "返回字数": x.get("out_chars"),
+                          "状态": x.get("status")} for i, x in enumerate(rows, 1))
         try:
             (out / "plan_tools.json").write_text(json.dumps(tools, ensure_ascii=False, indent=1), encoding="utf-8")
         except OSError:
@@ -718,6 +731,8 @@ def check(project, work, script, task, pack=None):
     if not re.search(r"^\s*预算\s", body, re.M):
         generic.append("开头缺 预算 语句（第二行写 预算 调用 N 秒 M）")
     probs += pack.plan_problems(main, body, cl, generic)
+    if not probs:
+        probs += DC.edit_problems(project, main)
     if probs:
         rec["阶段"] = "静态"
         return "白名单 / 格式检查没过：\n" + "\n".join(probs[:12]), main, subs, rec
@@ -828,7 +843,7 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
         for k in range(2):
             user = first_user if k == 0 else DPR.fix_prompt(script, problem)
             if mode == "read":
-                raw = plan_read_call(M, plan_system(pack, "read"), user, "plan" if k == 0 else "plan_fix", project, plan_model, out,
+                raw = plan_read_call(M, plan_system(pack, "read", M.spec("plan", plan_model)["engine"]), user, "plan" if k == 0 else "plan_fix", project, plan_model, out,
                                      plan_tools)
             else:
                 raw = M(plan_system(pack), user, "plan" if k == 0 else "plan_fix", model=plan_model)

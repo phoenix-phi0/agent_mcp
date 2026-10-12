@@ -24,6 +24,13 @@ CODEX_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 GROK_EFFORTS = ("low", "medium", "high", "xhigh")
 CODEX_EFFORT = "medium"
 GROK_EFFORT = "low"
+GROK_READ_TOOLS = ("read_file", "grep", "list_dir")      # read 规划放开的内置工具（只读）
+GROK_DISABLED = ("write,search_replace,run_terminal_command,kill_command_or_subagent,todo_write,get_command_or_subagent_output,spawn_subagent,"
+                 "scheduler_create,scheduler_delete,scheduler_list,monitor,search_tool,use_tool,workflow,web_search,open_page,open_page_with_find,"
+                 "web_fetch,x_user_search,x_semantic_search,x_keyword_search,x_thread_fetch,image_gen,image_edit,image_to_video,reference_to_video,"
+                 "send_feedback,ask_user_question,enter_plan_mode,exit_plan_mode")
+GROK_MAX_TURNS = 20
+GROK_READ_CAP = 200000   # read 规划累计读入字数上限，超了杀
 IDLE_OC = 120            # opencode 整段才发事件，空闲超时比逐字流宽
 FIRST_CAP = 120          # 首个事件之前最多静默这么久（codex / grok / opencode）
 ENV = "DSLAGENT_MODELS"
@@ -86,11 +93,11 @@ def normalize(value):
 
 
 def validate(models, plan_mode="read", subtask="json"):
-    """normalize + 组合限制：read 方式下 plan 只支持 claude / codex（要挂只读 dsl 工具）；DSLAGENT_SUBTASK=tool 时 sub 只支持 claude。"""
+    """normalize + 组合限制：read 方式下 plan 只支持 claude / codex / grok（claude / codex 挂只读 dsl 工具，grok 用自带只读工具）；DSLAGENT_SUBTASK=tool 时 sub 只支持 claude。"""
     m = normalize(models)
     p = parse(m["plan"]) if "plan" in m else None
-    if p and plan_mode == "read" and p["engine"] not in ("claude", "codex"):
-        raise ValueError(f"models.plan={m['plan']!r}：read 规划方式要挂只读 dsl 工具，只支持 claude 和 codex；"
+    if p and plan_mode == "read" and p["engine"] not in ("claude", "codex", "grok"):
+        raise ValueError(f"models.plan={m['plan']!r}：read 规划方式要读代码，只支持 claude / codex / grok；"
                          f"{p['engine']} 做规划请同时设 dsl_options.plan_mode=full")
     s = parse(m["sub"]) if "sub" in m else None
     if s and subtask == "tool" and s["engine"] != "claude":
@@ -349,11 +356,25 @@ def call_codex(system, user, timeout=300, reply_path=None, idle=None, model=None
 # ------------------------------------------------------------------ grok
 
 
-def call_grok(system, user, timeout=300, reply_path=None, idle=None, model=None, effort=None, first_cap=None, **_ignored):
+def _grok_out_len(ro):
+    """tool_call_update 的 rawOutput → 返回字数（有 Content.content 取它，否则整个对象的 json 长度）。"""
+    try:
+        c = ro.get("Content")
+        if isinstance(c, dict) and isinstance(c.get("content"), str):
+            return len(c["content"])
+    except AttributeError:
+        pass
+    return len(json.dumps(ro, ensure_ascii=False)) if ro else 0
+
+
+def call_grok(system, user, timeout=300, reply_path=None, idle=None, model=None, effort=None, first_cap=None, read_cwd=None, **_ignored):
     """grok（Grok Build CLI）单轮文本生成：--output-format streaming-json 流式（记首字时间），内置工具只留 read_file 且 --deny Read（--tools "" 关不掉），
     不开子代理 / 联网，dontAsk；系统提示用 --system-prompt-override，cwd 是空目录，提示放 -p 参数（单个参数不能超过 Linux 的 128KB）。
     流里一出现 tool_call / tool_call_update 事件（哪怕被拒）立即杀；空闲超时只按正文 / 推理增量（text / thought）刷新。
-    cost 取 grok 自报的 total_cost_usd（无则 0）。"""
+    cost 取 grok 自报的 total_cost_usd（无则 0）。
+    read_cwd（read 规划，只用于 plan / plan_fix）：cwd = 该目录（待改项目），只放开 read_file / grep / list_dir（GROK_READ_TOOLS），其余内置工具
+    （GROK_DISABLED）从工具表去掉并 deny 写 / 编辑 / 命令 / MCP，--max-turns GROK_MAX_TURNS；事件流里出现别的工具调用即杀（调用被禁工具），
+    累计读入超过 GROK_READ_CAP 字即杀（读超限）；工具调用逐条记进返回的 calls（工具 / 参数 / 返回字数）；回复取最后一次工具调用之后的文本。"""
     V = _v2()
     tmp, cwd = _empty_cwd("v2_grok_empty")
     env = dict(os.environ)
@@ -361,11 +382,18 @@ def call_grok(system, user, timeout=300, reply_path=None, idle=None, model=None,
     cmd = [grok_bin(), "-p", user, "--output-format", "streaming-json", "--tools", "read_file", "--deny", "Read", "--deny", "MCPTool",
            "--permission-mode", "dontAsk", "--no-subagents", "--disable-web-search", "--reasoning-effort", effort or GROK_EFFORT,
            "--system-prompt-override", system]
+    if read_cwd:
+        cwd = str(read_cwd)
+        cmd = [grok_bin(), "-p", user, "--output-format", "streaming-json", "--tools", ",".join(GROK_READ_TOOLS), "--disallowed-tools", GROK_DISABLED,
+               "--deny", "write", "--deny", "Edit", "--deny", "Bash", "--deny", "run_terminal_command", "--deny", "MCPTool",
+               "--permission-mode", "dontAsk", "--no-subagents", "--disable-web-search", "--max-turns", str(GROK_MAX_TURNS),
+               "--reasoning-effort", effort or GROK_EFFORT, "--system-prompt-override", system]
     if model:
         cmd += ["--model", model]
     pr = _Proc(cmd, None, timeout, idle or V.IDLE_SEC, first_cap or int(os.environ.get("DSLAGENT_GROK_FIRST_CAP") or FIRST_CAP), cwd, env,
                reply_path)
     streamed, ttft, end, n_cmds = "", None, None, 0
+    calls, byid, cur = [], {}, ""
     for line in pr.p.stdout:
         try:
             ev = json.loads(line)
@@ -381,12 +409,29 @@ def call_grok(system, user, timeout=300, reply_path=None, idle=None, model=None,
             n_cmds += 1
         elif ty not in ("text", "thought"):
             pr.log_event(line)
-        if ty in ("tool_call", "tool_call_update") and not pr.killed:
+        if read_cwd and ty in ("tool_call", "tool_call_update"):
+            pr.active(now)
+            if ty == "tool_call":
+                name = ev.get("toolName")
+                c = {"工具": name, "参数": ev.get("rawInput"), "返回字数": None}
+                calls.append(c)
+                byid[ev.get("toolCallId")] = c
+                cur = ""
+                if name not in GROK_READ_TOOLS and not pr.killed:
+                    pr.kill("调用被禁工具")
+            else:
+                c = byid.get(ev.get("toolCallId"))
+                if c and ev.get("rawOutput"):
+                    c["返回字数"] = _grok_out_len(ev["rawOutput"])
+                    if not pr.killed and sum(x["返回字数"] or 0 for x in calls) > GROK_READ_CAP:
+                        pr.kill("读超限")
+        elif ty in ("tool_call", "tool_call_update") and not pr.killed:
             pr.kill("尝试调用工具")
         if ty == "text" and ev.get("data"):
             if ttft is None:
                 ttft = round(now - pr.t0, 2)
             streamed += ev["data"]
+            cur += ev["data"]
             pr.write_reply(ev["data"])
             pr.text_guard(streamed)
         elif ty == "end":
@@ -399,9 +444,13 @@ def call_grok(system, user, timeout=300, reply_path=None, idle=None, model=None,
     rc = pr.p.returncode
     if end is not None and res.get("stopReason") not in (None, "end_turn") and not reason:
         reason, rc = f"stopReason={res.get('stopReason')}", rc or 1
-    return {"text": streamed if (end is not None and not reason and rc == 0) else "", "sec": round(time.time() - pr.t0, 1), "rc": rc,
-            "ttft": ttft, "cost": res.get("total_cost_usd") or 0.0, "usage": usage, "stderr": err[-500:], "reason": reason,
-            "partial": streamed, "num_turns": res.get("num_turns"), "tool_calls": 0, "engine": "grok", "model": model, "subtype": None}
+    text = (cur if read_cwd else streamed) if (end is not None and not reason and rc == 0) else ""
+    r = {"text": text, "sec": round(time.time() - pr.t0, 1), "rc": rc,
+         "ttft": ttft, "cost": res.get("total_cost_usd") or 0.0, "usage": usage, "stderr": err[-500:], "reason": reason,
+         "partial": streamed, "num_turns": res.get("num_turns"), "tool_calls": len(calls), "engine": "grok", "model": model, "subtype": None}
+    if read_cwd:
+        r["calls"] = calls
+    return r
 
 
 # ------------------------------------------------------------------ opencode
