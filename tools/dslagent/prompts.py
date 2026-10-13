@@ -6,12 +6,12 @@
 
 from . import promptfile as PF
 
-CHEAT = PF.text("cheat.md")
-VERBS = PF.text("verbs.md")
-TIPS = PF.text("tips.md")
-SEE = PF.text("see.txt")
+CHEAT = PF.shared("cheat.md")
+VERBS = PF.shared("verbs.md")
+TIPS = PF.shared("tips.md")
+SEE = PF.shared("see.txt")
 
 
 def fix_prompt(script, problem):
-    return PF.tpl("fix_prompt.tpl.txt", SEE=SEE, problem=problem,
-                  numbered="\n".join(f"{i:3d}| {l}" for i, l in enumerate(script.splitlines(), 1)))
+    return PF.template("plan_fix", "用户提示词", SEE=SEE, problem=problem,
+                       numbered="\n".join(f"{i:3d}| {l}" for i, l in enumerate(script.splitlines(), 1)))

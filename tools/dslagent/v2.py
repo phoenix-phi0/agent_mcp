@@ -9,7 +9,7 @@
 保险同下（空闲超时、文本 invoke 拦截、超长输出、重试一次）；计划检查不过的那次重写也走这条。
 每次规划的工具调用（工具名、参数、返回字数）写进运行目录 plan_tools.json。
 规划用 grok 时不挂 dsl 工具，用 grok 自带只读工具（read_file / grep / list_dir，cwd = 待改项目，写 / 命令 / 联网 / 子代理全禁，--max-turns 20），
-system 里「用 dsl 工具读」那句换成 grok 版（READ_TAIL_GROK）；出现别的工具调用即杀（调用被禁工具），累计读入超 200000 字即杀（读超限）。
+system 里「用 dsl 工具读」那句换成 grok 版（agents/plan.md 的「变体：grok」）；出现别的工具调用即杀（调用被禁工具），累计读入超 200000 字即杀（读超限）。
 opencode 不能做规划（engines.validate 提交时报错）。老的 full 规划方式（资料包 + 补查）已删除，DSLAGENT_PLAN_MODE=full 报错。
 
 流程（流程本身与任务类型无关，细节由包 / 验收实现）：
@@ -41,7 +41,6 @@ from . import dslcheck as DC
 from . import agents as AG
 from . import engines, packs, verify
 from . import guard as G
-from . import promptfile as PF
 from .snap import DIFF_CAP, changed, code_hash, diff_text, restore, snapshot  # noqa: F401  旧名仍从 v2 取
 
 PKG, LIB, VERBS = C.PKG, C.LIB, C.VERBS
@@ -63,29 +62,8 @@ def enabled():
 
 SUB_SYS = AG.SUB_JSON.system_text()
 
-RULES_HEAD = PF.text("rules_head.md")
-
-RULES_STOP = PF.text("rules_stop.md")
-
-RULES_OUT = PF.text("rules_out.md")
-
 PLAN_MODE_ENV = "DSLAGENT_PLAN_MODE"      # 已去掉；只认空 / read，full 报「已移除」
 READ_MAX_TURNS = AG.PLAN.turns
-READ_TAIL = PF.text("read_tail.txt")
-# read 方式下 system 里与「按需读」矛盾的说法：(原文, 换成)。原文必须在 full 的 system 里出现（read_system 里断言）。
-READ_TAIL_GROK = PF.text("read_tail_grok.txt")
-# grok 版：与 dsl 工具有关的两处说法按引擎换掉（READ_SUBS 里同下标的项）：下标 → 换成
-_subs = PF.js("read_subs.json")
-
-
-def _tails(t):
-    return t.replace("{READ_TAIL_GROK}", READ_TAIL_GROK).replace("{READ_TAIL}", READ_TAIL)
-
-
-READ_SUBS_GROK = {int(k): (a, _tails(b)) for k, (a, b) in _subs["grok"].items()}
-READ_SUBS = tuple((a, _tails(b)) for a, b in _subs["claude"])
-
-_PLAN_SYS = {}
 
 
 def check_plan_mode(value=None):
@@ -98,51 +76,10 @@ def check_plan_mode(value=None):
     raise ValueError(f"{PLAN_MODE_ENV} 取值不对：{v!r}；这个选项已去掉，规划只有 read 一种方式")
 
 
-def plan_rules(pack):
-    """规划规则：通用的几行 + 资料包专属的几段（见 packs/__init__.py 的 PLAN_RULES / PLAN_RULES_END）。"""
-    return "\n".join([RULES_HEAD, pack.PLAN_RULES, RULES_STOP, pack.PLAN_RULES_END, RULES_OUT])
-
-
-def _base_system(pack):
-    """规划 system 的底稿（read_system 在它上面按 read_intro_cut / READ_SUBS 换掉讲资料包的那句和与按需读矛盾的说法）。"""
-    if pack.NAME not in _PLAN_SYS:
-        from . import prompts as DPR
-        keep = ("赋值右边不要以", "一条语句只能写在一行", "修改内容的字段名固定为", "你看不到代码")
-        tips = PF.text("tips_head.txt") + "\n".join(
-            "- " + b.strip() for b in DPR.TIPS.split("\n- ") if b.strip().startswith(keep))
-        _PLAN_SYS[pack.NAME] = (
-            PF.tpl("plan_intro.tpl.txt", TASK_DESC=pack.TASK_DESC, PACK_DESC=pack.PACK_DESC)
-            + f"{DPR.CHEAT}\n\n{DPR.VERBS}\n\n{tips}\n\n{plan_rules(pack)}\n\n"
-            + PF.text("plan_example_head.txt")
-            + (LIB / "示例_分支规划.zs").read_text(encoding="utf-8"))
-    return _PLAN_SYS[pack.NAME]
-
-
 def plan_system(pack=None, engine=None):
-    """规划的 system：底稿去掉开头讲资料包各节的那句（换成一句话说明 user 里是什么），再按 READ_SUBS 换掉与按需读矛盾的说法（READ_TAIL 放在开头说明里）。
-    engine=grok 时 READ_SUBS 里下标在 READ_SUBS_GROK 的项换成 grok 版（自带只读工具），其余同 claude / codex。"""
-    return read_system(pack or packs.current(), engine)
-
-
-def read_intro_cut(pack):
-    """底稿 system 里去掉的那一句（讲资料包各节 / 补查结果）→ 换成的那句。"""
-    return (PF.tpl("plan_intro_cut.tpl.txt", TASK_DESC=pack.TASK_DESC, PACK_DESC=pack.PACK_DESC),
-            PF.tpl("plan_intro_read.tpl.txt", TASK_DESC=pack.TASK_DESC, PACK_DESC=pack.PACK_DESC))
-
-
-def read_system(pack, engine=None):
-    """engine=grok 时把 READ_SUBS 里下标在 READ_SUBS_GROK 的项换成 grok 版（自带只读工具），其余同 claude / codex。"""
-    full = _base_system(pack)
-    old, new = read_intro_cut(pack)
-    assert old in full, "规划 system 开头句变了，read 方式要同步改 read_intro_cut"
-    s = full.replace(old, new, 1)
-    for i, (a, b) in enumerate(READ_SUBS):
-        assert a in s, f"规划 system 里找不到「{a[:20]}…」，read 方式要同步改 READ_SUBS"
-        if engine == "grok" and i in READ_SUBS_GROK:
-            assert READ_SUBS_GROK[i][0] == a, "READ_SUBS_GROK 的原文要与 READ_SUBS 同下标项一致"
-            b = READ_SUBS_GROK[i][1]
-        s = s.replace(a, b, 1)
-    return s
+    """规划的 system：agents/plan.md 展开（公用块在 agents/shared/，资料包专属的规则按包名取）；engine=grok 时套 plan.md 里的 grok 变体。"""
+    pack = pack or packs.current()
+    return AG.PLAN.system_text(engine, getattr(pack, "RULES_KEY", pack.NAME))
 
 
 def plan_user_read(task, outline=""):

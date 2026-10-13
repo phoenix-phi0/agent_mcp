@@ -9,8 +9,9 @@
       只产「文件大纲」，规划的 user = 任务原文 + 大纲：{"text": 大纲文本, "refs": [候选文件], "记录": {…并进 v2.*}}；
       不收代码片段 / 引用行 / 测试断言（规划自己用只读 dsl 工具读）。确定性，不调模型。
   files(project)        迭代 (相对路径, 绝对路径)：这类任务里「会被改动 / 要做快照」的文件（snap.snapshot 用它）。
-  TASK_DESC, PACK_DESC  str，规划提示开头那句里的「任务」「资料包」是什么（如「改代码任务」「…数据包（…）」）。
-  PLAN_RULES            str，规划提示里这类任务专属的规则行（每行以「- 」开头），插在通用规则中间。
+  TASK_DESC, PACK_DESC  str，说明性文字（规划提示 agents/plan.md 开头已按 code 包写死，现在不再拼进提示）。
+  PLAN_RULES            str，规划提示里这类任务专属的规则行（每行以「- 」开头），插在通用规则中间；文本在 agents/shared/plan_rules_<RULES_KEY>.md，由 agents/plan.md 插入。
+  RULES_KEY             str（可选，缺省取 NAME），上面两个规则文件名里的「包名」。
   PLAN_RULES_END        str，同上，插在「终止」规则之后、「只输出 .zs」之前。
   plan_problems(main, body, cl, generic) -> list[str]
       计划静态检查里这类任务专属的问题；generic 是核心已查出的通用问题（如缺 预算），按包希望的顺序合并后整体返回。

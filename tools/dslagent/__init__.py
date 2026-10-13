@@ -9,7 +9,7 @@
   runner.py     入口 run()：planner=v2 → v2.run，否则 legacy/run.py；并把 common / auto 的公共名字 import 进来（旧写法 runner.xxx 仍可用）
   common.py     公共：目录（tmp_dir）、测试命令探测（detect_test_cmd）、动词模块加载（_verb_module）、claude 子进程环境（child_env）
   auto.py       engine=auto 的判定：decide_auto、capability_gaps、test_state（cbatch 用）
-  agents.py     各 agent（plan / plan_fix / sub_json / sub_tool / fix / bound / bfix）的定义：步骤、system、user 拼装、工具、轮数、回复格式、重试
+  agents.py     各 agent（plan / plan_fix / sub / sub_tool / fix / bound / bfix）的定义：从 agents/*.md 读步骤、工具、轮数、回复格式、system；user 拼装、解析、重试在代码里
   guard.py      模型调用保险的常量和原因（超时 / 空闲 / 超长 / invoke 拦截 / 禁工具…），四个引擎和 Model 共用
   engines.py    按步骤选模型（parse / validate / step_of）、_Proc 进程保险、call_claude / call_codex / call_grok / call_opencode
   v2.py         v2 核心：Model（唯一模型入口：计数 / 墙钟 / 记账 / 重试）、Client、规划（plan_read_call）、V2Engine、计划检查、run、记录
@@ -21,8 +21,9 @@
   dslmcp.py     stdio MCP：单个 dsl 工具（可写 / --readonly），日志落 toollogs/
   dslcheck.py   tool / 只读工具的白名单检查、空跑、edit_problems、子任务方式（env_mode / check_mode）
   plan.py       计划检查：strip_prose / autoclose / split_subs / whitelist_check、假模型 dry_run、write_subs
-  prompts.py    共用的提示：CHEAT / VERBS / TIPS / SEE / fix_prompt（文本在 prompts/，见 prompts/README.md）
-  promptfile.py 提示词文件加载器
+  prompts.py    共用的提示：CHEAT / VERBS / TIPS / SEE / fix_prompt（文本在 agents/shared/ 和 agents/plan_fix.md，见 agents/README.md）
+  promptfile.py 提示词文件加载器（agents/*.md：frontmatter、插入、变体；旧路径 prompts/legacy/）
+  agents/       一个 agent 一个 Markdown（system 提示词 + 说明），见 agents/README.md
   snap.py       项目快照（snapshot / changed / diff_text / restore），核心和验收共用
   reason.py     逻辑规则：规则求值 infer、规则 3 安全约束 check（写 / 删文件前）、开局快照 setup、done_items
   datalog.py    小 Datalog 求值器（reason 和 legacy/infer 共用）

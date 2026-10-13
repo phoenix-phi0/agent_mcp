@@ -22,6 +22,7 @@ import test_dslagent_v2 as T                   # noqa: E402  复用它的假项�
 TMP, V = T.TMP, T.V
 from tools.dslagent import engines as E, packs          # noqa: E402
 from tools.dslagent import guard as G                    # noqa: E402
+from tools.dslagent import promptfile as PF               # noqa: E402
 
 PASS = FAIL = 0
 
@@ -439,9 +440,10 @@ def t_grok_read():
         # 提示：grok 版那句；claude / codex 不变
         pk = packs.current()
         sg, sc = V.plan_system(pk, "grok"), V.plan_system(pk)
-        check(V.READ_TAIL_GROK in sg and V.READ_TAIL not in sg and "每次最多读 200 行" in sg and "每轮最多 3 个工具调用" in sg and "dsl 工具" not in sg
+        READ_TAIL, READ_TAIL_GROK = PF.agent_doc("plan").variants["grok"][0]      # agents/plan.md「变体：grok」第一对：dsl 版 → grok 版
+        check(READ_TAIL_GROK in sg and READ_TAIL not in sg and "每次最多读 200 行" in sg and "每轮最多 3 个工具调用" in sg and "dsl 工具" not in sg
               and "搜索代码 / 查引用" not in sg, "grok 的 read system：换成 grok 版那句，不再提 dsl 工具", sg[:400])
-        check(V.READ_TAIL in sc and V.READ_TAIL_GROK not in sc and sc == V.plan_system(pk, "claude") == V.plan_system(pk, "codex"),
+        check(READ_TAIL in sc and READ_TAIL_GROK not in sc and sc == V.plan_system(pk, "claude") == V.plan_system(pk, "codex"),
               "claude / codex 的 read system 不变")
         check(len(sg) < len(sc) + 400, "没有复制整份 system")
         # 整条流程：规划走 grok read，plan_tools.json 记录
@@ -449,7 +451,7 @@ def t_grok_read():
         r, p, out = run_real("fl_grok_read", {"plan": "grok:high"})
         rc = [x for x in recs() if x["engine"] == "grok"]
         check(r["fixed"] and "x + x" in T.util(p), "read 规划走 grok：全流程成功", r.get("stop"))
-        check(rc[0]["cwd"] == str(p) and rc[0]["argv"][rc[0]["argv"].index("--reasoning-effort") + 1] == "high" and V.READ_TAIL_GROK in rc[0]["argv"][rc[0]["argv"].index("--system-prompt-override") + 1]
+        check(rc[0]["cwd"] == str(p) and rc[0]["argv"][rc[0]["argv"].index("--reasoning-effort") + 1] == "high" and READ_TAIL_GROK in rc[0]["argv"][rc[0]["argv"].index("--system-prompt-override") + 1]
               and rc[0]["stdin"].startswith("【任务原文】") and "## 文件大纲" in rc[0]["stdin"], "流程里 grok：cwd=项目、强度、grok 版 system、user=任务+大纲")
         tools = json.loads((out / "plan_tools.json").read_text(encoding="utf-8"))
         check(len(tools) == 1 and tools[0]["工具"] == "read_file" and tools[0]["参数"]["path"] == "pkg/util.py" and tools[0]["返回字数"] == 88

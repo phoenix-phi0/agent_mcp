@@ -27,6 +27,7 @@ V, K, TMP = T.V, T.K, T.TMP
 from tools.dslagent import dslmcp as DM         # noqa: E402
 from tools.dslagent import packs                # noqa: E402
 from tools.dslagent import prompts as DPR       # noqa: E402
+from tools.dslagent import promptfile as PF       # noqa: E402
 
 PASS = FAIL = 0
 
@@ -86,16 +87,16 @@ def t_input():
           [m for m in CODE_MARKS if m in u])
     check("double:" in u and "clamp:" in u, "大纲给的是函数名:起-止", u[-300:])
     s = system_of(f, "plan")
-    full = V._base_system(packs.current())
-    old, new = V.read_intro_cut(packs.current())
-    check(V.READ_TAIL in s, "READ_TAIL 在 read 的 system 里")
-    check(all(a not in s and b in s for a, b in V.READ_SUBS), "READ_SUBS 每项：原文不在、新文在",
-          [a[:20] for a, b in V.READ_SUBS if a in s or b not in s])
+    READ_TAIL = PF.agent_doc("plan").variants["grok"][0][0]      # agents/plan.md「变体：grok」的原文＝claude / codex 的读法说明
+    OLD = ("你看不到别的文件，也不能运行任何东西。", "- 改法：数据包 / 补查结果里能看到原文的改动，", "- 子任务：数据包里没有原文、或要看运行结果才能决定怎么改的，",
+           "脚本必须覆盖数据包和补查结果里查到的**每一个**位置", "不用 定位.zs / 读改测.zs（数据包已给原文）。",
+           "你看不到代码，只能靠脚本里的动词去读；读到的内容要嵌进 问JSON 的提示词里，模型才看得到")
+    check(READ_TAIL in s, "读法说明在 read 的 system 里")
+    check(not any(a in s for a in OLD), "与按需读矛盾的旧说法都不在 system 里", [a[:20] for a in OLD if a in s])
     check("需要看代码时用 dsl 工具读：读片段（按大纲里的 文件:起-止）、搜索代码、查引用。只读，不改文件。读够了直接输出完整 .zs。" in s,
-          "READ_TAIL 约定的原话在 system 里", s[:300])
-    check("补查结果" not in old.replace("后面可能有「补查结果」，同等对待。", "") and "「补查结果」" not in s
-          and "确定性抽出" not in s and "候选文件的大纲" in s, "讲资料包各节 / 补查结果的那句已去掉", s[:200])
-    check(s == V.plan_system(packs.current()) and full != s, "plan_system 就是读代码改写后的 system（底稿是 _base_system）")
+          "读法说明的原话在 system 里", s[:300])
+    check("「补查结果」" not in s and "确定性抽出" not in s and "候选文件的大纲" in s, "讲资料包各节 / 补查结果的那句已去掉", s[:200])
+    check(s == V.plan_system(packs.current()), "plan_system 就是 agents/plan.md 展开后的 system")
     v = r["v2"]
     check("规划方式" not in v and "补查" not in v and "补查项" not in v and v["大纲字符"] == len(u.split("\n\n", 1)[1])
           and (out / "outline.md").is_file() and not (out / "pack.md").exists() and v["候选"],

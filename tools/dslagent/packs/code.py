@@ -379,9 +379,10 @@ OLD_RX_LINE = re.compile(r"^\s*#\s*旧写法\s*[:：]\s*(.+?)\s*$", re.M)
 TASK_DESC = "改代码任务"
 PACK_DESC = "从仓库里确定性抽出的「数据包」（相关代码片段带行号、登记处、引用行、相关测试断言、文件大纲）"
 
-PLAN_RULES = PF.text("packs/code/plan_rules.md")
+RULES_KEY = "code"                 # agents/shared/plan_rules_<RULES_KEY>.md、plan_rules_<RULES_KEY>_end.md（缺省取 NAME）
+PLAN_RULES = PF.shared("plan_rules_code.md")       # 规划 system（agents/plan.md）里按包名插入这两段
 
-PLAN_RULES_END = PF.text("packs/code/plan_rules_end.md")
+PLAN_RULES_END = PF.shared("plan_rules_code_end.md")
 
 
 def files(project):
