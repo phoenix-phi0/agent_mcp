@@ -18,11 +18,11 @@ import sys
 import time
 from pathlib import Path
 
-from .. import promptfile as PF
+from .. import agents as AG
 from ..packs import code as K
 from ..packs.code import OLD_RX_LINE
 from ..snap import changed, code_hash, diff_text, restore, snapshot
-from ..v2 import Stop, parse_json
+from ..v2 import Stop
 
 NAME = "code"
 TEST_TIMEOUT = 600
@@ -31,11 +31,11 @@ FN_CAP = 250             # 补改入参：单个函数最多给多少行
 FIX_CAP = 40000          # 补改入参总字符
 MISSING_MSG = "项目里探测不到测试（没有 tests/、test_*.py 或 pytest 配置），v2 要靠测试验收；可以传 test_cmd"
 
-FIX_SYS = PF.text("verify/code/fix_sys.txt")
+FIX_SYS = AG.FIX.system_text()
 
-BOUND_SYS = PF.text("verify/code/bound_sys.md")
+BOUND_SYS = AG.BOUND.system_text()
 
-BFIX_SYS = PF.text("verify/code/bfix_sys.txt")
+BFIX_SYS = AG.BFIX.system_text()
 
 
 # ------------------------------------------------------------------ 项目快照 / 改法 / 测试
@@ -76,7 +76,7 @@ def apply_edits(project, edits):
 
 
 def _test_verb():
-    from ..runner import _verb_module
+    from ..common import _verb_module
     return _verb_module("跑测试")
 
 
@@ -256,8 +256,7 @@ def _fix_user(project, task, gaps, before, after, test_summary=""):
 
 
 def _check_reply(rep):
-    if not isinstance(rep, dict) or rep.get("状态") not in ("成功", "失败", "超出预期"):
-        return "缺 状态，或 状态 不是 成功/失败/超出预期"
+    """补改回复在通用 {结果,状态,原因} 校验（dsl_task.check_reply）之上叠加的：状态 成功 时 结果.edits 的结构。rep 是已通过通用校验的回复。"""
     if rep["状态"] == "成功":
         res = rep.get("结果")
         ed = res.get("edits") if isinstance(res, dict) else None
@@ -269,23 +268,20 @@ def _check_reply(rep):
 
 def dispatch_fix(M, project, system, user, tag):
     """派 1 次补改（回复不合格重答 1 次），能套就套。返回记录 {状态, 原因, 说明, edits, 套用, 套用说明, files}。"""
+    from tools import dsl_task as T
     rec = {"发生": True}
+
+    def ask(text):
+        p = T.parse_check(text, [], extra=_check_reply)
+        return p["value"], "；".join(p["problems"]), p["repaired"]
     try:
-        txt = M(system, user, tag)
-        try:
-            rep = parse_json(txt)
-            bad = _check_reply(rep)
-        except ValueError as e:
-            rep, bad = None, f"JSON 解析失败：{e}"
-        if bad:
-            txt = M(system, user + f"\n\n【你上一次的回复不合格：{bad}。请严格按回复格式只输出 JSON。】", tag + "_reask")
-            try:
-                rep = parse_json(txt)
-                bad = _check_reply(rep)
-            except ValueError as e:
-                bad = f"JSON 解析失败：{e}"
+        rep, bad, repaired = ask(M(system, user, tag))
+        if bad and AG.AGENTS[tag].retry.times > 1:
+            rep, bad, repaired = ask(M(system, user + f"\n\n【你上一次的回复不合格：{bad}。请严格按回复格式只输出 JSON。】", tag + "_reask"))
     except (Stop, RuntimeError) as e:
         return {"发生": False, "原因": f"没派成：{e}"}
+    if repaired:
+        rec["repaired"] = repaired
     if bad:
         rec.update(状态="回复不合格", 原因=bad)
         return rec
@@ -449,7 +445,7 @@ def boundary(M, project, plan_result):
 
 
 def detect_cmd(project, given):
-    from ..runner import detect_test_cmd
+    from ..common import detect_test_cmd
     return given or detect_test_cmd(project)
 
 

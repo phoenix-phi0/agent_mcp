@@ -11,7 +11,7 @@
 
     python dslmcp.py --workdir 项目目录 --log 日志文件 [--verbs-root 动词目录] [--readonly]
 
---readonly（规划 plan_mode=read 用）：只读工具。白名单只留 读片段 / 搜索代码 / 查引用 + 用包 设 打印，改文件 / 写文件 / #改法 / 如果 一律检查不过；
+--readonly（规划用）：只读工具。白名单只留 读片段 / 搜索代码 / 查引用 + 用包 设 打印，改文件 / 写文件 / #改法 / 如果 一律检查不过；
 不做空跑和前后快照（不会改文件）。日志里每行多记 out_chars（返回给模型的字数）。
 """
 import argparse

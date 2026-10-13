@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""dslagent v2 规划方式 read（DSLAGENT_PLAN_MODE，缺省 read；full = 老流程）：不调真模型。
+"""dslagent v2 规划（任务原文 + 文件大纲 + 只读 dsl 工具按需读代码；老的 full 方式已删除）：不调真模型。
 
     cd /home/ysc/mcp && .venv/bin/python tests/tools/test_dslagent_planread.py
 
@@ -20,7 +20,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import test_dslagent_v2 as T                   # noqa: E402  复用它的假项目 / 计划（它把 DSLAGENT_PLAN_MODE 设成 full）
+import test_dslagent_v2 as T                   # noqa: E402  复用它的假项目 / 计划
 
 ROOT = T.ROOT
 V, K, TMP = T.V, T.K, T.TMP
@@ -56,12 +56,8 @@ class RFake(T.Fake):
         return r
 
 
-def go(name, fake, mode="read", **kw):
-    os.environ["DSLAGENT_PLAN_MODE"] = mode
-    try:
-        return T.go(name, fake, **kw)
-    finally:
-        os.environ["DSLAGENT_PLAN_MODE"] = "full"
+def go(name, fake, **kw):
+    return T.go(name, fake, **kw)
 
 
 def user_of(f, tag):
@@ -90,7 +86,7 @@ def t_input():
           [m for m in CODE_MARKS if m in u])
     check("double:" in u and "clamp:" in u, "大纲给的是函数名:起-止", u[-300:])
     s = system_of(f, "plan")
-    full = V.plan_system(packs.current(), "full")
+    full = V._base_system(packs.current())
     old, new = V.read_intro_cut(packs.current())
     check(V.READ_TAIL in s, "READ_TAIL 在 read 的 system 里")
     check(all(a not in s and b in s for a, b in V.READ_SUBS), "READ_SUBS 每项：原文不在、新文在",
@@ -99,23 +95,16 @@ def t_input():
           "READ_TAIL 约定的原话在 system 里", s[:300])
     check("补查结果" not in old.replace("后面可能有「补查结果」，同等对待。", "") and "「补查结果」" not in s
           and "确定性抽出" not in s and "候选文件的大纲" in s, "讲资料包各节 / 补查结果的那句已去掉", s[:200])
-    check(full == V.plan_system(packs.current()), "plan_system 缺省仍是 full 原文")
+    check(s == V.plan_system(packs.current()) and full != s, "plan_system 就是读代码改写后的 system（底稿是 _base_system）")
     v = r["v2"]
-    check(v["规划方式"] == "read" and v["补查"] is None and v["补查项"] == 0 and v["大纲字符"] == len(u.split("\n\n", 1)[1])
+    check("规划方式" not in v and "补查" not in v and "补查项" not in v and v["大纲字符"] == len(u.split("\n\n", 1)[1])
           and (out / "outline.md").is_file() and not (out / "pack.md").exists() and v["候选"],
-          "记录：规划方式 / 大纲字符 / outline.md（没有 pack.md）", {k: v.get(k) for k in ("规划方式", "大纲字符", "候选")})
+          "记录：大纲字符 / outline.md（没有 pack.md、没有补查字段）", {k: v.get(k) for k in ("大纲字符", "候选")})
     check(set(v["步骤秒"]) == {"1大纲", "3规划", "4执行", "5验收", "6边界复核"}, "步骤里没有 2补查", v["步骤秒"])
 
-    # 不调补查 / 收集：这两个函数一调就炸
-    boom = lambda *a, **k: (_ for _ in ()).throw(AssertionError("read 方式不该调它"))   # noqa: E731
-    old_c, old_e = K.collect, K.extra
-    K.collect, K.extra = boom, boom
-    try:
-        f = RFake()
-        r, p, out = go("rd_nocoll", f)
-    finally:
-        K.collect, K.extra = old_c, old_e
-    check(r["fixed"] and "preq" not in f.tags(), "pack.collect / pack.extra 都没被调用（补查被取消）", r.get("stop"))
+    # 资料包不再有 collect / extra / QUERY_SYS（full 方式已删）
+    check(not any(hasattr(K, n) for n in ("collect", "extra", "QUERY_SYS", "PRE_SYS", "run_queries")), "packs.code 没有 collect / extra / 补查入口")
+    check(not hasattr(V, "plan_user") and not hasattr(V, "plan_mode") and not hasattr(V, "parse_json"), "v2 没有 plan_user / plan_mode / parse_json")
 
     # 包没实现 plan_outline → 只有任务原文
     mod = types.ModuleType("tests_pack_nooutline")
@@ -185,14 +174,22 @@ def t_call():
         del os.environ["DSLAGENT_PLAN_MODEL"]
     check(f.kws[0][1] == "opus" and f.kws[1][1] is None, "DSLAGENT_PLAN_MODEL 对 read 规划也生效", f.kws)
 
-    os.environ["DSLAGENT_PLAN_MODE"] = "half"
+    for bad, needles in (("half", ("half", "已去掉")), ("full", ("已移除", "full"))):
+        os.environ["DSLAGENT_PLAN_MODE"] = bad
+        try:
+            f = RFake()
+            r, p, out = T.go("rd_bad_" + bad, f)
+        finally:
+            os.environ.pop("DSLAGENT_PLAN_MODE")
+        check(r["reply"]["状态"] == "失败" and all(n in r["reply"]["原因"] for n in needles) and not f.log and not r["changed_files"],
+              f"DSLAGENT_PLAN_MODE={bad} → 失败、不调模型、说明已去掉 / 已移除", r["reply"])
+    os.environ["DSLAGENT_PLAN_MODE"] = "read"
     try:
         f = RFake()
-        r, p, out = T.go("rd_bad", f)
+        r, p, out = T.go("rd_read", f)
     finally:
-        os.environ["DSLAGENT_PLAN_MODE"] = "full"
-    check(r["reply"]["状态"] == "失败" and "half" in r["reply"]["原因"] and "read" in r["reply"]["原因"] and not f.log,
-          "DSLAGENT_PLAN_MODE 取值不对 → 失败、不调模型", r["reply"])
+        os.environ.pop("DSLAGENT_PLAN_MODE")
+    check(r["fixed"], "DSLAGENT_PLAN_MODE=read 等于没设")
 
 
 # ------------------------------------------------------------------ 三、只读工具
@@ -256,10 +253,8 @@ def t_cli():
         p = T.make_proj("cli")
         out = TMP / "out_cli"
         shutil.rmtree(out, ignore_errors=True)
-        os.environ["DSLAGENT_PLAN_MODE"] = "read"
         r = V.run(p, T.TASK, out, test_cmd=T.TEST_CMD)
     finally:
-        os.environ["DSLAGENT_PLAN_MODE"] = "full"
         for k, v in old.items():
             os.environ.pop(k) if v is None else os.environ.__setitem__(k, v)
     check(r["fixed"] and "x + x" in T.util(p), "假 CLI 走完 read 全流程（工具读 → 计划 → 执行 → 验收）", r.get("stop"))
@@ -281,34 +276,26 @@ def t_cli():
     check(r["v2"]["规划工具"] == {"次数": 3, "返回字数": sum(x["返回字数"] for x in tools)}, "result.json 里有规划工具汇总", r["v2"].get("规划工具"))
 
 
-# ------------------------------------------------------------------ 五、full
+# ------------------------------------------------------------------ 五、plan_mode 选项已去掉
 
-def t_full():
-    print("五、full")
-    f = RFake()
-    r, p, out = go("fl_ok", f, mode="full")
-    check(r["fixed"] and f.tags() == ["preq", "plan", "bound"], "full：先补查再规划（3 次调用）", f.tags())
-    u = user_of(f, "plan")
-    check("【数据包】" in u and "## 候选模块" in u and "### pkg/util.py L" in u, "full 的 user 有数据包全文")
-    check(system_of(f, "plan") == V.plan_system(packs.current()) and V.READ_TAIL not in system_of(f, "plan")
-          and "确定性抽出" in system_of(f, "plan"), "full 的 system 是原文（没有 read 那段）")
-    check(all("mcp_config" not in kw for _, _, kw in f.kws), "full 不挂工具")
-    check(r["v2"]["规划方式"] == "full" and (out / "pack.md").is_file() and set(r["v2"]["步骤秒"]) >= {"1数据包", "2补查"}, "full 的记录")
-    check(V.plan_mode("READ ") == "read" and V.plan_mode("") == "read" and V.plan_mode("full") == "full", "plan_mode 取值：大小写 / 空白不计，空 = read")
-    try:
-        V.plan_mode("half")
-        check(False, "plan_mode('half') 要报错")
-    except ValueError as e:
-        check("read" in str(e) and "full" in str(e), "不认识的取值报错并列出可用的", str(e))
-    os.environ.pop("DSLAGENT_PLAN_MODE")
-    try:
-        check(V.plan_mode() == "read", "环境变量没设 → 缺省 read")
-    finally:
-        os.environ["DSLAGENT_PLAN_MODE"] = "full"
+def t_plan_mode():
+    print("五、plan_mode 选项已去掉")
+    for v in ("", "read", " READ "):
+        V.check_plan_mode(v)
+    check(True, "空 / read（大小写、空白不计）通过")
+    for bad, needles in (("full", ("已移除", "full")), ("half", ("half", "已去掉"))):
+        try:
+            V.check_plan_mode(bad)
+            check(False, f"check_plan_mode({bad!r}) 要报错")
+        except ValueError as e:
+            check(all(n in str(e) for n in needles), f"check_plan_mode({bad!r}) 报错说明", str(e))
+    os.environ.pop("DSLAGENT_PLAN_MODE", None)
+    V.check_plan_mode()
+    check(True, "环境变量没设通过")
 
 
 def main():
-    for t in (t_input, t_call, t_readonly, t_cli, t_full):
+    for t in (t_input, t_call, t_readonly, t_cli, t_plan_mode):
         t()
     print(f"\n通过 {PASS}，失败 {FAIL}")
     return 1 if FAIL else 0

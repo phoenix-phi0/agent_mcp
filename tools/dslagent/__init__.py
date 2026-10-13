@@ -1,22 +1,36 @@
 """dslagent：用中文 DSL 修「有失败测试的 bug」、做「测试全过、产物明确」的小任务——cbatch 的 engine="dsl" / "auto" 走这里。
 
-把 /tmp/dslagent 的 plan6/plan7 实验（P6 臂）搬成生产路径，只留：
-  pool.py      常驻 claude 进程池（stream-json，每次调用后 /clear），单次调用省 ≈3 秒
-  template.py  第 1 版固定模板：从任务描述 / 测试摘要里按规则抽关键词和预读段落，不调模型规划
-  infer.py     推理候选：ast 事实 + 小 Datalog + 打分，前 8 段并进模板预读（≤675 行；出错/超时回退；DSLAGENT_INFER=0 关）
-  prompts.py   规划提示（修 bug 模板没修好时 / 任务路径；不变的大段在系统提示里，跨调用读缓存）
-  plan.py      计划检查：去说明文字、白名单、补末尾「结束」、假模型空跑
-  engine.py    AgentEngine（DSLEngine 子类）：系统子脚本映射、语句白名单、子脚本调用记录
-  runner.py    执行器：开局有失败 → 模板 → 规划（≤2 版）；全过 → 任务路径（模型规划 ≤2 版）；→ 交回（没成时附交接说明，
-               cbatch 决定要不要 claude 兜底）；auto 判定
-  v2.py        规划路径 v2 的核心（DSLAGENT_PLANNER=v2 时 runner.run 转过去，与任务类型无关）：资料包 → 补查 → 一次规划 .zs
-               → 引擎执行（计划内的 跑测试 只在影响走向时真跑）→ 验收 → 补改 1 次 → 边界复核；模型调用 / 保险 / 重试 / 记录 / 预算
-  packs/       资料包（DSLAGENT_PACK，缺省 code）：collect / extra / 补查提示 / 规划说明；code = 候选模块、引用行、登记处、测试断言
-  verify/      验收（DSLAGENT_VERIFY，缺省跟随 PACK）：check / fix / boundary；code = 全量测试、清单、旧写法残留、边界复核
-  snap.py      项目快照（snapshot / changed / diff_text / restore），核心和验收共用
-  v2pack.py    旧路径兼容，转发到 packs/code.py
-  lib/         定位.zs、读改测.zs 两个系统子脚本
-  verbs/       私有动词根：code 包（读、搜、改、写/删文件、改模块名、跑测试、运行看看），common/text 转发到仓库 verbs/，不污染全局动词
+两条路径，runner.run 按 DSLAGENT_PLANNER 选：
+  v2（cbatch 现在的用法）：文件大纲 → 模型读代码规划 .zs → 引擎执行 → 验收 → 补改 → 边界复核。
+  旧路径（planner≠v2，保留、隔离在 legacy/）：固定模板 → 模型规划 → 交回兜底。v2 不 import legacy/。
+
+文件职责（tools/dslagent/）：
+  __main__.py   命令行入口：run → runner.run；auto → auto.decide_auto
+  runner.py     入口 run()：planner=v2 → v2.run，否则 legacy/run.py；并把 common / auto 的公共名字 import 进来（旧写法 runner.xxx 仍可用）
+  common.py     公共：目录（tmp_dir）、测试命令探测（detect_test_cmd）、动词模块加载（_verb_module）、claude 子进程环境（child_env）
+  auto.py       engine=auto 的判定：decide_auto、capability_gaps、test_state（cbatch 用）
+  agents.py     各 agent（plan / plan_fix / sub_json / sub_tool / fix / bound / bfix）的定义：步骤、system、user 拼装、工具、轮数、回复格式、重试
+  guard.py      模型调用保险的常量和原因（超时 / 空闲 / 超长 / invoke 拦截 / 禁工具…），四个引擎和 Model 共用
+  engines.py    按步骤选模型（parse / validate / step_of）、_Proc 进程保险、call_claude / call_codex / call_grok / call_opencode
+  v2.py         v2 核心：Model（唯一模型入口：计数 / 墙钟 / 记账 / 重试）、Client、规划（plan_read_call）、V2Engine、计划检查、run、记录
+  verify/       验收（DSLAGENT_VERIFY，缺省跟随 PACK）：check / fix / boundary；code = 全量测试、清单、旧写法残留、边界复核
+  packs/        资料包（DSLAGENT_PACK，缺省 code）：plan_outline（文件大纲）、规划说明、计划专属检查
+  v2pack.py     旧名兼容，转发到 packs/code.py
+  engine.py     AgentEngine（DSLEngine 子类）：子脚本映射、语句白名单、子任务 tool 模式入口、写类动词前的开局快照
+  toolsub.py    子任务 tool 模式（dsl_options.subtask=tool）：2 次尝试、快照恢复、退回 json
+  dslmcp.py     stdio MCP：单个 dsl 工具（可写 / --readonly），日志落 toollogs/
+  dslcheck.py   tool / 只读工具的白名单检查、空跑、edit_problems、子任务方式（env_mode / check_mode）
+  plan.py       计划检查：strip_prose / autoclose / split_subs / whitelist_check、假模型 dry_run、write_subs
+  prompts.py    共用的提示：CHEAT / VERBS / TIPS / SEE / fix_prompt（文本在 prompts/，见 prompts/README.md）
+  promptfile.py 提示词文件加载器
+  snap.py       项目快照（snapshot / changed / diff_text / restore），核心和验收共用
+  reason.py     逻辑规则：规则求值 infer、规则 3 安全约束 check（写 / 删文件前）、开局快照 setup、done_items
+  datalog.py    小 Datalog 求值器（reason 和 legacy/infer 共用）
+  rules/        安全.dl
+  lib/          示例_分支规划.zs（规划 system 的末尾示例）
+  verbs/        私有动词根：code 包（读、搜、改、写 / 删文件、改模块名、跑测试、运行看看），common / text 转发仓库 verbs/
+  legacy/       旧路径：run.py（执行器）、template.py、infer.py、pool.py、engine.py（LegacyEngine）、prompts.py、
+                reason_rules.py（测试变化 / 完成核对检查 / 退回规划前回滚）、lib/（定位.zs、读改测.zs）、rules/（测试变化.dl、完成核对.dl）
 
 命令行（cbatch 起的就是这个，独立进程）：
     python -m tools.dslagent run --project DIR --task-file F --out DIR [--test-cmd CMD] [--max-plan 2]

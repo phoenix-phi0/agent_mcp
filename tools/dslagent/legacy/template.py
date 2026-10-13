@@ -14,26 +14,21 @@
 plan6/plan7 实测 N1–N10 共 28 次，模板第 1 版修好 28/28。
 """
 import re
-import sys
 from pathlib import Path
+
+from ..common import sandbox, src_files
 
 SKIP_CALLS = {"self", "assertEqual", "assertTrue", "assertFalse", "assertRaises", "assertIn", "assertIsNone", "assertAlmostEqual",
               "assertNotEqual", "assertIsNotNone", "date", "datetime", "len", "str", "int", "float", "list", "dict", "set",
               "tuple", "Decimal", "print", "range", "sorted", "sum", "min", "max", "isinstance", "super", "type", "repr"}
 WHOLE, AROUND, CAP = 300, 30, 450
-_DEFS = Path(__file__).resolve().parent / "verbs" / "code" / "defs"
 
 
-def _sandbox():
-    if str(_DEFS) not in sys.path:
-        sys.path.insert(0, str(_DEFS))
-    import _sandbox
-    return _sandbox
+_sandbox = sandbox
 
 
 def _src_files(repo):
-    sb = _sandbox()
-    return [f for f in sb.py_files(repo) if not sb.is_test_rel(f)]
+    return src_files(repo)
 
 
 def _lines(repo, rel):

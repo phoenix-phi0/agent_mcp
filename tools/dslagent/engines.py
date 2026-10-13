@@ -1,13 +1,13 @@
 """v2 的模型引擎：按步骤指定模型（cbatch dsl_options.models → 环境变量 DSLAGENT_MODELS，JSON）。
 
-步骤：plan（规划 / 规划重写 / 补查）、sub（问 / 问JSON / 派任务 / 并行派任务）、fix（验收补改）、bound（边界复核及其补改）；没写的步骤 sonnet。
+步骤：plan（规划 / 规划重写）、sub（问 / 问JSON / 派任务 / 并行派任务）、fix（验收补改）、bound（边界复核及其补改）；没写的步骤 sonnet。
 模型串：
-  sonnet / opus / haiku（或 claude-… 完整名）   claude CLI（call_claude 在 v2.py）
+  sonnet / opus / haiku（或 claude-… 完整名）   claude CLI（call_claude 在本文件）
   codex:<模型>[:<强度>]                          codex exec，强度 minimal|low|medium|high|xhigh，缺省 medium
   grok[:<强度>]                                  grok CLI，强度 low|medium|high|xhigh，缺省 low
   opencode:<provider/model>                      opencode run
 各引擎的调用函数返回同一种 dict（text / sec / ttft / cost / usage / rc / stderr / reason / partial / num_turns / tool_calls / engine / model），
-保险同 call_claude：首事件前静默、空闲超时、文本里的 <invoke 拦截、输出超长、总超时（killpg）；失败重试在 v2.Model 里（统一 1 次）。
+保险（guard.py，四个引擎共用 _Proc）：首事件前静默、空闲超时、文本里的 <invoke 拦截、输出超长、总超时（killpg）；失败重试在 v2.Model 里（统一 1 次）。
 """
 import json
 import os
@@ -17,6 +17,9 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+
+from . import agents as AG
+from . import guard as G
 
 STEPS = ("plan", "sub", "fix", "bound")
 DEFAULT = "sonnet"
@@ -29,10 +32,8 @@ GROK_DISABLED = ("write,search_replace,run_terminal_command,kill_command_or_suba
                  "scheduler_create,scheduler_delete,scheduler_list,monitor,search_tool,use_tool,workflow,web_search,open_page,open_page_with_find,"
                  "web_fetch,x_user_search,x_semantic_search,x_keyword_search,x_thread_fetch,image_gen,image_edit,image_to_video,reference_to_video,"
                  "send_feedback,ask_user_question,enter_plan_mode,exit_plan_mode")
-GROK_MAX_TURNS = 20
+GROK_MAX_TURNS = AG.PLAN.turns_grok
 GROK_READ_CAP = 200000   # read 规划累计读入字数上限，超了杀
-IDLE_OC = 120            # opencode 整段才发事件，空闲超时比逐字流宽
-FIRST_CAP = 120          # 首个事件之前最多静默这么久（codex / grok / opencode）
 ENV = "DSLAGENT_MODELS"
 
 _CLAUDE_RX = re.compile(r"^(sonnet|opus|haiku|claude-[A-Za-z0-9._\-\[\]]+)$")
@@ -92,13 +93,13 @@ def normalize(value):
     return out
 
 
-def validate(models, plan_mode="read", subtask="json"):
-    """normalize + 组合限制：read 方式下 plan 只支持 claude / codex / grok（claude / codex 挂只读 dsl 工具，grok 用自带只读工具）；DSLAGENT_SUBTASK=tool 时 sub 只支持 claude。"""
+def validate(models, subtask="json"):
+    """normalize + 组合限制：plan 要读代码，只支持 claude / codex / grok（claude / codex 挂只读 dsl 工具，grok 用自带只读工具；opencode 不能做规划）；
+    DSLAGENT_SUBTASK=tool 时 sub 只支持 claude。"""
     m = normalize(models)
     p = parse(m["plan"]) if "plan" in m else None
-    if p and plan_mode == "read" and p["engine"] not in ("claude", "codex", "grok"):
-        raise ValueError(f"models.plan={m['plan']!r}：read 规划方式要读代码，只支持 claude / codex / grok；"
-                         f"{p['engine']} 做规划请同时设 dsl_options.plan_mode=full")
+    if p and p["engine"] not in ("claude", "codex", "grok"):
+        raise ValueError(f"models.plan={m['plan']!r}：规划要读代码，只支持 claude / codex / grok，{p['engine']} 不能做规划")
     s = parse(m["sub"]) if "sub" in m else None
     if s and subtask == "tool" and s["engine"] != "claude":
         raise ValueError(f"models.sub={m['sub']!r}：DSLAGENT_SUBTASK=tool 时子任务要挂 dsl 工具，只支持 claude")
@@ -106,17 +107,9 @@ def validate(models, plan_mode="read", subtask="json"):
 
 
 def step_of(tag):
-    """调用 tag → 步骤：plan / plan_fix / preq → plan；dslNN[_…] → sub；fix → fix；bound / bfix → bound；其余 None。"""
-    t = re.sub(r"_reask$", "", tag or "")
-    if t in ("plan", "plan_fix", "preq"):
-        return "plan"
-    if re.match(r"^dsl\d+", t):
-        return "sub"
-    if t == "fix":
-        return "fix"
-    if t in ("bound", "bfix"):
-        return "bound"
-    return None
+    """调用 tag → 步骤：plan / plan_fix → plan；dslNN[_…] → sub；fix → fix；bound / bfix → bound；其余 None。"""
+    a = AG.of_tag(tag)
+    return a.step if a else None
 
 
 def effective(models):
@@ -139,11 +132,6 @@ def from_env():
 # ------------------------------------------------------------------ 公共：进程、保险
 
 
-def _v2():
-    from . import v2      # 保险阈值（MAX_OUT / IDLE_SEC / TOOL_MARKS）按 v2 里的当前值取，测试可改
-    return v2
-
-
 def _bin(env_name, name, fallback):
     return os.environ.get(env_name) or shutil.which(name) or fallback
 
@@ -162,9 +150,10 @@ def opencode_bin():
 
 
 class _Proc:
-    """一次子进程调用的公共部分：起进程（新进程组）、stdin 喂入、stderr 收集、总超时 / 首事件前静默 / 空闲超时三道 killpg、事件落盘。"""
+    """一次子进程调用的公共部分（claude / codex / grok / opencode 共用）：起进程（新进程组）、stdin 喂入、stderr 收集、
+    总超时 / 首事件前静默 / 空闲超时三道 killpg、文本保险（工具调用格式 / 超长）、事件落盘（events=False 不落）。"""
 
-    def __init__(self, cmd, stdin_text, timeout, idle, first_cap, cwd, env, reply_path):
+    def __init__(self, cmd, stdin_text, timeout, idle, first_cap, cwd, env, reply_path, events=True):
         self.t0 = time.time()
         self.killed, self.err_buf = [], []
         self.last = self.first = None          # 最近一次「有效活动」/ 首个事件的墙钟
@@ -176,7 +165,7 @@ class _Proc:
         if reply_path:
             try:
                 self.fh = open(reply_path, "w", encoding="utf-8")
-                self.efh = open(str(reply_path) + ".events", "w", encoding="utf-8")
+                self.efh = open(str(reply_path) + ".events", "w", encoding="utf-8") if events else None
             except OSError:
                 pass
         self.done = threading.Event()
@@ -195,7 +184,7 @@ class _Proc:
         except (OSError, ValueError):
             pass
 
-    def kill(self, why="总超时"):
+    def kill(self, why=G.R_TOTAL):
         if not self.killed:
             self.killed.append(why)
         try:
@@ -207,10 +196,10 @@ class _Proc:
         while not self.done.wait(min(1.0, max(0.05, self.idle / 4))):
             now = time.time()
             if self.first is None and now - self.t0 > self.first_cap:
-                self.kill("首字前静默超时")
+                self.kill(G.R_FIRST)
                 return
             if self.act and now - self.last > self.idle:
-                self.kill("空闲超时")
+                self.kill(G.R_IDLE)
                 return
 
     def event(self, now=None):
@@ -241,15 +230,14 @@ class _Proc:
             except OSError:
                 pass
 
-    def text_guard(self, so_far):
-        """流里出现 <invoke 等 → 杀；累计超过 MAX_OUT → 杀。"""
+    def text_guard(self, so_far, total=None):
+        """so_far 里出现 <invoke 等 → 杀；累计字数（缺省 len(so_far)，多轮调用传各轮累计 total）超过 MAX_OUT → 杀。"""
         if self.killed:
             return
-        V = _v2()
-        if any(m in so_far for m in V.TOOL_MARKS):
-            self.kill("输出工具调用格式")
-        elif len(so_far) > V.MAX_OUT:
-            self.kill("输出超长")
+        if G.has_mark(so_far):
+            self.kill(G.R_MARK)
+        elif (len(so_far) if total is None else total) > G.MAX_OUT:
+            self.kill(G.R_LONG)
 
     def close(self):
         """读完 stdout 后收尾：等进程、停计时、关文件。返回 (reason, stderr 文本)。"""
@@ -265,11 +253,95 @@ class _Proc:
 
 
 def _empty_cwd(name):
-    from .runner import tmp_dir
+    from .common import tmp_dir
     tmp = tmp_dir()
     cwd = tmp / name
     cwd.mkdir(parents=True, exist_ok=True)
     return tmp, cwd
+
+
+# ------------------------------------------------------------------ claude
+
+
+def call_claude(system, user, timeout=300, model=None, reply_path=None, idle=None, mcp_config=None, max_turns=1, allow_tool=None,
+                first_cap=None):
+    """claude -p（model 缺省 DEFAULT），自定系统提示，无内置工具 / 技能，流式（记首 token）。返回 text / sec / ttft / cost / usage / rc / stderr / reason。
+    进程保险同 codex / grok / opencode（_Proc）：总超时、首个 API 事件前静默（FIRST_CAP）、首 token 之后 idle 秒没有新流事件（空闲超时）、
+    文本里出现 <invoke / <function_calls（输出工具调用格式）、累计超过 MAX_OUT 字符（输出超长）。
+    reply_path：边收流边把文本增量追加进该文件，被杀时已收到的内容也在；返回的 partial 是已收到的流文本。
+    mcp_config（工具调用）：多挂一个 MCP（--mcp-config + --strict-mcp-config，内置工具仍 --tools ""，只许 allow_tool 那一个），
+    --max-turns 用 max_turns；text 是最后一轮的最终回复（中途轮次里的文字、真实工具调用不算），「输出工具调用格式」只查当前这一轮的文字，
+    超长按各轮累计，返回里多 num_turns / tool_calls / subtype。"""
+    from tools.cbatch import CLAUDE_BIN
+
+    from .common import child_env
+    tmp, cwd = _empty_cwd("v2_empty")
+    cmd = [os.environ.get("CBATCH_CLAUDE") or CLAUDE_BIN, "-p", "--model", model or DEFAULT, "--output-format", "stream-json",
+           "--verbose", "--include-partial-messages", "--max-turns", str(max_turns), "--tools", "", "--setting-sources", "",
+           "--strict-mcp-config", "--disable-slash-commands", "--system-prompt", system]
+    if mcp_config:
+        cmd += ["--mcp-config", str(mcp_config), "--allowedTools", allow_tool or "mcp__dsl__dsl"]
+    pr = _Proc(cmd, user, timeout, idle or G.IDLE_SEC, first_cap or G.FIRST_CAP, cwd, child_env(tmp), reply_path, events=False)
+    result, ttft, streamed = None, None, ""
+    turn_text, total_chars = "", 0          # 当前这一轮的流文本 / 全部轮的累计字数
+    text = ""
+    msgs, tool_ids = {}, set()              # 消息 id → {text, tool}（按出现顺序），真实工具调用块 id
+    for line in pr.p.stdout:
+        if ttft is not None:
+            pr.active()
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        ty = ev.get("type")
+        if ty in ("stream_event", "assistant", "result"):
+            pr.event()
+        if ty == "stream_event":
+            se = ev.get("event") or {}
+            if se.get("type") == "message_start":
+                turn_text = ""
+            if se.get("type") == "content_block_delta":
+                if ttft is None:
+                    ttft = round(time.time() - pr.t0, 2)
+                    pr.active()
+                d = se.get("delta") or {}
+                if d.get("type") == "text_delta" and d.get("text"):
+                    streamed += d["text"]
+                    turn_text += d["text"]
+                    total_chars += len(d["text"])
+                    if mcp_config:
+                        pr.text_guard(turn_text, total_chars)
+                    else:
+                        pr.text_guard(streamed)
+                    pr.write_reply(d["text"])
+        elif ty == "assistant":
+            if mcp_config:
+                m = msgs.setdefault(ev["message"].get("id") or f"m{len(msgs)}", {"text": "", "tool": False})
+                for b in ev["message"].get("content", []):
+                    if b.get("type") == "text":
+                        m["text"] += b["text"]
+                    elif b.get("type") == "tool_use":
+                        m["tool"] = True
+                        tool_ids.add(b.get("id") or len(tool_ids))
+                continue
+            for b in ev["message"].get("content", []):
+                if b.get("type") == "text":
+                    text += b["text"]
+        elif ty == "result":
+            result = ev
+    reason, err = pr.close()
+    if mcp_config:
+        last_msg = list(msgs.values())[-1] if msgs else None
+        text = (last_msg["text"] if last_msg and not last_msg["tool"] else "") if result is None or result.get("is_error") \
+            else (result.get("result") or "")
+    res = result or {}
+    u = res.get("usage", {}) or {}
+    usage = {"input": u.get("input_tokens"), "output": u.get("output_tokens"),
+             "cache_read": u.get("cache_read_input_tokens"), "cache_creation": u.get("cache_creation_input_tokens")}
+    return {"text": text, "sec": round(time.time() - pr.t0, 1), "rc": pr.p.returncode, "ttft": ttft,
+            "cost": res.get("total_cost_usd") or 0.0, "usage": usage, "stderr": err[-500:], "reason": reason,
+            "partial": streamed, "num_turns": res.get("num_turns"), "tool_calls": len(tool_ids),
+            "subtype": res.get("subtype")}
 
 
 # ------------------------------------------------------------------ codex
@@ -280,7 +352,6 @@ def call_codex(system, user, timeout=300, reply_path=None, idle=None, model=None
     system 经 -c developer_instructions，推理强度 -c model_reasoning_effort（缺省 medium）。回复取最后一条 agent_message（-o 文件兜底）。
     mcp_config（同 call_claude 的 mcpServers json）：只把里面的 dsl 这一个 MCP 以 -c mcp_servers.dsl.* 挂上，工具审批 approve；
     mcp_tool_call 不算违规，次数记进 tool_calls；codex 没有 max-turns，靠总超时兜底。出现命令 / 改文件 / 联网事件即杀。"""
-    V = _v2()
     tmp, cwd = _empty_cwd("v2_codex_empty")
     env = dict(os.environ)
     env["TMPDIR"] = str(tmp)
@@ -297,7 +368,7 @@ def call_codex(system, user, timeout=300, reply_path=None, idle=None, model=None
     if model:
         cmd += ["-m", model]
     cmd.append("-")
-    pr = _Proc(cmd, user, timeout, idle or (180 if mcp_config else V.IDLE_SEC), first_cap or int(os.environ.get("DSLAGENT_CODEX_FIRST_CAP") or FIRST_CAP),
+    pr = _Proc(cmd, user, timeout, idle or (G.IDLE_MCP if mcp_config else G.IDLE_SEC), first_cap or int(os.environ.get("DSLAGENT_CODEX_FIRST_CAP") or G.FIRST_CAP),
                cwd, env, reply_path)
     msgs, t_text, mcp_n, err_msg = [], [], 0, ""
     usage = {"input": None, "output": None, "cache_read": None, "reasoning": None}
@@ -331,7 +402,7 @@ def call_codex(system, user, timeout=300, reply_path=None, idle=None, model=None
         if it != "agent_message":
             pr.log_event(line)
         if not pr.killed and (it in ("command_execution", "file_change", "web_search") or (it == "mcp_tool_call" and not mcp_config)):
-            pr.kill("尝试调用工具")
+            pr.kill(G.R_TRY_TOOL)
     reason, err = pr.close()
     text = msgs[-1] if msgs else ""
     if not text and not pr.killed:
@@ -375,7 +446,6 @@ def call_grok(system, user, timeout=300, reply_path=None, idle=None, model=None,
     read_cwd（read 规划，只用于 plan / plan_fix）：cwd = 该目录（待改项目），只放开 read_file / grep / list_dir（GROK_READ_TOOLS），其余内置工具
     （GROK_DISABLED）从工具表去掉并 deny 写 / 编辑 / 命令 / MCP，--max-turns GROK_MAX_TURNS；事件流里出现别的工具调用即杀（调用被禁工具），
     累计读入超过 GROK_READ_CAP 字即杀（读超限）；工具调用逐条记进返回的 calls（工具 / 参数 / 返回字数）；回复取最后一次工具调用之后的文本。"""
-    V = _v2()
     tmp, cwd = _empty_cwd("v2_grok_empty")
     env = dict(os.environ)
     env["TMPDIR"] = str(tmp)
@@ -390,7 +460,7 @@ def call_grok(system, user, timeout=300, reply_path=None, idle=None, model=None,
                "--reasoning-effort", effort or GROK_EFFORT, "--system-prompt-override", system]
     if model:
         cmd += ["--model", model]
-    pr = _Proc(cmd, None, timeout, idle or V.IDLE_SEC, first_cap or int(os.environ.get("DSLAGENT_GROK_FIRST_CAP") or FIRST_CAP), cwd, env,
+    pr = _Proc(cmd, None, timeout, idle or G.IDLE_SEC, first_cap or int(os.environ.get("DSLAGENT_GROK_FIRST_CAP") or G.FIRST_CAP), cwd, env,
                reply_path)
     streamed, ttft, end, n_cmds = "", None, None, 0
     calls, byid, cur = [], {}, ""
@@ -418,15 +488,15 @@ def call_grok(system, user, timeout=300, reply_path=None, idle=None, model=None,
                 byid[ev.get("toolCallId")] = c
                 cur = ""
                 if name not in GROK_READ_TOOLS and not pr.killed:
-                    pr.kill("调用被禁工具")
+                    pr.kill(G.R_BAD_TOOL)
             else:
                 c = byid.get(ev.get("toolCallId"))
                 if c and ev.get("rawOutput"):
                     c["返回字数"] = _grok_out_len(ev["rawOutput"])
                     if not pr.killed and sum(x["返回字数"] or 0 for x in calls) > GROK_READ_CAP:
-                        pr.kill("读超限")
+                        pr.kill(G.R_READ_CAP)
         elif ty in ("tool_call", "tool_call_update") and not pr.killed:
-            pr.kill("尝试调用工具")
+            pr.kill(G.R_TRY_TOOL)
         if ty == "text" and ev.get("data"):
             if ttft is None:
                 ttft = round(now - pr.t0, 2)
@@ -473,7 +543,7 @@ def call_opencode(system, user, timeout=300, reply_path=None, idle=None, model=N
     cmd = [opencode_bin(), "run", "--format", "json", "--thinking", "--agent", OB.AGENT, "-m", model]
     if effort:
         cmd += ["--variant", effort]
-    pr = _Proc(cmd, user, timeout, idle or IDLE_OC, first_cap or int(os.environ.get("DSLAGENT_OC_FIRST_CAP") or FIRST_CAP), cwd, env,
+    pr = _Proc(cmd, user, timeout, idle or G.IDLE_OC, first_cap or int(os.environ.get("DSLAGENT_OC_FIRST_CAP") or G.FIRST_CAP), cwd, env,
                reply_path)
     streamed, ttft, cost, n_tok, err_msg = "", None, 0.0, 0, ""
     tok = {"input": 0, "output": 0, "reasoning": 0, "total": 0}
@@ -508,7 +578,7 @@ def call_opencode(system, user, timeout=300, reply_path=None, idle=None, model=N
         if ty not in ("text", "reasoning"):
             pr.log_event(line)
         if (ty in ("tool", "tool_use", "tool_call") or part.get("type") == "tool") and not pr.killed:
-            pr.kill("尝试调用工具")
+            pr.kill(G.R_TRY_TOOL)
     reason, err = pr.close()
     if err_msg:
         err = err_msg + "\n" + err
@@ -522,6 +592,6 @@ def call_opencode(system, user, timeout=300, reply_path=None, idle=None, model=N
 
 
 def call(spec, system, user, timeout, **kw):
-    """按 parse() 的结果调非 claude 引擎（claude 走 v2.call_claude，不经这里）。"""
-    fn = {"codex": call_codex, "grok": call_grok, "opencode": call_opencode}[spec["engine"]]
-    return fn(system, user, timeout, model=spec["model"], effort=spec["effort"], **kw)
+    """按 parse() 的结果调引擎。"""
+    fn = {"claude": call_claude, "codex": call_codex, "grok": call_grok, "opencode": call_opencode}[spec["engine"]]
+    return fn(system, user, timeout, model=spec["model"], **({"effort": spec["effort"]} if spec["engine"] != "claude" else {}), **kw)

@@ -29,10 +29,11 @@ TMP = Path(tempfile.mkdtemp(prefix="dslagent_v2_"))
 os.environ["DSLAGENT_TMP"] = str(TMP / "tmp")
 os.environ["CBATCH_CLAUDE"] = "/bin/true"
 os.environ.pop("DSLAGENT_PLANNER", None)
-os.environ["DSLAGENT_PLAN_MODE"] = "full"      # 本文件测老流程（资料包 + 补查）；read 方式见 test_dslagent_planread.py
+os.environ.pop("DSLAGENT_PLAN_MODE", None)
 
 from tools.dslagent import runner as RN      # noqa: E402
 from tools.dslagent import v2 as V            # noqa: E402
+from tools.dslagent import guard as G                    # noqa: E402
 from tools.dslagent import v2pack as K        # noqa: E402
 
 PASS = FAIL = 0
@@ -172,13 +173,12 @@ class Fake:
     """按 tag 前缀回复；值可以是文本、dict（转 JSON）、或 callable(user) → 文本。记下每次的 (tag, system, user)。"""
 
     def __init__(self, **replies):
-        self.replies = {"preq": {"查引用": [], "查文本": [], "读文件": [], "够了": True}, "plan": PLAN_OK,
-                        "bound": BOUND_OK}
+        self.replies = {"plan": PLAN_OK, "bound": BOUND_OK}
         self.replies.update(replies)
         self.log = []
         self.models = []
 
-    def __call__(self, system, user, tag, timeout, model=None):
+    def __call__(self, system, user, tag, timeout, model=None, **kw):
         self.log.append((tag, system, user))
         self.models.append((tag, model))
         key = next((k for k in sorted(self.replies, key=len, reverse=True) if tag.startswith(k)), None)
@@ -211,7 +211,7 @@ def util(p):
 
 
 def t_pack():
-    print("一、数据包 / 补查")
+    print("一、数据包（大纲 / 候选）")
     p = make_proj("pack")
     text, info = K.build(p, "把 pkg/util.py 里的 double 改成加法；clamp 不动")
     check("pkg/util.py" in info["cands"] and "def double" in text, "候选模块含点名文件、给了原文", info)
@@ -221,14 +221,6 @@ def t_pack():
     check(not any(c.startswith("tests/") for c in info["cands"]), "测试文件不当候选")
     small, si = K.build(p, "把 pkg/util.py 里的 double 改成加法，pkg/other.py 的 twice 也一样", budget=1500)
     check(len(small) <= 1500 + 40 and len(si["cands"]) <= len(info["cands"]), "超长时砍候选块 / 截断", (len(small), si))
-    q = {"查引用": ["double"], "查文本": [r"x \* 2"], "读文件": ["pkg/other.py:4-5", "nope.py", "../etc/passwd"],
-         "够了": False}
-    txt, log, files = K.run_queries(p, q)
-    check("pkg/util.py:9" in txt and "docs/old.py:2" in txt and "pkg/other.py L4-5" in txt,
-          "查引用 / 查文本 / 读文件 都给结果", txt[:800])
-    check("（文件不存在）" in txt and len(log) == 5 and "pkg/other.py" in files, "读不到的项说明、项目外的不读", log)
-    q9 = {"查引用": [f"n{i}" for i in range(12)]}
-    check(len(K.run_queries(p, q9)[1]) == 8, "补查最多 8 项")
 
 
 # ------------------------------------------------------------------ 二、test_gate
@@ -260,13 +252,13 @@ def t_flow():
     r, p, out = go("ok", f)
     rp = r["reply"]
     check(rp["状态"] == "成功" and r["fixed"] and "x + x" in util(p), "成功：改法套上、验收过、边界用例过", r.get("stop"))
-    check(f.tags() == ["preq", "plan", "bound"] and r["calls"] == 3 and abs(r["cost"] - 0.03) < 1e-9,
-          "够了 → 不补查；调用 3 次，费用累加", f.tags())
+    check(f.tags() == ["plan", "bound"] and r["calls"] == 2 and abs(r["cost"] - 0.02) < 1e-9,
+          "没有补查；调用 2 次，费用累加", f.tags())
     v = r["v2"]
     check([x["mode"] for x in v["计划内测试"]] == ["skipped", "real"] and v["验收"]["测试"][0]["方式"] == "真跑",
           "计划里不影响走向的 跑测试 跳过，验收真跑一次", v["计划内测试"])
-    check(set(v["步骤秒"]) == {"1数据包", "2补查", "3规划", "4执行", "5验收", "6边界复核"}, "记下各步耗时", v["步骤秒"])
-    check(set(rp) == {"结果", "状态", "原因"} and rp["结果"]["改动文件"] == ["pkg/util.py"] and rp["结果"]["调用"] == 3
+    check(set(v["步骤秒"]) == {"1大纲", "3规划", "4执行", "5验收", "6边界复核"}, "记下各步耗时", v["步骤秒"])
+    check(set(rp) == {"结果", "状态", "原因"} and rp["结果"]["改动文件"] == ["pkg/util.py"] and rp["结果"]["调用"] == 2
           and "全过" in rp["结果"]["边界复核"], "reply 是 结果/状态/原因 结构", rp)
     check((out / "result.json").is_file() and (out / "calls.json").is_file() and (out / "boundary" / "test_boundary_v2.py").is_file()
           and not (p / "test_boundary_v2.py").exists(), "记录写进任务目录，用例文件不进项目")
@@ -279,20 +271,13 @@ def t_flow():
     finally:
         del os.environ["DSLAGENT_PLAN_MODEL"]
     calls = json.loads((out / "calls.json").read_text(encoding="utf-8"))
-    check(f.models == [("preq", None), ("plan", "opus"), ("bound", None)] and r["plan_model"] == "opus"
-          and r["v2"]["规划模型"] == "opus" and [c["model"] for c in calls] == ["sonnet", "opus", "sonnet"],
-          "DSLAGENT_PLAN_MODEL：规划用指定模型，补查 / 边界复核仍 sonnet，记录里写规划模型", (f.models, r.get("plan_model"), calls))
+    check(f.models == [("plan", "opus"), ("bound", None)] and r["plan_model"] == "opus"
+          and r["v2"]["规划模型"] == "opus" and [c["model"] for c in calls] == ["opus", "sonnet"],
+          "DSLAGENT_PLAN_MODEL：规划用指定模型，边界复核仍 sonnet，记录里写规划模型", (f.models, r.get("plan_model"), calls))
     f = Fake()
     r, p, out = go("planmodel0", f)
-    check(f.models == [("preq", None), ("plan", None), ("bound", None)] and r["plan_model"] == "sonnet",
+    check(f.models == [("plan", None), ("bound", None)] and r["plan_model"] == "sonnet",
           "没设 DSLAGENT_PLAN_MODEL：规划用 sonnet，backend 不多传 model", f.models)
-
-    f = Fake(preq={"查引用": ["twice"], "查文本": [r"x \* 2$"], "读文件": ["pkg/other.py:1-9"], "够了": False})
-    r, p, out = go("query", f)
-    pack = (out / "pack.md").read_text(encoding="utf-8")
-    plan_user = next(u for t, _, u in f.log if t == "plan")
-    check(r["v2"]["补查项"] == 3 and "## 补查结果" in pack and "pkg/other.py:9" in pack and "## 补查结果" in plan_user,
-          "要补查 → 程序查完并入数据包，规划看得到", r["v2"].get("补查记录"))
 
     bad = "用包 common text code\n预算 调用 2 秒 60\n设 x = 运行命令 ls\n终止 成功 好\n\n#清单\n改 pkg/util.py:double\n"
     f = Fake(plan=bad, plan_fix=PLAN_OK)
@@ -303,7 +288,7 @@ def t_flow():
     f = Fake(plan=bad, plan_fix=bad.replace("预算 调用 2 秒 60\n", ""))
     r, p, _ = go("rewrite2", f)
     check(r["reply"]["状态"] == "失败" and "重写 1 次仍没过检查" in r["reply"]["原因"] and util(p) == UTIL
-          and f.tags() == ["preq", "plan", "plan_fix"], "重写仍错 → 失败、不执行", r["reply"])
+          and f.tags() == ["plan", "plan_fix"], "重写仍错 → 失败、不执行", r["reply"])
     f = Fake(plan=plan("设 res = 改文件 {e1}\n终止 失败 故意失败"))
     r, p, _ = go("halt", f)
     check(r["reply"]["状态"] == "失败" and "故意失败" in r["reply"]["原因"] and util(p) == UTIL and r["changed_files"] == [],
@@ -397,7 +382,7 @@ def t_flow():
     check(r["reply"]["状态"] == "成功" and "跑不起来" in r["v2"]["边界复核"]["结论"] and "bfix" not in f.tags(),
           "用例文件跑不起来 → 记下，不算代码的问题", r["v2"]["边界复核"])
     f = Fake()
-    r, p, _ = go("calls_cap", f, max_calls=2)
+    r, p, _ = go("calls_cap", f, max_calls=1)
     check(r["reply"]["状态"] == "成功" and "没生成用例" in r["v2"]["边界复核"]["结论"], "调用次数用完时边界复核跳过并记下",
           r["v2"]["边界复核"])
 
@@ -409,7 +394,7 @@ def t_switch():
     print("四、开关")
     check(not V.enabled(), "缺省不走 v2")
     fake = Fake()
-    sysmap = {V.PRE_SYS: "preq", V.BOUND_SYS: "bound"}
+    sysmap = {V.BOUND_SYS: "bound"}
     old = V.call_claude
     V.call_claude = lambda s, u, timeout=300, model=None, **kw: fake(s, u, sysmap.get(s, "plan"), timeout)
     os.environ["DSLAGENT_PLANNER"] = "v2"
@@ -435,6 +420,8 @@ def ev(o):
     print(json.dumps(o), flush=True)
 def delta(t):
     ev({"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": t}}})
+if mode == "silent":
+    time.sleep(30)
 if mode == "invoke_ok" and n == 1:
     delta("先说两句<inv")
     delta("oke name=x>")
@@ -462,9 +449,9 @@ def t_idle_retry():
     cli = TMP / "fake_cli.py"
     cli.write_text(FAKE_CLI, encoding="utf-8")
     cli.chmod(0o755)
-    old_env, old_idle = os.environ["CBATCH_CLAUDE"], V.IDLE_SEC
+    old_env, old_idle = os.environ["CBATCH_CLAUDE"], G.IDLE_SEC
     os.environ["CBATCH_CLAUDE"] = str(cli)
-    V.IDLE_SEC = 1.5
+    G.IDLE_SEC = 1.5
 
     def go(mode, name):
         cnt = TMP / f"cnt_{name}"
@@ -497,12 +484,19 @@ def t_idle_retry():
               and M.log[0]["sec"] < 20, "累计超过 20000 字符 → 被杀（reason=输出超长），重试仍超长则报错", (err, M.log))
         r1 = (out / "calls" / "01_t.reply.txt").read_text(encoding="utf-8")
         check(r1.startswith("字" * 20000) and "输出超长" in r1, "超长被杀时已收到的内容保留在 reply 文件", len(r1))
+        old_first, G.FIRST_CAP = G.FIRST_CAP, 1
+        try:
+            M, text, err, out = go("silent", "h")
+        finally:
+            G.FIRST_CAP = old_first
+        check(text is None and M.n == 2 and M.log[0].get("failed") == G.R_FIRST and M.log[0]["sec"] < 20 and G.R_FIRST in (err or ""),
+              "claude 首个事件前静默超过 FIRST_CAP → 被杀（首字前静默超时），重试仍静默则报错", (err, M.log))
         M, text, err, out = go("angle", "g")
         check(text == "好的回复" and M.n == 1 and not M.log[0].get("failed"), "普通尖括号（a<b、<div>、List<int>）不误杀", (text, err, M.log))
         # 增量落盘：流还没结束时文件里已经有内容
         cnt = TMP / "cnt_d"
         os.environ.update(FAKE_MODE="idle_always", FAKE_CNT=str(cnt))
-        V.IDLE_SEC = 3
+        G.IDLE_SEC = 3
         rp = TMP / "inc.reply.txt"
         import threading
         res = []
@@ -520,7 +514,7 @@ def t_idle_retry():
         check(res[0]["reason"] == "空闲超时" and res[0]["partial"] == "半截内容", "被杀返回 reason 和 partial", res[0])
     finally:
         os.environ["CBATCH_CLAUDE"] = old_env
-        V.IDLE_SEC = old_idle
+        G.IDLE_SEC = old_idle
 
 
 def t_fix_input():
@@ -555,6 +549,85 @@ def t_fix_input():
     check("未能定位" not in sec and "x + x" in sec, "无栈信息 → 给改动函数", sec[:200])
 
 
+def t_reply():
+    print("回复解析统一：补括号 / 状态上提 / 通用校验 + edits 结构")
+    from tools.dslagent.verify import code as VC
+    p = make_proj("rp_fix")
+    ok_edit = json.dumps({"file": "pkg/util.py", "old": "return x * 2", "new": "return x + x"}, ensure_ascii=False)
+
+    class FakeM:
+        def __init__(self, *replies):
+            self.replies, self.tags = list(replies), []
+
+        def __call__(self, system, user, tag):
+            self.tags.append(tag)
+            return self.replies.pop(0)
+    # 缺末尾括号 → 补括号后能套用，记录标 repaired
+    M = FakeM('{"结果": {"edits": [' + ok_edit + '], "说明": "改了"}, "状态": "成功", "原因": ""')
+    rec = VC.dispatch_fix(M, p, "s", "u", "fix")
+    check(rec.get("套用") is True and rec.get("repaired") == "补括号" and M.tags == ["fix"], "fix 回复缺末尾括号 → 补括号解析，记录标 repaired", rec)
+    # 状态写进结果里 → 状态上提
+    p = make_proj("rp_lift")
+    M = FakeM('{"结果": {"edits": [' + ok_edit + '], "状态": "成功", "原因": ""}}')
+    rec = VC.dispatch_fix(M, p, "s", "u", "fix")
+    check(rec.get("套用") is True and rec.get("repaired") == "状态上提", "状态写在结果里 → 状态上提，标 repaired", rec)
+    # edits 结构不对 → 带问题重问 1 次（tag fix_reask），仍不合格 → 回复不合格
+    p = make_proj("rp_bad")
+    M = FakeM('{"结果": {"edits": "没有"}, "状态": "成功", "原因": ""}', '{"结果": {"edits": []}, "状态": "成功", "原因": ""}')
+    rec = VC.dispatch_fix(M, p, "s", "u", "bfix")
+    check(M.tags == ["bfix", "bfix_reask"] and rec.get("状态") == "成功" and rec.get("edits") == 0, "edits 结构不对 → 重问 1 次（bfix_reask），空 edits 合格", (M.tags, rec))
+    M = FakeM("不是 JSON", "还不是")
+    rec = VC.dispatch_fix(M, p, "s", "u", "fix")
+    check(rec.get("状态") == "回复不合格" and M.tags == ["fix", "fix_reask"], "不是 JSON → 重问 1 次仍不合格", rec)
+    M = FakeM('{"结果": {"edits": []}, "状态": "失败", "原因": ""}', '{"结果": {"edits": []}, "状态": "失败", "原因": "做不到"}')
+    rec = VC.dispatch_fix(M, p, "s", "u", "fix")
+    check(M.tags == ["fix", "fix_reask"] and rec.get("原因") == "做不到", "通用校验：状态不是成功时原因不能空（同子任务）", (M.tags, rec))
+
+
+def t_reason_setup():
+    print("安全约束的开局快照：第一次写 / 改 / 删文件前才设")
+    from tools.dslagent import reason as R
+    from tools.mock import MockClient
+    p = make_proj("rs_eng")
+    (p / "config.json").write_text('{"a": 1}\n', encoding="utf-8")
+    R.STATE.update(snap=None, root=None, task="", log=[], fires=[])
+    eng = V._engine_cls()(client=MockClient(default="x", offline=True), workdir=p, verbose=False, verbs_root=V.VERBS)
+    eng.vars["task"] = TASK
+    eng.vars["e"] = {"file": "config.json", "content": '{"a": 2}\n'}
+    eng.run("用包 common text code\n设 n = 列文件 全部\n")
+    check(R.STATE.get("snap") is None, "没碰写类动词 → 不设快照（不白读整个项目）")
+    eng.run("设 w = 写文件 {e}\n")
+    w = eng.vars["w"]
+    check(w["ok"] == "否" and "安全约束拦下" in w["msg"] and (p / "config.json").read_text(encoding="utf-8") == '{"a": 1}\n',
+          "覆盖任务没点名、开局就有的数据文件 → 被安全约束拦下（有开局快照）", w)
+    check("config.json" in R.STATE["snap"] and R.STATE["task"] == TASK, "快照里有开局的文件、带任务原文")
+    eng.run("设 d = 删文件 config.json\n")
+    check(eng.vars["d"]["ok"] == "否" and "安全约束拦下" in eng.vars["d"]["msg"], "删没有等价迁移的数据文件 → 拦下", eng.vars["d"])
+    # 整个 v2.run：计划里 改文件 一执行，快照里就是开局的内容
+    f = Fake()
+    r, p2, out = go("rs_run", f)
+    check(r["fixed"] and R.STATE.get("snap") is not None and R.STATE["snap"]["pkg/util.py"] == UTIL.encode("utf-8"),
+          "v2.run：第一次 改文件 前设了开局快照（pkg/util.py 是开局内容）", r.get("stop"))
+    go("rs_run2", Fake(plan=plan("设 x = 打印 没写文件\n终止 失败 故意失败")))
+    check(R.STATE.get("snap") is None, "下一次 v2.run 开头清掉上次的快照；没写类动词就不设")
+
+
+def t_isolation():
+    print("v2 不 import legacy；planner≠v2 时 runner.run 才转 legacy")
+    import subprocess
+    code = ("import sys; sys.path.insert(0, %r); "
+            "import tools.dslagent.runner, tools.dslagent.v2, tools.dslagent.auto, tools.dslagent.common, tools.dslagent.engines, "
+            "tools.dslagent.verify.code, tools.dslagent.packs.code, tools.dslagent.toolsub, tools.dslagent.dslmcp, tools.dslagent.plan, "
+            "tools.dslagent.reason, tools.dslagent.datalog; "
+            "print([m for m in sys.modules if m.startswith('tools.dslagent.legacy')])" % str(ROOT))
+    out = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=60)
+    check(out.returncode == 0 and out.stdout.strip() == "[]", "import v2 / runner / auto / verify / packs / engines … 不会带进 legacy", (out.stdout, out.stderr[-300:]))
+    p = make_proj("iso")
+    f = Fake()
+    r, p, _ = go("iso_v2", f)
+    check(r["fixed"] and not [m for m in sys.modules if m.startswith("tools.dslagent.legacy")], "跑一次 v2.run 之后 legacy 也没被 import", r.get("stop"))
+
+
 def main():
     try:
         t_pack()
@@ -563,6 +636,9 @@ def main():
         t_switch()
         t_idle_retry()
         t_fix_input()
+        t_reply()
+        t_reason_setup()
+        t_isolation()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n{'=' * 50}\n通过 {PASS}，失败 {FAIL}")

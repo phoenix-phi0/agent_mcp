@@ -15,18 +15,16 @@
   任一情况 → 恢复快照，用 json 模式（dsl_task.dispatch_json，直接给改法）重发该子任务一次，结果记 fallback=1 和 fallback_reason。
 - 结果附：工具调用（次数）、轮数、保险触发（次数及原因）、工具改文件、子任务秒、缓存读 token、fallback。
 """
-import json
 import time
 
 from tools.dsl_core import ScriptHalt, ScriptReturn, to_text
 
-from . import promptfile as PF
+from . import agents as AG
+from . import guard as G
 
-MAX_TURNS = 6
-GUARD = ("空闲超时", "输出工具调用格式", "输出超长")
-TOOL_MARKS = ("<invoke", "<function_calls")
+MAX_TURNS = AG.SUB_TOOL.turns
 
-SYSTEM = PF.text("toolsub_system.txt")
+SYSTEM = AG.SUB_TOOL.system_text()
 
 
 def _snap(workdir):
@@ -42,14 +40,6 @@ def _restore(workdir, base, files):
 
 def _fail(reason, **extra):
     return {"结果": "", "状态": "失败", "原因": reason, **extra}
-
-
-def _parse(text):
-    from tools.zhipu import strip_json
-    try:
-        return json.loads(strip_json(text))
-    except (json.JSONDecodeError, ValueError, TypeError):
-        return None
 
 
 def _edits(result):
@@ -85,7 +75,8 @@ def run(engine, task, inputs: list, logic, spec: list) -> dict:
             raise ScriptHalt("超出预期", f"预算用完：{why}", "")
 
     value = None
-    for attempt in range(2):
+    tries = AG.SUB_TOOL.retry.times
+    for attempt in range(tries):
         try:
             r = runner(SYSTEM, prompt, engine.workdir, f"tool{attempt + 1}", MAX_TURNS)
         except ScriptReturn:
@@ -98,27 +89,29 @@ def run(engine, task, inputs: list, logic, spec: list) -> dict:
         spent()
         text = (r.get("text") or "").strip()
         why = r.get("failed")
-        if not why and any(m in text for m in TOOL_MARKS):
-            why = "输出工具调用格式"
-        if why in GUARD:
+        if not why and G.has_mark(text):
+            why = G.R_MARK
+        if why in G.GUARD_REASONS:
             st["保险触发"].append(why)
             _restore(engine.workdir, base, st["改过"])
-            if len(st["保险触发"]) >= 2:
+            if len(st["保险触发"]) >= tries:
                 fb = "保险触发 2 次：" + "、".join(st["保险触发"])
                 break
             continue
-        if why == "轮数用尽" or (why == "空回复" and (r.get("tool_calls") or 0) > 0):
-            fb = "轮数用尽未回 JSON" if why == "轮数用尽" else "工具调用后没有最终回复"
+        if why == G.F_TURNS or (why == G.F_EMPTY and (r.get("tool_calls") or 0) > 0):
+            fb = "轮数用尽未回 JSON" if why == G.F_TURNS else "工具调用后没有最终回复"
             _restore(engine.workdir, base, st["改过"])
             break
         if why:                               # rc≠0 / 空回复（没调工具）：当模型没有回应，重试 1 次
             st.setdefault("失败", []).append(why)
             _restore(engine.workdir, base, st["改过"])
-            if attempt == 1:
+            if attempt == tries - 1:
                 return _fail(f"模型没有回应：{why}", **_extra(st, t_all, [], 0))
             continue
-        data = _parse(text)
-        res, problems = T.check_reply(data, spec)
+        p = T.parse_check(text, spec)           # 同 json 模式：补括号 / 状态上提 + {结果,状态,原因} 校验
+        res, problems = p["value"], p["problems"]
+        if p["repaired"]:
+            st["repaired"] = p["repaired"]
         if problems:
             fb = "最终回复不是合法 JSON：" + "；".join(problems)[:200]
             _restore(engine.workdir, base, st["改过"])
@@ -156,4 +149,4 @@ def _extra(st, t_all, files, fallback):
     return {"工具调用": st["工具调用"], "轮数": st["轮数"], "保险触发": list(st["保险触发"]), "工具改文件": files,
             "子任务秒": round(time.time() - t_all, 1), "缓存读": st["缓存读"], "fallback": fallback,
             "尝试": st["尝试"], **({"丢弃edits": st["丢弃edits"]} if "丢弃edits" in st else {}),
-            **({"模型失败": st["失败"]} if "失败" in st else {})}
+            **({"模型失败": st["失败"]} if "失败" in st else {}), **({"repaired": st["repaired"]} if st.get("repaired") else {})}

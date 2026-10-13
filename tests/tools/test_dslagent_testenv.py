@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from tools.dslagent import runner as RN          # noqa: E402
 from tools.dslagent import reason as R           # noqa: E402
+from tools.dslagent.legacy import reason_rules as RR    # noqa: E402
 from tools.dslagent.verify import code as VC     # noqa: E402
 
 FAILS = []
@@ -39,7 +40,7 @@ check(dsl_vars(m.clean_env({"DSLAGENT_A": "1", "B": "2"})) == [] and m.clean_env
       "clean_env 可传 base")
 e = m.test_env()
 check(dsl_vars(e) == [] and e["PYTHONDONTWRITEBYTECODE"] == "1", "test_env 无 DSLAGENT_*，仍不写 pyc")
-check(dsl_vars(R._pycache_env()) == [], "reason._pycache_env 无 DSLAGENT_*")
+check(dsl_vars(RR._pycache_env()) == [], "reason._pycache_env 无 DSLAGENT_*")
 
 # 二、各入口起的子进程真看不到
 with tempfile.TemporaryDirectory() as d:

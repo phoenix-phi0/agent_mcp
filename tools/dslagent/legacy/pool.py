@@ -31,6 +31,8 @@ import threading
 import time
 from types import SimpleNamespace
 
+from ..common import child_env  # noqa: F401  v2 也用，挪到 common.py；旧名仍可从这里取
+
 # 首 token 对冲阈值（秒）。依据 plan9/11/12 共 344 次带首 token 的调用：正常调用中位 2.6s、P90 4.4s、最大 5.98s，
 # 之后直接断档到 8.3s；8.3s 以上的长尾 22 次（6.4%，最长 72s），另有 2 次 150 秒超时连首 token 都没出。
 # 取 7s：在正常调用最大值和长尾最小值之间，按历史数据正常调用误触发 0 次。DSLAGENT_HEDGE_SEC 可改，0 = 关。
@@ -462,13 +464,3 @@ class Pool:
     def kill(self):
         for s in self.sessions.values():
             s.kill()
-
-
-def child_env(tmp):
-    """claude 子进程的环境：洗掉 CLAUDECODE / CLAUDE_CODE_*（cbatch 同款）和 ANTHROPIC_API_KEY（要走订阅登录），
-    TMPDIR / CLAUDE_CODE_TMPDIR 指到可写的临时目录（/tmp 满了 claude 会 ENOSPC 秒退，plan7 撞上过）。"""
-    from tools.cbatch import _child_env
-    env = _child_env()
-    env.pop("ANTHROPIC_API_KEY", None)
-    env["TMPDIR"] = env["CLAUDE_CODE_TMPDIR"] = str(tmp)
-    return env

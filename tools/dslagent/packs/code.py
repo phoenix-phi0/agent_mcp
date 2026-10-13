@@ -1,11 +1,10 @@
 """资料包 code（改代码任务）：规划路径 v2 的确定性数据包（不调模型），由 plan35/proto 的 pack.py + proto2 的补查 / 测试断言
-改成对任意项目目录用。实现 packs/__init__.py 里写的资料包接口（collect / extra / QUERY_SYS / files / TASK_DESC / PACK_DESC /
+改成对任意项目目录用。实现 packs/__init__.py 里写的资料包接口（plan_outline / files / TASK_DESC / PACK_DESC /
 PLAN_RULES / PLAN_RULES_END / plan_problems），配套验收是 verify/code.py。旧路径 tools.dslagent.v2pack 转发到这里。
 
 - build(project, task)：从任务原文抽名字 → 按区分度给非测试 .py 打分选种子模块 → 沿 import 走一跳 → 小文件全文、
   大文件只给文件头和命中的函数；登记处行（同列名字共现、ALLOWED_/注册/白名单 一类）；被点名字的引用行；
   import 了候选模块的测试文件的断言行；候选文件大纲。总长超过 PACK_CHARS 时从最后的候选块砍起。
-- run_queries(project, q)：执行规划第一步要的补查（查引用 / 查文本 / 读文件，合计 ≤ MAX_Q 项），结果附到数据包后。
 - test_asserts(project, files, skip)：import 了（或按路径 / 模块名引用了）这些模块的测试文件的断言行。
 文件遍历跳过隐藏目录、__pycache__、node_modules、venv 等（同 verbs/code/defs/_sandbox.py 的 SKIP_DIRS）。
 """
@@ -22,7 +21,7 @@ PACK_CHARS = 40000       # 数据包总字符上限（含测试断言）
 FULL_MAX = 150           # ≤ 这么多行的候选文件给全文
 TOP_HITS, MAX_FUNCS = 5, 10   # 大文件：顶层命中最多几处、相关函数最多几个
 SEC_CAP = 7000           # 登记处 / 引用行 / 非 .py 命中：每节最多字符
-MAX_Q, Q_LINES, Q_READ, Q_CAP = 8, 40, 200, 16000
+Q_LINES = 40
 T_CAP_FILE, T_CAP = 2500, 9000
 SKIP_DIRS = {"__pycache__", "node_modules", "venv", "env", "site-packages", "build", "dist"}
 TEXT_SUF = {".py", ".zs", ".md", ".txt", ".json", ".ui", ".entity", ".toml", ".ini", ".cfg", ".yaml", ".yml", ".sql",
@@ -186,7 +185,7 @@ def outline(project, files, src=None):
 
 def build(project, task, opening="未跑（验收时统一跑一次全量测试）", budget=PACK_CHARS, outline_only=False):
     """返回 (数据包文本, 信息 {chars, cands, seeds, peers, test_files})。
-    outline_only：选完候选文件就返回，文本只有「文件大纲」一节（全部候选，不按 budget 砍；规划 plan_mode=read 用）。"""
+    outline_only：选完候选文件就返回，文本只有「文件大纲」一节（全部候选，不按 budget 砍；规划用）。"""
     project = Path(project)
     terms, peers = terms_of(task)
     src = {}
@@ -374,70 +373,11 @@ def grep(project, rx, limit=Q_LINES, py_only=False, skip_tests=False, dirs=None)
     return hits, len(allh), allh
 
 
-def _items(q, k):
-    v = q.get(k) if isinstance(q, dict) else None
-    return [x for x in v if isinstance(x, str) and x.strip()] if isinstance(v, list) else []
-
-
-def run_queries(project, q):
-    """执行补查，返回 (附到数据包后的文本, 记录, 命中的非测试 .py 文件集合)。"""
-    items = [("查引用", x) for x in _items(q, "查引用")] + [("查文本", x) for x in _items(q, "查文本")] + \
-            [("读文件", x) for x in _items(q, "读文件")]
-    items = items[:MAX_Q]
-    out, log, files = ["## 补查结果（程序按你的要求查出）"], [], set()
-    for kind, x in items:
-        if kind in ("查引用", "查文本"):
-            try:
-                if kind == "查引用":
-                    w = x.strip()
-                    rx = re.compile((r"(?<![\w])" + re.escape(w) + r"(?![\w])") if re.fullmatch(r"\w+", w, re.A)
-                                    else re.escape(w))
-                else:
-                    rx = re.compile(x)
-            except re.error as e:
-                out.append(f"### {kind} {x!r}\n（正则不合法：{e}）")
-                log.append({"类": kind, "项": x, "命中": None})
-                continue
-            hits, n, _ = grep(project, rx)
-            for h in hits:
-                rel = h.split(":", 1)[0]
-                if rel.endswith(".py") and not is_test(rel):
-                    files.add(rel)
-            more = f"\n…（共 {n} 行，只列前 {len(hits)}）" if n > len(hits) else ""
-            out.append(f"### {kind} {x!r}（{n} 行）\n```\n" + ("\n".join(hits) or "（无命中）") + more + "\n```")
-            log.append({"类": kind, "项": x, "命中": n})
-        else:
-            m = re.match(r"^\s*(.+?)(?::\s*L?(\d+)\s*[-~–]\s*L?(\d+))?\s*$", x)
-            rel = m.group(1) if m else x
-            rel = rel[2:] if rel.startswith("./") else rel
-            p = (Path(project) / rel).resolve()
-            root = Path(project).resolve()
-            t = read(project, rel) if (p == root or root in p.parents) else None
-            if t is None:
-                out.append(f"### 读文件 {x}\n（文件不存在）")
-                log.append({"类": kind, "项": x, "行数": None})
-                continue
-            n = len(t.splitlines())
-            a, b = (int(m.group(2)), int(m.group(3))) if m and m.group(2) else (1, n)
-            b = min(b, a + Q_READ - 1)
-            out.append(snippet(project, rel, a, b, text=t))
-            if rel.endswith(".py") and not is_test(rel):
-                files.add(rel)
-            log.append({"类": kind, "项": x, "行数": max(0, b - a + 1)})
-    text = "\n\n".join(out)
-    if len(text) > Q_CAP:
-        text = text[:Q_CAP] + "\n…（补查结果过长，已截断）"
-    return text, log, files
-
-
 # ------------------------------------------------------------ 资料包接口（见 packs/__init__.py）
 
 OLD_RX_LINE = re.compile(r"^\s*#\s*旧写法\s*[:：]\s*(.+?)\s*$", re.M)
 TASK_DESC = "改代码任务"
 PACK_DESC = "从仓库里确定性抽出的「数据包」（相关代码片段带行号、登记处、引用行、相关测试断言、文件大纲）"
-
-QUERY_SYS = PF.text("packs/code/query_sys.md")
-PRE_SYS = QUERY_SYS          # 旧名（v2.PRE_SYS 转发到这里）
 
 PLAN_RULES = PF.text("packs/code/plan_rules.md")
 
@@ -449,29 +389,10 @@ def files(project):
     return text_files(project)
 
 
-def collect(task, project, limits=None):
-    """确定性收集（见 packs/__init__.py）。refs = 候选模块；info 是 build 的信息（chars / cands / seeds / peers / test_files）。"""
-    text, info = build(project, task, **({"budget": limits["budget"]} if limits and limits.get("budget") else {}))
-    return {"text": text, "refs": list(info["cands"]), "info": info,
-            "记录": {"候选": info["cands"], "测试断言文件": list(info["test_files"])}}
-
-
 def plan_outline(task, project):
-    """只产文件大纲（不收代码片段 / 引用行 / 测试断言；规划 plan_mode=read 的 user 用）。出参同 collect 的 text / refs / 记录。"""
+    """只产文件大纲（不收代码片段 / 引用行 / 测试断言；规划的 user 用）。出参 {text, refs, 记录}。"""
     text, info = build(project, task, outline_only=True)
     return {"text": text, "refs": list(info["cands"]), "记录": {"候选": list(info["cands"])}}
-
-
-def extra(project, query, collected):
-    """执行补查；补查命中的模块再收一轮测试断言（已收过的测试文件不重复）。"""
-    info = collected["info"]
-    text, log, qfiles = run_queries(project, query)
-    rec = {}
-    ta, tf = test_asserts(project, qfiles - set(info["cands"]), skip=set(info["test_files"]))
-    if ta:
-        text += "\n\n" + ta
-        rec["测试断言文件"] = list(collected["记录"]["测试断言文件"]) + tf
-    return {"text": text, "log": log, "记录": rec}
 
 
 def plan_problems(main, body, cl, generic):

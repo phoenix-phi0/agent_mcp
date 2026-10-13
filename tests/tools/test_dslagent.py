@@ -29,7 +29,8 @@ os.environ["CBATCH_CLAUDE"] = "/bin/true"
 
 from tools.dslagent import plan as P          # noqa: E402
 from tools.dslagent import runner as R        # noqa: E402
-from tools.dslagent import template as T      # noqa: E402
+from tools.dslagent.legacy import run as LR     # noqa: E402
+from tools.dslagent.legacy import template as T      # noqa: E402
 
 DEFS = ROOT / "tools" / "dslagent" / "verbs" / "code" / "defs"
 PASS = FAIL = 0
@@ -134,7 +135,7 @@ def _pid_alive(pid):
 def test_hedge():
     """常驻进程池的首 token 对冲：用假 claude 模拟慢/快/崩，不调模型。"""
     import json
-    from tools.dslagent.pool import Pool
+    from tools.dslagent.legacy.pool import Pool
     print("常驻进程池：首 token 对冲重发")
     fake = TMP / "fake_claude.py"
     fake.write_text(FAKE_CLAUDE, encoding="utf-8")
@@ -263,7 +264,7 @@ def test_hedge():
     check(not finish(d, pool), "关池后不留进程")
 
     os.environ["DSLAGENT_HEDGE_SEC"] = "2.5"
-    from tools.dslagent import pool as PL
+    from tools.dslagent.legacy import pool as PL
     check(PL.Pool("/", "x", {}).hedge == 2.5 and PL.Pool("/", "x", {}, hedge=1).hedge == 1,
           "阈值可用 DSLAGENT_HEDGE_SEC / 参数配置")
     del os.environ["DSLAGENT_HEDGE_SEC"]
@@ -275,12 +276,12 @@ def test_hedge():
 
     call = SimpleNamespace(stdout=json.dumps({"total_cost_usd": 0.02, "_pool": {"hedged": True, "winner": "backup",
                                                                                   "hedge_at_ms": 7000, "extra_cost": 0.01}}))
-    cm = R.call_meta(call)
+    cm = LR.call_meta(call)
     check(cm["hedged"] and cm["winner"] == "backup" and cm["extra_cost"] == 0.01 and cm["hedge_at_ms"] == 7000,
           "calls.json 记录带 hedged / winner / hedge_at_ms / extra_cost", cm)
     call = SimpleNamespace(stdout=json.dumps({"is_error": True, "_pool": {"hedged": False, "ttft_ms": 3000, "stall_ms": 147000,
                                                                           "no_output_ms": 900, "hedge_reason": None}}))
-    cm = R.call_meta(call)
+    cm = LR.call_meta(call)
     check(cm["ttft_ms"] == 3000 and cm["stall_ms"] == 147000 and cm["no_output_ms"] == 900 and "hedge_reason" in cm,
           "calls.json 记录带 ttft（超时也带）/ stall_ms / no_output_ms / hedge_reason", cm)
 
@@ -375,7 +376,7 @@ def main():
 
     print("AgentEngine：子脚本映射到项目外、语句白名单")
     from tools.dsl import DSLError
-    from tools.dslagent.engine import AgentEngine
+    from tools.dslagent.legacy.engine import LegacyEngine as AgentEngine
     from tools.mock import MockClient
     lib = TMP / "lib"
     lib.mkdir()
@@ -402,8 +403,8 @@ def main():
     print("定位/读改测：固定说明在系统提示里，用户消息只放变化内容")
     import json
     from tools.dsl_model import _format_note, _split_format
-    from tools.dslagent import prompts as PR
-    lib_txt = {n: (R.LIB / n).read_text(encoding="utf-8") for n in P.LIBS}
+    from tools.dslagent.legacy import prompts as PR
+    lib_txt = {n: (LR.LIB / n).read_text(encoding="utf-8") for n in P.LIBS}
     check(f"格式 {PR.LOC_FORMAT}\n" in lib_txt["定位.zs"] and f"格式 {PR.RCT_FORMAT}\n" in lib_txt["读改测.zs"],
           "prompts 里的格式和 lib 脚本里 问JSON 的「格式」逐字一致")
     check(PR.LOC_TAIL == _format_note(_split_format("x 格式 " + PR.LOC_FORMAT, 0)[1]) and PR.LOC_TAIL in PR.LIB_SYSTEM
@@ -428,7 +429,7 @@ def main():
     for rep in (1, 2):
         mk = MockClient(handler=h, offline=True)
         eng = AgentEngine(client=mk, workdir=fail, verbose=False, verbs_root=R.VERBS,
-                          scripts={n: R.LIB / n for n in P.LIBS})
+                          scripts={n: LR.LIB / n for n in P.LIBS})
         eng.vars["task"] = f"修 total 第{rep}次"
         eng.run("用包 common text code\n设 p = 执行 定位.zs task={task} kw=def\\s+total rounds=1\n"
                 "设 r = 执行 读改测.zs task={task} segs={p.segs} rounds=1\n打印 {p.outcome} {r.outcome}")

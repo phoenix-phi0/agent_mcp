@@ -56,8 +56,8 @@ CLAUDE_CODE_SESSION_ID 这些。原样传给子进程，claude -p 会以为自�
   兜底的权限沿用这批的 permission_mode / allowed_tools（给了任一个就照用户的）；都没给就是 acceptEdits +
   PROJECT_TOOLS（Read/Edit/Write/Grep/Glob、python/pytest/unittest、ls/cat/head/tail/wc/diff、git diff/status）
   + 测试命令，不放开任意 Bash / 装包 / 联网 / rm / git commit、push。
-- engine="auto"：执行时判定（decide()）。先做能力检查（runner.capability_gaps：装依赖/联网/任意 shell/改仓库外
-  文件/浏览器/交互式调试）→ 命中就 claude。再走规则（runner.decide_auto）：没 project / 测试跑不起来 → claude；
+- engine="auto"：执行时判定（decide()）。先做能力检查（auto.capability_gaps：装依赖/联网/任意 shell/改仓库外
+  文件/浏览器/交互式调试）→ 命中就 claude。再走规则（auto.decide_auto）：没 project / 测试跑不起来 → claude；
   初始有失败且（给了 test_cmd 或提示词里有失败测试 / Traceback）→ dsl 修 bug；初始全过、没有报错说法、任务文本里
   抽得出明确产物 → dsl 任务路径。规则拿不准的两种（全过但抽不出产物；有失败但没报错说法）再做**一次**短分类
   （ROUTE_JUDGE，问 JSON {route, needs, reason}，见 ROUTE_PROMPT）：needs 非空或 route=claude → claude；超时、
@@ -71,13 +71,16 @@ CLAUDE_CODE_SESSION_ID 这些。原样传给子进程，claude -p 会以为自�
 （dsl_options 的 planner 逐条覆盖）；不设就是 dslagent 的缺省路径。
 资料包：dsl_options 的 pack（如 code）设成 dsl 进程的 DSLAGENT_PACK（验收 DSLAGENT_VERIFY 缺省跟随它）；不设用环境里的 / 缺省 code。
 取值不认识在提交时就报错，列出可用的（见 tools/dslagent/packs/）。
-规划方式：dsl_options 的 plan_mode（read 缺省 / full）设成 dsl 进程的 DSLAGENT_PLAN_MODE（v2 规划用：read = 任务原文 + 文件大纲 + 只读 dsl 工具按需读代码，
-full = 资料包全文 + 补查）；取值不对在提交时报错。
+规划方式：只有一种——任务原文 + 文件大纲 + 只读 dsl 工具按需读代码。老的 plan_mode=full（资料包全文 + 补查）已移除：dsl_options.plan_mode 传 full
+（或别的值）提交时报错，传 read 等于没传；DSLAGENT_PLAN_MODE 环境变量同。
+子任务方式：dsl_options 的 subtask（json 缺省 / tool）设成 dsl 进程的 DSLAGENT_SUBTASK（计划里的 派任务 / 并行派任务）：json = 子任务只回 JSON，改法由计划里的
+改文件 套用；tool = 子任务自己挂可写的 dsl 工具（读片段 / 搜索代码 / 查引用 / 改文件 / 写文件）读和改，最后回 JSON（只支持 claude 做 sub；出问题退回 json）。
+取值不对在提交时报错；不给就看提交时环境里的 DSLAGENT_SUBTASK，再缺省 json。
 按步骤指定模型：dsl_options.models = {plan, sub, fix, bound}（或一个字符串 = 四步都用它），没写的步骤 sonnet。
-plan = 规划 / 规划重写 / 补查，sub = 计划里的 问 / 问JSON / 派任务 / 并行派任务，fix = 验收补改，bound = 边界复核及其补改。
+plan = 规划 / 规划重写，sub = 计划里的 问 / 问JSON / 派任务 / 并行派任务，fix = 验收补改，bound = 边界复核及其补改。
 模型串：sonnet / opus / haiku（或完整 claude 模型名）；codex:<模型>[:<强度>]（强度缺省 medium）；grok[:<强度>]（low|medium|high|xhigh，缺省 low）；
-opencode:<provider/model>。提交时校验，不合格直接报错：read 规划只支持 claude / codex / grok（grok 用自带只读工具读代码；opencode 做 plan 要同时设 plan_mode=full），
-DSLAGENT_SUBTASK=tool 时 sub 只支持 claude。顶层 model 仍是执行任务那个 claude 的模型，也仍透传成规划模型，但 models.plan 写了以它为准。
+opencode:<provider/model>。提交时校验，不合格直接报错：规划只支持 claude / codex / grok（grok 用自带只读工具读代码；opencode 不能做规划），
+subtask=tool（DSLAGENT_SUBTASK=tool）时 sub 只支持 claude。顶层 model 仍是执行任务那个 claude 的模型，也仍透传成规划模型，但 models.plan 写了以它为准。
 
 dsl 在独立进程里跑（python -m tools.dslagent run），记录在任务目录 task_<n>/ 下；每条任务的
 engine_used（template / plan / plan_task / claude_fallback / claude）、versions、calls、cost_usd、seconds、calls_log
@@ -347,14 +350,19 @@ def _engine_fields(it: dict, i: int, engine, project, test_cmd, fallback,
     if opts.get("plan_mode"):
         from tools.dslagent import v2 as _v2
         try:
-            _v2.plan_mode(str(opts["plan_mode"]))
+            _v2.check_plan_mode(str(opts["plan_mode"]))
         except ValueError as e:
             raise CBatchError(f"第 {i} 条：dsl_options.plan_mode 不对：{e}") from None
+    if opts.get("subtask"):
+        from tools.dslagent import dslcheck as _dc
+        try:
+            _dc.check_mode(str(opts["subtask"]))
+        except ValueError as e:
+            raise CBatchError(f"第 {i} 条：dsl_options.subtask 不对：{e}") from None
     if opts.get("models"):
         from tools.dslagent import engines as _eng
         try:
-            _eng.validate(opts["models"], str(opts.get("plan_mode") or os.environ.get("DSLAGENT_PLAN_MODE") or "read").strip().lower(),
-                          (os.environ.get("DSLAGENT_SUBTASK") or "json").strip().lower())
+            _eng.validate(opts["models"], (str(opts.get("subtask") or os.environ.get("DSLAGENT_SUBTASK") or "json")).strip().lower())
         except ValueError as e:
             raise CBatchError(f"第 {i} 条：dsl_options.models 不对：{e}") from None
     it.update(project=proj or None, test_cmd=own.get("test_cmd", test_cmd) or None,
@@ -388,7 +396,7 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
         project、test_cmd、fallback、dsl_options 是这批的默认值，tasks 里的字典可以逐条覆盖
         （{"prompt": …, "engine": "dsl", "project": "/path", "test_cmd": "…", "fallback": false}）。
         engine=dsl 必须有 project（任务里或这里）；test_cmd 缺省按项目探测 pytest / unittest。
-        dsl_options 是调试用的：{"max_plan": 2, "template": true, "inject": {...}, "planner": "v2", "pack": "code", "plan_mode": "read",
+        dsl_options 是调试用的：{"max_plan": 2, "template": true, "inject": {...}, "planner": "v2", "pack": "code", "subtask": "json",
         "models": {"plan": "opus", "sub": "codex:gpt-5.1:low", "fix": "sonnet", "bound": "grok"}}（models 见模块文档）。
     concurrency / dsl_concurrency：isolated 模式下 claude 道、dsl 道（engine=dsl/auto）各自的并发上限，
         默认 1 / DSL_CONCURRENCY（3），最多 MAX_CONCURRENCY；见模块文档「并发」。share 模式逐条跑，不看这两个。
@@ -576,7 +584,7 @@ def decide(prompt: str, project: str = None, test_cmd: str = None, classify: boo
     返回 {engine: dsl|claude, kind, reason, source: 能力检查|规则|短分类|出错, test_cmd, needs,
     classify: {route, needs, reason, seconds, ok, error, cost_usd} 或 None}。classify=False 时拿不准就照规则给 claude。
     """
-    from .dslagent import runner
+    from .dslagent import auto as runner
     try:
         r = runner.decide_auto(prompt, project, test_cmd)
     except Exception as e:   # 判定本身坏了不该让任务卡住，退回默认
@@ -639,7 +647,7 @@ def _route_classify(prompt: str, project, initial: dict, cwd: str = None) -> dic
     c = {"route": "claude", "needs": [], "reason": "", "seconds": 0.0, "ok": False, "error": "", "cost_usd": None,
          "judge": "/".join(x for x in ROUTE_JUDGE if x)}
     if not cwd:
-        from .dslagent.runner import tmp_dir
+        from .dslagent.common import tmp_dir
         cwd = str(tmp_dir())
     t0 = time.time()
     try:
@@ -881,9 +889,9 @@ def _run_dsl(d: dict, t: dict, i: int) -> dict:
     if o.get("pack"):
         env["DSLAGENT_PACK"] = str(o["pack"])
         t["dsl_pack"] = str(o["pack"])
-    if o.get("plan_mode"):
-        env["DSLAGENT_PLAN_MODE"] = str(o["plan_mode"])
-        t["dsl_plan_mode"] = str(o["plan_mode"])
+    if o.get("subtask"):
+        env["DSLAGENT_SUBTASK"] = str(o["subtask"]).strip().lower()
+        t["dsl_subtask"] = env["DSLAGENT_SUBTASK"]
     if t.get("model"):
         env["DSLAGENT_PLAN_MODEL"] = str(t["model"])
     if o.get("models"):
@@ -936,7 +944,7 @@ def _run_engine(d: dict, t: dict, i: int, resume: str = None, gate=None) -> None
         if t["engine"] == "auto":
             eng = _decide(d, t)
         else:
-            from .dslagent.runner import capability_gaps
+            from .dslagent.auto import capability_gaps
             gaps = capability_gaps(t["prompt"])
             if gaps:   # 调用方显式选了 dsl：只记警告，不改道
                 t["engine_warning"] = "能力检查：任务像是需要 dsl 做不到的事——" + "、".join(gaps) + "；按 engine=dsl 照跑"

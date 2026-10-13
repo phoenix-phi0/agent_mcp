@@ -21,7 +21,7 @@ os.environ.pop("DSLAGENT_RULES", None)
 (TMP / "state").mkdir()
 
 from tools.dslagent import plan as P              # noqa: E402
-from tools.dslagent import prompts as PR          # noqa: E402
+from tools.dslagent.legacy import prompts as PR          # noqa: E402
 from tools.dslagent import reason as R            # noqa: E402
 from tools.dslagent.engine import ALLOWED_HEADS, AgentEngine   # noqa: E402
 from tools.mock import MockClient                 # noqa: E402

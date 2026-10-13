@@ -490,7 +490,6 @@ class ModelMixin:
         自己调 chat_messages 拿原文、自己解析，不走 chat_json：重问要带上
         上次的原文，而且 api / cli / 假客户端这样走的是同一条路。
         """
-        from .zhipu import strip_json
         msgs = []
         if self.system:
             msgs.append({"role": "system", "content": self.system})
@@ -503,7 +502,7 @@ class ModelMixin:
                 data, last = reply, to_text(reply)
             else:
                 last = str(reply)
-                data, _, err = _jr.parse(strip_json(last))
+                data, _, err = _jr.parse_reply(last, lift=False)
                 if data is None:
                     data = _BAD_JSON
             value, problems = _check_format(data, spec)

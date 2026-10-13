@@ -225,6 +225,19 @@ def check_reply(data, spec: list):
     return {"结果": result, "状态": state, "原因": reason}, []
 
 
+def parse_check(text, spec: list, extra=None):
+    """模型回复原文 → 同一套解析（JR.parse_reply：补括号、状态上提）+ 同一套 {结果,状态,原因} 校验（check_reply）；
+    extra(value) 在其上叠加专属校验（如补改的 edits 结构），返回问题文本或空。
+    返回 {value（合格的 {结果,状态,原因}，否则 None）, problems, repaired, err, data}。"""
+    data, repaired, err = JR.parse_reply(text)
+    value, problems = check_reply(data, spec)
+    if value is not None and extra:
+        bad = extra(value)
+        if bad:
+            value, problems = None, [bad]
+    return {"value": value, "problems": problems, "repaired": repaired, "err": err, "data": data}
+
+
 def _fake(task, spec: list) -> dict:
     from .dsl_model import _KIND_SAMPLE
     head = to_text(task).strip()[:20]
@@ -273,7 +286,6 @@ def _dispatch(engine, task, inputs, logic, fmt) -> dict:
 
 def dispatch_json(engine, task, inputs: list, logic, spec: list, client=None) -> dict:
     """json 模式的一次子任务（子任务回 JSON，edits 交主流程套用）。inputs 已经是 collect_inputs 的结果。client 缺省用引擎的。"""
-    from .zhipu import strip_json
     client = client or engine.client
     prompt = build_prompt(task, inputs, logic, spec)
     msgs = ([{"role": "system", "content": engine.system}] if engine.system else []) + \
@@ -288,16 +300,15 @@ def dispatch_json(engine, task, inputs: list, logic, spec: list, client=None) ->
         except Exception as e:
             first = (str(e).strip().splitlines() or [type(e).__name__])[0]
             return _failed(f"模型没有回应：{first}"[:200])
-        repaired, err = "", ""
         if isinstance(reply, (dict, list)):        # 假客户端可以直接回结构
-            data, last = reply, to_text(reply)
+            data, last, repaired, err = reply, to_text(reply), "", ""
+            data, lifted = JR.lift_status(data)
+            repaired = "状态上提" if lifted else ""
+            value, problems = check_reply(data, spec)
         else:
             last = str(reply)
-            data, repaired, err = JR.parse(strip_json(last))
-        data, lifted = JR.lift_status(data)
-        if lifted:
-            repaired = (repaired + "+" if repaired else "") + "状态上提"
-        value, problems = check_reply(data, spec)
+            p = parse_check(last, spec)
+            data, repaired, err, value, problems = p["data"], p["repaired"], p["err"], p["value"], p["problems"]
         if not problems:
             return dict(value, repaired=repaired, 原文=last[:500]) if repaired else value
         feedback = [p + f"（{err}）" if err and data is None and p == "回复不是合法 JSON" else p for p in problems]

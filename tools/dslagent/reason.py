@@ -1,30 +1,28 @@
-"""执行中的小分支交给逻辑规则：Python 只算事实，rules/<名>.dl（infer.Datalog）决定动作。
+"""执行中的小分支交给逻辑规则：Python 只算事实，rules/<名>.dl（datalog.Datalog）决定动作。
 
     from tools.dslagent import reason as R
-    d = R.infer("测试变化", R.test_facts(前摘要, 后摘要, 错误史))   # → {action, reason, code, ...}
+    R.setup(项目, R.all_files(项目), 任务原文)       # 开局快照（写 / 删文件的安全约束要用）
+    R.check("写入", 项目, "a.json", 内容)             # → "" 放行，否则拦截原因
 
-三组规则（rules/ 下，单独可测）：
-  测试变化.dl  读改测每次改文件+跑测试之后：失败变多→撤回并带新失败重问；变少→保留继续；集合换了→带新失败重问；
-              同一错误连续 2 次→升级（交回上层：退回规划/放弃）。
-  完成核对.dl  宣布完成之前：从任务文本机械抽出的产物（done_items）逐条核对；不满足→再做一轮（最多 1 轮）→仍不满足交模型确认一次。
-  安全.dl      写/删/退回规划之前：删仍被引用或没等价迁移的源数据、覆盖没点名且与开局快照不等价的数据文件、写改删测试、
-              越出项目 → 拦；退回规划前回归已坏且有改动 → 先回滚。
-动词 推理（verbs/code/defs/推理.py）把这里接进 DSL：设 d = 推理 规则=测试变化.dl {前} {后} {史}
-开关：DSLAGENT_RULES=0 关（runner / 读改测 / 写删动词都看它）。
+这里是 v2 也用的部分：规则求值 infer、规则 3 安全约束（安全.dl：写 / 删文件之前，删仍被引用或没等价迁移的源数据、覆盖没点名且与
+开局快照不等价的数据文件、写改删测试、越出项目 → 拦）、done_items（从任务文本机械抽出点名的产物，engine=auto 判定也用）、
+开局快照 setup / all_files / restore。
+旧路径专用的（规则 1 测试变化、规则 2 完成核对的检查、退回规划前回滚）在 legacy/reason_rules.py，规则文件在 legacy/rules/
+（rules() 两处都找）。动词 推理（verbs/code/defs/推理.py）把规则接进 DSL。
+开关：DSLAGENT_RULES=0 关（写删动词和旧路径都看它）。
 """
 import ast
 import csv
-import hashlib
 import io
 import json
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 sys.modules.setdefault("dslagent_reason", sys.modules[__name__])
 RULES_DIR = Path(__file__).resolve().parent / "rules"
+LEGACY_RULES_DIR = Path(__file__).resolve().parent / "legacy" / "rules"      # 旧路径的规则文件（测试变化.dl、完成核对.dl）
 DATA_EXT = (".json", ".csv", ".tsv", ".txt", ".yaml", ".yml", ".ini", ".toml")
 STATE = {"snap": None, "task": "", "root": None, "log": [], "fires": []}
 _CACHE = {}
@@ -50,17 +48,17 @@ def enabled():
     return os.environ.get("DSLAGENT_RULES", "1") not in ("0", "off", "否")
 
 
-def _infer_mod():
+def _datalog_mod():
     try:
-        from . import infer as I
-        return I
-    except ImportError:
+        from . import datalog as D
+        return D
+    except ImportError:          # 动词 推理 按文件路径单独加载本模块（没有包）：同目录的 datalog.py 也按路径加载
         import importlib.util
-        m = sys.modules.get("dslagent_infer")
+        m = sys.modules.get("dslagent_datalog")
         if m is None:
-            spec = importlib.util.spec_from_file_location("dslagent_infer", Path(__file__).resolve().parent / "infer.py")
+            spec = importlib.util.spec_from_file_location("dslagent_datalog", Path(__file__).resolve().parent / "datalog.py")
             m = importlib.util.module_from_spec(spec)
-            sys.modules["dslagent_infer"] = m
+            sys.modules["dslagent_datalog"] = m
             spec.loader.exec_module(m)
         return m
 
@@ -68,14 +66,17 @@ def _infer_mod():
 def rules(name):
     name = name[:-3] if name.endswith(".dl") else name
     if name not in _CACHE:
-        _CACHE[name] = _infer_mod().parse_rules((RULES_DIR / f"{name}.dl").read_text(encoding="utf-8"))
+        f = RULES_DIR / f"{name}.dl"
+        if not f.is_file():
+            f = LEGACY_RULES_DIR / f"{name}.dl"
+        _CACHE[name] = _datalog_mod().parse_rules(f.read_text(encoding="utf-8"))
     return _CACHE[name]
 
 
 def infer(name, facts):
     """facts：{谓词: 值 或 值列表}（值都按字符串）。返回优先级最高的 decide。"""
     name = name[:-3] if name.endswith(".dl") else name
-    dl = _infer_mod().Datalog(rules(name))
+    dl = _datalog_mod().Datalog(rules(name))
     for k, v in facts.items():
         for x in (v if isinstance(v, (list, tuple, set)) else [v]):
             dl.add(k, x if isinstance(x, str) else ("yes" if x is True else "no" if x is False else str(x)))
@@ -100,40 +101,6 @@ def _log(rec):
 
 
 # ============================================================ 规则 1 测试变化
-
-def fail_set(summary):
-    s = summary or ""
-    if "全部通过" in s:
-        return set()
-    names = {re.sub(r"\s+", " ", l.split(":", 1)[1]).strip() for l in s.splitlines() if l.startswith(("FAIL:", "ERROR:"))}
-    return names or {"<测试整体没跑通>"}
-
-
-def err_sig(summary):
-    lines = sorted({l.strip() for l in (summary or "").splitlines()
-                    if l.startswith(("FAIL:", "ERROR:")) or re.match(r"^\s*\w*(Error|Exception)\b", l)})
-    return hashlib.sha1("\n".join(lines).encode()).hexdigest()[:10]
-
-
-def _summary(x):
-    if isinstance(x, dict):
-        return x.get("summary") or ("全部通过" if x.get("passed") == "是" else "")
-    return str(x or "")
-
-
-def test_facts(before, after, hist="", can_undo=True):
-    """before/after：跑测试 的结果（结构或摘要文本）；hist：之前各次改动后的错误签名（逗号隔开）。"""
-    b, a = fail_set(_summary(before)), fail_set(_summary(after))
-    passed = (after.get("passed") == "是") if isinstance(after, dict) else not a
-    delta = "more" if len(a) > len(b) else "less" if len(a) < len(b) else "changed" if a != b else "same"
-    sig = err_sig(_summary(after))
-    prev = [x for x in str(hist or "").split(",") if x and x != "无"]
-    facts = {"after_pass": passed, "delta": delta, "same_err2": bool(prev) and prev[-1] == sig and not passed,
-             "can_undo": bool(can_undo)}
-    extra = {"sigs": ",".join(prev + [sig]), "new_fail": sorted(a - b), "n_before": len(b), "n_after": len(a),
-             "delta": delta}
-    return facts, extra
-
 
 # ============================================================ 规则 2 完成前核对
 
@@ -263,72 +230,6 @@ def _src_files(root):
         yield r, f
 
 
-def done_unmet(root, items, snap=None):
-    """逐条核对 → 未满足项（文字）列表。snap：开局 {相对路径: bytes}（unchanged 用）。"""
-    root = Path(root)
-    srcs = None
-    out = []
-    for it in items:
-        k = it["kind"]
-        if k == "exists" and not (root / it["path"]).is_file():
-            out.append(f"文件 {it['path']} 还不存在（任务要求新建）")
-        elif k == "absent" and (root / it["path"]).exists():
-            out.append(f"文件 {it['path']} 还在（任务要求删除）")
-        elif k == "unchanged" and snap is not None and it["path"] in snap:
-            p = root / it["path"]
-            if not p.is_file() or p.read_bytes() != snap[it["path"]]:
-                out.append(f"文件 {it['path']} 被改动了（任务要求不许改）")
-        elif k in ("def", "forbid"):
-            if srcs is None:
-                srcs = {r: f.read_text(encoding="utf-8", errors="ignore") for r, f in _src_files(root)}
-            if k == "def":
-                pat = re.compile(rf"^\s*(?:async\s+)?(?:def|class)\s+{re.escape(it['name'])}\b|^\s*{re.escape(it['name'])}\s*[:=]", re.M)
-                if not any(pat.search(s) for s in srcs.values()):
-                    out.append(f"代码里找不到 {it['name']} 的定义（任务点名要有）")
-            else:
-                bad = [r for r, s in srcs.items() if r.startswith(it["dir"]) and re.search(rf"\b{re.escape(it['name'])}\b", s)]
-                if bad:
-                    out.append(f"{it['dir']} 下仍出现 {it['name']}（{'、'.join(bad[:3])}），任务要求不能再出现")
-        elif k == "keys":
-            p = root / it["path"]
-            try:
-                j = json.loads(p.read_text(encoding="utf-8"))
-                miss = [x for x in it["keys"] if not isinstance(j, dict) or x not in j]
-            except (OSError, ValueError):
-                miss = None
-            if miss is None:
-                out.append(f"{it['path']} 读不出 JSON 对象")
-            elif miss:
-                out.append(f"{it['path']} 缺键：{'、'.join(miss)}")
-        elif k == "lines":
-            p = root / it["path"]
-            n = len(p.read_text(encoding="utf-8", errors="ignore").splitlines()) if p.is_file() else 0
-            if n > it["max"]:
-                out.append(f"{it['path']} 有 {n} 行，任务要求 {it['max']} 行以内")
-        elif k == "import":
-            try:
-                p = subprocess.run([sys.executable, "-c", f"from {it['mod']} import {it['name']}"], cwd=root,
-                                   capture_output=True, text=True, timeout=30,
-                                   env=_pycache_env())
-                if p.returncode != 0:
-                    out.append(f"from {it['mod']} import {it['name']} 失败：{(p.stderr.strip().splitlines() or [''])[-1][:120]}")
-            except subprocess.TimeoutExpired:
-                out.append(f"from {it['mod']} import {it['name']} 超时")
-    return out
-
-
-def _pycache_env():
-    """子进程环境：不写 .pyc。不用 PYTHONPYCACHEPREFIX 缓存——.pyc 只按 mtime（秒）+ 大小判新旧，
-    同一秒内的等长改动会读到旧字节码。"""
-    from .runner import _verb_module
-    return _verb_module("跑测试").clean_env(PYTHONDONTWRITEBYTECODE="1")
-
-
-def done_facts(tests_pass, unmet, redo_left, confirm_left):
-    return {"tests_pass": bool(tests_pass), "unmet_any": bool(unmet), "redo_left": bool(redo_left),
-            "confirm_left": bool(confirm_left)}
-
-
 # ============================================================ 规则 3 安全约束
 
 def setup(root, snap, task):
@@ -429,17 +330,6 @@ def check(op, root, path, content=None):
         why = f"新数据文件（{'、'.join(extra['new'][:3])}）的记录数和源文件（{extra['n0']} 条）对不上，等价性检查没过"
     STATE["log"].append({"op": op, "file": extra["rel"], "why": why, "code": d["code"]})
     return f"安全约束拦下 {op} {extra['rel']}：{why}"
-
-
-def replan_check(fail0, summary_now, dirty):
-    """退回规划前：fail0 开局失败集合；summary_now 当前测试摘要；dirty 有改动。→ 推理结果（action=rollback 要先回滚）。"""
-    now = fail_set(summary_now)
-    reg = sorted(now - set(fail0)) if "全部通过" not in (summary_now or "") else []
-    d = infer("安全", {"op": "replan", "regress": bool(reg), "dirty": bool(dirty)})
-    d["regress"] = reg
-    if d["action"] == "rollback":
-        STATE["log"].append({"op": "退回规划", "file": "", "why": f"回归 {reg[:3]}，先回滚", "code": d["code"]})
-    return d
 
 
 def restore(root, snap):

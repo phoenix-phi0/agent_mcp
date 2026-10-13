@@ -94,6 +94,7 @@ with open({str(DSL_LOG)!r}, "a", encoding="utf-8") as f:
                        "plan_model": os.environ.get("DSLAGENT_PLAN_MODEL"),
                        "pack": os.environ.get("DSLAGENT_PACK"),
                        "plan_mode": os.environ.get("DSLAGENT_PLAN_MODE"),
+                       "subtask": os.environ.get("DSLAGENT_SUBTASK"),
                        "models": os.environ.get("DSLAGENT_MODELS")}},
                        ensure_ascii=False) + "\\n")
 if "DSLCRASH" in task:
@@ -416,7 +417,7 @@ def main():
           [x["plan_model"] for x in dl.values()])
     n_jobs = len(cbatch.jobs(1000))
     for bad, needle, opts in [({"plan": "gpt-9"}, "不认识", {}), ({"judge": "opus"}, "步骤名", {}), ({"fix": "codex:gpt-5:turbo"}, "强度", {}),
-                              ({"plan": "opencode:a/b"}, "plan_mode=full", {}), ({"plan": "opencode:a/b"}, "plan_mode=full", {"plan_mode": "read"}),
+                              ({"plan": "opencode:a/b"}, "不能做规划", {}), ({"plan": "opencode:a/b"}, "不能做规划", {"plan_mode": "read"}),
                               ("grok:ultra", "强度", {}), (["plan"], "字典或字符串", {})]:
         try:
             cbatch.submit([{"prompt": "DSLOK 错 models", "engine": "dsl", "project": str(proj), "dsl_options": {"models": bad, **opts}}],
@@ -424,15 +425,11 @@ def main():
             check(False, f"models={bad!r} 提交时要报错")
         except cbatch.CBatchError as e:
             check("models" in str(e) and needle in str(e), f"models={bad!r}：提交时报错", str(e))
-    j = cbatch.submit([{"prompt": "DSLOK full 下 grok 规划", "engine": "dsl", "project": str(proj),
-                        "dsl_options": {"models": {"plan": "grok"}, "plan_mode": "full"}}], cwd=str(TMP))
-    cbatch.wait(j["job_id"], timeout=60, every=0.2)
-    check(True, "plan_mode=full 时 grok 规划可以提交")
     j = cbatch.submit([{"prompt": "DSLOK read 下 grok 规划", "engine": "dsl", "project": str(proj),
                         "dsl_options": {"models": {"plan": "grok:medium"}, "plan_mode": "read"}}], cwd=str(TMP))
     cbatch.wait(j["job_id"], timeout=60, every=0.2)
-    check(True, "plan_mode=read 时 grok 规划可以提交")
-    check(len(cbatch.jobs(1000)) == n_jobs + 2, "报错的提交没有入队（只多了最后两个能提交的）", (n_jobs, len(cbatch.jobs(1000))))
+    check(True, "grok 规划可以提交（plan_mode=read 等于没传）")
+    check(len(cbatch.jobs(1000)) == n_jobs + 1, "报错的提交没有入队（只多了最后一个能提交的）", (n_jobs, len(cbatch.jobs(1000))))
 
     print("engine=dsl：dsl_options.pack 透传成 DSLAGENT_PACK，写错在提交时报错并列出可用的")
     DSL_LOG.unlink()
@@ -450,21 +447,46 @@ def main():
     except cbatch.CBatchError as e:
         check("docs" in str(e) and "code" in str(e), "pack 取值不对：提交时报错并列出可用的", str(e))
 
-    print("engine=dsl：dsl_options.plan_mode 透传成 DSLAGENT_PLAN_MODE，写错在提交时报错")
+    print("engine=dsl：dsl_options.plan_mode 已去掉：full 提交时报错说明已移除，read 等于没传、不透传")
     DSL_LOG.unlink()
-    j = cbatch.submit([{"prompt": "DSLOK 带 plan_mode", "engine": "dsl", "project": str(proj), "dsl_options": {"plan_mode": "full"}},
-                       {"prompt": "DSLOK 没给 plan_mode", "engine": "dsl", "project": str(proj)}], cwd=str(TMP))
+    j = cbatch.submit([{"prompt": "DSLOK 带 plan_mode", "engine": "dsl", "project": str(proj), "dsl_options": {"plan_mode": "read"}}], cwd=str(TMP))
     d = cbatch.wait(j["job_id"], timeout=60, every=0.2)
     dl = {json.loads(x)["task"]: json.loads(x) for x in DSL_LOG.read_text(encoding="utf-8").splitlines()}
-    check(dl["DSLOK 带 plan_mode"]["plan_mode"] == "full" and dl["DSLOK 没给 plan_mode"]["plan_mode"] is None
-          and d["tasks"][0]["dsl_plan_mode"] == "full" and "dsl_plan_mode" not in d["tasks"][1],
-          "给了 plan_mode → dsl 进程有 DSLAGENT_PLAN_MODE；没给就没有", [x["plan_mode"] for x in dl.values()])
+    check(dl["DSLOK 带 plan_mode"]["plan_mode"] is None and "dsl_plan_mode" not in d["tasks"][0],
+          "plan_mode=read 不设 DSLAGENT_PLAN_MODE", [x["plan_mode"] for x in dl.values()])
+    for bad, needles in (("full", ("已移除", "full")), ("half", ("half", "已去掉"))):
+        try:
+            cbatch.submit([{"prompt": "DSLOK 错 plan_mode", "engine": "dsl", "project": str(proj), "dsl_options": {"plan_mode": bad}}],
+                          cwd=str(TMP))
+            check(False, f"plan_mode={bad} 提交时要报错")
+        except cbatch.CBatchError as e:
+            check(all(n in str(e) for n in needles), f"plan_mode={bad}：提交时报错", str(e))
+
+    print("engine=dsl：dsl_options.subtask 透传成 DSLAGENT_SUBTASK，写错在提交时报错；tool 时 sub 只许 claude")
+    DSL_LOG.unlink()
+    j = cbatch.submit([{"prompt": "DSLOK 子任务 tool", "engine": "dsl", "project": str(proj), "dsl_options": {"subtask": "tool"}},
+                       {"prompt": "DSLOK 子任务 json", "engine": "dsl", "project": str(proj), "dsl_options": {"subtask": "JSON"}},
+                       {"prompt": "DSLOK 没给 subtask", "engine": "dsl", "project": str(proj)}], cwd=str(TMP))
+    d = cbatch.wait(j["job_id"], timeout=60, every=0.2)
+    dl = {json.loads(x)["task"]: json.loads(x) for x in DSL_LOG.read_text(encoding="utf-8").splitlines()}
+    check(dl["DSLOK 子任务 tool"]["subtask"] == "tool" and dl["DSLOK 子任务 json"]["subtask"] == "json"
+          and dl["DSLOK 没给 subtask"]["subtask"] is None and d["tasks"][0]["dsl_subtask"] == "tool" and "dsl_subtask" not in d["tasks"][2],
+          "给了 subtask → dsl 进程有 DSLAGENT_SUBTASK（小写）；没给就没有", [x["subtask"] for x in dl.values()])
     try:
-        cbatch.submit([{"prompt": "DSLOK 错 plan_mode", "engine": "dsl", "project": str(proj), "dsl_options": {"plan_mode": "half"}}],
-                      cwd=str(TMP))
-        check(False, "plan_mode=half 提交时要报错")
+        cbatch.submit([{"prompt": "DSLOK 错 subtask", "engine": "dsl", "project": str(proj), "dsl_options": {"subtask": "mcp"}}], cwd=str(TMP))
+        check(False, "subtask=mcp 提交时要报错")
     except cbatch.CBatchError as e:
-        check("half" in str(e) and "read" in str(e) and "full" in str(e), "plan_mode 取值不对：提交时报错并列出可用的", str(e))
+        check("subtask" in str(e) and "mcp" in str(e) and "json" in str(e) and "tool" in str(e), "subtask 取值不对：提交时报错并列出可用的", str(e))
+    try:
+        cbatch.submit([{"prompt": "DSLOK tool+codex", "engine": "dsl", "project": str(proj),
+                        "dsl_options": {"subtask": "tool", "models": {"sub": "codex:gpt-5.1"}}}], cwd=str(TMP))
+        check(False, "subtask=tool + sub=codex 提交时要报错")
+    except cbatch.CBatchError as e:
+        check("models" in str(e) and "claude" in str(e), "subtask=tool 时 models.sub 不是 claude → 提交时报错", str(e))
+    j = cbatch.submit([{"prompt": "DSLOK tool+claude", "engine": "dsl", "project": str(proj),
+                        "dsl_options": {"subtask": "tool", "models": {"sub": "opus"}}}], cwd=str(TMP))
+    cbatch.wait(j["job_id"], timeout=60, every=0.2)
+    check(True, "subtask=tool + sub=opus 可以提交")
 
     print("engine：显式给了权限就照用户的，不套默认放行")
     LOG.unlink()

@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from tools.dslagent import plan as P              # noqa: E402
-from tools.dslagent import prompts as PR          # noqa: E402
+from tools.dslagent.legacy import prompts as PR          # noqa: E402
 from tools.dslagent.engine import AgentEngine     # noqa: E402
 from tools.mock import MockClient                 # noqa: E402
 

@@ -21,6 +21,7 @@ import test_dslagent_v2 as T                   # noqa: E402  复用它的假项�
 
 TMP, V = T.TMP, T.V
 from tools.dslagent import engines as E, packs          # noqa: E402
+from tools.dslagent import guard as G                    # noqa: E402
 
 PASS = FAIL = 0
 
@@ -75,21 +76,20 @@ def t_parse():
     check(raises(lambda: n({"fix": "codex:gpt:turbo"}), "强度") is True, "字典里某项强度不对 → 报错")
     check(raises(lambda: n(["plan"]), "字典或字符串") is True, "类型不对 → 报错")
     V_ = E.validate
-    check(V_({"plan": "codex:gpt-5"}, "read", "json") == {"plan": "codex:gpt-5"} and V_({"plan": "opus"}, "read", "tool"), "read 规划：claude / codex 可以")
-    check(V_({"plan": "grok:medium"}, "read", "json") == {"plan": "grok:medium"} and V_("grok", "read", "json"), "read 规划：grok 可以（含字符串简写）")
+    check(V_({"plan": "codex:gpt-5"}, "json") == {"plan": "codex:gpt-5"} and V_({"plan": "opus"}, "tool"), "规划：claude / codex 可以")
+    check(V_({"plan": "grok:medium"}, "json") == {"plan": "grok:medium"} and V_("grok", "json"), "规划：grok 可以（含字符串简写）")
     for eng in ("opencode:a/b",):
-        r = raises(lambda: V_({"plan": eng}, "read", "json"), "plan_mode=full", "read")
-        check(r is True, f"read 规划用 {eng} → 报错，说明要 plan_mode=full", r)
-        check(V_({"plan": eng}, "full", "json") == {"plan": eng}, f"full 规划用 {eng} 可以")
-    check(V_({"sub": "grok", "fix": "opencode:a/b", "bound": "codex:x"}, "read", "json"), "sub / fix / bound 随便哪个引擎（json 子任务）")
-    r = raises(lambda: V_({"sub": "codex:gpt-5"}, "read", "tool"), "DSLAGENT_SUBTASK=tool", "claude")
+        r = raises(lambda: V_({"plan": eng}, "json"), "不能做规划", "claude")
+        check(r is True, f"规划用 {eng} → 报错，说明 opencode 不能做规划", r)
+    check(V_({"sub": "grok", "fix": "opencode:a/b", "bound": "codex:x"}, "json"), "sub / fix / bound 随便哪个引擎（json 子任务）")
+    r = raises(lambda: V_({"sub": "codex:gpt-5"}, "tool"), "DSLAGENT_SUBTASK=tool", "claude")
     check(r is True, "tool 子任务用 codex → 报错", r)
-    check(V_({"sub": "opus"}, "read", "tool") == {"sub": "opus"}, "tool 子任务用 claude 可以")
-    check(V_("grok", "full", "json") == {k: "grok" for k in E.STEPS}, "字符串简写同样走组合检查（full + json 通过）")
-    check(raises(lambda: V_("opencode:a/b", "read", "json"), "plan_mode=full") is True, "字符串简写 opencode + read → 报错（plan 也是 opencode）")
+    check(V_({"sub": "opus"}, "tool") == {"sub": "opus"}, "tool 子任务用 claude 可以")
+    check(V_("grok", "json") == {k: "grok" for k in E.STEPS}, "字符串简写同样走组合检查（grok + json 通过）")
+    check(raises(lambda: V_("opencode:a/b", "json"), "不能做规划") is True, "字符串简写 opencode → 报错（plan 也是 opencode）")
     S = E.step_of
-    check([S(x) for x in ("plan", "plan_fix", "preq", "dsl01", "dsl12_读", "fix", "fix_reask", "bound", "bfix", "bfix_reask", "zzz")]
-          == ["plan", "plan", "plan", "sub", "sub", "fix", "fix", "bound", "bound", "bound", None], "tag → 步骤")
+    check([S(x) for x in ("plan", "plan_fix", "dsl01", "dsl12_读", "fix", "fix_reask", "bound", "bfix", "bfix_reask", "zzz")]
+          == ["plan", "plan", "sub", "sub", "fix", "fix", "bound", "bound", "bound", None], "tag → 步骤")
     check(E.effective({"plan": "opus"}) == {"plan": "opus", "sub": "sonnet", "fix": "sonnet", "bound": "sonnet"}, "effective 补缺省 sonnet")
     os.environ["DSLAGENT_MODELS"] = "{坏"
     try:
@@ -107,11 +107,10 @@ class MFake(T.Fake):
     pass
 
 
-def run_with(name, fake, models=None, env=None, mode="full", **kw):
+def run_with(name, fake, models=None, env=None, **kw):
     old = {k: os.environ.get(k) for k in ("DSLAGENT_MODELS", "DSLAGENT_PLAN_MODEL", "DSLAGENT_PLAN_MODE", "DSLAGENT_SUBTASK")}
     for k in old:
         os.environ.pop(k, None)
-    os.environ["DSLAGENT_PLAN_MODE"] = mode
     if models is not None:
         os.environ["DSLAGENT_MODELS"] = models if isinstance(models, str) else json.dumps(models)
     os.environ.update(env or {})
@@ -120,7 +119,6 @@ def run_with(name, fake, models=None, env=None, mode="full", **kw):
     finally:
         for k, v in old.items():
             os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
-        os.environ["DSLAGENT_PLAN_MODE"] = "full"
 
 
 REMEDY_PLAN = T.plan('''
@@ -148,8 +146,8 @@ def t_routes():
     f = MFake(plan=REMEDY_PLAN, dsl=REMEDY_FIX)
     r, p, out = run_with("rt_sub", f, M)
     mm = models_of(f)
-    check(r["fixed"] and f.tags() == ["preq", "plan", "dsl01", "bound"], "全流程（补查 / 规划 / 子任务 / 边界复核）", (f.tags(), r.get("stop")))
-    check(mm == {"preq": "opus", "plan": "opus", "dsl01": "haiku", "bound": "opus"}, "preq、plan → plan 模型；dsl01 → sub；bound → bound", mm)
+    check(r["fixed"] and f.tags() == ["plan", "dsl01", "bound"], "全流程（规划 / 子任务 / 边界复核）", (f.tags(), r.get("stop")))
+    check(mm == {"plan": "opus", "dsl01": "haiku", "bound": "opus"}, "plan → plan 模型；dsl01 → sub；bound → bound", mm)
     f = MFake(plan=RESID_PLAN, fix=RESID_FIX)
     r, p, out = run_with("rt_fix", f, M)
     check(r["fixed"] and models_of(f).get("fix") == "claude-sonnet-5-5" and "fix" in f.tags(), "验收补改 fix → fix 模型", (f.tags(), models_of(f)))
@@ -160,7 +158,7 @@ def t_routes():
     # 不是 claude 的串：假 backend 收到完整模型串（真引擎走 engines.call，见第三 / 四）
     f = MFake(plan=REMEDY_PLAN, dsl=REMEDY_FIX)
     r, p, out = run_with("rt_mixed", f, {"sub": "grok:high", "bound": "codex:gpt-5.1:low"})
-    check(models_of(f) == {"preq": None, "plan": None, "dsl01": "grok:high", "bound": "codex:gpt-5.1:low"}, "没写的步骤 backend 不多传 model（sonnet）", models_of(f))
+    check(models_of(f) == {"plan": None, "dsl01": "grok:high", "bound": "codex:gpt-5.1:low"}, "没写的步骤 backend 不多传 model（sonnet）", models_of(f))
     calls = json.loads((out / "calls.json").read_text(encoding="utf-8"))
     by = {c["tag"]: c for c in calls}
     check(by["plan"]["engine"] == "claude" and by["plan"]["model"] == "sonnet" and by["plan"]["effort"] is None, "calls.json：plan 记 claude / sonnet", by["plan"])
@@ -175,16 +173,16 @@ def t_routes():
     # 字符串简写
     f = MFake(plan=REMEDY_PLAN, dsl=REMEDY_FIX)
     r, p, out = run_with("rt_str", f, json.dumps("opus"))
-    check(models_of(f) == {"preq": "opus", "plan": "opus", "dsl01": "opus", "bound": "opus"} and r["v2"]["models"] == {k: "opus" for k in E.STEPS},
+    check(models_of(f) == {"plan": "opus", "dsl01": "opus", "bound": "opus"} and r["v2"]["models"] == {k: "opus" for k in E.STEPS},
           "字符串 = 四步全用它", models_of(f))
     # 没设 models：全 sonnet，backend 不多传 model
     f = MFake(plan=REMEDY_PLAN, dsl=REMEDY_FIX)
     r, p, out = run_with("rt_none", f)
     check(all(m is None for m in models_of(f).values()) and r["v2"]["models"] == {k: "sonnet" for k in E.STEPS}, "不设 models → 四步 sonnet", models_of(f))
-    # 兼容：旧的 DSLAGENT_PLAN_MODEL 只管规划（plan / plan_fix），补查仍 sonnet
+    # 兼容：旧的 DSLAGENT_PLAN_MODEL 只管规划（plan / plan_fix）
     f = MFake()
     r, p, out = run_with("rt_legacy", f, env={"DSLAGENT_PLAN_MODEL": "opus"})
-    check(models_of(f) == {"preq": None, "plan": "opus", "bound": None} and r["plan_model"] == "opus" and r["v2"]["models"]["plan"] == "opus"
+    check(models_of(f) == {"plan": "opus", "bound": None} and r["plan_model"] == "opus" and r["v2"]["models"]["plan"] == "opus"
           and "规划模型说明" not in r["v2"], "旧透传 DSLAGENT_PLAN_MODEL：规划用它，其它 sonnet，没有覆盖说明", (models_of(f), r["v2"]))
     # models.plan 写了以它为准，并记一句
     f = MFake()
@@ -196,9 +194,9 @@ def t_routes():
     check("规划模型说明" not in r["v2"], "两者相同不用记说明")
     # 非法 DSLAGENT_MODELS
     for name, val, needle in [("rt_bad1", {"plan": "gpt-9"}, "不认识"), ("rt_bad2", {"judge": "opus"}, "步骤名"), ("rt_bad3", "{坏", "JSON"),
-                              ("rt_bad4", {"plan": "opencode:a/b"}, "plan_mode=full")]:
+                              ("rt_bad4", {"plan": "opencode:a/b"}, "不能做规划")]:
         f = MFake()
-        r, p, out = run_with(name, f, val, mode="read" if name == "rt_bad4" else "full")
+        r, p, out = run_with(name, f, val)
         check(r["reply"]["状态"] == "失败" and needle in r["reply"]["原因"] and not f.log and not r["changed_files"],
               f"运行时再校验：{val!r} → 失败、不调模型", r["reply"])
     f = MFake()
@@ -237,10 +235,10 @@ def recs():
 
 def t_engines():
     print("三、各引擎（假 codex / grok / opencode）")
-    old = (V.IDLE_SEC, E.IDLE_OC, V.MAX_OUT)
+    old = (G.IDLE_SEC, G.IDLE_OC, G.MAX_OUT)
     first_env = {"DSLAGENT_CODEX_FIRST_CAP": "1", "DSLAGENT_GROK_FIRST_CAP": "1", "DSLAGENT_OC_FIRST_CAP": "1"}
     os.environ.update(first_env)
-    V.IDLE_SEC, E.IDLE_OC = 1, 1
+    G.IDLE_SEC, G.IDLE_OC = 1, 1
     try:
         for name, spec in (("codex", "codex:gpt-5.1:high"), ("grok", "grok:medium"), ("opencode", "opencode:zhipuai-coding-plan/glm-5.3")):
             sp = E.parse(spec)
@@ -317,7 +315,7 @@ def t_engines():
         finally:
             os.environ["DSLAGENT_CODEX_BIN"] = saved
     finally:
-        V.IDLE_SEC, E.IDLE_OC, V.MAX_OUT = old
+        G.IDLE_SEC, G.IDLE_OC, G.MAX_OUT = old
         for k in first_env:
             os.environ.pop(k, None)
 
@@ -332,11 +330,10 @@ def _mcp_cfg():
 
 # ------------------------------------------------------------------ 四、整条流程（假二进制）
 
-def run_real(name, models, mode, env=None):
+def run_real(name, models, env=None):
     old = {k: os.environ.get(k) for k in ("DSLAGENT_MODELS", "DSLAGENT_PLAN_MODE", "DSLAGENT_PLAN_MODEL", "DSLAGENT_SUBTASK")}
     for k in old:
         os.environ.pop(k, None)
-    os.environ["DSLAGENT_PLAN_MODE"] = mode
     os.environ["DSLAGENT_MODELS"] = json.dumps(models)
     os.environ.update(env or {})
     try:
@@ -347,14 +344,13 @@ def run_real(name, models, mode, env=None):
     finally:
         for k, v in old.items():
             os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
-        os.environ["DSLAGENT_PLAN_MODE"] = "full"
 
 
 def t_flow():
     print("四、整条流程（假二进制）")
     # read 规划走 codex 挂只读 MCP（真的调一次 dsl 工具），边界复核走 grok
     setup_fake({"codex": [{"text": T.PLAN_OK, "call": "设 r = 读片段 pkg/util.py:1-9\n打印 {r}"}], "grok": [{"text": T.BOUND_OK}]})
-    r, p, out = run_real("fl_codex", {"plan": "codex:gpt-5.1:high", "bound": "grok:high"}, "read")
+    r, p, out = run_real("fl_codex", {"plan": "codex:gpt-5.1:high", "bound": "grok:high"})
     check(r["fixed"] and "x + x" in T.util(p), "read 规划 codex + 边界复核 grok：全流程成功", r.get("stop"))
     rc = recs()
     check([x["engine"] for x in rc] == ["codex", "grok"], "只调了 codex（规划）和 grok（边界复核），没有 claude", [x["engine"] for x in rc])
@@ -372,17 +368,17 @@ def t_flow():
           and calls[0]["tool"] == 1 and calls[0]["tool_calls"] == 1, "calls.json：engine / model / effort（codex 规划记工具调用 1 次）", calls)
     check(r["v2"]["models"] == {"plan": "codex:gpt-5.1:high", "sub": "sonnet", "fix": "sonnet", "bound": "grok:high"}, "v2.models 记生效的四步", r["v2"]["models"])
 
-    # full 规划走 opencode；边界复核走 claude haiku（假 claude）
-    setup_fake({"opencode": [{"text": T.PLAN_OK}], "claude": [{"text": T.BOUND_OK}]})
-    r, p, out = run_real("fl_oc", {"plan": "opencode:zhipuai-coding-plan/glm-5.3", "bound": "haiku"}, "full")
+    # 规划走 claude（缺省 sonnet），子任务走 opencode，边界复核走 claude haiku（假 claude）
+    setup_fake({"opencode": [{"text": json.dumps(REMEDY_FIX, ensure_ascii=False)}], "claude": [{"text": REMEDY_PLAN}, {"text": T.BOUND_OK}]})
+    r, p, out = run_real("fl_oc", {"sub": "opencode:zhipuai-coding-plan/glm-5.3", "bound": "haiku"})
     rc = recs()
-    check(r["fixed"] and [x["engine"] for x in rc] == ["opencode", "opencode", "claude"], "full 规划 opencode（补查 + 规划都归 plan）+ 边界复核 claude", ([x["engine"] for x in rc], r.get("stop")))
+    check(r["fixed"] and [x["engine"] for x in rc] == ["claude", "opencode", "claude"], "规划 claude + 子任务 opencode + 边界复核 claude", ([x["engine"] for x in rc], r.get("stop")))
     check(rc[2]["argv"][rc[2]["argv"].index("--model") + 1] == "haiku", "claude 步骤带 --model haiku")
-    check(rc[0]["argv"][rc[0]["argv"].index("-m") + 1] == "zhipuai-coding-plan/glm-5.3", "opencode 的 -m")
+    check(rc[1]["argv"][rc[1]["argv"].index("-m") + 1] == "zhipuai-coding-plan/glm-5.3", "opencode 的 -m")
 
     # 失败重试 1 次：首次 rc≠0，第二次成功；记录 retry / first_fail
     setup_fake({"codex": [{"mode": "rc"}, {"text": T.PLAN_OK}], "claude": [{"text": T.BOUND_OK}]})
-    r, p, out = run_real("fl_retry", {"plan": "codex:gpt-5.1"}, "read")
+    r, p, out = run_real("fl_retry", {"plan": "codex:gpt-5.1"})
     calls = json.loads((out / "calls.json").read_text(encoding="utf-8"))
     check(r["fixed"] and [c["engine"] for c in calls] == ["codex", "codex", "claude"] and calls[0].get("failed") == "rc=3"
           and not calls[1].get("failed"), "read 规划 codex 失败 → 同输入重试 1 次后成功（第一次记 failed）",
@@ -391,22 +387,22 @@ def t_flow():
 
     # 两次都失败 → 判失败，项目不动
     setup_fake({"codex": [{"mode": "rc"}]})
-    r, p, out = run_real("fl_fail", {"plan": "codex:gpt-5.1"}, "read")
+    r, p, out = run_real("fl_fail", {"plan": "codex:gpt-5.1"})
     check(r["reply"]["状态"] == "失败" and "模型没有回应" in r["reply"]["原因"] and "rc=3" in r["reply"]["原因"] and not r["changed_files"]
           and T.util(p) == T.UTIL, "两次都失败 → 状态失败、项目不动", r["reply"])
 
     # sub / fix 走 codex（json 子任务）：计划里派任务 → codex；验收残留补改 → grok
     setup_fake({"codex": [{"text": json.dumps(REMEDY_FIX, ensure_ascii=False)}], "claude": [{"text": REMEDY_PLAN}], "grok": [{"text": T.BOUND_OK}]})
-    r, p, out = run_real("fl_sub", {"sub": "codex:gpt-5.1:low", "bound": "grok"}, "full")
+    r, p, out = run_real("fl_sub", {"sub": "codex:gpt-5.1:low", "bound": "grok"})
     rc = recs()
     check(r["fixed"], "sub 走 codex（派任务）、bound 走 grok、plan 走 claude：全流程成功", ([x["engine"] for x in rc], r.get("stop")))
-    check([x["engine"] for x in rc] == ["claude", "claude", "codex", "grok"], "调用顺序：补查 / 规划 claude → 子任务 codex → 边界复核 grok", [x["engine"] for x in rc])
+    check([x["engine"] for x in rc] == ["claude", "codex", "grok"], "调用顺序：规划 claude → 子任务 codex → 边界复核 grok", [x["engine"] for x in rc])
 
 
 def t_grok_read():
     print("五、grok read 规划（自带只读工具）")
-    old = (V.IDLE_SEC, E.GROK_READ_CAP)
-    V.IDLE_SEC = 2
+    old = (G.IDLE_SEC, E.GROK_READ_CAP)
+    G.IDLE_SEC = 2
     os.environ["DSLAGENT_GROK_FIRST_CAP"] = "5"
     try:
         sp = E.parse("grok:medium")
@@ -439,18 +435,18 @@ def t_grok_read():
         r = E.call(sp, "s", "u", 30, read_cwd=str(proj))
         check(r["reason"] == "读超限" and r["text"] == "", "累计读入超上限 → 杀（读超限）", r)
         E.GROK_READ_CAP = old[1]
-        check("调用被禁工具" in V.GUARD_REASONS and "读超限" in V.GUARD_REASONS, "两种原因都算保险触发（失败重试）")
+        check("调用被禁工具" in G.GUARD_REASONS and "读超限" in G.GUARD_REASONS, "两种原因都算保险触发（失败重试）")
         # 提示：grok 版那句；claude / codex 不变
         pk = packs.current()
-        sg, sc = V.plan_system(pk, "read", "grok"), V.plan_system(pk, "read")
+        sg, sc = V.plan_system(pk, "grok"), V.plan_system(pk)
         check(V.READ_TAIL_GROK in sg and V.READ_TAIL not in sg and "每次最多读 200 行" in sg and "每轮最多 3 个工具调用" in sg and "dsl 工具" not in sg
               and "搜索代码 / 查引用" not in sg, "grok 的 read system：换成 grok 版那句，不再提 dsl 工具", sg[:400])
-        check(V.READ_TAIL in sc and V.READ_TAIL_GROK not in sc and sc == V.plan_system(pk, "read", "claude") == V.plan_system(pk, "read", "codex"),
+        check(V.READ_TAIL in sc and V.READ_TAIL_GROK not in sc and sc == V.plan_system(pk, "claude") == V.plan_system(pk, "codex"),
               "claude / codex 的 read system 不变")
         check(len(sg) < len(sc) + 400, "没有复制整份 system")
         # 整条流程：规划走 grok read，plan_tools.json 记录
         setup_fake({"grok": [{"text": T.PLAN_OK, "reads": [["read_file", {"path": "pkg/util.py", "start": 1, "end": 9}, 88]]}], "claude": [{"text": T.BOUND_OK}]})
-        r, p, out = run_real("fl_grok_read", {"plan": "grok:high"}, "read")
+        r, p, out = run_real("fl_grok_read", {"plan": "grok:high"})
         rc = [x for x in recs() if x["engine"] == "grok"]
         check(r["fixed"] and "x + x" in T.util(p), "read 规划走 grok：全流程成功", r.get("stop"))
         check(rc[0]["cwd"] == str(p) and rc[0]["argv"][rc[0]["argv"].index("--reasoning-effort") + 1] == "high" and V.READ_TAIL_GROK in rc[0]["argv"][rc[0]["argv"].index("--system-prompt-override") + 1]
@@ -461,12 +457,12 @@ def t_grok_read():
         check(r["v2"]["规划工具"] == {"次数": 1, "返回字数": 88}, "result 里有规划工具汇总", r["v2"].get("规划工具"))
         # 被禁工具 → 重试 1 次
         setup_fake({"grok": [{"mode": "write"}, {"text": T.PLAN_OK}], "claude": [{"text": T.BOUND_OK}]})
-        r, p, out = run_real("fl_grok_ban", {"plan": "grok"}, "read")
+        r, p, out = run_real("fl_grok_ban", {"plan": "grok"})
         calls = json.loads((out / "calls.json").read_text(encoding="utf-8"))
         check(r["fixed"] and calls[0].get("failed") == "调用被禁工具" and not calls[1].get("failed") and T.util(p) != T.UTIL,
               "被禁工具调用 → 同输入重试 1 次后成功", [(c["tag"], c.get("failed")) for c in calls])
     finally:
-        V.IDLE_SEC, E.GROK_READ_CAP = old
+        G.IDLE_SEC, E.GROK_READ_CAP = old
         os.environ.pop("DSLAGENT_GROK_FIRST_CAP", None)
 
 

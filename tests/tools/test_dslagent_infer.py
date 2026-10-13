@@ -26,9 +26,9 @@ os.environ["DSLAGENT_TMP"] = str(TMP / "tmp")
 os.environ["CBATCH_CLAUDE"] = "/bin/true"      # 执行器开头的预热换成马上退出的程序
 sys.dont_write_bytecode = True
 
-from tools.dslagent import infer as I         # noqa: E402
+from tools.dslagent.legacy import infer as I         # noqa: E402
 from tools.dslagent import runner as R        # noqa: E402
-from tools.dslagent import template as T      # noqa: E402
+from tools.dslagent.legacy import template as T      # noqa: E402
 
 EXP = Path("/home/ysc/dslagent_exp")
 AR = Path("/home/ysc/dslagent_archive")
@@ -136,7 +136,7 @@ def test_determinism(fx, summary):
     a = I.locate(fx, summary, DESC, k=8)
     b = I.locate(fx, summary, DESC, k=8)
     check(a["segs"] == b["segs"], "同进程两次逐项一致")
-    code = ("import sys, json; sys.path.insert(0, %r); from tools.dslagent import infer as I; "
+    code = ("import sys, json; sys.path.insert(0, %r); from tools.dslagent.legacy import infer as I; "
             "print(json.dumps(I.locate(%r, sys.stdin.read(), %r, k=8)['segs'], ensure_ascii=False))") % (str(ROOT), str(fx), DESC)
     key = lambda segs: (sorted((x["file"], x["a"], x["b"], x["score"]) for x in segs), [x["score"] for x in segs])
     outs = []

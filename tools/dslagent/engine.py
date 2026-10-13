@@ -1,38 +1,34 @@
-"""AgentEngine：DSLEngine 的子类，给 dslagent 用。比基类多四件事，都不改基类、不打全局补丁：
+"""AgentEngine：DSLEngine 的子类，给 dslagent 用（v2 和旧路径共用）。比基类多三件事，都不改基类、不打全局补丁：
 
-- 系统子脚本不进项目：「执行 定位.zs / 读改测.zs / _plan/名字.zs」映射到 dslagent/lib 和任务目录里的计划，
-  项目目录里不放任何临时脚本（实验装置是拷进项目再删，崩了会留垃圾）。
+- 系统子脚本不进项目：「执行 _plan/名字.zs」映射到任务目录里的计划，项目目录里不放任何临时脚本
+  （实验装置是拷进项目再删，崩了会留垃圾）。
 - 语句白名单：计划里只许用 ALLOWED_HEADS 里的语句（静态检查之外的运行期兜底，子引擎同样生效）。
-- 子脚本调用记录：on_call 回调拿到每次 定位.zs / 读改测.zs 的参数、耗时和返回的 outcome/log。
-- 固定系统提示：定位.zs / 读改测.zs 的 问JSON（提示以 prompts.LOC_TAG / RCT_TAG 开头）改用 prompts.LIB_SYSTEM 作系统提示，
-  并剥掉 DSL 自动附在末尾、LIB_SYSTEM 里已有的格式说明——用户消息只剩变化内容，系统提示跨调用不变能读缓存。
-  格式校验和重问还是基类那一套。
+- 子任务 tool 模式：run_subtask_tool → toolsub.py。
+旧路径专用的（定位.zs / 读改测.zs 调用记录、固定系统提示）在 legacy/engine.py 的 LegacyEngine。
 """
-import time
+import sys
 
 from tools.dsl import DSLEngine, DSLError
-from tools.dsl_model import _format_note
 
-from . import prompts as PR
-
+WRITE_VERBS = ("改文件", "写文件", "删文件")     # 会过安全约束（reason.check）的动词
 ALLOWED_HEADS = {"use", "set", "ask", "ask_json", "if", "elif", "else", "end", "each", "print", "compute", "call", "ret",
                  "while", "repeat", "break", "continue", "halt", "budget"}
-LIB_SCRIPTS = ("定位.zs", "读改测.zs")
 
 
 class AgentEngine(DSLEngine):
-    def __init__(self, *a, scripts=None, guard=True, on_call=None, **k):
+    lazy_reason = False        # True：第一次真的要写 / 改 / 删文件之前才给安全约束设开局快照（v2 用；旧路径开局就设）
+
+    def __init__(self, *a, scripts=None, guard=True, **k):
         super().__init__(*a, **k)
         self.scripts = dict(scripts or {})
         self.guard = guard
-        self.on_call = on_call
         self.subtask_mode = "json"
         self.sublog = None
 
     def _sub_engine(self):
         sub = AgentEngine(client=self.client, workdir=self.workdir, verbose=False, verbs=self.verbs,
                           verbs_root=self.verbs_root, _depth=self._depth + 1,
-                          scripts=self.scripts, guard=self.guard, on_call=self.on_call)
+                          scripts=self.scripts, guard=self.guard)
         sub.system = self.system
         sub.temperature = self.temperature
         sub.model = self.model
@@ -40,7 +36,22 @@ class AgentEngine(DSLEngine):
         sub.dry_run = self.dry_run
         sub.subtask_mode = self.subtask_mode
         sub.sublog = self.sublog
+        sub.lazy_reason = self.lazy_reason
         return sub
+
+    def _reason_setup(self):
+        """第一次真的要 改文件 / 写文件 / 删文件 时（还没改过任何东西）才给安全约束（reason.check）开局快照：
+        覆盖任务没点名的数据文件、删仍被引用的文件、数据迁移不等价这些规则要靠它。整个运行只做一次（子引擎看到 STATE 里有快照就跳过）。"""
+        from . import reason as R
+        if not R.enabled() or R.STATE.get("snap") is not None:
+            return
+        sys.modules["dslagent_reason"] = R          # 动词（推理.py 的 _R）按这个名字取模块
+        R.setup(self.workdir, R.all_files(self.workdir), str(self.vars.get("task") or ""))
+
+    def _do_verb(self, name, rest, lineno, assign_to=None):
+        if self.lazy_reason and name in WRITE_VERBS and not self.dry_run:
+            self._reason_setup()
+        return super()._do_verb(name, rest, lineno, assign_to)
 
     def run_subtask_tool(self, task, inputs, logic, spec):
         from . import toolsub
@@ -56,29 +67,3 @@ class AgentEngine(DSLEngine):
         if self.guard and head not in ALLOWED_HEADS:
             raise DSLError(f"第 {lineno + 1} 行：语句「{head}」不在白名单里（dslagent 拦截）")
         return super()._exec_stmt(head, rest, lineno)
-
-    def _do_call(self, rest, lineno, assign_to=None):
-        name = (rest.split() or [""])[0]
-        if not self.on_call or name not in LIB_SCRIPTS:
-            return super()._do_call(rest, lineno, assign_to)
-        t0 = time.time()
-        item = {"name": name, "args": rest[:200]}
-        try:
-            super()._do_call(rest, lineno, assign_to)
-        finally:
-            item["sec"] = round(time.time() - t0, 1)
-            v = self.vars.get(assign_to) if assign_to else None
-            if isinstance(v, dict):
-                item.update({k: str(v.get(k))[:600] for k in ("outcome", "rounds", "segs", "note", "log", "reason", "need")
-                             if k in v})
-            self.on_call(item)
-
-    def _ask_json_format(self, prompt, spec, reasks, model, lineno):
-        tail = PR.lib_tail(prompt)
-        if self.system or not tail or not prompt.endswith(tail) or _format_note(spec) != tail:
-            return super()._ask_json_format(prompt, spec, reasks, model, lineno)
-        self.system = PR.LIB_SYSTEM
-        try:
-            return super()._ask_json_format(prompt[:-len(tail)], spec, reasks, model, lineno)
-        finally:
-            self.system = None

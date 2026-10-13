@@ -5,7 +5,9 @@
     cd /home/ysc/mcp && .venv/bin/python tests/tools/test_dslagent_split.py --record   # 重录基线（只在有意改提示时）
 
   一、提示逐字一致：同一假模型输入，各场景里发给模型的每次 system / user 文本，逐字等于拆分前录下的基线
-     （fixtures/dslagent_v2_prompts.json；基线是拆分前的 v2.py + v2pack.py 录的）
+     （fixtures/dslagent_v2_prompts.json；基线是拆分前的 v2.py + v2pack.py 录的）。full 规划方式删除后，基线里只有 full 才有的条目
+     （preq、规划 plan / plan_fix 的 system / user、PRE_SYS、plan_system）和 query 场景已从基线里删掉，其余条目（子任务 / 补改 / 边界）没重录；
+     比对时也跳过这些 tag
   二、DSLAGENT_PACK / DSLAGENT_VERIFY 取值校验：缺省 code；verify 缺省跟随 pack；别的取值报错并列出可用的
   三、旧 import 路径兼容：from tools.dslagent import v2pack、v2.<搬走的名字>
   四、cbatch：dsl_options.pack 透传成 DSLAGENT_PACK，写错在提交时就报错（行为测试在 test_cbatch.py）
@@ -52,13 +54,11 @@ FIXREP = {"结果": {"edits": [{"file": "pkg/other.py", "old": "    return x * 2
 
 def scenarios():
     """场景名 → Fake 的参数。覆盖：补查、重写、子任务、残留补改、清单缺口、边界补改、用例自身错误。"""
-    q = {"查引用": ["twice"], "查文本": [r"x \* 2$"], "读文件": ["pkg/other.py:1-9"], "够了": False}
     harness = T.BOUND_OK.replace("class B(unittest.TestCase):\n", "class B(unittest.TestCase):\n    f = double\n\n") \
         .replace("double(0)", "self.f(0)")
     body = T.PLAN_OK.split("预算 调用 4 秒 300\n", 1)[1].split("\n\n#改法")[0]
     return {
         "ok": {},
-        "query": {"preq": q},
         "rewrite": {"plan": BAD, "plan_fix": T.PLAN_OK},
         "resid_fix": {"plan": T.PLAN_OK.replace("预算 调用 4 秒 300\n", OLD_RX), "fix": FIXREP},
         "checklist": {"plan": T.plan(body, checklist="改 pkg/util.py:double\n改 pkg/other.py:twice"),
@@ -71,16 +71,17 @@ def scenarios():
     }
 
 
+FULL_ONLY = {"preq", "plan", "plan_fix"}      # 基线里只有 full 规划方式才有的调用（已删）
+
+
 def record_all():
     """跑全部场景，返回 {场景: [{tag, system, user}], ...}（逐次调用，按调用顺序）。"""
     out = {}
     for name, kw in scenarios().items():
         f = T.Fake(**kw)
         T.go("g_" + name, f)
-        out[name] = [{"tag": t, "system": s, "user": u} for t, s, u in f.log]
-    out["_static"] = [{"tag": n, "system": getattr(V, n, None) or "", "user": ""} for n in ("PRE_SYS", "FIX_SYS", "BOUND_SYS",
-                                                                                           "BFIX_SYS", "SUB_SYS")]
-    out["_static"].append({"tag": "plan_system", "system": V.plan_system(), "user": ""})
+        out[name] = [{"tag": t, "system": s, "user": u} for t, s, u in f.log if t not in FULL_ONLY]
+    out["_static"] = [{"tag": n, "system": getattr(V, n, None) or "", "user": ""} for n in ("FIX_SYS", "BOUND_SYS", "BFIX_SYS", "SUB_SYS")]
     return out
 
 
@@ -111,7 +112,7 @@ def t_prompts():
         for a, b in zip(g, c):
             ok = a["sys"] == b["sys"] and a["user"] == b["user"]
             check(ok, f"{name}/{a['tag']}：system / user 逐字一致", f"长度 sys {a['sys_len']}→{b['sys_len']} user {a['user_len']}→{b['user_len']}")
-    check(total >= 20, f"共比对 {total} 次调用（含静态提示）", total)
+    check(total >= 14, f"共比对 {total} 次调用（含静态提示）", total)
 
 
 def t_select():
@@ -160,12 +161,12 @@ def t_compat():
     from tools.dslagent import packs, v2pack
     from tools.dslagent.packs import code as PC
     from tools.dslagent.verify import code as VC
-    check(v2pack.build is PC.build and v2pack.run_queries is PC.run_queries and v2pack.is_test is PC.is_test, "v2pack 转发到 packs.code")
-    check(v2pack._items is PC._items and v2pack.PACK_CHARS == PC.PACK_CHARS, "v2pack 的私有名 / 常量也在")
+    check(v2pack.build is PC.build and v2pack.is_test is PC.is_test, "v2pack 转发到 packs.code")
+    check(v2pack.test_asserts is PC.test_asserts and v2pack.PACK_CHARS == PC.PACK_CHARS, "v2pack 的私有名 / 常量也在")
     for n in ("_fix_user", "dispatch_fix", "full_test", "apply_edits", "run_boundary", "residuals", "checklist_gaps",
               "enclosing", "func_span", "strip_code", "_changed_funcs"):
         check(getattr(V, n) is getattr(VC, n), f"v2.{n} 转发到 verify.code")
-    for n in ("PRE_SYS", "FIX_SYS", "BOUND_SYS", "BFIX_SYS"):
+    for n in ("FIX_SYS", "BOUND_SYS", "BFIX_SYS"):
         check(isinstance(getattr(V, n), str) and getattr(V, n), f"v2.{n} 还在")
     for n in ("snapshot", "changed", "restore", "diff_text", "code_hash"):
         check(callable(getattr(V, n)), f"v2.{n} 还在")

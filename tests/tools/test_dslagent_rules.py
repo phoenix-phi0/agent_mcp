@@ -25,8 +25,10 @@ os.environ.pop("DSLAGENT_RULES", None)
 (TMP / "state").mkdir()
 
 from tools.dslagent import reason as R          # noqa: E402
+from tools.dslagent.legacy import reason_rules as RR   # noqa: E402
+from tools.dslagent.legacy import run as LR            # noqa: E402
 from tools.dslagent import runner as RN         # noqa: E402
-from tools.dslagent.engine import AgentEngine   # noqa: E402
+from tools.dslagent.legacy.engine import LegacyEngine as AgentEngine   # noqa: E402
 from tools.mock import MockClient               # noqa: E402
 
 PY = sys.executable
@@ -82,10 +84,10 @@ def test_test_delta():
                              ("失败变少 → keep", S("a", "b"), S("a"), "keep"),
                              ("集合换了 → reask", S("a"), S("b"), "reask"),
                              ("全过 → done", S("a"), {"passed": "是", "summary": "全部通过：Ran 3 tests"}, "done")):
-        f, _ = R.test_facts(b, a, "")
+        f, _ = RR.test_facts(b, a, "")
         check(R.infer("测试变化", f)["action"] == want, name, f)
-    f, x = R.test_facts(S("a"), S("a"), "")
-    f2, _ = R.test_facts(S("a"), S("a"), x["sigs"])
+    f, x = RR.test_facts(S("a"), S("a"), "")
+    f2, _ = RR.test_facts(S("a"), S("a"), x["sigs"])
     check(R.infer("测试变化", f)["action"] == "reask" and R.infer("测试变化", f2)["action"] == "escalate",
           "同一错误第 1 次 reask，连续第 2 次 escalate")
 
@@ -107,7 +109,7 @@ def test_read_edit_test():
 
     os.environ["DSLAGENT_TEST_CMD"] = f"{PY} -m unittest discover -s tests"
     eng = AgentEngine(client=MockClient(handler=handler, offline=True), workdir=mini, verbose=False, verbs_root=RN.VERBS,
-                      scripts={n: RN.LIB / n for n in ("读改测.zs", "定位.zs")})
+                      scripts={n: LR.LIB / n for n in ("读改测.zs", "定位.zs")})
     eng.vars.update(task="修 add", segs="calc.py:1-6", rounds="3")
     eng.run("用包 common text code\n设 o = 调用 读改测.zs task={task} segs={segs} rounds={rounds}\n打印 {o.outcome}｜{o.log}")
     out = "\n".join(eng.output)
@@ -137,15 +139,15 @@ def test_done_check():
     kinds = {(i["kind"], i.get("path")) for i in items}
     check({("exists", "lib/data/members.json"), ("absent", "lib/data/members.csv"), ("unchanged", "lib/data/books.csv"),
            ("keys", "lib/data/members.json")} <= kinds, "迁移任务：新建/删除/不许动/顶层键", kinds)
-    check(len(R.done_unmet(p, items, snap)) >= 3, "开局：新建/删除/键 都未满足")
+    check(len(RR.done_unmet(p, items, snap)) >= 3, "开局：新建/删除/键 都未满足")
     (p / "lib/data/members.json").write_text(json.dumps([{"mid": "1"}]), encoding="utf-8")
-    un = R.done_unmet(p, items, snap)
+    un = RR.done_unmet(p, items, snap)
     check(len(un) == 2, "假成功：CSV 还在、JSON 不是对象 → 2 项未满足", un)
-    f = lambda tp, u, redo, conf: R.infer("完成核对", R.done_facts(tp, u, redo, conf))["action"]
+    f = lambda tp, u, redo, conf: R.infer("完成核对", RR.done_facts(tp, u, redo, conf))["action"]
     check((f(True, un, True, True), f(True, un, False, True), f(True, un, False, False), f(False, [], True, True), f(True, [], True, True))
           == ("redo", "confirm", "not_done", "not_done", "done"), "redo → confirm → not_done；测试没过 not_done；全满足 done")
     (p / "lib/data/books.csv").write_text("x\n", encoding="utf-8")
-    check(any("books.csv" in x for x in R.done_unmet(p, items, snap)), "点名不许动的文件被改 → 未满足")
+    check(any("books.csv" in x for x in RR.done_unmet(p, items, snap)), "点名不许动的文件被改 → 未满足")
     shutil.rmtree(p)
 
 
@@ -168,11 +170,11 @@ def test_safety():
                                              encoding="utf-8")
     check(R.check("删除", p, "lib/data/members.csv") == "", "记录数一致、不再引用 → 删除放行")
     cmd = f"{PY} -m unittest discover -s tests"
-    d = R.replan_check(set(), RN.test_state(p, cmd)["summary"], R.all_files(p) != snap)
+    d = RR.replan_check(set(), RN.test_state(p, cmd)["summary"], R.all_files(p) != snap)
     check(d["action"] == "rollback" and d["regress"], "退回规划前回归已坏且有改动 → rollback", d)
     R.restore(p, snap)
     check(R.all_files(p) == snap, "回滚后与开局快照逐字节一致")
-    check(R.replan_check(set(), RN.test_state(p, cmd)["summary"], False)["action"] == "allow", "回归没坏 → 不回滚")
+    check(RR.replan_check(set(), RN.test_state(p, cmd)["summary"], False)["action"] == "allow", "回归没坏 → 不回滚")
     os.environ["DSLAGENT_RULES"] = "0"
     check(R.check("改写", p, "lib/data/books.csv", "y") == "" and R.check("改写", p, "tests/x.py", "y") != "",
           "DSLAGENT_RULES=0：只留越界/测试文件检查")
@@ -232,7 +234,7 @@ def test_runner_done_check():
         def close(self):
             pass
 
-    import tools.dslagent.pool as PL
+    import tools.dslagent.legacy.pool as PL
     old = PL.Pool
     PL.Pool = FakePool
     try:

@@ -1,6 +1,6 @@
 """tool 模式（DSLAGENT_SUBTASK=tool）用的 DSL 检查 / 空跑辅助：dslmcp 每次工具调用前用。
 
-- env_mode()：读环境变量 DSLAGENT_SUBTASK（json 缺省 / tool）。
+- env_mode()：读环境变量 DSLAGENT_SUBTASK（json 缺省 / tool；cbatch 的 dsl_options.subtask 提交时校验后设成它）；check_mode：取值检查。
 - check(text, first)：语法 + 白名单（用包 设 如果/否则如果/否则/结束 终止 打印；动词只许 改文件 写文件 搜索代码 读片段 查引用）。
 - check_call(text, first)：工具调用版，在 check 之上再禁 终止。
 - dry_run(engine, script, vars_)：在项目拷贝里空跑，改文件 / 写文件 没套上算问题。
@@ -18,19 +18,29 @@ from tools.dsl_sections import split_sections
 MODE_ENV = "DSLAGENT_SUBTASK"
 SCRIPT_VERBS = ("改文件", "写文件", "搜索代码", "读片段", "查引用")
 SCRIPT_HEADS = {"use", "set", "if", "elif", "else", "end", "halt", "print"}
-READ_ONLY_VERBS = ("读片段", "搜索代码", "查引用")      # 规划（plan_mode=read）挂的只读工具
 READ_ONLY_HEADS = {"use", "set", "print"}
 HEAD_NAMES = {"use": "用包", "set": "设", "if": "如果", "elif": "否则如果", "else": "否则", "end": "结束", "halt": "终止", "print": "打印"}
 HEAD_ORDER = ("use", "set", "if", "elif", "else", "end", "halt", "print")
 BANNED = ("派任务", "并行派任务")
 ROUND_OUT = 6000
-READ_VERBS = ("读片段", "搜索代码", "查引用")
+READ_VERBS = ("读片段", "搜索代码", "查引用")      # 读 / 搜 / 查三个动词；规划挂的只读工具也只许这三个
 EDIT_VERBS = ("改文件", "写文件")
 
 
 def _all_verbs():
     from . import plan as DP
     return DP.ALL_VERBS
+
+
+MODES = ("json", "tool")
+
+
+def check_mode(value):
+    """dsl_options.subtask / DSLAGENT_SUBTASK 的取值检查（空 = json）；不认识报 ValueError。返回规范化后的取值。"""
+    v = (value or "").strip().lower() or MODES[0]
+    if v not in MODES:
+        raise ValueError(f"子任务方式只能是 {' / '.join(MODES)}，收到：{value!r}")
+    return v
 
 
 def env_mode():
@@ -111,7 +121,7 @@ def check(text, first=True, verbs=SCRIPT_VERBS, heads=SCRIPT_HEADS):
 def edit_problems(project, script):
     """计划里写死的 #改法 段对着真实文件核对（只读）：文件在不在、old 出现几次（报行号）、@@ 新建 的文件已存在。
     复用 改文件 的匹配代码，按它实际的顺序套用方式在内存里模拟。返回问题文本列表。"""
-    from .runner import _verb_module
+    from .common import _verb_module
     _, secs, _, _ = split_sections(script)
     if not secs:
         return []
@@ -188,7 +198,7 @@ def check_call(text, first, readonly=False):
     """语法 + 白名单（工具版：不许 终止）。readonly：规划挂的只读工具，只许 读片段 / 搜索代码 / 查引用 + 用包 设 打印，不许 #改法 段。
     返回 (脚本, 问题列表)。"""
     if readonly:
-        script, probs = check(text, first=first, verbs=READ_ONLY_VERBS, heads=READ_ONLY_HEADS)
+        script, probs = check(text, first=first, verbs=READ_VERBS, heads=READ_ONLY_HEADS)
         if re.search(r"^\s*#\s*改法|^\s*@@\s*(改|新建)", text or "", re.M):
             probs.append("只读工具：不能写 #改法 / @@ 改 / @@ 新建")
         return script, probs

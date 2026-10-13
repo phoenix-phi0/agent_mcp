@@ -62,3 +62,16 @@ def lift_status(data):
         out["原因"] = inner.pop("原因")
     out["结果"] = inner
     return out, True
+
+
+def parse_reply(text: str, lift: bool = True):
+    """模型回复原文 → (data, repaired, err)：抠出 JSON 部分（去围栏 / 取最外层括号）→ parse（补括号）→ lift_status（lift=True 才做）。
+    子任务（json / tool）、补改（fix / bfix）、问JSON 都走这一个；repaired 是 ""、"补括号"、"状态上提" 或 "补括号+状态上提"。
+    问JSON 的回复格式是用户自己声明的，不做状态上提（lift=False）。"""
+    from .zhipu import strip_json
+    data, repaired, err = parse(strip_json(text or ""))
+    if lift:
+        data, lifted = lift_status(data)
+        if lifted:
+            repaired = (repaired + "+" if repaired else "") + "状态上提"
+    return data, repaired, err

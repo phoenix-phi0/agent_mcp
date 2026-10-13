@@ -24,7 +24,7 @@ os.environ["DSLAGENT_TMP"] = str(TMP / "tmp")
 os.environ["CBATCH_CLAUDE"] = "/bin/true"
 
 from tools.dslagent import plan as P          # noqa: E402
-from tools.dslagent import prompts as PR      # noqa: E402
+from tools.dslagent.legacy import prompts as PR      # noqa: E402
 from tools.dslagent import reason as RS       # noqa: E402
 from tools.dslagent import runner as R        # noqa: E402
 
