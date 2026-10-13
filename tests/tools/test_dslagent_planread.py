@@ -93,7 +93,7 @@ def t_input():
            "你看不到代码，只能靠脚本里的动词去读；读到的内容要嵌进 问JSON 的提示词里，模型才看得到")
     check(READ_TAIL in s, "读法说明在 read 的 system 里")
     check(not any(a in s for a in OLD), "与按需读矛盾的旧说法都不在 system 里", [a[:20] for a in OLD if a in s])
-    check("需要看代码时用 dsl 工具读：读片段（按大纲里的 文件:起-止）、搜索代码、查引用。只读，不改文件。读够了直接输出完整 .zs。" in s,
+    check("- 用 dsl 工具：读片段、搜索代码、查引用\n- 读片段按大纲里的 文件:起-止 取\n- 读够就停，直接输出完整 .zs" in s,
           "读法说明的原话在 system 里", s[:300])
     check("「补查结果」" not in s and "确定性抽出" not in s and "候选文件的大纲" in s, "讲资料包各节 / 补查结果的那句已去掉", s[:200])
     check(s == V.plan_system(packs.current()), "plan_system 就是 agents/plan.md 展开后的 system")

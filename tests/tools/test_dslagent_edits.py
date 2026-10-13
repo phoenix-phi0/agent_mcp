@@ -180,7 +180,7 @@ def test_plan():
                             {}, "t", lambda d, s: {}, "平衡")
     check(not err and "[终止] 超出预期：预算用完" in out, f"空跑里预算用完按 终止 收尾，不算没过：{err!r} {out!r}")
 
-    for w in ("预算 调用 N 秒 M", "#改法 名", "@@ 改", "@@ 新建", "<<<<<<< 原文", ">>>>>>> 新文", "#清单", "改文件 {e1}"):
+    for w in ("预算 调用 N 秒 M", "#改法 e1", "@@ 改", "@@ 新建", "<<<<<<< 原文", ">>>>>>> 新文", "#清单", "改文件 {e1}"):
         check(w in PR.SYSTEM, f"规划系统提示里有「{w}」")
     ex = (P.PKG / "lib" / "示例_分支规划.zs").read_text(encoding="utf-8")
     check("预算 调用" in ex and "#改法 e1" in ex and "改文件 {e1}" in ex and "#清单" in ex, "示例脚本用上 预算 和 #改法 / #清单")

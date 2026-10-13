@@ -145,7 +145,7 @@ def test_prompts():
     from tools.dslagent import prompts as PR
     i = PR.VERBS.index("- 搜索代码")
     seg = PR.VERBS[i:i + 400]
-    check("第二个参数「范围」" in seg and "tools/dsl.py" in seg, "VERBS 里 搜索代码 写了范围参数")
+    check("范围：文件或目录" in seg and "tools/dsl_core.py" in seg, "VERBS 里 搜索代码 写了范围参数")
 
 
 def main():
