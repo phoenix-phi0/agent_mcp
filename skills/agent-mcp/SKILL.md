@@ -120,7 +120,7 @@ cbatch.routing_stats  since="2026-10-08"                  # 各路线成功率/�
 临时目录默认 `~/.cache/dslagent/tmp`（`DSLAGENT_TMP` 可改），不用 /tmp。改了 cbatch.py 后 `tool_call … reset=True`
 就能让 submit 认新参数（执行器每批都是新进程，本来就用磁盘上的新代码），不用重启 zmcp。
 真模型集成测试：`tests/tools/dslagent_live.py paths|regress`（手动跑，花钱）。
-**首 token 对冲**（`tools/dslagent/pool.py`）：一次模型调用发出 7 秒还没出首 token，就现起一个同系统提示+模型的
+**首 token 对冲**（`tools/dslagent/legacy/pool.py`）：一次模型调用发出 7 秒还没出首 token，就现起一个同系统提示+模型的
 备用 claude 进程重发同一问题，谁先出首 token 用谁、另一路直接杀掉（备用赢了就接替成常驻进程）；每次调用最多对冲 1 次，
 总超时（`DSL_CLAUDE_TIMEOUT`，默认 150）仍从主路发出算。阈值依据：plan9/11/12 共 344 次调用，正常首 token 最大 5.98 秒、
 长尾从 8.3 秒起（6.4%，最长 72 秒，另有 150 秒超时）。`DSLAGENT_HEDGE_SEC` 改阈值，`0` 关掉。备用不预热
@@ -131,7 +131,7 @@ cbatch.routing_stats  since="2026-10-08"                  # 各路线成功率/�
 7 秒内出了、之后流卡死；旧记录超时不带 ttft，看着像没出首 token。现在超时/崩溃的调用也记 `ttft_ms`、`hedge_reason`
 （no_token/stall）、`first_out_ms`、`no_output_ms`、`stall_ms`、`legs`（每一路的时刻明细）。问题在后台线程里写 stdin，
 进程还在启动、没读 stdin 时计时照样从发出算。
-**推理候选补充预读**（`tools/dslagent/infer.py`，默认开）：模板抽参之后，用 ast 抽项目事实（调用/同名方法弱边/常量读取/
+**推理候选补充预读**（`tools/dslagent/legacy/infer.py`，默认开）：模板抽参之后，用 ast 抽项目事实（调用/同名方法弱边/常量读取/
 字面量/舍入/读 json）+ 小 Datalog 求值（从失败测试出发的调用闭包、名字/traceback/数据命中）+ 打分，取前 K=8 段**合并**进
 第一次定位的预读：模板预读不动，被同文件已有段包住的跳过，按名次加、加上会超 675 行（模板上限 450 的 1.5 倍）的跳过；
 不替代模板、不做硬过滤，只是多给模型几段原文。抽事实在开局跑测试时后台先做；抽取/推理出错、等待超过 3 秒
