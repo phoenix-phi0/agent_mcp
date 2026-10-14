@@ -8,7 +8,7 @@
 「用 dsl 工具读」；规划调用挂 dslmcp --readonly（读片段 / 搜索代码 / 查引用 / 设 / 打印），workdir = 待改项目，--max-turns 12，
 保险同下（空闲超时、文本 invoke 拦截、超长输出、重试一次）；计划检查不过的那次重写也走这条。
 每次规划的工具调用（工具名、参数、返回字数）写进运行目录 plan_tools.json。
-规划用 grok 时不挂 dsl 工具，用 grok 自带只读工具（read_file / grep / list_dir，cwd = 待改项目，写 / 命令 / 联网 / 子代理全禁，--max-turns 20），
+规划用 grok 时不挂 dsl 工具，用 grok 自带只读工具（read_file / grep / list_dir，cwd = 待改项目，写 / 命令 / 联网 / 子代理全禁，--max-turns 10），
 system 里「用 dsl 工具读」那句换成 grok 版（agents/plan.md 的「变体：grok」）；出现别的工具调用即杀（调用被禁工具），累计读入超 200000 字即杀（读超限），杀掉后不原样重读，走收尾调用（tag plan_wrapup，不带工具，user 里附程序重取的已读内容 ≤120000 字，见 wrapup.py / plan.md「模板：收尾说明」）。
 opencode 不能做规划（engines.validate 提交时报错）。老的 full 规划方式（资料包 + 补查）已删除，DSLAGENT_PLAN_MODE=full 报错。
 
@@ -252,7 +252,7 @@ def plan_read_call(M, system, user, tag, project, model, out, tools, wrap=None):
                     c["failed"] = why
         if not why:
             return r["text"]
-        if why == G.R_READ_CAP and r.get("calls") is not None:       # grok 读超限：不再原样重读，用已读内容收尾
+        if why in (G.R_READ_CAP, G.F_TURNS) and r.get("calls") is not None:       # grok 读超限 / 到轮数上限：不再原样重读，用已读内容收尾
             return _wrapup(M, system, user, project, model, r["calls"], wrap)
         if attempt == AG.PLAN.retry.times:
             raise RuntimeError(f"模型没有回应（{why}，rc={r.get('rc')}）：{(r.get('stderr') or '')[-200:]}；首次失败：{first}")

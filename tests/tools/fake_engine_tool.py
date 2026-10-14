@@ -5,7 +5,7 @@
 FAKE_ENGINES = json 文件 {"codex": [attempt, …], "grok": […], "opencode": […], "claude": […]}；每次被调用取该引擎的下一个 attempt（计数放在
 FAKE_ENGINES.<引擎>.n，超过就重复最后一个）。attempt：{"text": "回复", "mode": …, "call": "<dsl 代码>"}，mode：
   ok（缺省）正常回复 / silent 一个事件都不出（挂着）/ idle 先出一点再挂着 / invoke 回复里写 <invoke / big 回复 25000 字
-  rc 退出码 3 + stderr / tool 出一个工具 / 命令事件。
+  maxturns（只对 grok）读完 reads 后到轮数上限 / rc 退出码 3 + stderr / tool 出一个工具 / 命令事件。
   （只对 grok，read 规划用）reads 先发 at["reads"] = [[工具名, 参数, 返回字数], …] 这些工具调用（带返回内容）再回复 / write 发一个 write 工具调用后挂着。
 call（只对带 mcp_servers.dsl 的 codex）：真的拉起那个 MCP 调一次 dsl 工具，再回复。
 FAKE_REC：每次被调用记 {"engine", "argv", "stdin"} 一行。"""
@@ -92,6 +92,11 @@ elif name == "grok":
         out({"type": "text", "data": "我先看看。"})
         out({"type": "tool_call", "toolName": tn, "toolCallId": f"r{k}", "rawInput": tin})
         out({"type": "tool_call_update", "toolCallId": f"r{k}", "rawOutput": {"Content": {"content": "y" * tn_chars}}})
+    if mode == "maxturns":      # 真 grok 到 --max-turns：max_turns_reached 事件 + end.stopReason=cancelled + rc=1，没有最终回复
+        out({"type": "max_turns_reached"})
+        out({"type": "end", "stopReason": "cancelled", "total_cost_usd": 0.003, "usage": {"input_tokens": 9, "output_tokens": 5}})
+        print("Error: max turns reached", file=sys.stderr)
+        sys.exit(1)
     for i in range(0, len(text), 200):
         out({"type": "text", "data": text[i:i + 200]})
     out({"type": "end", "stopReason": "end_turn", "total_cost_usd": 0.003, "usage": {"input_tokens": 9, "output_tokens": 5}})

@@ -415,9 +415,9 @@ def t_grok_read():
         argv = a["argv"]
         deny = [argv[i + 1] for i, x in enumerate(argv) if x == "--deny"]
         dis = argv[argv.index("--disallowed-tools") + 1].split(",")
-        check(a["cwd"] == str(proj) and argv[argv.index("--tools") + 1] == "read_file,grep,list_dir" and argv[argv.index("--max-turns") + 1] == "20"
+        check(a["cwd"] == str(proj) and argv[argv.index("--tools") + 1] == "read_file,grep,list_dir" and argv[argv.index("--max-turns") + 1] == "10"
               and argv[argv.index("--reasoning-effort") + 1] == "medium" and argv[argv.index("--permission-mode") + 1] == "dontAsk"
-              and "--no-subagents" in argv and "--disable-web-search" in argv, "grok read 参数：cwd=项目、只读三件套、max-turns 20、强度、dontAsk、无子代理 / 联网", (a["cwd"], argv))
+              and "--no-subagents" in argv and "--disable-web-search" in argv, "grok read 参数：cwd=项目、只读三件套、max-turns 10、强度、dontAsk、无子代理 / 联网", (a["cwd"], argv))
         check({"write", "Edit", "Bash", "run_terminal_command", "MCPTool"} <= set(deny)
               and {"write", "search_replace", "run_terminal_command", "spawn_subagent", "web_search", "web_fetch"} <= set(dis)
               and not ({"read_file", "grep", "list_dir"} & set(dis)), "grok read：写 / 编辑 / 命令 / 联网 / 子代理 deny，只读工具不在禁用表", (deny, dis))
@@ -441,7 +441,7 @@ def t_grok_read():
         pk = packs.current()
         sg, sc = V.plan_system(pk, "grok"), V.plan_system(pk)
         READ_TAIL, READ_TAIL_GROK = PF.agent_doc("plan").variants["grok"][0]      # agents/plan.md「变体：grok」第一对：dsl 版 → grok 版
-        check(READ_TAIL_GROK in sg and READ_TAIL not in sg and "每次最多读 200 行" in sg and "每轮最多 3 个工具调用" in sg and "dsl 工具" not in sg
+        check(READ_TAIL_GROK in sg and READ_TAIL not in sg and "limit 不超过 120" in sg and "合计最多 8 次" in sg and "limit 不超过 200" not in sg and "dsl 工具" not in sg
               and "搜索代码 / 查引用" not in sg, "grok 的 read system：换成 grok 版那句，不再提 dsl 工具", sg[:400])
         check(READ_TAIL in sc and READ_TAIL_GROK not in sc and sc == V.plan_system(pk, "claude") == V.plan_system(pk, "codex"),
               "claude / codex 的 read system 不变")
@@ -529,6 +529,17 @@ def t_grok_wrapup():
         setup_fake({"grok": [{"text": T.PLAN_OK, "reads": [["read_file", {"target_file": "pkg/util.py"}, 10]]}], "claude": [{"text": T.BOUND_OK}]})
         r, p, out = run_real("fl_grok_nowrap", {"plan": "grok"})
         check(r["fixed"] and r["v2"]["收尾"]["触发"] is False and "plan_wrapup" not in r["calls_by_purpose"], "没读超限：不触发收尾", r["v2"].get("收尾"))
+        # 到轮数上限（max_turns_reached，rc=1，无回复）：引擎层记 error_max_turns，整条流程走收尾、不原样重试
+        setup_fake({"grok": [{"mode": "maxturns", "reads": reads}]})
+        r = E.call(E.parse("grok:medium"), "s", "u", 30, read_cwd=str(proj))
+        check(r["subtype"] == "error_max_turns" and r["text"] == "" and r["rc"] == 1 and len(r["calls"]) == 2, "grok 到轮数上限：subtype=error_max_turns、无回复、calls 保留", r)
+        setup_fake({"grok": [{"mode": "maxturns", "reads": reads}, {"text": T.PLAN_OK}], "claude": [{"text": T.BOUND_OK}]})
+        r, p, out = run_real("fl_grok_maxturns", {"plan": "grok"})
+        gr = [x for x in recs() if x["engine"] == "grok"]
+        calls_j = json.loads((out / "calls.json").read_text(encoding="utf-8"))
+        check(len(gr) == 2 and [c["tag"] for c in calls_j][:2] == ["plan", "plan_wrapup"] and calls_j[0].get("failed") == "轮数用尽"
+              and not any(c.get("retry") for c in calls_j) and "--max-turns" not in gr[1]["argv"], "到轮数上限 → plan_wrapup、不原样重试", ([c["tag"] for c in calls_j], len(gr)))
+        check(r["fixed"] and r["v2"]["收尾"]["触发"] is True and r["v2"]["收尾"]["段数"] == 2, "到轮数上限的收尾：计划照常执行、记 收尾 触发", r["v2"].get("收尾"))
         # 读超限以外的失败（被禁工具）照旧原样重试
         setup_fake({"grok": [{"mode": "write"}, {"text": T.PLAN_OK}], "claude": [{"text": T.BOUND_OK}]})
         r, p, out = run_real("fl_grok_ban2", {"plan": "grok"})

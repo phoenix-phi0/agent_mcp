@@ -445,7 +445,8 @@ def call_grok(system, user, timeout=300, reply_path=None, idle=None, model=None,
     cost 取 grok 自报的 total_cost_usd（无则 0）。
     read_cwd（read 规划，只用于 plan / plan_fix）：cwd = 该目录（待改项目），只放开 read_file / grep / list_dir（GROK_READ_TOOLS），其余内置工具
     （GROK_DISABLED）从工具表去掉并 deny 写 / 编辑 / 命令 / MCP，--max-turns GROK_MAX_TURNS；事件流里出现别的工具调用即杀（调用被禁工具），
-    累计读入超过 GROK_READ_CAP 字即杀（读超限）；工具调用逐条记进返回的 calls（工具 / 参数 / 返回字数）；回复取最后一次工具调用之后的文本。"""
+    累计读入超过 GROK_READ_CAP 字即杀（读超限）；工具调用逐条记进返回的 calls（工具 / 参数 / 返回字数）；回复取最后一次工具调用之后的文本。
+    到 --max-turns 时 grok 发 max_turns_reached 事件、end.stopReason=cancelled、rc=1、没有最终回复：read 规划里记 subtype=error_max_turns（v2 当轮数用尽，走收尾）。"""
     tmp, cwd = _empty_cwd("v2_grok_empty")
     env = dict(os.environ)
     env["TMPDIR"] = str(tmp)
@@ -462,7 +463,7 @@ def call_grok(system, user, timeout=300, reply_path=None, idle=None, model=None,
         cmd += ["--model", model]
     pr = _Proc(cmd, None, timeout, idle or G.IDLE_SEC, first_cap or int(os.environ.get("DSLAGENT_GROK_FIRST_CAP") or G.FIRST_CAP), cwd, env,
                reply_path)
-    streamed, ttft, end, n_cmds = "", None, None, 0
+    streamed, ttft, end, n_cmds, max_turns_hit = "", None, None, 0, False
     calls, byid, cur = [], {}, ""
     for line in pr.p.stdout:
         try:
@@ -504,6 +505,8 @@ def call_grok(system, user, timeout=300, reply_path=None, idle=None, model=None,
             cur += ev["data"]
             pr.write_reply(ev["data"])
             pr.text_guard(streamed)
+        elif ty == "max_turns_reached":
+            max_turns_hit = True
         elif ty == "end":
             end = ev
     reason, err = pr.close()
@@ -517,7 +520,8 @@ def call_grok(system, user, timeout=300, reply_path=None, idle=None, model=None,
     text = (cur if read_cwd else streamed) if (end is not None and not reason and rc == 0) else ""
     r = {"text": text, "sec": round(time.time() - pr.t0, 1), "rc": rc,
          "ttft": ttft, "cost": res.get("total_cost_usd") or 0.0, "usage": usage, "stderr": err[-500:], "reason": reason,
-         "partial": streamed, "num_turns": res.get("num_turns"), "tool_calls": len(calls), "engine": "grok", "model": model, "subtype": None}
+         "partial": streamed, "num_turns": res.get("num_turns"), "tool_calls": len(calls), "engine": "grok", "model": model,
+         "subtype": "error_max_turns" if max_turns_hit and read_cwd else None}
     if read_cwd:
         r["calls"] = calls
     return r
