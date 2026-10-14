@@ -2,7 +2,7 @@
 """模型 JSON 回复的确定性修复，问JSON 和 派任务 共用。只修两种，不猜内容：
 
   括号    解析不了、括号不配平且只差末尾若干个 } / ]：扫描（忽略字符串里的括号）后补齐再解析
-  上提    子任务回复里「状态」「原因」被写进了「结果」对象里面（顶层没有 状态）：提到顶层
+  上提    子任务回复里「状态」「原因」被写进了「结果」对象里面（顶层没有 状态）：提到顶层；「思路」同理
 
 修不了的原样交回，由调用方走原有的校验和重问。
 """
@@ -64,6 +64,15 @@ def lift_status(data):
     return out, True
 
 
+def lift_thought(data):
+    """{结果:{…,思路}} 顶层没有 思路 → 把 思路 提到顶层（放最前面）。返回 (data, 是否提了)。"""
+    if not isinstance(data, dict) or "思路" in data or not isinstance(data.get("结果"), dict) \
+            or "思路" not in data["结果"]:
+        return data, False
+    inner = dict(data["结果"])
+    return {"思路": inner.pop("思路"), **data, "结果": inner}, True
+
+
 def parse_reply(text: str, lift: bool = True):
     """模型回复原文 → (data, repaired, err)：抠出 JSON 部分（去围栏 / 取最外层括号）→ parse（补括号）→ lift_status（lift=True 才做）。
     子任务（json / tool）、补改（fix / bfix）、问JSON 都走这一个；repaired 是 ""、"补括号"、"状态上提" 或 "补括号+状态上提"。
@@ -74,4 +83,7 @@ def parse_reply(text: str, lift: bool = True):
         data, lifted = lift_status(data)
         if lifted:
             repaired = (repaired + "+" if repaired else "") + "状态上提"
+        data, lifted_t = lift_thought(data)
+        if lifted_t:
+            repaired = (repaired + "+" if repaired else "") + "思路上提"
     return data, repaired, err

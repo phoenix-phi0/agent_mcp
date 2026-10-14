@@ -2,7 +2,7 @@
 """派子任务：「派任务」「并行派任务」两个动词的实现（verbs/common/defs 里只是薄壳）。
 
 一个子任务 = 任务描述 + 入参 + 处理逻辑 + 回复格式字段，交给模型做一件事，
-回复固定是 {结果, 状态, 原因}：
+回复固定是 {结果, 状态, 原因}（前面可带一个可选的 思路，只记录不参与判断）：
 
     结果   格式给了字段（改法:列表,说明:文本）就是带这些字段的对象，没给就是非空文本
     状态   只能是 成功 / 失败 / 超出预期（同「终止」的三个状态）
@@ -178,7 +178,8 @@ def _format_desc(spec: list) -> tuple:
     return "\n".join(lines), sample
 
 
-def build_prompt(task, inputs: list, logic, spec: list) -> str:
+def build_prompt(task, inputs: list, logic, spec: list, thought: bool = False) -> str:
+    """thought=True（子任务走 codex 引擎）才在回复格式里加可选的「思路」；Claude 等引擎和原来一样。"""
     result_desc, sample = _format_desc(spec)
     parts = [f"【子任务】\n{to_text(task).strip()}"]
     if to_text(logic).strip():
@@ -186,9 +187,13 @@ def build_prompt(task, inputs: list, logic, spec: list) -> str:
     if inputs:
         parts.append("【入参】\n" + "\n".join(f"◆ {t}\n{c}" for t, c in inputs))
     states = "、".join(f"\"{s}\"" for s in STATES)
-    example = json.dumps({"结果": sample, "状态": STATES[0], "原因": ""}, ensure_ascii=False)
+    ex = {"结果": sample, "状态": STATES[0], "原因": ""}
+    if thought:
+        ex = {"思路": "1–3 句：判断依据、为什么这样做", **ex}
+    example = json.dumps(ex, ensure_ascii=False)
     parts.append(
         "【回复格式】只输出一个 JSON 对象，不要代码围栏，不要任何解释。顶层字段：\n"
+        + ("- 思路：可选，放在最前面；1–3 句、不超过 150 字，写判断依据、为什么这样做，拿不准的地方也写出来\n" if thought else "") +
         f"- 结果：{result_desc}\n"
         f"- 状态：只能是 {states} 之一（成功＝按要求做完；失败＝做不到或出错；"
         f"超出预期＝实际情况和任务的前提不符，要上层重新决定）\n"
@@ -222,7 +227,11 @@ def check_reply(data, spec: list):
         problems.append("缺少 结果")
     if problems:
         return None, problems
-    return {"结果": result, "状态": state, "原因": reason}, []
+    out = {"结果": result, "状态": state, "原因": reason}
+    thought = data.get("思路")
+    if thought is not None and to_text(thought).strip():      # 可选；只记录，不参与判断
+        out = {"思路": to_text(thought).strip(), **out}
+    return out, []
 
 
 def parse_check(text, spec: list, extra=None):
@@ -284,10 +293,18 @@ def _dispatch(engine, task, inputs, logic, fmt) -> dict:
     return dispatch_json(engine, task, collect_inputs(inputs, engine.workdir), logic, spec)
 
 
+def _is_codex(client) -> bool:
+    """子任务这次会不会走 codex 引擎（真客户端有 M.spec；假客户端没有就当不是）。"""
+    try:
+        return client.M.spec("dsl01")["engine"] == "codex"
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def dispatch_json(engine, task, inputs: list, logic, spec: list, client=None) -> dict:
     """json 模式的一次子任务（子任务回 JSON，edits 交主流程套用）。inputs 已经是 collect_inputs 的结果。client 缺省用引擎的。"""
     client = client or engine.client
-    prompt = build_prompt(task, inputs, logic, spec)
+    prompt = build_prompt(task, inputs, logic, spec, thought=_is_codex(client))
     msgs = ([{"role": "system", "content": engine.system}] if engine.system else []) + \
         [{"role": "user", "content": prompt}]
     problems, last = [], ""
@@ -303,7 +320,8 @@ def dispatch_json(engine, task, inputs: list, logic, spec: list, client=None) ->
         if isinstance(reply, (dict, list)):        # 假客户端可以直接回结构
             data, last, repaired, err = reply, to_text(reply), "", ""
             data, lifted = JR.lift_status(data)
-            repaired = "状态上提" if lifted else ""
+            data, lifted_t = JR.lift_thought(data)
+            repaired = "+".join(x for x, f in (("状态上提", lifted), ("思路上提", lifted_t)) if f)
             value, problems = check_reply(data, spec)
         else:
             last = str(reply)

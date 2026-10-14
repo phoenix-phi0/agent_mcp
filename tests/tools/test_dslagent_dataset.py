@@ -224,6 +224,62 @@ def t_reads_backfill():
     check(stat["新增"] == 1 and stat["按来源"] == {"exp": 1}, "backfill 扫实验目录（跳过拼不出的）", stat)
 
 
+def t_thought():
+    print("六、思路字段（可选，只记录）")
+    from tools import dsl_task as DT
+    from tools import json_repair as JR
+    base_ = {"结果": {"edits": [], "说明": "x"}, "状态": "成功", "原因": ""}
+    withT = json.dumps({"思路": "先看调用方再改", **base_}, ensure_ascii=False)
+    noT = json.dumps(base_, ensure_ascii=False)
+    inRes = json.dumps({"结果": {**base_["结果"], "思路": "写在结果里"}, "状态": "成功", "原因": ""}, ensure_ascii=False)
+    p1, p2, p3 = DT.parse_check(withT, []), DT.parse_check(noT, []), DT.parse_check(inRes, [])
+    check(p1["value"] and p1["value"]["思路"] == "先看调用方再改" and not p1["repaired"], "带思路：解析通过，思路取出", p1)
+    check(p2["value"] and "思路" not in p2["value"] and not p2["problems"], "不带思路：解析照常通过，没有思路键", p2)
+    check(p3["value"] and p3["value"]["思路"] == "写在结果里" and "思路" not in p3["value"]["结果"]
+          and p3["repaired"] == "思路上提", "思路写在结果里：提到外层，标 思路上提", p3)
+    lifted, f = JR.lift_thought({"思路": "外", "结果": {"思路": "内"}})
+    check(not f and lifted["结果"]["思路"] == "内", "顶层已有思路：不动")
+    p4 = DT.parse_check('{"结果": {"edits": [], "状态": "成功", "思路": "二者都写在里面"}}', [])
+    check(p4["value"] and p4["value"]["思路"] == "二者都写在里面" and p4["repaired"] == "状态上提+思路上提", "状态和思路都写在结果里", p4)
+    check(DT.parse_check(json.dumps({"思路": "", **base_}, ensure_ascii=False), [])["value"].get("思路") is None, "空思路当没有")
+    pr0, pr = DT.build_prompt("t", [], "", []), DT.build_prompt("t", [], "", [], thought=True)
+    check("思路" not in pr0, "build_prompt 默认（Claude）回复格式里没有思路", pr0)
+    check("思路：可选" in pr and pr.index("思路：") < pr.index("结果：") and '"思路"' in pr.split("示例：")[1],
+          "build_prompt thought=True（codex）说明和示例里有思路、在结果前面")
+    # 各 agent 的 system：claude（缺省）与 HEAD 一致、不含思路；codex 含思路；for_engine 只在默认 system + codex 时换
+    import subprocess
+    from tools.dslagent import agents as AG, promptfile as PF
+    root = Path(__file__).resolve().parents[2]
+    for a in (AG.SUB_JSON, AG.SUB_TOOL, AG.FIX, AG.BFIX):
+        head = subprocess.run(["git", "show", f"HEAD:tools/dslagent/agents/{a.file}"], cwd=root, capture_output=True,
+                              text=True, encoding="utf-8").stdout
+        body = head.split("\n## 变体：")[0]
+        cl, cx = a.system_text("claude"), a.system_text("codex")
+        check("思路" not in cl and a.system_text() == cl and "思路" not in head, f"{a.file}：claude 渲染不含思路", a.file)
+        check(PF.agent_doc(a.file).body.strip() == body.split("---\n", 2)[-1].strip() or "思路" not in body,
+              f"{a.file}：正文与 HEAD 一致", a.file)
+        check("思路" in cx and cx != cl, f"{a.file}：codex 渲染含思路", a.file)
+    check(AG.for_engine(AG.FIX.system_text(), "fix", "codex") == AG.FIX.system_text("codex")
+          and AG.for_engine(AG.FIX.system_text(), "fix", "claude") == AG.FIX.system_text()
+          and AG.for_engine("自带 system", "fix", "codex") == "自带 system"
+          and AG.for_engine(AG.SUB_JSON.system_text(), "dsl03", "codex") == AG.SUB_JSON.system_text("codex"),
+          "for_engine：只在默认 system + codex 时换变体")
+    check(DS._thought(withT) == "先看调用方再改" and DS._thought(noT) is None and DS._thought(inRes) == "写在结果里"
+          and DS._thought("不是 JSON") is None, "dataset._thought：三种回复都取得出，不是 JSON 给 None")
+    # 样本：fix 回复带思路 → 子任务调用里单独存「思路」
+    base = TMP / "data_th"
+    os.environ[DS.ENV] = str(base)
+    fx = dict(T.FIX_CLAMP, 思路="clamp 缺区间检查，补一个 ValueError")
+    f = T.Fake(bound=T.BOUND_RAISE, bfix=fx)
+    T.go("ds_thought", f)
+    s = DS.load(rows(base)[-1]["run_id"], base)
+    bf = [x for x in s["子任务调用"] if x["tag"] == "bfix"]
+    bd = [x for x in s["子任务调用"] if x["tag"] == "bound"]
+    check(bf and bf[0]["思路"] == "clamp 缺区间检查，补一个 ValueError" and bd and bd[0]["思路"] is None,
+          "样本：bfix 调用带思路字段，bound（回代码）为 None", [(x["tag"], x.get("思路")) for x in s["子任务调用"]])
+    os.environ.pop(DS.ENV, None)
+
+
 def main():
     try:
         t_live()
@@ -231,6 +287,7 @@ def main():
         t_scrub()
         t_label()
         t_reads_backfill()
+        t_thought()
     finally:
         os.environ.pop(DS.ENV, None)
         shutil.rmtree(TMP, ignore_errors=True)

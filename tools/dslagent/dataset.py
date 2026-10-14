@@ -139,6 +139,17 @@ def _parse_reply(text):
     return (True, d.get("状态")) if isinstance(d, dict) else (False, None)
 
 
+def _thought(text):
+    """子任务 / 补改 / 复核回复里的「思路」（顶层，或写在结果里的也算）；没有返回 None。"""
+    try:
+        from tools import json_repair as JR
+        d, _, _ = JR.parse_reply(text or "")
+    except Exception:  # noqa: BLE001
+        return None
+    t = d.get("思路") if isinstance(d, dict) else None
+    return t.strip() if isinstance(t, str) and t.strip() else None
+
+
 # ------------------------------------------------------------------ 规划时读码返回内容（grok 在开局快照上重取）
 
 
@@ -252,7 +263,7 @@ def build_v2(out, task=None, project=None, reads=None, meta=None):
         ok, st = _parse_reply(rp)
         rec = {"调用序": c["n"], "tag": tag, "agent": _agent_name(tag), "引擎": c.get("engine"), "模型": _model_name(c),
                "effort": c.get("effort"), "system哈希": _sha(s), "user": u, "回复原文": rp, "失败原因": c.get("failed"),
-               "解析通过": ok, "回复状态": st, "改法套上": None, "秒": c.get("sec"), "费用": c.get("cost")}
+               "解析通过": ok, "回复状态": st, "思路": _thought(rp), "改法套上": None, "秒": c.get("sec"), "费用": c.get("cost")}
         if tag.startswith("fix"):
             rec["改法套上"] = (acc.get("补改") or {}).get("套用")
         elif tag.startswith("bfix"):

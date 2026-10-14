@@ -152,6 +152,7 @@ class Model:
         t0 = time.time()
         tmo = G.call_timeout((self.deadline - t0) if self.deadline else None)
         sp = self.spec(tag, model)
+        system = AG.for_engine(system, tag, sp["engine"])
         rp = self.out / "calls" / f"{n:02d}_{tag}.reply.txt"
         kw = {"reply_path": rp} if self.real else {}
         if sp["spec"] != MODEL:

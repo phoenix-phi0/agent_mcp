@@ -69,6 +69,15 @@ class Agent:
         return PF.render(self.file, engine, 包=pack or "code")
 
 
+def for_engine(system, tag, engine):
+    """system 恰好是该 tag 的 agent 默认（Claude）渲染时，按引擎换成它的变体渲染；其余（规划已按引擎渲染、调用方自带的 system）原样。
+    目前只有 codex 在 sub / sub_tool / fix / bfix 的「变体：codex」里有不同写法（带「思路」字段）。"""
+    a = of_tag(tag)
+    if engine != "codex" or a is None or a is PLAN or system != a.system_text():
+        return system
+    return a.system_text(engine)
+
+
 def _split(v, what):
     """「默认值；引擎：值」→ (默认值, {引擎: 值})。"""
     head, *rest = [x.strip() for x in v.split("；") if x.strip()]
