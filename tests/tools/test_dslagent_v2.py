@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT))
 TMP = Path(tempfile.mkdtemp(prefix="dslagent_v2_"))
 os.environ["DSLAGENT_TMP"] = str(TMP / "tmp")
 os.environ["CBATCH_CLAUDE"] = "/bin/true"
+os.environ["DSLAGENT_DATASET"] = str(TMP / "dataset")      # 训练数据样本写临时目录，不进 ~/dslagent_data
 os.environ.pop("DSLAGENT_PLANNER", None)
 os.environ.pop("DSLAGENT_PLAN_MODE", None)
 

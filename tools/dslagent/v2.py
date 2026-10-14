@@ -39,6 +39,7 @@ from pathlib import Path
 from . import common as C
 from . import dslcheck as DC
 from . import agents as AG
+from . import dataset as DS
 from . import engines, packs, verify
 from . import promptfile as PF
 from . import guard as G
@@ -532,7 +533,8 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
     out = Path(out_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
     t_start = time.time()
-    plan_tools, routes = [], {}
+    plan_tools, routes, reads = [], {}, {}
+    record = model is None and call_claude is engines.call_claude or bool(os.environ.get(DS.ENV))      # 假模型的测试运行不写训练数据（除非显式给了目录）
     try:
         pack, ver = packs.current(), verify.current()
         check_plan_mode()
@@ -556,10 +558,10 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
 
     if pack is None:
         state["原因"] = pick_err
-        return _finish(res, out, M, steps, state, accept, bound, {}, {}, t_start)
+        return _recorded(_finish(res, out, M, steps, state, accept, bound, {}, {}, t_start), record, project, task, reads)
     if not test_cmd:
         state["原因"] = ver.MISSING_MSG
-        return _finish(res, out, M, steps, state, accept, bound, {}, {}, t_start)
+        return _recorded(_finish(res, out, M, steps, state, accept, bound, {}, {}, t_start), record, project, task, reads)
     info["models"] = engines.effective({**routes, **({} if "plan" in routes or not os.environ.get("DSLAGENT_PLAN_MODEL")
                                                      else {"plan": os.environ["DSLAGENT_PLAN_MODEL"]})})
     ver.setup(out, test_cmd)
@@ -592,19 +594,22 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
         wrap = {"触发": False, "次": 0, "段数": 0, "字数": 0}
         if M.spec("plan", plan_model)["engine"] == "grok":
             info["收尾"] = wrap
-        for k in range(1 + AG.PLAN.rewrites):
-            user = first_user if k == 0 else DPR.fix_prompt(script, problem)
-            raw = plan_read_call(M, plan_system(pack, M.spec("plan", plan_model)["engine"]), user, "plan" if k == 0 else "plan_fix", project,
-                                 plan_model, out, plan_tools, wrap)
-            (out / f"plan_v{k + 1}.raw.txt").write_text(raw, encoding="utf-8")
-            script, _ = DP.strip_prose(raw)
-            script, n_close, _ = DP.autoclose(script)
-            (out / f"plan_v{k + 1}.zs").write_text(script, encoding="utf-8")
-            problem, main, subs, crec = check(project, out / "dry", script, task, pack)
-            info["检查"].append(dict(crec, 补结束=n_close, 问题=problem[:1500]))
-            if not problem:
-                break
-            info["重写"] = True
+        try:
+            for k in range(1 + AG.PLAN.rewrites):
+                user = first_user if k == 0 else DPR.fix_prompt(script, problem)
+                raw = plan_read_call(M, plan_system(pack, M.spec("plan", plan_model)["engine"]), user, "plan" if k == 0 else "plan_fix", project,
+                                     plan_model, out, plan_tools, wrap)
+                (out / f"plan_v{k + 1}.raw.txt").write_text(raw, encoding="utf-8")
+                script, _ = DP.strip_prose(raw)
+                script, n_close, _ = DP.autoclose(script)
+                (out / f"plan_v{k + 1}.zs").write_text(script, encoding="utf-8")
+                problem, main, subs, crec = check(project, out / "dry", script, task, pack)
+                info["检查"].append(dict(crec, 补结束=n_close, 问题=problem[:1500]))
+                if not problem:
+                    break
+                info["重写"] = True
+        finally:      # 规划结束、执行还没开始：项目还是开局快照，grok 的读码返回内容此时重取（给训练数据用）
+            reads.update(DS.capture_reads(project, plan_tools))
         step("3规划", t0)
         info["规划工具"] = {"次数": len(plan_tools), "返回字数": sum(x.get("返回字数") or 0 for x in plan_tools)}
         if problem:
@@ -678,11 +683,18 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
         now = snapshot(project, pack)
         restore(project, base, changed(base, now))
         info["回滚"] = changed(base, now)
-    return _finish(res, out, M, steps, state, accept, bound, base, snapshot(project, pack), t_start)
+    return _recorded(_finish(res, out, M, steps, state, accept, bound, base, snapshot(project, pack), t_start), record, project, task, reads)
 
 
 class _Done(Exception):
     pass
+
+
+def _recorded(res, record, project, task, reads):
+    """收尾后写一条训练样本（tools/dslagent/dataset.py）；写失败只在 stderr 记一行，不改 res。"""
+    if record:
+        DS.record(res["dir"], project=project, task=task, reads=reads)
+    return res
 
 
 def _finish(res, out, M, steps, state, accept, bound, base, now, t_start):

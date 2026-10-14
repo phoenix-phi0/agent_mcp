@@ -6,7 +6,7 @@
 检查不过、空跑报错也作为工具结果（isError=false 的普通文本）返回，让模型改。
 同一个 MCP 进程里引擎状态（变量）一直保留 = 同一个子任务里多次调用共享变量；每个子任务起自己的进程。
 
-每次调用往 --log 文件追加一行 JSON：{ts, t, code_len, code, reply(出错时返回给模型的原文), edited(是否改了文件), files(改了哪些), sec, status(ok/check/dry/error)}，
+每次调用往 --log 文件追加一行 JSON：{ts, t, code_len, code, reply(返回给模型的原文), edited(是否改了文件), files(改了哪些), sec, status(ok/check/dry/error)}，
 给父进程统计、计预算。
 
     python dslmcp.py --workdir 项目目录 --log 日志文件 [--verbs-root 动词目录] [--readonly]
@@ -192,8 +192,7 @@ class Server:
                     text, info = f"工具内部出错：{type(e).__name__}: {str(e)[:300]}", {
                         "status": "internal", "code_len": len(code), "code": code, "edited": False, "files": [], "sec": 0}
             info["out_chars"] = len(text)
-            if info.get("status") != "ok":
-                info["reply"] = text                      # 返回给模型的报错原文（检查不过 / 空跑没过 / 运行出错）
+            info["reply"] = text                          # 返回给模型的原文（含正常读到的内容，训练数据要用；报错时就是报错原文）
             self._log(**info)
             res = {"content": [{"type": "text", "text": text}], "isError": False}
         else:
