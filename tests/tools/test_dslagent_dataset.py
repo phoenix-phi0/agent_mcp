@@ -255,7 +255,7 @@ def t_thought():
                               text=True, encoding="utf-8").stdout
         body = head.split("\n## 变体：")[0]
         cl, cx = a.system_text("claude"), a.system_text("codex")
-        check("思路" not in cl and a.system_text() == cl and "思路" not in head, f"{a.file}：claude 渲染不含思路", a.file)
+        check("思路" not in cl and a.system_text() == cl and "思路" not in body, f"{a.file}：claude 渲染不含思路", a.file)
         check(PF.agent_doc(a.file).body.strip() == body.split("---\n", 2)[-1].strip() or "思路" not in body,
               f"{a.file}：正文与 HEAD 一致", a.file)
         check("思路" in cx and cx != cl, f"{a.file}：codex 渲染含思路", a.file)
