@@ -9,7 +9,7 @@
 保险同下（空闲超时、文本 invoke 拦截、超长输出、重试一次）；计划检查不过的那次重写也走这条。
 每次规划的工具调用（工具名、参数、返回字数）写进运行目录 plan_tools.json。
 规划用 grok 时不挂 dsl 工具，用 grok 自带只读工具（read_file / grep / list_dir，cwd = 待改项目，写 / 命令 / 联网 / 子代理全禁，--max-turns 20），
-system 里「用 dsl 工具读」那句换成 grok 版（agents/plan.md 的「变体：grok」）；出现别的工具调用即杀（调用被禁工具），累计读入超 200000 字即杀（读超限）。
+system 里「用 dsl 工具读」那句换成 grok 版（agents/plan.md 的「变体：grok」）；出现别的工具调用即杀（调用被禁工具），累计读入超 200000 字即杀（读超限），杀掉后不原样重读，走收尾调用（tag plan_wrapup，不带工具，user 里附程序重取的已读内容 ≤120000 字，见 wrapup.py / plan.md「模板：收尾说明」）。
 opencode 不能做规划（engines.validate 提交时报错）。老的 full 规划方式（资料包 + 补查）已删除，DSLAGENT_PLAN_MODE=full 报错。
 
 流程（流程本身与任务类型无关，细节由包 / 验收实现）：
@@ -40,6 +40,7 @@ from . import common as C
 from . import dslcheck as DC
 from . import agents as AG
 from . import engines, packs, verify
+from . import promptfile as PF
 from . import guard as G
 from .snap import DIFF_CAP, changed, code_hash, diff_text, restore, snapshot  # noqa: F401  旧名仍从 v2 取
 
@@ -206,10 +207,11 @@ def _rec_model(sp):
     return sp["model"] or sp["engine"]
 
 
-def plan_read_call(M, system, user, tag, project, model, out, tools):
+def plan_read_call(M, system, user, tag, project, model, out, tools, wrap=None):
     """plan_mode=read 的一次规划调用：挂只读 dslmcp（--readonly，workdir=待改项目）、--max-turns READ_MAX_TURNS，
     保险同 call_claude（空闲超时 / 输出超长 / 输出工具调用格式）；失败（保险触发、rc≠0、空回复、轮数用尽）同输入重试 1 次，仍失败抛 RuntimeError。
-    每次尝试的工具调用（工具名、参数、返回字数）追加进 tools，并整份写到 out/plan_tools.json。返回最终回复文本。"""
+    每次尝试的工具调用（工具名、参数、返回字数）追加进 tools，并整份写到 out/plan_tools.json。返回最终回复文本。
+    grok 读超限（杀掉之后）不原样重试，改走 _wrapup（收尾调用，不带工具）；wrap 是记收尾情况的 dict（触发 / 次 / 段数 / 字数）。"""
     d = out / "toollogs"
     d.mkdir(parents=True, exist_ok=True)
     first = None
@@ -248,9 +250,23 @@ def plan_read_call(M, system, user, tag, project, model, out, tools):
                     c["failed"] = why
         if not why:
             return r["text"]
+        if why == G.R_READ_CAP and r.get("calls") is not None:       # grok 读超限：不再原样重读，用已读内容收尾
+            return _wrapup(M, system, user, project, model, r["calls"], wrap)
         if attempt == AG.PLAN.retry.times:
             raise RuntimeError(f"模型没有回应（{why}，rc={r.get('rc')}）：{(r.get('stderr') or '')[-200:]}；首次失败：{first}")
         first = why
+
+
+def _wrapup(M, system, user, project, model, calls, wrap):
+    """grok 读超限后的收尾调用（tag plan_wrapup）：按已记录的读取调用在项目里重新取出内容（wrapup.reread），
+    system = 原 grok system + plan.md「模板：收尾说明」，user = 原 user + 「模板：收尾提示」（带已读内容），不给任何工具。失败的重试同 Model.__call__。"""
+    from . import wrapup as WU
+    content, n, chars = WU.reread(project, calls)
+    if wrap is not None:
+        wrap.update(触发=True, 次=wrap.get("次", 0) + 1, 段数=wrap.get("段数", 0) + n, 字数=wrap.get("字数", 0) + chars)
+    sys2 = system + "\n\n" + PF.template("plan.md", "收尾说明")
+    user2 = user + "\n\n" + PF.template("plan.md", "收尾提示", 已读内容=content)
+    return M(sys2, user2, "plan_wrapup", model)
 
 
 class Client:
@@ -573,10 +589,13 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
                 info["规划模型说明"] = f"models.plan={routes['plan']} 优先，没用 model={os.environ['DSLAGENT_PLAN_MODEL']}"
             plan_model = routes["plan"]
         info["规划模型"] = res["plan_model"] = plan_model
+        wrap = {"触发": False, "次": 0, "段数": 0, "字数": 0}
+        if M.spec("plan", plan_model)["engine"] == "grok":
+            info["收尾"] = wrap
         for k in range(1 + AG.PLAN.rewrites):
             user = first_user if k == 0 else DPR.fix_prompt(script, problem)
             raw = plan_read_call(M, plan_system(pack, M.spec("plan", plan_model)["engine"]), user, "plan" if k == 0 else "plan_fix", project,
-                                 plan_model, out, plan_tools)
+                                 plan_model, out, plan_tools, wrap)
             (out / f"plan_v{k + 1}.raw.txt").write_text(raw, encoding="utf-8")
             script, _ = DP.strip_prose(raw)
             script, n_close, _ = DP.autoclose(script)

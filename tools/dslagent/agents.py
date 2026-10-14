@@ -108,8 +108,10 @@ AGENTS = {a.name: a for a in (PLAN, PLAN_FIX, SUB_JSON, SUB_TOOL, FIX, BOUND, BF
 
 
 def of_tag(tag):
-    """调用 tag → Agent（plan / plan_fix / dslNN / dslNN_toolK / fix / bound / bfix，后缀 _reask 归同一个）；不认识返回 None。"""
+    """调用 tag → Agent（plan / plan_fix / plan_wrapup（grok 读超限后的收尾，归 plan）/ dslNN / dslNN_toolK / fix / bound / bfix，后缀 _reask 归同一个）；不认识返回 None。"""
     t = re.sub(r"_reask$", "", tag or "")
+    if t == "plan_wrapup":
+        return PLAN
     if re.match(r"^dsl\d+_tool", t):
         return SUB_TOOL
     if re.match(r"^dsl\d+", t):

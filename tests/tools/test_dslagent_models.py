@@ -468,8 +468,87 @@ def t_grok_read():
         os.environ.pop("DSLAGENT_GROK_FIRST_CAP", None)
 
 
+def t_grok_wrapup():
+    print("六、grok 读超限 → 收尾调用（不原样重试）")
+    from tools.dslagent import wrapup as WU
+    old = (G.IDLE_SEC, E.GROK_READ_CAP)
+    G.IDLE_SEC = 5
+    os.environ["DSLAGENT_GROK_FIRST_CAP"] = "5"
+    try:
+        # 重取：去重、顺序、越界、grep、list_dir
+        proj = TMP / "wrap_proj"
+        shutil.rmtree(proj, ignore_errors=True)
+        (proj / "pkg").mkdir(parents=True)
+        (proj / "pkg" / "a.py").write_text("".join(f"line{i}\n" for i in range(1, 21)), encoding="utf-8")
+        (proj / "pkg" / "b.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+        calls = [{"工具": "read_file", "参数": {"target_file": str(proj / "pkg/a.py"), "offset": 3, "limit": 2}, "返回字数": 1},
+                 {"工具": "grep", "参数": {"pattern": "def f", "glob": "**/*.{py}"}, "返回字数": 1},
+                 {"工具": "read_file", "参数": {"target_file": str(proj / "pkg/a.py"), "offset": 3, "limit": 2}, "返回字数": 1},
+                 {"工具": "read_file", "参数": {"target_file": "/etc/passwd"}, "返回字数": 1},
+                 {"工具": "list_dir", "参数": {"target_directory": "pkg"}, "返回字数": 1}]
+        txt, n, chars = WU.reread(proj, calls)
+        check(n == 3 and chars == len(txt) and txt.index("3|line3") < txt.index("pkg/b.py:1:def f():") < txt.index("### list_dir pkg")
+              and txt.count("3|line3") == 1 and "root:" not in txt, "重取：重复调用只取一次、越界取不到、按调用顺序拼", (n, txt))
+        # 截断：超过上限去掉最早的、保留靠后的
+        big = [{"工具": "read_file", "参数": {"target_file": f"pkg/big{i}.py"}, "返回字数": 1} for i in range(4)]
+        for i in range(4):
+            (proj / "pkg" / f"big{i}.py").write_text(f"# big{i}\n" + ("x" * 49) + "\n", encoding="utf-8")
+        txt, n, chars = WU.reread(proj, big, cap=200)
+        check(n == 4 and chars == len(txt) <= 200 and "big3" in txt and "big2" in txt and "big0" not in txt and "big1" not in txt,
+              "已读内容超上限：去掉最早的段，保留靠后的", (n, chars, txt))
+        one = WU.reread(proj, big[:1], cap=20)
+        check(one[2] == 20 and one[0] == WU.reread(proj, big[:1])[0][-20:], "只剩一段还超：保留它靠后的部分", one)
+        check(WU.CAP == 120000, "默认上限 120000 字")
+        # 整条流程：读超限 → 收尾调用
+        pk = packs.current()
+        E.GROK_READ_CAP = 100
+        reads = [["read_file", {"target_file": "pkg/util.py", "offset": 1, "limit": 5}, 60], ["grep", {"pattern": "def double", "path": "pkg"}, 60]]
+        setup_fake({"grok": [{"text": "半截", "reads": reads}, {"text": T.PLAN_OK}], "claude": [{"text": T.BOUND_OK}]})
+        r, p, out = run_real("fl_grok_wrap", {"plan": "grok"})
+        gr = [x for x in recs() if x["engine"] == "grok"]
+        calls_j = json.loads((out / "calls.json").read_text(encoding="utf-8"))
+        tags = [c["tag"] for c in calls_j]
+        argv = gr[1]["argv"]
+        sysp = argv[argv.index("--system-prompt-override") + 1]
+        check(len(gr) == 2 and tags[:2] == ["plan", "plan_wrapup"] and calls_j[0].get("failed") == "读超限" and not calls_j[1].get("failed")
+              and not any(c.get("retry") for c in calls_j), "读超限 → 第二次是 plan_wrapup、不是原样重试的 plan", (tags, [c.get("failed") for c in calls_j]))
+        check("--max-turns" not in argv and argv[argv.index("--tools") + 1] == "read_file" and "read_file,grep,list_dir" not in argv and gr[1]["cwd"] != str(p),
+              "收尾调用不带工具（不放开 read_file / grep / list_dir，不给项目 cwd）", argv)
+        check(gr[1]["stdin"].startswith("【任务原文】") and "## 文件大纲" in gr[1]["stdin"] and "【已读内容】" in gr[1]["stdin"]
+              and "读取额度已用完" in gr[1]["stdin"] and "### grep def double" in gr[1]["stdin"] and "pkg/util.py L1-5" in gr[1]["stdin"],
+              "收尾 user = 任务原文 + 大纲 + 已读内容 + 说明", gr[1]["stdin"][-600:])
+        check("## 本次不能调用工具" in sysp and PF.template("plan.md", "收尾说明") in sysp and sysp.startswith(V.plan_system(pk, "grok")),
+              "收尾 system = grok 变体 + 模板「收尾说明」", sysp[-300:])
+        check(r["fixed"] and r["v2"]["检查"][0].get("问题") == "" and T.util(p) != T.UTIL, "收尾产出的计划照常过检查并执行", r.get("stop"))
+        w = r["v2"]["收尾"]
+        check(w["触发"] is True and w["次"] == 1 and w["段数"] == 2 and w["字数"] > 0 and r["calls_by_purpose"].get("plan_wrapup") == 1,
+              "result.json 记 触发 / 重取段数 / 字数，calls_by_purpose 有 plan_wrapup", (w, r["calls_by_purpose"]))
+        check(calls_j[1]["engine"] == "grok" and not calls_j[1].get("tool"), "calls.json 里收尾调用记 engine=grok、不是工具调用", calls_j[1])
+        # 没超限：不触发，字段在但为 False
+        E.GROK_READ_CAP = old[1]
+        setup_fake({"grok": [{"text": T.PLAN_OK, "reads": [["read_file", {"target_file": "pkg/util.py"}, 10]]}], "claude": [{"text": T.BOUND_OK}]})
+        r, p, out = run_real("fl_grok_nowrap", {"plan": "grok"})
+        check(r["fixed"] and r["v2"]["收尾"]["触发"] is False and "plan_wrapup" not in r["calls_by_purpose"], "没读超限：不触发收尾", r["v2"].get("收尾"))
+        # 读超限以外的失败（被禁工具）照旧原样重试
+        setup_fake({"grok": [{"mode": "write"}, {"text": T.PLAN_OK}], "claude": [{"text": T.BOUND_OK}]})
+        r, p, out = run_real("fl_grok_ban2", {"plan": "grok"})
+        check([c["tag"] for c in json.loads((out / "calls.json").read_text(encoding="utf-8"))][:2] == ["plan", "plan"] and r["v2"]["收尾"]["触发"] is False,
+              "被禁工具仍是原样重试，不走收尾")
+        # claude / codex 规划：读超限不适用，没有收尾字段
+        setup_fake({"claude": [{"text": T.BOUND_OK}]})
+        r, p, out = run_real("fl_claude_nowrap", {})
+        check("收尾" not in r["v2"], "claude 规划路径不变：没有收尾记录")
+        setup_fake({"codex": [{"text": T.PLAN_OK}], "claude": [{"text": T.BOUND_OK}]})
+        r, p, out = run_real("fl_codex_nowrap", {"plan": "codex:gpt-5.1"})
+        check(r["fixed"] and "收尾" not in r["v2"], "codex 规划路径不变：没有收尾记录", r.get("stop"))
+        check(E.step_of("plan_wrapup") == "plan", "tag plan_wrapup 归 plan 步骤（用 models.plan 的引擎）")
+    finally:
+        G.IDLE_SEC, E.GROK_READ_CAP = old
+        os.environ.pop("DSLAGENT_GROK_FIRST_CAP", None)
+
+
 def main():
-    for t in (t_parse, t_routes, t_engines, t_flow, t_grok_read):
+    for t in (t_parse, t_routes, t_engines, t_flow, t_grok_read, t_grok_wrapup):
         t()
     print(f"\n通过 {PASS}，失败 {FAIL}")
     return 1 if FAIL else 0
