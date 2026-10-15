@@ -65,6 +65,19 @@ grok 里 bypassPermissions 就是 --always-approve。理由同 cbatch：批量�
   cbatch 的 model="auto"。
 - grok 也读工作目录下的 .claude/settings.json 里的权限规则。
 
+## 并发和卡死检测
+
+concurrency：isolated 模式下同时跑几条（1~MAX_TASKS），做法同 obatch；
+share 模式要接前一条的会话，一律顺序。
+
+stall：grok 在 -p 里偶尔会一声不吭地等一个没人批的调用，进程不退，
+跑满 timeout 才被杀，还拖着后面的任务。所以 grok 用 Popen 起、轮询：
+stdout / stderr 没长，GROK_HOME/sessions 下也没有新建或改动的文件，
+连续 stall 秒（从进程起来算）就整组杀掉，记 status='stalled'。
+跑之前拿不到 sessionId，没法确定是哪个 updates.jsonl，所以看的是整个
+sessions 目录——并发时别的条有动静也算活着，宁可晚杀不误杀。
+stall=0 关掉。timeout 照旧是硬上限。
+
 ## 用法
 
     from tools import gbatch
@@ -83,6 +96,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -103,6 +117,8 @@ GROK_BIN = (os.environ.get("GBATCH_GROK") or shutil.which("grok")
 
 MAX_TASKS = 10
 TASK_TIMEOUT = 600
+STALL = 120
+POLL = 0.5
 
 # 同 cbatch.PREAMBLE，多一条：grok 要批准的调用会直接中断整条，提前说清楚
 # 能让它少碰没放开的工具。
@@ -307,7 +323,8 @@ def _save(d: dict) -> None:
 def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
            model: str = None, permission_mode: str = None,
            allowed_tools=None, timeout: int = TASK_TIMEOUT,
-           preamble: bool = True, effort: str = DEFAULT_EFFORT) -> dict:
+           preamble: bool = True, effort: str = DEFAULT_EFFORT,
+           concurrency: int = 1, stall: int = STALL) -> dict:
     """提交一批任务，立刻返回，不等跑完。
 
     tasks：提示词列表，或 {prompt, outfile} 字典列表。outfile 给了的话，
@@ -327,6 +344,9 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
         （也收 低/中/高/极高），默认 medium。None 或空串不传，用 grok 自己
         的默认（high）。tasks 里的字典可带 "effort" 单独覆盖。非法值直接
         报错；grok-4.5 系列不支持 xhigh。
+    concurrency：isolated 模式下同时跑几条（1~MAX_TASKS）；share 模式一律顺序。
+    stall：多少秒没动静（没输出、会话记录没变）就当卡在等批准，杀掉记
+        stalled，默认 120；0 不检测。见模块文档「并发和卡死检测」。
 
     返回 {"job_id", "status", "tasks", "dir", "allow", "warnings"}。
     warnings 里有工具名翻译的问题，和「提示词像要写文件/跑命令但没放行」
@@ -357,6 +377,14 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
     if permission_mode and permission_mode not in PERMISSION_MODES:
         raise GBatchError(f"permission_mode 只能是 {' / '.join(PERMISSION_MODES)}，"
                           f"收到：{permission_mode}")
+    try:
+        concurrency, stall, timeout = int(concurrency), int(stall), int(timeout)
+    except (TypeError, ValueError):
+        raise GBatchError("concurrency / stall / timeout 要是整数") from None
+    if not 1 <= concurrency <= MAX_TASKS:
+        raise GBatchError(f"concurrency 要在 1~{MAX_TASKS}，收到：{concurrency}")
+    if stall < 0:
+        raise GBatchError(f"stall 不能是负数（0 表示不检测），收到：{stall}")
     rules, warnings = _effective_rules(permission_mode, allowed_tools)
     warnings += _precheck(items, permission_mode, rules)
     if shutil.which(GROK_BIN) is None:
@@ -381,7 +409,8 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
                     "allowed_tools": list(allowed_tools or []),
                     "allow": rules,
                     "timeout": int(timeout), "preamble": bool(preamble),
-                    "effort": job_effort},
+                    "effort": job_effort,
+                    "concurrency": concurrency, "stall": stall},
         "warnings": warnings,
         "cmd": None,
         "tasks": [dict(it, status="pending", output="", error="",
@@ -529,6 +558,10 @@ def describe() -> str:
         "  bypassPermissions 不收；\"*\" 规则也不收",
         "  allowed_tools   每条一个 --allow，例：['Edit', 'Bash(python3 *)', 'Bash(git *)']",
         "",
+        "并发 concurrency：isolated 模式同时跑几条（1~10，默认 1）；share 模式一律顺序。",
+        "卡死检测 stall：默认 120 秒没输出、会话记录也没变就杀掉记 stalled"
+        "（多半在等没人批的工具调用）；0 关掉。timeout 仍是硬上限。",
+        "",
         "推理强度 effort（--reasoning-effort）：low / medium / high / xhigh，"
         "也收 低/中/高/极高；默认 medium。",
         "  轻任务（查文件、列清单、简单函数）用 low；复杂排查/重构用 high；",
@@ -623,6 +656,78 @@ def _pending_calls(r: dict, session_id: str) -> tuple:
     return [_summary(*calls[c]) for c in failed if c in calls], "session"
 
 
+# 正在跑的 grok 进程，执行器收到 SIGTERM（cancel）时一起杀：它们各自
+# 一个进程组，cancel 的 killpg 够不着
+_procs, _procs_lock = set(), threading.Lock()
+
+
+def _track(p, add: bool) -> None:
+    with _procs_lock:
+        (_procs.add if add else _procs.discard)(p)
+
+
+def _kill(p) -> None:
+    try:
+        os.killpg(p.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    try:
+        p.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def _on_term(signum, frame):
+    with _procs_lock:
+        ps = list(_procs)
+    for p in ps:
+        _kill(p)
+    os._exit(143)
+
+
+def _session_dirs(sessions: Path) -> set:
+    try:
+        return {s.name for proj in sessions.iterdir() if proj.is_dir()
+                for s in proj.iterdir() if s.is_dir()}
+    except OSError:
+        return set()
+
+
+def _newest_mtime(root: Path) -> float:
+    """root 下最新的修改时间（含目录本身，新建文件会改目录的 mtime）。"""
+    best = 0.0
+    for dp, dns, fns in os.walk(root):
+        for x in [dp] + [os.path.join(dp, f) for f in fns]:
+            try:
+                best = max(best, os.stat(x).st_mtime)
+            except OSError:
+                pass
+    return best
+
+
+def _watch(p, timeout, stall, out_f, err_f, sessions, t0):
+    """等 p 结束。返回退出码，或 "timeout" / "stalled"（已整组杀掉）。"""
+    last, sizes = t0, None
+    while True:
+        rc = p.poll()
+        if rc is not None:
+            return rc
+        now = time.time()
+        if now - t0 >= timeout:
+            _kill(p)
+            return "timeout"
+        if stall:
+            cur = tuple(f.stat().st_size if f.exists() else 0 for f in (out_f, err_f))
+            if cur != sizes:
+                sizes, last = cur, now
+            if sessions.is_dir():
+                last = max(last, min(now, _newest_mtime(sessions)))
+            if now - last >= stall:
+                _kill(p)
+                return "stalled"
+        time.sleep(POLL)
+
+
 def _run_one(d: dict, t: dict, resume: str = None, n: int = 1) -> None:
     """跑一条，结果写回 t。不抛异常：一条坏了记下来，接着跑下一条。
 
@@ -633,28 +738,46 @@ def _run_one(d: dict, t: dict, resume: str = None, n: int = 1) -> None:
     cmd = _command(d, t, resume)
     t["cmd"] = _show_cmd(cmd)
 
-    def keep(out, err):
-        for name, s in ((f"task_{n}.raw.json", out), (f"task_{n}.stderr.log", err)):
-            if isinstance(s, bytes):
-                s = s.decode("utf-8", "replace")
-            try:
-                (jd / name).write_text(s or "", encoding="utf-8")
-            except OSError:
-                pass
-
+    o = d["options"]
+    out_f, err_f = jd / f"task_{n}.raw.json", jd / f"task_{n}.stderr.log"
+    sessions = GROK_HOME / "sessions"
+    before = _session_dirs(sessions)
     t0 = time.time()
-    try:
-        p = subprocess.run(cmd, cwd=d["cwd"],
-                           env=_child_env(), stdin=subprocess.DEVNULL,
-                           capture_output=True, text=True,
-                           timeout=d["options"]["timeout"])
-    except subprocess.TimeoutExpired as e:
-        keep(e.stdout, e.stderr)
-        t.update(status="timeout", seconds=round(time.time() - t0, 1),
-                 error=f"超过 {d['options']['timeout']} 秒，已杀掉")
-        return
+    with open(out_f, "wb") as fo, open(err_f, "wb") as fe:
+        # 自成一组，超时 / 卡死时连 grok 的子进程一起杀
+        p = subprocess.Popen(cmd, cwd=d["cwd"], env=_child_env(),
+                             stdin=subprocess.DEVNULL, stdout=fo, stderr=fe,
+                             start_new_session=True)
+        _track(p, True)
+        try:
+            why = _watch(p, o["timeout"], o.get("stall", 0), out_f, err_f,
+                         sessions, t0)
+        finally:
+            _track(p, False)
     t["seconds"] = round(time.time() - t0, 1)
-    keep(p.stdout, p.stderr)
+    out = out_f.read_text(encoding="utf-8", errors="replace")
+    err = err_f.read_text(encoding="utf-8", errors="replace")
+
+    if why == "timeout":
+        t.update(status="timeout", error=f"超过 {o['timeout']} 秒，已杀掉")
+        return
+    if why == "stalled":
+        # 跑之前拿不到 sessionId；这段时间只多出一个会话目录的话就是它
+        new = _session_dirs(sessions) - before
+        sid = next(iter(new)) if len(new) == 1 else None
+        pending, _ = _pending_calls({}, sid) if sid else ([], "")
+        what = ""
+        if pending:
+            t["pending"] = pending
+            what = "卡住时没执行的调用：" + "，".join(
+                f"{c['tool']} {c['arg']}".strip() for c in pending[:5]) + "。"
+        t.update(status="stalled", session_id=sid, output=out,
+                 error=f"{o['stall']} 秒没有任何输出，会话记录也没变化，已杀掉。"
+                       f"多半在等一个没人批准的工具调用。{what}要写文件或跑命令，"
+                       "传 permission_mode='acceptEdits' 或 allowed_tools")
+        return
+
+    p = subprocess.CompletedProcess(cmd, why, out, err)
 
     try:
         r = json.loads(p.stdout)
@@ -718,18 +841,56 @@ def _run(job_id: str) -> None:
     d.update(status="running", started=_now(), pid=os.getpid())
     _save(d)
 
-    prev_session = None
-    for n, t in enumerate(d["tasks"], 1):
+    signal.signal(signal.SIGTERM, _on_term)
+    lock = threading.Lock()
+
+    def save():
+        with lock:
+            if not cancelled():
+                _save(d)
+
+    def work(n, t, resume=None):
         if cancelled():
-            break
-        t["status"] = "running"
-        _save(d)
-        resume = prev_session if d["mode"] == "share" else None
-        _run_one(d, t, resume, n)
-        prev_session = t["session_id"] if t["status"] == "done" else None
-        if cancelled():
-            return          # cancel() 负责收尾，这里再写会盖掉它
-        _save(d)
+            return
+        w = dict(t, status="running")
+        with lock:
+            t["status"] = "running"
+        save()
+        try:
+            _run_one(d, w, resume, n)
+        except Exception as e:     # 一条坏了不拖垮整批
+            w.update(status="error", error=f"执行器出错：{type(e).__name__}: {e}")
+        with lock:
+            t.clear()
+            t.update(w)
+        save()
+
+    if d["mode"] == "share":
+        prev = None
+        for n, t in enumerate(d["tasks"], 1):
+            if cancelled():
+                break
+            work(n, t, prev)
+            prev = t["session_id"] if t["status"] == "done" else None
+    else:
+        # 同 obatch：几个线程从队列里取
+        q = list(enumerate(d["tasks"], 1))
+        q_lock = threading.Lock()
+
+        def worker():
+            while True:
+                with q_lock:
+                    if not q:
+                        return
+                    n, t = q.pop(0)
+                work(n, t)
+
+        ths = [threading.Thread(target=worker, daemon=True)
+               for _ in range(max(1, d["options"].get("concurrency", 1)))]
+        for th in ths:
+            th.start()
+        for th in ths:
+            th.join()
 
     if cancelled():
         return

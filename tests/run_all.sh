@@ -114,6 +114,7 @@ run 批量codex   $PY tests/tools/test_cxbatch.py
 run Colab启动   $PY tests/tools/test_colab_vllm.py
 run 批量grok    $PY tests/tools/test_gbatch.py
 run grok权限    $PY tests/tools/test_gbatch_perm.py
+run grok并发    $PY tests/tools/test_gbatch_concurrency.py
 run 代理工作目录 $PY tests/tools/test_zcode_workdir.py
 run 认证        $PY tests/auth/test_auth.py
 run 认证攻击    $PY tests/auth/test_auth_attack.py
