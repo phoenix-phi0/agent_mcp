@@ -861,5 +861,60 @@ def mcp_read(key: str, path: str, max_kb: int = 64) -> str:
 
 
 
+# ----------------------------------------------------------------------
+# 请求日志：排查是谁在连、为什么被拒（比如 406 是 Accept 头不对）。
+# 只记头里的这几项和状态码。不记请求体（key 在里面），不记 Authorization / Cookie。
+# ----------------------------------------------------------------------
+import logging
+import time
+
+_reqlog = logging.getLogger("reqlog")
+if not _reqlog.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s REQ %(message)s", "%H:%M:%S"))
+    _reqlog.addHandler(_h)
+    # 服务常被外部守护拉起，stdout 不在我们手里；同时落一个能读的滚动文件。
+    from logging.handlers import RotatingFileHandler
+    _fh = RotatingFileHandler("/tmp/fs_server_v2.req.log", maxBytes=1_000_000,
+                              backupCount=2, encoding="utf-8")
+    _fh.setFormatter(logging.Formatter("%(asctime)s REQ %(message)s", "%m-%d %H:%M:%S"))
+    _reqlog.addHandler(_fh)
+    _reqlog.setLevel(logging.INFO)
+    _reqlog.propagate = False
+
+_LOG_HEADERS = ("user-agent", "accept", "content-type", "content-length",
+                "origin", "host", "x-forwarded-for", "cf-connecting-ip",
+                "mcp-session-id", "mcp-protocol-version")
+
+
+class RequestLog:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        t0 = time.time()
+        status = {"v": "-"}
+
+        async def _send(message):
+            if message["type"] == "http.response.start":
+                status["v"] = message["status"]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, _send)
+        finally:
+            hdr = {k.decode("latin-1").lower(): v.decode("latin-1")
+                   for k, v in scope.get("headers", [])}
+            picked = " ".join(
+                "%s=%r" % (k, hdr[k][:120]) for k in _LOG_HEADERS if k in hdr)
+            client = scope.get("client") or ("-", 0)
+            _reqlog.info("%s %s -> %s %.0fms from=%s:%s %s", scope["method"],
+                         scope["path"], status["v"], (time.time() - t0) * 1000,
+                         client[0], client[1], picked)
+
+
 if __name__ == "__main__":
-    mcp.run(transport="http", port=8000)
+    from starlette.middleware import Middleware
+    mcp.run(transport="http", port=8000, middleware=[Middleware(RequestLog)])
