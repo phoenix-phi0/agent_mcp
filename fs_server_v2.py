@@ -133,6 +133,14 @@ _CALLABLE = {
     "obatch.wait":     ("tools.obatch", "wait"),
     "obatch.jobs":    ("tools.obatch", "jobs"),
     "obatch.cancel":   ("tools.obatch", "cancel"),
+    # CXBatch：同样的批量，执行端换成 Codex 的非交互模式（codex exec）。
+    # 默认只读沙箱，不收 danger-full-access，单次上限 10 条——见 cxbatch.py。
+    "cxbatch.describe": ("tools.cxbatch", "describe"),
+    "cxbatch.submit":   ("tools.cxbatch", "submit"),
+    "cxbatch.status":   ("tools.cxbatch", "status"),
+    "cxbatch.wait":     ("tools.cxbatch", "wait"),
+    "cxbatch.jobs":     ("tools.cxbatch", "jobs"),
+    "cxbatch.cancel":   ("tools.cxbatch", "cancel"),
     # 精确编辑 data/ 下的文件：改几行不用重写整个文件。
     #
     # 路径基准是 **data/**，跟 write_file 一样。要改 tools/ verbs/ 这些

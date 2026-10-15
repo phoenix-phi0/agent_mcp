@@ -110,6 +110,7 @@ run DSLv2流程 $PY tests/tools/test_dslagent_v2.py
 run DSLv2拆分 $PY tests/tools/test_dslagent_split.py
 run DSL范围 $PY tests/tools/test_dslagent_scope.py
 run 批量opencode $PY tests/tools/test_obatch.py
+run 批量codex   $PY tests/tools/test_cxbatch.py
 run 批量grok    $PY tests/tools/test_gbatch.py
 run grok权限    $PY tests/tools/test_gbatch_perm.py
 run 代理工作目录 $PY tests/tools/test_zcode_workdir.py
