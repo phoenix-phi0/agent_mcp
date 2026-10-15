@@ -14,6 +14,8 @@ _LAZY = {
     "run_script": "dsl",
     "make_verbs": "dsl",
     "RESERVED": "dsl",
+    "ColabVllm": "colab_vllm",
+    "ColabVllmError": "colab_vllm",
 }
 
 __all__ = [
@@ -28,6 +30,8 @@ __all__ = [
     "run_script",
     "make_verbs",
     "RESERVED",
+    "ColabVllm",
+    "ColabVllmError",
 ]
 
 

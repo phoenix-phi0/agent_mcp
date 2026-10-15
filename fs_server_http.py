@@ -137,6 +137,12 @@ _CALLABLE = {
     "cxbatch.wait":     ("tools.cxbatch", "wait"),
     "cxbatch.jobs":     ("tools.cxbatch", "jobs"),
     "cxbatch.cancel":   ("tools.cxbatch", "cancel"),
+    # Colab 上启动 vLLM。默认 Qwen2.5-Coder-3B-Instruct-AWQ。
+    "colabvllm.describe": ("tools.colab_vllm", "describe"),
+    "colabvllm.start":    ("tools.colab_vllm", "start"),
+    "colabvllm.status":   ("tools.colab_vllm", "status"),
+    "colabvllm.stop":     ("tools.colab_vllm", "stop"),
+    "colabvllm.chat":     ("tools.colab_vllm", "chat"),
     # 精确编辑：改几行不用重写整个文件。
     #
     # write_file 只能整个覆盖，改 ui.py（1132 行）里的两行要把一千一百行

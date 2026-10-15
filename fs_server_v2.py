@@ -141,6 +141,13 @@ _CALLABLE = {
     "cxbatch.wait":     ("tools.cxbatch", "wait"),
     "cxbatch.jobs":     ("tools.cxbatch", "jobs"),
     "cxbatch.cancel":   ("tools.cxbatch", "cancel"),
+    # Colab 上启动 vLLM。默认 Qwen2.5-Coder-3B-Instruct-AWQ。
+    # 新名字要重启 zmcp 才进白名单；tools 源码改了用 tool_call reset=true。
+    "colabvllm.describe": ("tools.colab_vllm", "describe"),
+    "colabvllm.start":    ("tools.colab_vllm", "start"),
+    "colabvllm.status":   ("tools.colab_vllm", "status"),
+    "colabvllm.stop":     ("tools.colab_vllm", "stop"),
+    "colabvllm.chat":     ("tools.colab_vllm", "chat"),
     # 精确编辑 data/ 下的文件：改几行不用重写整个文件。
     #
     # 路径基准是 **data/**，跟 write_file 一样。要改 tools/ verbs/ 这些
