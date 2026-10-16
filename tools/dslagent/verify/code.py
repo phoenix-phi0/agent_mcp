@@ -392,11 +392,17 @@ def boundary(M, project, plan_result):
     bdir = out / "boundary"
     bdir.mkdir(parents=True, exist_ok=True)
     bound["跑了"] = True
+    why = ""
     try:
         code = strip_code(M(BOUND_SYS, f"【任务原文】\n{task}\n\n【改动（diff，新建文件给全文）】\n{diff}", "bound"))
+        if not re.search(r"^\s*def test", code, re.M):
+            why = "模型回复里没有任何 def test 用例"
     except (Stop, RuntimeError) as e:
-        bound["结论"] = f"没生成用例（{e}），未复核"
-        return {"状态": "成功", "原因": ""}
+        why = f"没生成用例（{e}）"
+    if why:                 # 没拿到用例不能当通过（引擎出错 / 额度用完 / 超时 / 空回复）
+        bound["结论"] = f"未复核：{why}"
+        bound["未复核"] = True
+        return {"状态": "超出预期", "原因": f"边界复核没做成：{why}"}
     (bdir / "test_boundary_v2.py").write_text(code, encoding="utf-8")
     r = run_boundary(project, test_cmd, bdir)
     bound["第1次"] = {k: r[k] for k in ("ok", "ran", "failed_desc", "broken", "sec")}
@@ -406,6 +412,7 @@ def boundary(M, project, plan_result):
         return {"状态": "成功", "原因": ""}
     if r["broken"]:
         bound["结论"] = f"用例文件跑不起来，未复核：{r['tail'][-300:]}"
+        bound["未复核"] = True
         return {"状态": "成功", "原因": ""}
     names = "、".join(r["failed_desc"])
     user = (f"【任务原文】\n{task}\n\n【改动（diff）】\n{diff}\n\n【边界用例】\n```python\n{code}```\n\n"

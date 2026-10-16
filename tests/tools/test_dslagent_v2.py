@@ -378,14 +378,33 @@ def t_flow():
     check(r["reply"]["状态"] == "成功" and "修了用例自身的错" in b["结论"] and b["补改"]["改了用例"]
           and (out / "boundary" / "test_boundary_v2.run1.py").is_file() and util(p).count("x + x") == 1,
           "用例自身的编程错误 → 补改给改好的用例文件 → 再跑全过（代码不动）", b)
-    f = Fake(bound="import unittest\nclass B(unittest.TestCase:\n    pass\n")
+    f = Fake(bound="import unittest\nclass B(unittest.TestCase:\n    def test_x(self):\n        pass\n")
     r, p, _ = go("b_broken", f)
     check(r["reply"]["状态"] == "成功" and "跑不起来" in r["v2"]["边界复核"]["结论"] and "bfix" not in f.tags(),
           "用例文件跑不起来 → 记下，不算代码的问题", r["v2"]["边界复核"])
+    check(r["v2"]["边界复核"].get("未复核") is True, "用例文件跑不起来 → bound 记 未复核=True（判定不变）", r["v2"]["边界复核"])
     f = Fake()
     r, p, _ = go("calls_cap", f, max_calls=1)
-    check(r["reply"]["状态"] == "成功" and "没生成用例" in r["v2"]["边界复核"]["结论"], "调用次数用完时边界复核跳过并记下",
-          r["v2"]["边界复核"])
+    check(r["reply"]["状态"] == "超出预期" and "未复核" in r["v2"]["边界复核"]["结论"] and r["v2"]["边界复核"].get("未复核") is True
+          and "边界复核没做成" in r["reply"]["原因"], "调用次数用完时边界复核没做成 → 超出预期，不当通过", (r["reply"], r["v2"]["边界复核"]))
+
+    def boom(user):
+        raise RuntimeError("额度用完")
+    f = Fake(bound=boom)
+    r, p, _ = go("b_raise", f)
+    b = r["v2"]["边界复核"]
+    check(r["reply"]["状态"] == "超出预期" and "未复核" in b["结论"] and b.get("未复核") is True and "额度用完" in r["reply"]["原因"]
+          and "x + x" in util(p), "边界复核时引擎抛错 → 超出预期、结论含未复核（代码不回滚）", (r["reply"], b))
+    for nm, rep in (("b_empty", ""), ("b_blank", "  \n\n ")):
+        f = Fake(bound=rep)
+        r, p, _ = go(nm, f)
+        b = r["v2"]["边界复核"]
+        check(r["reply"]["状态"] == "超出预期" and "未复核" in b["结论"] and b.get("未复核") is True and "边界复核没做成" in r["reply"]["原因"],
+              f"边界复核回复为空（{nm}）→ 超出预期、结论含未复核", (r["reply"], b))
+    f = Fake()
+    r, p, _ = go("b_pass", f)
+    check(r["reply"]["状态"] == "成功" and "全过" in r["v2"]["边界复核"]["结论"] and "未复核" not in r["v2"]["边界复核"],
+          "正常用例全过 → 仍成功（防回归）", r["v2"]["边界复核"])
 
 
 # ------------------------------------------------------------------ 四、开关
