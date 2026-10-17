@@ -2,7 +2,8 @@
    上下文：entities = [entity, ...]，已按依赖排过序（被引用的表在前）
    entity：.name .fields[] .pk[] .has_implicit_id
    field： .name .type .required .unique .indexed .options
-           .ref（关联的实体名） .default .default_is_word #}
+           .ref（关联的实体名） .default .default_is_word
+           .cascade（级联删除：外键写 ON DELETE CASCADE，其余 RESTRICT） #}
 -- 由 DSL 生成，请勿手改。改 .entity 后重新生成。
 -- 第一版不做迁移：字段变更后请删库重建。
 
@@ -32,7 +33,7 @@ CREATE TABLE {{ entity.name }} (
     {{ field | 转SQL }}
 {%- if field.unique %} UNIQUE{% endif %}
 {%- if field.default %} DEFAULT {{ field | 转默认值 }}{% endif %}
-{%- if field.ref %} REFERENCES {{ field.ref }}({{ field.ref | 主键名(entities) }}) ON DELETE RESTRICT{% endif %}
+{%- if field.ref %} REFERENCES {{ field.ref }}({{ field.ref | 主键名(entities) }}) ON DELETE {{ 'CASCADE' if field.cascade else 'RESTRICT' }}{% endif %}
 {%- if not loop.last or entity.pk %},{% endif %}
 
 {% endfor %}

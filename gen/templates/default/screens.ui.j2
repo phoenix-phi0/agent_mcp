@@ -22,7 +22,7 @@
 
 界面 表单 {{ 名 }}编辑
   分组 主体 竖排 间距 12px
-    全部字段 {{ e.name }}
+    全部字段 {{ e.name }}{{ (' 除 ' ~ (e.fields | 系统字段 | map(attribute='name') | list | join(' '))) if e.fields | 系统字段 }}
   结束
 
   分组 底栏 横排 底栏

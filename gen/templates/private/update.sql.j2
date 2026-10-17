@@ -3,7 +3,7 @@
     不存在一样，不透露那条记录在不在。 -#}
 -- 更新一条{{ e | 标签 }}，只能改自己的。
 UPDATE {{ e.name }} SET
-{% for f in e.fields | 可写 | 除去(e | 主键) | 除去("owner") %}
+{% for f in e.fields | 客户端写 | 除去(e | 主键) | 除去("owner") %}
   {{ f | 转赋值 }}{{ "," if not loop.last }}
 {% endfor %}
 WHERE {{ e | 主键 }} = :{{ e | 主键 }} AND owner = :current_user

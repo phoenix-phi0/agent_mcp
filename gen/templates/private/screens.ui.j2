@@ -11,7 +11,7 @@
 {% set 名 = e | 标签 %}
 {% set pk = e | 主键 %}
 {% set 自动 = ["owner"] %}
-{% for f in e.fields %}{% if f | 数据库填 %}{% set _ = 自动.append(f.name) %}{% endif %}{% endfor %}
+{% for f in e.fields %}{% if (f | 数据库填) or f.system %}{% set _ = 自动.append(f.name) %}{% endif %}{% endfor %}
 {% set 表单字段 = "全部字段 " ~ e.name ~ " 除 " ~ 自动 | join(" ") %}
 # {{ 名 }}：列表 + 浮层，只显示当前用户自己的数据。由实体 {{ e.name }} 用
 # private 模板生成，随便改。

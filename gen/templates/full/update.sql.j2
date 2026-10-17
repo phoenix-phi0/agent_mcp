@@ -3,7 +3,7 @@
     而那要级联改所有引用它的表，不是一条 UPDATE 能办的事。 -#}
 -- 更新一条{{ e | 标签 }}。{{ e | 主键 }} 随编辑表单一起提交（列表点编辑时整行拷进去的）。
 UPDATE {{ e.name }} SET
-{% for f in e.fields | 可写 | 除去(e | 主键) %}
+{% for f in e.fields | 客户端写 | 除去(e | 主键) %}
   {{ f | 转赋值 }}{{ "," if not loop.last }}
 {% endfor %}
 WHERE {{ e | 主键 }} = :{{ e | 主键 }}

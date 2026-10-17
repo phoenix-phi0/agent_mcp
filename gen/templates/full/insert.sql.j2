@@ -6,5 +6,5 @@
 {% if e | 主键自增 %}
 -- {{ e | 主键 }} 是自增主键，不在这里给。
 {% endif %}
-INSERT INTO {{ e.name }}({{ e.fields | 可写 | 列名 }})
-VALUES({% for f in e.fields | 可写 %}{{ f | 转占位符 }}{{ ", " if not loop.last }}{% endfor %})
+INSERT INTO {{ e.name }}({{ e.fields | 客户端写 | 列名 }})
+VALUES({% for f in e.fields | 客户端写 %}{{ f | 转占位符 }}{{ ", " if not loop.last }}{% endfor %})

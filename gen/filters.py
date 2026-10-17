@@ -77,6 +77,20 @@ def 可写(fields) -> list:
     return [f for f in fields if not 数据库填(f)]
 
 
+def 系统字段(fields) -> list:
+    """带「系统」旗标的列：值由系统定，客户端不写、表单里不出现。"""
+    return [f for f in fields if getattr(f, "system", False)]
+
+
+def 客户端写(fields) -> list:
+    """INSERT / UPDATE 里客户端能写的列：可写，再去掉「系统」字段。
+
+    新建时系统字段不进 INSERT，由表里的 DEFAULT 填；修改时不进 SET。
+    查询单条（one）仍用「可写」，系统字段要照常返回。
+    """
+    return [f for f in 可写(fields) if not getattr(f, "system", False)]
+
+
 def 上列表(fields) -> list:
     """列表显示哪几列。
 
@@ -156,6 +170,8 @@ FILTERS = {
     "主键自增": 主键自增,
     "标签": 标签,
     "可写": 可写,
+    "系统字段": 系统字段,
+    "客户端写": 客户端写,
     "上列表": 上列表,
     "上表格": 上表格,
     "除去": 除去,

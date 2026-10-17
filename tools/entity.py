@@ -70,7 +70,12 @@ UNIQUE = "唯一"
 END = "结束"
 
 # Bare words that may follow the type
-FLAGS = {"必填", "唯一", "索引"}
+FLAGS = {"必填", "唯一", "索引", "系统", "级联删除"}
+# 系统：值由系统定（新建一律用默认值，客户端传什么都不算，修改接口也不改它，
+#       表单里不出现）。级联删除：只用在带「关联」的字段上，删父记录连带删子记录。
+
+# 这两个旗标允许跟在标签后面（见 _eat_modifiers）。
+TRAILING_FLAGS = {"系统", "级联删除"}
 
 # Modifiers that take one value. Same shape as .ui's keyed modifiers, and
 # the same limitation: the value cannot contain a space.
@@ -114,6 +119,10 @@ class Field:
     default: str = ""
     label: str = ""
     line: int = 0
+    # 「系统」旗标：新建只写默认值，修改不动它，表单里不出现。
+    system: bool = False
+    # 「级联删除」旗标：建表时外键写 ON DELETE CASCADE，而不是 RESTRICT。
+    cascade: bool = False
 
     @property
     def default_is_word(self) -> bool:
@@ -130,6 +139,8 @@ class Field:
             "unique": self.unique, "indexed": self.indexed,
             "options": list(self.options), "ref": self.ref,
             "default": self.default, "label": self.label,
+            **({"system": True} if self.system else {}),
+            **({"cascade": True} if self.cascade else {}),
         }
 
 
@@ -195,7 +206,12 @@ def _eat_modifiers(words, lineno: int):
             i += 2
         else:
             break
-    return flags, keyed, " ".join(words[i:])
+    # 「系统」「级联删除」也可以写在标签后面：`关联 project 项目 级联删除`。
+    # 只认末尾、且前面还剩至少一个标签词，免得吃掉整个标签。
+    rest = list(words[i:])
+    while len(rest) > 1 and rest[-1] in TRAILING_FLAGS:
+        flags.append(rest.pop())
+    return flags, keyed, " ".join(rest)
 
 
 def parse(text: str) -> list:
@@ -284,6 +300,7 @@ def parse(text: str) -> list:
                 name=name, type=type_name, options=options,
                 required="必填" in flags, unique="唯一" in flags,
                 indexed="索引" in flags,
+                system="系统" in flags, cascade="级联删除" in flags,
                 ref=keyed.get("关联", ""), default=keyed.get("默认", ""),
                 label=label or name, line=lineno))
             continue
@@ -358,6 +375,18 @@ def validate(entities) -> list:
                     problems.append(
                         f"第 {f.line} 行：「{f.name}」指向自己所在的实体，"
                         f"这需要显式主键")
+
+            if f.cascade and not f.ref:
+                problems.append(
+                    f"第 {f.line} 行：「级联删除」只能用在带「关联」的字段上"
+                    f"（字段 {f.name} 没有「关联 <实体>」）")
+            # owner 由 private 模板自己填，不要求默认值；别的系统字段新建时
+            # 没人给值，没有默认值就会写成 NULL（必填的还会直接插入失败）。
+            if f.system and not f.default and f.name != "owner":
+                problems.append(
+                    f"第 {f.line} 行：「系统」字段「{f.name}」必须有默认值"
+                    f"（新建时一律用它），比如：字段 {f.name} 枚举 草稿,已提交 "
+                    f"必填 默认 草稿 系统")
 
             if f.default and f.type == "枚举" and f.options \
                     and f.default not in f.options:
@@ -468,7 +497,8 @@ def dump(entities) -> str:
             if f.options:
                 bits.append("/".join(f.options))
             for flag, on in (("必填", f.required), ("唯一", f.unique),
-                             ("索引", f.indexed)):
+                             ("索引", f.indexed), ("系统", f.system),
+                             ("级联删除", f.cascade)):
                 if on:
                     bits.append(flag)
             if f.ref:

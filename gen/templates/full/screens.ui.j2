@@ -24,7 +24,7 @@
     空输入框，人会以为得自己填，而填了也不会写进去——insert 和 update
     都排除了它。列表照常显示。 #}
 {% set 自动 = [] %}
-{% for f in e.fields %}{% if f | 数据库填 %}{% set _ = 自动.append(f.name) %}{% endif %}{% endfor %}
+{% for f in e.fields %}{% if (f | 数据库填) or f.system %}{% set _ = 自动.append(f.name) %}{% endif %}{% endfor %}
 {% set 表单字段 = "全部字段 " ~ e.name ~ ((" 除 " ~ 自动 | join(" ")) if 自动 else "") %}
 # {{ 名 }}：列表 + 浮层。由实体 {{ e.name }} 用 full 模板生成，随便改。
 
