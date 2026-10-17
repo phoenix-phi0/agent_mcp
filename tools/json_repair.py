@@ -73,6 +73,16 @@ def lift_thought(data):
     return {"思路": inner.pop("思路"), **data, "结果": inner}, True
 
 
+def fill_shell(data):
+    """顶层直接是 {edits:[…]}（没有 结果 / 状态）→ 补成 {结果:{edits,…}, 状态:成功, 原因:""}；思路留在顶层。
+    只补外壳，不动、不放宽 edits 本身（edits 的校验仍在后面）。返回 (data, 是否补了)。"""
+    if not isinstance(data, dict) or "结果" in data or "状态" in data or not isinstance(data.get("edits"), list):
+        return data, False
+    inner = {k: v for k, v in data.items() if k not in ("思路", "原因")}
+    out = {"思路": data["思路"]} if "思路" in data else {}
+    return {**out, "结果": inner, "状态": "成功", "原因": ""}, True
+
+
 def parse_reply(text: str, lift: bool = True):
     """模型回复原文 → (data, repaired, err)：抠出 JSON 部分（去围栏 / 取最外层括号）→ parse（补括号）→ lift_status（lift=True 才做）。
     子任务（json / tool）、补改（fix / bfix）、问JSON 都走这一个；repaired 是 ""、"补括号"、"状态上提" 或 "补括号+状态上提"。

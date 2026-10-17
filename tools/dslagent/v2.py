@@ -209,7 +209,8 @@ class Model:
 
 def _rec_model(sp):
     """calls.json 记的模型：实际模型串（grok 没有模型名，记 grok；effort 另记）。"""
-    return sp["model"] or sp["engine"]
+    m = sp["model"] or sp["engine"]
+    return f"{m}:budget={sp['budget']}" if sp.get("budget") else m
 
 
 def plan_read_call(M, system, user, tag, project, model, out, tools, wrap=None):

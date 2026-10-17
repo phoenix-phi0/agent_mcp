@@ -5,7 +5,7 @@
   sonnet / opus / haiku（或 claude-… 完整名）   claude CLI（call_claude 在本文件）
   codex:<模型>[:<强度>]                          codex exec，强度 minimal|low|medium|high|xhigh，缺省 medium
   grok[:<强度>]                                  grok CLI，强度 low|medium|high|xhigh，缺省 low
-  opencode:<provider/model>                      opencode run
+  opencode:<provider/model>[:budget=<N>]         opencode run；budget = 思考 token 预算（正整数，只影响这次子进程），缺省不限
 各引擎的调用函数返回同一种 dict（text / sec / ttft / cost / usage / rc / stderr / reason / partial / num_turns / tool_calls / engine / model），
 保险（guard.py，四个引擎共用 _Proc）：首事件前静默、空闲超时、文本里的 <invoke 拦截、输出超长、总超时（killpg）；失败重试在 v2.Model 里（统一 1 次）。
 """
@@ -39,6 +39,8 @@ ENV = "DSLAGENT_MODELS"
 _CLAUDE_RX = re.compile(r"^(sonnet|opus|haiku|claude-[A-Za-z0-9._\-\[\]]+)$")
 _CODEX_RX = re.compile(r"^[A-Za-z0-9_.\-]+$")
 _OC_RX = re.compile(r"^[A-Za-z0-9_.\-]+/[A-Za-z0-9_.:\-]+$")
+_OC_BUDGET_RX = re.compile(r"^(.*):budget=(.*)$")
+OC_BUDGET_MAX = 200000
 
 
 # ------------------------------------------------------------------ 解析 / 校验
@@ -66,10 +68,20 @@ def parse(s):
             raise ValueError(f"grok 推理强度只能是 {'|'.join(GROK_EFFORTS)}，收到：{rest!r}（{s!r}）")
         return {"engine": "grok", "model": None, "effort": rest or GROK_EFFORT, "spec": s}
     if head == "opencode":
+        budget = None
+        bm = _OC_BUDGET_RX.match(rest)
+        if bm:
+            rest, b = bm.groups()
+            if not re.fullmatch(r"[1-9][0-9]{0,6}", b) or int(b) > OC_BUDGET_MAX:
+                raise ValueError(f"opencode 思考预算要是 1–{OC_BUDGET_MAX} 的整数（写成 :budget=6000），收到：{b!r}（{s!r}）")
+            budget = int(b)
         if not _OC_RX.match(rest):
-            raise ValueError(f"opencode 模型串要写成 opencode:<provider/model>，收到：{s!r}")
-        return {"engine": "opencode", "model": rest, "effort": None, "spec": s}
-    raise ValueError(f"模型串不认识：{s!r}。可写：sonnet / opus / haiku / claude-…、codex:<模型>[:<强度>]、grok[:<强度>]、opencode:<provider/model>")
+            raise ValueError(f"opencode 模型串要写成 opencode:<provider/model>[:budget=<N>]，收到：{s!r}")
+        out = {"engine": "opencode", "model": rest, "effort": None, "spec": s}
+        if budget:
+            out["budget"] = budget
+        return out
+    raise ValueError(f"模型串不认识：{s!r}。可写：sonnet / opus / haiku / claude-…、codex:<模型>[:<强度>]、grok[:<强度>]、opencode:<provider/model>[:budget=<N>]")
 
 
 def normalize(value):
@@ -530,15 +542,25 @@ def call_grok(system, user, timeout=300, reply_path=None, idle=None, model=None,
 # ------------------------------------------------------------------ opencode
 
 
-def call_opencode(system, user, timeout=300, reply_path=None, idle=None, model=None, effort=None, first_cap=None, **_ignored):
+def _oc_budget(cfg, model, budget):
+    """把思考预算合并进 opencode 配置（原地改 cfg）：model 是 <provider>/<模型>；已有的同名配置项保留，只覆盖 enable_thinking / thinking_budget。"""
+    prov, _, mid = model.partition("/")
+    opts = cfg.setdefault("provider", {}).setdefault(prov, {}).setdefault("models", {}).setdefault(mid, {}).setdefault("options", {})
+    opts.update({"enable_thinking": True, "thinking_budget": int(budget)})
+
+
+def call_opencode(system, user, timeout=300, reply_path=None, idle=None, model=None, effort=None, first_cap=None, budget=None, **_ignored):
     """opencode run 单次调用。命令与环境复用 tools/obatch.py 的精简 agent（OPENCODE_CONFIG_CONTENT 注入，tools 全关，steps 限轮，--format json），
     agent.prompt 换成 system；user 经 stdin 传（大提示放 argv 会超单参数上限）；不用 --pure。事件是整段（part）结束时才发，
-    空闲超时按 text / reasoning 事件刷新（缺省 IDLE_OC 秒，比逐字流宽）；出现 tool 类事件即杀。"""
+    空闲超时按 text / reasoning 事件刷新（缺省 IDLE_OC 秒，比逐字流宽）；出现 tool 类事件即杀。
+    budget（正整数）→ 在注入的配置里合并 provider.<p>.models.<m>.options = {enable_thinking: true, thinking_budget: N}，只影响这次子进程。"""
     from tools import obatch as OB
     tmp, cwd = _empty_cwd("v2_oc_empty")
     model = model or OB.DEFAULT_MODEL
     cfg = OB._config({"lean": True, "preamble": False, "max_steps": 3, "permission_mode": None})
     cfg["agent"][OB.AGENT]["prompt"] = system
+    if budget:
+        _oc_budget(cfg, model, budget)
     env = OB._child_env()
     env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
     env["OPENCODE_DISABLE_CLAUDE_CODE"] = "1"
@@ -599,4 +621,5 @@ def call_opencode(system, user, timeout=300, reply_path=None, idle=None, model=N
 def call(spec, system, user, timeout, **kw):
     """按 parse() 的结果调引擎。"""
     fn = {"claude": call_claude, "codex": call_codex, "grok": call_grok, "opencode": call_opencode}[spec["engine"]]
-    return fn(system, user, timeout, model=spec["model"], **({"effort": spec["effort"]} if spec["engine"] != "claude" else {}), **kw)
+    extra = {"budget": spec["budget"]} if spec.get("budget") else {}
+    return fn(system, user, timeout, model=spec["model"], **({"effort": spec["effort"]} if spec["engine"] != "claude" else {}), **extra, **kw)

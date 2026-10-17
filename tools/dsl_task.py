@@ -234,11 +234,16 @@ def check_reply(data, spec: list):
     return out, []
 
 
-def parse_check(text, spec: list, extra=None):
+def parse_check(text, spec: list, extra=None, shell=False):
     """模型回复原文 → 同一套解析（JR.parse_reply：补括号、状态上提）+ 同一套 {结果,状态,原因} 校验（check_reply）；
     extra(value) 在其上叠加专属校验（如补改的 edits 结构），返回问题文本或空。
+    shell=True（子任务）时，回复只有 {edits:[…]} 没有 结果/状态外壳，先补成标准结构（repaired 记「外壳补齐」，状态视为成功）。
     返回 {value（合格的 {结果,状态,原因}，否则 None）, problems, repaired, err, data}。"""
     data, repaired, err = JR.parse_reply(text)
+    if shell:
+        data, filled = JR.fill_shell(data)
+        if filled:
+            repaired = (repaired + "+" if repaired else "") + "外壳补齐"
     value, problems = check_reply(data, spec)
     if value is not None and extra:
         bad = extra(value)
@@ -325,7 +330,7 @@ def dispatch_json(engine, task, inputs: list, logic, spec: list, client=None) ->
             value, problems = check_reply(data, spec)
         else:
             last = str(reply)
-            p = parse_check(last, spec)
+            p = parse_check(last, spec, shell=True)
             data, repaired, err, value, problems = p["data"], p["repaired"], p["err"], p["value"], p["problems"]
         if not problems:
             return dict(value, repaired=repaired, 原文=last[:500]) if repaired else value
