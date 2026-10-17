@@ -31,7 +31,17 @@ def main(argv=None):
     u.add_argument("--task")
     u.add_argument("--task-file")
     u.add_argument("--test-cmd")
+    n = sp.add_parser("newproj", help="新建项目：跳过规划，直接执行固定模板 packs/newproj/newproj.zs")
+    n.add_argument("req_file", help="需求文件")
+    n.add_argument("project", help="项目目录（不存在就建）")
+    n.add_argument("--out", required=True)
+    n.add_argument("--wall", type=int, default=900)
     a = ap.parse_args(argv)
+    if a.cmd == "newproj":
+        from . import v2
+        res = v2.run_newproj(Path(a.req_file).read_text(encoding="utf-8"), a.project, a.out, wall=a.wall)
+        print(json.dumps({k: res[k] for k in ("fixed", "calls", "cost", "seconds", "stop", "changed_files")}, ensure_ascii=False))
+        return 0
 
     from . import runner
     if a.cmd == "auto":

@@ -82,8 +82,11 @@ def split_subs(script):
     return "\n".join(main + secs), {k: "\n".join(v) for k, v in subs.items()}
 
 
-def whitelist_check(script, subs, libs=LIBS):
-    """静态白名单：每行的语句头、动词、「设 x = 动词」右边、问 的后缀、执行 的目标。返回问题列表。"""
+def whitelist_check(script, subs, libs=LIBS, verbs=(), packs=()):
+    """静态白名单：每行的语句头、动词、「设 x = 动词」右边、问 的后缀、执行 的目标。返回问题列表。
+    verbs / packs：资料包额外放开的动词和 用包 可写的包名（缺省不放开，其它包行为不变）。"""
+    allowed = ALLOWED_VERBS | set(verbs)
+    use_ok = ("common", "text", "code") + tuple(packs)
     split_head, KW = _heads()
     from tools.dsl_core import normalize
     probs = []
@@ -97,7 +100,7 @@ def whitelist_check(script, subs, libs=LIBS):
             h, rest = split_head(s)
             where = f"{name}第 {i} 行"
             if h in ALL_VERBS:
-                if h not in ALLOWED_VERBS:
+                if h not in allowed:
                     probs.append(f"{where}：动词「{h}」不在白名单里")
                 continue
             if h not in ALLOWED_HEADS:
@@ -105,13 +108,13 @@ def whitelist_check(script, subs, libs=LIBS):
                              else f"{where}：认不出的语句「{s[:40]}」（不是关键字也不是白名单动词）")
                 continue
             if h == "use":
-                bad = [x for x in re.split(r"[\s,，、]+", rest) if x and x not in ("common", "text", "code")]
+                bad = [x for x in re.split(r"[\s,，、]+", rest) if x and x not in use_ok]
                 if bad:
-                    probs.append(f"{where}：只能用包 common text code，不能用 {bad}")
+                    probs.append(f"{where}：只能用包 {' '.join(use_ok)}，不能用 {bad}")
             if h == "set":
                 _, _, val = rest.partition("=")
                 sh, srest = split_head(val.strip())
-                if sh in ALL_VERBS and sh not in ALLOWED_VERBS:
+                if sh in ALL_VERBS and sh not in allowed:
                     probs.append(f"{where}：动词「{sh}」不在白名单里")
                 elif sh in set(KW.values()) and sh not in ("call", "compute"):
                     probs.append(f"{where}：「设 x = {val.strip().split()[0]}」不允许（右边只能是值、白名单动词、计算、执行）")

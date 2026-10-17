@@ -505,7 +505,7 @@ def check(project, work, script, task, pack=None):
     pack = pack or packs.current()
     rec = {}
     main, subs = DP.split_subs(script)
-    probs = DP.whitelist_check(main, subs, libs=())      # v2 计划不用 执行 定位.zs / 读改测.zs
+    probs = DP.whitelist_check(main, subs, libs=(), verbs=getattr(pack, "EXTRA_VERBS", ()), packs=getattr(pack, "EXTRA_PACKS", ()))      # v2 计划不用 执行 定位.zs / 读改测.zs
     body, _, cl, _ = split_sections(main)
     generic = []
     if not re.search(r"^\s*预算\s", body, re.M):
@@ -699,6 +699,89 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
     return _recorded(_finish(res, out, M, steps, state, accept, bound, base, snapshot(project, pack), t_start), record, project, task, reads)
 
 
+# ------------------------------------------------------------------ 新建项目：跳过规划，直接执行固定模板
+
+NEWPROJ_CALLS = 8        # 模板里 预算 调用 8：实体 / sql / zs / ui 各 ≤ 2 次
+
+
+def _req_text(req):
+    """需求：一行且是存在的文件路径就读文件，否则当需求原文。"""
+    s = str(req or "")
+    if s and "\n" not in s and len(s) < 500:
+        try:
+            if Path(s).is_file():
+                return Path(s).read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+    return s.strip()
+
+
+def run_newproj(req, project, out_dir, model=None, wall=WALL, max_calls=NEWPROJ_CALLS):
+    """新建项目入口：不规划，直接执行 packs/newproj/newproj.zs（pack=newproj）。
+    req：需求原文，或一个存在的文本文件路径；project：要新建的项目目录（不存在就建，也是引擎工作目录）；
+    out_dir：记录目录（calls/、calls.json、plan.zs、plan_out.txt、result.json）；model：假模型 backend（测试用）。
+    步骤：模板过 check（白名单 + 空跑）→ 引擎执行（预算、模型调用计数 / 墙钟 / 费用同 v2）→ 终止 成功 才算成功。
+    没有验收层；失败时已生成的文件留在项目里供排查（不回滚）。返回结果字典（同 run 的字段）。"""
+    from . import plan as DP
+
+    project = Path(project).resolve()
+    project.mkdir(parents=True, exist_ok=True)
+    out = Path(out_dir).resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    t_start = time.time()
+    task = _req_text(req)
+    pack = packs.pick("newproj")
+    M = Model(out, backend=model, max_calls=max_calls, deadline=t_start + wall)
+    steps, info = {}, {"检查": [], "重写": False, "子任务模式": "json", "子任务": [], "pack": pack.NAME}
+    res = {"project": str(project), "test_cmd": "", "kind": "newproj", "planner": "v2", "fixed": False,
+           "engine_used": "v2", "versions": 0, "calls": 0, "cost": 0.0, "seconds": 0, "stop": "", "dir": str(out),
+           "calls_log": str(out / "calls.json"), "version_log": [], "subcalls": [], "changed_files": [], "handoff": "",
+           "report": "", "v2": info}
+    state = {"状态": "失败", "原因": ""}
+    base = snapshot(project, pack)
+    try:
+        if not task:
+            raise Stop("需求为空")
+        script = pack.TEMPLATE.read_text(encoding="utf-8")
+        (out / "plan.zs").write_text(script, encoding="utf-8")
+        t0 = time.time()
+        problem, main, subs, crec = check(project, out / "dry", script, task, pack)
+        info["检查"].append(dict(crec, 问题=problem[:1500]))
+        steps["检查"] = round(time.time() - t0, 1)
+        if problem:
+            raise Stop("固定模板没过检查：" + problem[:400])
+        t0 = time.time()
+        Eng = _engine_cls()
+        eng = Eng(client=Client(M), workdir=project, verbose=False, verbs_root=VERBS, scripts={})
+        eng.gate, eng.project, eng.tests = {}, project, []
+        eng.model = MODEL
+        eng.sublog = info["子任务"]
+        eng.vars["task"] = task
+        err = ""
+        try:
+            eng.run(main)
+        except Exception as e:  # noqa: BLE001  脚本报错按失败处理
+            err = f"{type(e).__name__}: {str(e)[:800]}"
+        halted = eng.halted
+        (out / "plan_out.txt").write_text("\n".join(eng.output) + (f"\n\n[报错] {err}" if err else "")
+                                          + f"\n\n[终止] {json.dumps(halted, ensure_ascii=False)}", encoding="utf-8")
+        info.update(终止=halted, 报错=err, 预算={"calls": eng.usage.calls, "max_calls": eng.usage.max_calls, "max_secs": eng.usage.max_secs})
+        steps["执行"] = round(time.time() - t0, 1)
+        res["versions"] = 1
+        if err:
+            raise Stop(f"脚本报错：{err}")
+        if not halted:
+            raise Stop("脚本跑完没有 终止（没自报成功）")
+        if halted.get("状态") != "成功":
+            raise Stop(f"脚本终止 {halted.get('状态')}：{str(halted.get('原因'))[:400]}")
+        state.update(状态="成功", 原因="")
+    except Stop as e:
+        state["原因"] = str(e)
+    except Exception as e:  # noqa: BLE001  流程自身出错也要有结果
+        state["原因"] = f"newproj 流程出错：{type(e).__name__}: {str(e)[:400]}"
+    return _finish(res, out, M, steps, state, {}, {"跑了": False}, base, snapshot(project, pack), t_start)
+
+
 class _Done(Exception):
     pass
 
@@ -711,10 +794,10 @@ def _recorded(res, record, project, task, reads):
 
 
 def _finish(res, out, M, steps, state, accept, bound, base, now, t_start):
-    ch = changed(base, now) if base else []
+    ch = changed(base, now) if base is not None else []
     res.update(fixed=state["状态"] == "成功", stop="" if state["状态"] == "成功" else state["原因"],
                calls=M.n, cost=round(M.cost, 4), seconds=round(time.time() - t_start, 1), changed_files=ch,
-               diff=diff_text(base, now, 3000) if base else "", status=state["状态"])
+               diff=diff_text(base, now, 3000) if base is not None else "", status=state["状态"])
     res["calls_by_purpose"] = {}
     for c in M.log:
         k = re.sub(r"\d+$|_reask$", "", c["tag"])

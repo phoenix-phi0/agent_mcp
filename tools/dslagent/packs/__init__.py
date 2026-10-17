@@ -22,7 +22,7 @@ files 给要快照的文档 / 数据文件、PLAN_RULES 写这类任务的计划
 import importlib
 import os
 
-REGISTRY = {"code": "tools.dslagent.packs.code"}
+REGISTRY = {"code": "tools.dslagent.packs.code", "newproj": "tools.dslagent.packs.newproj"}
 DEFAULT = "code"
 
 
