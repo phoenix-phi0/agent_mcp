@@ -544,6 +544,7 @@ def call_opencode(system, user, timeout=300, reply_path=None, idle=None, model=N
     env["OPENCODE_DISABLE_CLAUDE_CODE"] = "1"
     env["OPENCODE_CONFIG_CONTENT"] = json.dumps(cfg, ensure_ascii=False)
     env["TMPDIR"] = str(tmp)
+    env["PWD"] = str(cwd)           # opencode 工作目录取 PWD；stdin 由 _Proc 写完即关
     cmd = [opencode_bin(), "run", "--format", "json", "--thinking", "--agent", OB.AGENT, "-m", model]
     if effort:
         cmd += ["--variant", effort]

@@ -31,6 +31,7 @@ t0 = time.time()
 with open({str(LOG)!r}, "a", encoding="utf-8") as f:
     f.write(json.dumps({{"prompt": prompt, "resume": resume, "argv": a, "cwd": os.getcwd(),
                          "cfg": os.environ.get("OPENCODE_CONFIG_CONTENT"),
+                         "pwd": os.environ.get("PWD"), "stdin": sys.stdin.read(),
                          "env": {{k: os.environ.get(k) for k in
                                  ("OPENCODE_DISABLE_CLAUDE_CODE", "OPENCODE_DISABLE_AUTOUPDATE")}},
                          "leak": sorted(k for k in os.environ
@@ -121,6 +122,39 @@ def main():
         e = raises(obatch.submit, ["x"], model=bad, cwd=str(TMP))
         check(e and "zhipuai-coding-plan/glm-5.3-flash" in e, f"{bad!r} 报错并列出可用模型", e)
     check(raises(obatch.submit, [{"prompt": "x", "model": "bad"}], cwd=str(TMP)), "单条 model 写错也报错")
+
+    print("百炼模型白名单 / PWD / stdin")
+    for m in ("bailian-cli/qwen3.8-max", "bailian-cli/qwen3.8-flash"):
+        check(raises(obatch.submit, ["no-run"], model=m, cwd=str(TMP)) is None, f"{m} 放行")
+    time.sleep(1.5)      # 放行的提交会真起一个假 opencode，等它写完日志再开始
+    check(raises(obatch.submit, ["x"], model="bailian-cli/qwen9", cwd=str(TMP)), "未登记的百炼模型拒绝")
+    d, cs = run(["PWDCHK"], model="bailian-cli/qwen3.8-flash")
+    cs = [c for c in cs if c["prompt"] == "PWDCHK"]
+    check(d["status"] == "done" and cs and cs[0]["pwd"] == str(TMP) and cs[0]["stdin"] == "",
+          "obatch：env PWD=cwd 且 stdin 即刻 EOF", cs[:1])
+    check(arg(cs[0], "-m") == "bailian-cli/qwen3.8-flash", "-m 传百炼模型")
+    # v2 引擎 call_opencode：PWD、stdin 喂完即关
+    from tools.dslagent import engines
+    fake2 = TMP / "opencode_v2"
+    fake2.write_text(f"""#!{sys.executable}
+import json, os, sys
+u = sys.stdin.read()
+open({str(LOG)!r}, "a").write(json.dumps({{"pwd": os.environ.get("PWD"), "cwd": os.getcwd(), "user": u,
+    "home": os.environ.get("HOME"), "argv": sys.argv[1:]}}) + "\\n")
+print(json.dumps({{"type": "text", "part": {{"type": "text", "text": "OK"}}}}), flush=True)
+""", encoding="utf-8")
+    fake2.chmod(0o755)
+    LOG.unlink(missing_ok=True)
+    old = engines.opencode_bin
+    engines.opencode_bin = lambda: str(fake2)
+    try:
+        r = engines.call_opencode("sys", "用户内容", timeout=30, model="bailian-cli/qwen3.8-flash")
+    finally:
+        engines.opencode_bin = old
+    c = calls()[0] if calls() else {}
+    check(c.get("pwd") == c.get("cwd") and c.get("user") == "用户内容", "call_opencode：PWD==cwd，stdin 内容送达并 EOF", c)
+    check(c.get("home") == os.environ.get("HOME") and "bailian-cli/qwen3.8-flash" in c.get("argv", []), "保留 HOME，-m 透传")
+    check(r.get("text") == "OK" and r.get("rc") == 0, "call_opencode 返回文本", r)
 
     print("cwd 校验")
     check(raises(obatch.submit, ["x"], cwd=str(Path.home())), "不收家目录")

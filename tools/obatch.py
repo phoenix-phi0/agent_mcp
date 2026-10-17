@@ -79,7 +79,8 @@ MAX_OUTPUT = 100_000          # 单条输出存盘上限（字符），超出截
 PREVIEW = 500                 # status(full=False) 每条输出的预览长度
 DEFAULT_MODEL = "zhipuai-coding-plan/glm-5.3"
 MODELS = ("zhipuai-coding-plan/glm-5.3", "zhipuai-coding-plan/glm-5.3-flash",
-          "zhipuai-coding-plan/glm-5.3-highspeed", "zhipuai-coding-plan/glm-4.6v")
+          "zhipuai-coding-plan/glm-5.3-highspeed", "zhipuai-coding-plan/glm-4.6v",
+          "bailian-cli/qwen3.8-max", "bailian-cli/qwen3.8-flash")
 DEFAULT_STEPS = 5
 PERMISSION_MODES = ("readonly", "acceptEdits")
 AGENT = "obatch"
@@ -148,6 +149,7 @@ def _command(d: dict, t: dict, resume: str = None) -> list:
 def _env(d: dict) -> dict:
     env = _child_env()
     env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
+    env["PWD"] = str(d["cwd"])      # opencode 的工作目录取 PWD，不是子进程 cwd
     if d["options"]["lean"]:
         env["OPENCODE_DISABLE_CLAUDE_CODE"] = "1"
     cfg = _config(d["options"])
