@@ -112,12 +112,15 @@ SUB_TOOL = _agent("sub_tool.md", "tools.dsl_task:build_prompt", "tools.dsl_task:
 FIX = _agent("fix.md", "verify.code:_fix_user", "tools.dsl_task:parse_check", Retry(2, RETRY_ASK))
 BOUND = _agent("bound.md", parser="verify.code:strip_code")
 BFIX = _agent("bfix.md", parser="tools.dsl_task:parse_check", retry=Retry(2, RETRY_ASK))
+BOUND_JUDGE = _agent("bound_judge.md", parser="verify.bound_table:parse_judge", retry=Retry(2, RETRY_ASK))
+TABLE_FILL = _agent("bound_table_fill.md", user_fn="verify.bound_table:fill_user", parser="verify.bound_table:parse_rows")
 
-AGENTS = {a.name: a for a in (PLAN, PLAN_FIX, SUB_JSON, SUB_TOOL, FIX, BOUND, BFIX)}
+AGENTS = {a.name: a for a in (PLAN, PLAN_FIX, SUB_JSON, SUB_TOOL, FIX, BOUND, BFIX, BOUND_JUDGE, TABLE_FILL)}
 
 
 def of_tag(tag):
-    """调用 tag → Agent（plan / plan_fix / plan_wrapup（grok 读超限后的收尾，归 plan）/ dslNN / dslNN_toolK / fix / bound / bfix，后缀 _reask 归同一个）；不认识返回 None。"""
+    """调用 tag → Agent（plan / plan_fix / plan_wrapup（grok 读超限后的收尾，归 plan）/ dslNN / dslNN_toolK / fix / bound / bfix /
+    bound_judge / table_fill（补表，归 plan 步骤），后缀 _reask 归同一个）；不认识返回 None。"""
     t = re.sub(r"_reask$", "", tag or "")
     if t == "plan_wrapup":
         return PLAN

@@ -46,6 +46,8 @@
 
 {{插入 rules_out.md}}
 
+{{插入 plan_rules_{包}_table.md}}
+
 ## 变体：grok
 
 grok 引擎没有 dsl 工具，用自带的只读工具读文件；下面两处换成 grok 版（原文必须在提示词里找得到，找不到会报错）。

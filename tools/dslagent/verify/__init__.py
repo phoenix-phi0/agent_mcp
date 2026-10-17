@@ -14,7 +14,11 @@
              "补改系统": 补改调用的 system 提示, "原因": 没通过时的失败原因, "测试摘要": str}
   fix(M, project, chk, tag="fix") -> dict   用 check 的出参派 1 次补改（回复不合格重答 1 次、能套就套），返回补改记录。
   boundary(M, project, plan_result) -> {"状态", "原因"}   可选：验收通过后的边界复核（M 模型调用；plan_result 另含 "out" 任务目录、
-      "bound" 边界记录 dict，函数往里写）。没有这个名字就跳过、按成功处理。
+      "bound" 边界记录 dict，函数往里写；"expect_table" 规划阶段的期望表记录，没有表为 None）。没有这个名字就跳过、按成功处理。
+  split_table(raw) -> (去掉表的回复, 表行|None, 说明)   可选：规划回复里 #期望表 之后的块在进入 .zs 处理之前切出（code 有）。
+  fixture_notes(text) -> str                         可选：规划 user 按涉及的模块追加的专用夹具说明（没有就空串）。
+  table_stage(M, task, rows, note, main, out) -> dict 可选：计划通过检查后的表检查（零调用）+ 不达标补表 1 次；返回期望表记录
+      {rows, 达标, 说明, ...}，v2 放进 plan_result["expect_table"]（验收的 boundary 按它选表路径 / 旧路径）。
 
 以后加「文档」「数据」类验收要实现的：detect_cmd / MISSING_MSG / setup / check / fix（boundary 可不实现）。check 里按任务类型核对
 （文档：清单里的章节都在、引用都解析得开；数据：行数 / 校验和 / 约束），把缺口写成「说明」，补改入参自己组装。

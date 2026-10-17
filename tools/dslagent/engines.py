@@ -107,7 +107,7 @@ def validate(models, subtask="json"):
 
 
 def step_of(tag):
-    """调用 tag → 步骤：plan / plan_fix → plan；dslNN[_…] → sub；fix → fix；bound / bfix → bound；其余 None。"""
+    """调用 tag → 步骤：plan / plan_fix → plan；dslNN[_…] → sub；fix → fix；bound / bfix / bound_judge → bound；table_fill（补表）→ plan；其余 None。"""
     a = AG.of_tag(tag)
     return a.step if a else None
 

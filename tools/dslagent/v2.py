@@ -20,10 +20,12 @@ opencode 不能做规划（engines.validate 提交时报错）。老的 full 规
     （test_gate：结果变量被 打印 / 终止 以外的语句用到，或所在 如果 的分支不全是 打印 / 终止），否则给「通过」
     的占位结果，验收时统一跑。终止 成功 才往下验收，否则回滚到开局、判失败。
   5 验收：verify.check（通过 / 缺口 / 补改入参）；有缺口 verify.fix 派 1 次补改，补改后再 check 一次。
-  6 边界复核：verify.boundary（可选）；仍失败 → 状态 超出预期（不报成功）。
+  6 边界复核：verify.boundary（可选）；仍失败 → 状态 超出预期（不报成功）。code 验收有两条路：规划时给出的达标期望表（#期望表，
+    在进 .zs 处理前切出，存 expect_table.json；覆盖 / 条数不达标补表 1 次）→ 程序按表调用函数核对，全过即成功、0 次模型调用，
+    有失败 1 次 bound_judge 判表错再 bfix；无表 / 不达标 / 执行器出错 → 模型写 unittest 的旧路径。
   7 回复：reply = {结果, 状态, 原因}；v2 记各步耗时、调用次数、费用（calls.json 逐次）。
 子任务回复格式：缺省 json；DSLAGENT_SUBTASK=tool 时子任务挂 dslmcp 的 dsl 工具读 / 搜 / 改文件（toolsub.py），每个子任务的结果记在 v2.子任务。
-按步骤指定模型：环境变量 DSLAGENT_MODELS（JSON，cbatch 透传 dsl_options.models）{plan, sub, fix, bound} → 模型串，见 engines.py（claude / codex / grok / opencode）；
+按步骤指定模型：环境变量 DSLAGENT_MODELS（JSON，cbatch 透传 dsl_options.models）{plan, sub, fix, bound} → 模型串（补表 table_fill 归 plan，bound_judge 归 bound），见 engines.py（claude / codex / grok / opencode）；
 没写的步骤 sonnet；每次调用按 tag 选引擎（Model.spec），calls.json 逐条记 engine / model / effort，result.json 的 v2.models 记生效的四步。
 模型调用：claude CLI，--system-prompt 替换默认提示，--tools "" --strict-mcp-config --setting-sources "" --disable-slash-commands
 （同 plan35 proto），单轮流式；run(model=…) 可换成假模型（测试用）。
@@ -84,9 +86,9 @@ def plan_system(pack=None, engine=None):
     return AG.PLAN.system_text(engine, getattr(pack, "RULES_KEY", pack.NAME))
 
 
-def plan_user_read(task, outline=""):
-    """read 方式的 user：任务原文 + 文件大纲（包没有大纲就只有任务原文）。"""
-    return f"【任务原文】\n{task}" + (f"\n\n{outline}" if outline else "")
+def plan_user_read(task, outline="", extra=""):
+    """read 方式的 user：任务原文 + 文件大纲（包没有大纲就只有任务原文）；extra 是验收按涉及的模块追加的说明（如专用夹具，没有就空）。"""
+    return f"【任务原文】\n{task}" + (f"\n\n{outline}" if outline else "") + extra
 
 
 # ------------------------------------------------------------------ 模型调用
@@ -581,7 +583,7 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
             info.update(o.get("记录") or {})
         info["大纲字符"] = len(outline)
         (out / "outline.md").write_text(outline, encoding="utf-8")
-        first_user = plan_user_read(task, outline)
+        first_user = plan_user_read(task, outline, ver.fixture_notes(outline) if hasattr(ver, "fixture_notes") else "")
         step("1大纲", t0)
         # ---- 3 规划
         t0 = time.time()
@@ -593,6 +595,7 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
             plan_model = routes["plan"]
         info["规划模型"] = res["plan_model"] = plan_model
         wrap = {"触发": False, "次": 0, "段数": 0, "字数": 0}
+        table, tnote = None, "无表"          # 规划回复里 #期望表 之后的块（验收按表核对边界）；plan_fix 回复里有新表就换，没有就保留原表
         if M.spec("plan", plan_model)["engine"] == "grok":
             info["收尾"] = wrap
         try:
@@ -601,6 +604,10 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
                 raw = plan_read_call(M, plan_system(pack, M.spec("plan", plan_model)["engine"]), user, "plan" if k == 0 else "plan_fix", project,
                                      plan_model, out, plan_tools, wrap)
                 (out / f"plan_v{k + 1}.raw.txt").write_text(raw, encoding="utf-8")
+                if hasattr(ver, "split_table"):
+                    raw, rows, note = ver.split_table(raw)       # 表在进 .zs 处理（strip_prose / autoclose / check）之前切出
+                    if rows or k == 0:
+                        table, tnote = rows, ("" if rows else note)
                 script, _ = DP.strip_prose(raw)
                 script, n_close, _ = DP.autoclose(script)
                 (out / f"plan_v{k + 1}.zs").write_text(script, encoding="utf-8")
@@ -611,6 +618,11 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
                 info["重写"] = True
         finally:      # 规划结束、执行还没开始：项目还是开局快照，grok 的读码返回内容此时重取（给训练数据用）
             reads.update(DS.capture_reads(project, plan_tools))
+        exp = None
+        if not problem and hasattr(ver, "table_stage"):     # 零调用检查（规则覆盖 + 每函数条数），不达标补表 1 次
+            exp = ver.table_stage(M, task, table, tnote, main, out)
+            info["期望表"] = {k: v for k, v in exp.items() if k != "rows"}
+            info["期望表"]["表条数"] = len(exp["rows"] or [])
         step("3规划", t0)
         info["规划工具"] = {"次数": len(plan_tools), "返回字数": sum(x.get("返回字数") or 0 for x in plan_tools)}
         if problem:
@@ -652,7 +664,7 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
         t0 = time.time()
         cur = snapshot(project, pack)
         pr = {"task": task, "base": base, "cur": cur, "main": main, "tests": eng.tests, "accept": accept,
-              "test_cmd": test_cmd, "stage": "验收", "out": out, "bound": bound}
+              "test_cmd": test_cmd, "stage": "验收", "out": out, "bound": bound, "expect_table": exp}
         chk = ver.check(project, pr, eng.checklist)
         if not chk["通过"]:
             accept["补改"] = ver.fix(M, project, chk, "fix")

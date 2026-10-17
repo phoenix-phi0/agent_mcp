@@ -1,0 +1,14 @@
+{
+  "tools/cbatch.py": {
+    "函数": ["jobs"],
+    "构造": "jobs",
+    "环境变量": "CBATCH_HOME",
+    "说明": "批量执行器夹具（只对 tools/cbatch.py 的 jobs 生效，环境变量 CBATCH_HOME 指向它）：共 20 个任务目录，按名字倒序即「新的在前」：k12_failed、k11_done、k10_failed、k09_done、k08_failed、k07_done、k06_failed、k05_done、k04_failed、k03_done、k02_failed、k01_done（这 12 个都是正常 job.json，名字后缀即状态，各 1 个子任务，状态就是后缀），之后依次是 j8_done（done）、j7_nojson（没有 job.json，跳过）、j6_failed（failed）、j5_notasks（job.json 是对象但缺 tasks → broken）、j4_died（状态 running 但进程已不在，列表显示 died）、j3_list（内容是 []，→ broken）、j2_bad（不是合法 JSON → broken）、j1_done（done）。所以有 job.json 的共 19 个，显示 done 的 8 个（k11 k09 k07 k05 k03 k01 j8 j1）、failed 的 7 个、died 1 个、broken 3 个。"
+  },
+  "tools/gbatch.py": {
+    "函数": ["jobs"],
+    "构造": "jobs",
+    "环境变量": "GBATCH_HOME",
+    "说明": "批量执行器夹具（只对 tools/gbatch.py 的 jobs 生效，环境变量 GBATCH_HOME 指向它）：共 20 个任务目录，按名字倒序即「新的在前」：k12_failed、k11_done、k10_failed、k09_done、k08_failed、k07_done、k06_failed、k05_done、k04_failed、k03_done、k02_failed、k01_done（这 12 个都是正常 job.json，名字后缀即状态，各 1 个子任务，状态就是后缀），之后依次是 j8_done（done）、j7_nojson（没有 job.json，跳过）、j6_failed（failed）、j5_notasks（job.json 是对象但缺 tasks → broken）、j4_died（状态 running 但进程已不在，列表显示 died）、j3_list（内容是 []，→ broken）、j2_bad（不是合法 JSON → broken）、j1_done（done）。所以有 job.json 的共 19 个，显示 done 的 8 个（k11 k09 k07 k05 k03 k01 j8 j1）、failed 的 7 个、died 1 个、broken 3 个。"
+  }
+}
