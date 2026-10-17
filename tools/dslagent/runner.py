@@ -19,11 +19,11 @@ MAX_PLAN, MAX_CALLS, WALL = 2, 15, 500      # 旧路径的缺省（legacy/run.py
 
 
 def run(project, task, out_dir, test_cmd=None, max_plan=MAX_PLAN, template=True, wall=WALL, inject=None,
-        max_calls=MAX_CALLS, infer=None):
-    """跑一次。DSLAGENT_PLANNER=v2 → v2.run（只认 test_cmd / wall）；否则 legacy.run.run（max_plan / template / inject / infer 只对它有效）。"""
+        max_calls=MAX_CALLS, infer=None, scope=None):
+    """跑一次。DSLAGENT_PLANNER=v2 → v2.run（只认 test_cmd / wall / scope）；否则 legacy.run.run（max_plan / template / inject / infer 只对它有效）。"""
     from . import v2
     if v2.enabled():
-        return v2.run(project, task, out_dir, test_cmd=test_cmd, wall=wall)
+        return v2.run(project, task, out_dir, test_cmd=test_cmd, wall=wall, scope=scope)
     from .legacy import run as legacy_run
     return legacy_run.run(project, task, out_dir, test_cmd=test_cmd, max_plan=max_plan, template=template, wall=wall,
                           inject=inject, max_calls=max_calls, infer=infer)

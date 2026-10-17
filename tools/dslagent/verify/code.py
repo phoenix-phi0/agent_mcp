@@ -26,6 +26,7 @@ from pathlib import Path
 
 from .. import agents as AG
 from . import bound_table as BT
+from . import dsl as DSLV
 from ..packs import code as K
 from ..packs.code import OLD_RX_LINE
 from ..snap import changed, code_hash, diff_text, restore, snapshot
@@ -705,11 +706,14 @@ def check(project, plan_result, checklist):
     hits = residuals(project, old_rx, dirs, {r for r in chn if base.get(r) is None}) if old_rx else []
     gaps = checklist_gaps(project, checklist, set(chn))
     t = test_now(project, plan_result, cur, plan_result.get("stage") or "验收")
+    dsl = DSLV.check(project, chn)          # 改动里没有 DSL 文件就是 {"跑了": False}，不影响下面的判断
     if after_fix:
         accept.update(补改后残留=len(hits), 补改后残留列表=hits[:40], 补改后清单缺口=gaps)
     else:
         accept.update(残留=len(hits), 残留列表=hits[:40], 清单缺口=gaps)
-    ok = t["passed"] and not hits and not gaps
+    if dsl["跑了"]:
+        accept["补改后DSL检查" if after_fix else "DSL检查"] = {"项目": dsl["项目"], "缺口": dsl["缺口"]}
+    ok = t["passed"] and not hits and not gaps and not dsl["缺口"]
     glist = []
     if not ok and not after_fix:
         glist = [dict(h, 说明=f"{h['文件']}:{h['行']} 还有旧写法（匹配 {h['模式']}）：{h['该行']}") for h in hits[:30]]
@@ -717,9 +721,11 @@ def check(project, plan_result, checklist):
                   for g in gaps]
         if not t["passed"]:
             glist.append({"说明": "全量测试没过（失败摘要见下）"})
+        glist += dsl["缺口"]
     why = [] if t["passed"] else ["全量测试没过：" + t["summary"][:300]]
     why += [f"仍有 {len(hits)} 处旧写法残留（{hits[0]['文件']}:{hits[0]['行']}）"] if hits else []
     why += ["清单没做到：" + "；".join(f"{g['操作']} {g['文件']}" for g in gaps[:4])] if gaps else []
+    why += ["DSL 检查没过：" + dsl["缺口"][0]["说明"][:300]] if dsl["缺口"] else []
     return {"通过": ok, "缺口列表": glist, "补改系统": FIX_SYS,
             "补改入参": _fix_user(project, plan_result["task"], glist, base, cur, "" if t["passed"] else t["summary"])
             if glist else None,

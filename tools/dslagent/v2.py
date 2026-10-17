@@ -43,6 +43,7 @@ from . import dslcheck as DC
 from . import agents as AG
 from . import dataset as DS
 from . import engines, packs, verify
+from . import scope as SC
 from . import promptfile as PF
 from . import guard as G
 from .snap import DIFF_CAP, changed, code_hash, diff_text, restore, snapshot  # noqa: F401  旧名仍从 v2 取
@@ -525,9 +526,10 @@ def check(project, work, script, task, pack=None):
 # ------------------------------------------------------------------ 主流程
 
 
-def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=MAX_CALLS, boundary=True):
+def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=MAX_CALLS, boundary=True, scope=None):
     """跑一次 v2。project 里直接改文件；记录写进 out_dir（calls/、calls.json、plan*.zs、outline.md、boundary/、result.json）。
     model：假模型 backend(system, user, tag, timeout) → str|dict（测试用），缺省走 claude CLI。
+    scope：允许改动的目录前缀（"a/,b/" 或列表；缺省看计划里的 #范围 块，都没有就不启用范围闸，见 scope.py）。
     返回结果字典（runner.run 同款字段 + reply / v2）。"""
     from . import plan as DP
     from . import prompts as DPR
@@ -555,6 +557,8 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
            "report": "", "v2": info}
     state = {"状态": "失败", "原因": ""}
     accept, bound = {}, {"跑了": False}
+    scope_arg = SC.parse(scope)
+    scope = scope_arg
 
     def step(name, t0):
         steps[name] = round(time.time() - t0, 1)
@@ -604,6 +608,9 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
                 raw = plan_read_call(M, plan_system(pack, M.spec("plan", plan_model)["engine"]), user, "plan" if k == 0 else "plan_fix", project,
                                      plan_model, out, plan_tools, wrap)
                 (out / f"plan_v{k + 1}.raw.txt").write_text(raw, encoding="utf-8")
+                raw, plan_scope = SC.split(raw)       # #范围 块在进 .zs 处理之前切出；命令行 / 参数的范围优先
+                if plan_scope and not scope_arg:
+                    scope = plan_scope
                 if hasattr(ver, "split_table"):
                     raw, rows, note = ver.split_table(raw)       # 表在进 .zs 处理（strip_prose / autoclose / check）之前切出
                     if rows or k == 0:
@@ -662,19 +669,25 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
             raise Stop(f"脚本终止 {halted.get('状态')}：{str(halted.get('原因'))[:300]}")
         # ---- 5 验收
         t0 = time.time()
-        cur = snapshot(project, pack)
+        cur, oos = _scope_gate(project, pack, base, scope, accept, "验收")
         pr = {"task": task, "base": base, "cur": cur, "main": main, "tests": eng.tests, "accept": accept,
               "test_cmd": test_cmd, "stage": "验收", "out": out, "bound": bound, "expect_table": exp}
         chk = ver.check(project, pr, eng.checklist)
+        if oos:
+            _scope_merge(chk, task, oos, scope)
         if not chk["通过"]:
             accept["补改"] = ver.fix(M, project, chk, "fix")
-            pr.update(cur=snapshot(project, pack), stage="补改后")
+            cur, oos = _scope_gate(project, pack, base, scope, accept, "补改后")
+            pr.update(cur=cur, stage="补改后")
             chk = ver.check(project, pr, eng.checklist)
         accept["通过"] = chk["通过"]
         accept["测试摘要"] = chk["测试摘要"]
         step("5验收", t0)
         if not accept["通过"]:
             state.update(状态="失败", 原因=chk["原因"])
+            raise _Done()
+        if oos:      # 补改后仍越界（已恢复）：不判成功
+            state.update(状态="部分成功", 原因=f"补改后仍越界改了范围外的文件（已恢复）：{'、'.join(oos)}；范围 {'、'.join(scope)}")
             raise _Done()
         # ---- 6 边界复核
         if boundary and hasattr(ver, "boundary"):
@@ -780,6 +793,25 @@ def run_newproj(req, project, out_dir, model=None, wall=WALL, max_calls=NEWPROJ_
     except Exception as e:  # noqa: BLE001  流程自身出错也要有结果
         state["原因"] = f"newproj 流程出错：{type(e).__name__}: {str(e)[:400]}"
     return _finish(res, out, M, steps, state, {}, {"跑了": False}, base, snapshot(project, pack), t_start)
+
+
+def _scope_gate(project, pack, base, scope, accept, stage):
+    """范围闸：快照对比，范围外的改动恢复成改前内容。返回 (恢复后的快照, 越界文件列表)；越界记进 accept["越界"]。没启用范围就原样返回。"""
+    cur = snapshot(project, pack)
+    oos = SC.outside(changed(base, cur), scope)
+    if oos:
+        restore(project, base, oos)
+        cur = snapshot(project, pack)
+        accept.setdefault("越界", []).append({"阶段": stage, "文件": oos, "范围": scope})
+    return cur, oos
+
+
+def _scope_merge(chk, task, oos, scope):
+    """越界缺口并入验收结果：不通过，缺口列表加一条，补改入参追加范围说明（没有补改入参就以任务原文起头）。"""
+    chk["通过"] = False
+    chk["缺口列表"] = list(chk.get("缺口列表") or []) + [SC.gap(oos, scope)]
+    chk["补改入参"] = (chk.get("补改入参") or f"【任务原文】\n{task}\n\n【缺口列表】\n1. {SC.gap(oos, scope)['说明']}") + SC.fix_note(oos, scope)
+    chk["原因"] = (chk.get("原因") or "验收没过（已派 1 次补改）：") + f"；越界改动：{'、'.join(oos)}"
 
 
 class _Done(Exception):

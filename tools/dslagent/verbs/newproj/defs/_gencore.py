@@ -75,7 +75,91 @@ def check_project(root):
     return {"ok": "否" if errs else "是", "msg": ("；".join(errs) if errs else "通过")[:MSG_CAP]}
 
 
-OPS = {"generate": generate, "check_project": check_project}
+QREF = re.compile(r"^[^#\n]*?\b(?:查询|查一行|查一值)表?\s+\S+\.db\s+([^\s{=]+)", re.M)
+
+
+def missing_queries(root):
+    """routes/、scripts/ 下 .zs 里 查询 / 查一行 / 查一值 引用的 queries/<名>.sql 不存在的，返回「文件:行 引用了不存在的查询 名」列表。"""
+    root = Path(root)
+    have = {f.stem for f in (root / "queries").glob("*.sql")} if (root / "queries").is_dir() else None
+    if have is None:
+        return []
+    out = []
+    for d in ("routes", "scripts"):
+        for f in sorted((root / d).rglob("*.zs")) if (root / d).is_dir() else []:
+            for i, line in enumerate(f.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+                m = QREF.match(line)
+                name = m.group(1) if m else ""
+                if name and name != "表" and name.removesuffix(".sql") not in have and not name.startswith("{"):
+                    out.append(f"{f.relative_to(root)}:{i} 引用了不存在的查询 {name}（queries/ 下没有 {name.removesuffix('.sql')}.sql）")
+    return out
+
+
+IGNORE = ("__pycache__", "*.db", "*.db-*", "sessions", ".venv", ".git", "node_modules")
+
+
+def dsl_verify(root, ui_files=()):
+    """改完后的 DSL 验收：把项目拷到临时目录（不碰工作区的 app.db），依次 实体解析+校验 → build → ensure_db（新库）→ make_app
+    （含重复接口）→ 对 ui_files（项目内相对路径）逐个跑 ui 检查。返回 {ok, errors: [{步, msg}], msg}；碰到第一个挂掉的链上步骤就停，ui 检查另外跑。"""
+    import shutil
+    import tempfile
+    from gen import project as P
+    from tools.entity import parse, validate
+    from tools.ui import check as ui_check
+    PE, DE = _gen_errors()
+    root = Path(root)
+    errs = []
+    tmp = Path(tempfile.mkdtemp(prefix="dslverify_"))
+    try:
+        p = tmp / root.name
+        shutil.copytree(root, p, ignore=shutil.ignore_patterns(*IGNORE))
+
+        def chain():
+            try:
+                errs.extend({"步": "实体", "msg": m} for m in validate(parse(P.entities_text(p))))
+            except Exception as e:  # noqa: BLE001
+                errs.append({"步": "实体", "msg": f"{type(e).__name__}: {e}"})
+            if errs:
+                return
+            try:
+                P.build(p)
+            except Exception as e:  # noqa: BLE001  ProjectError / DSLError / 缺依赖
+                errs.append({"步": "build", "msg": f"{type(e).__name__}: {e}"})
+                return
+            try:
+                P.ensure_db(p)
+            except Exception as e:  # noqa: BLE001
+                errs.append({"步": "建库", "msg": f"{type(e).__name__}: {e}"})
+                return
+            errs.extend({"步": "接口", "msg": m} for m in dup_routes(p))
+            errs.extend({"步": "sql引用", "msg": m} for m in missing_queries(p))
+            if errs:
+                return
+            try:
+                P.make_app(p)
+            except Exception as e:  # noqa: BLE001
+                errs.append({"步": "路由加载", "msg": f"{type(e).__name__}: {e}"})
+        chain()
+        for rel in ui_files or ():
+            f = p / rel
+            if not f.is_file():
+                continue
+            try:
+                out = ui_check(f.read_text(encoding="utf-8"))
+            except Exception as e:  # noqa: BLE001
+                out = f"语法错误：{type(e).__name__}: {e}"
+            bad = [ln for ln in out.splitlines() if ln.startswith(("语法错误", "没有解析到"))]
+            if bad and not any(e["步"] == "ui" and e.get("文件") == rel for e in errs):
+                errs.append({"步": "ui", "文件": rel, "msg": "；".join(bad)})
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    for e in errs:
+        e["msg"] = e["msg"].replace(str(tmp / root.name) + "/", "").replace(str(tmp / root.name), ".")
+    return {"ok": "否" if errs else "是", "errors": errs,
+            "msg": ("；".join(f"{e['步']}：{e['msg']}" for e in errs) if errs else "通过")[:MSG_CAP * 2]}
+
+
+OPS = {"generate": generate, "check_project": check_project, "dsl_verify": dsl_verify}
 
 
 def call(op, args):
