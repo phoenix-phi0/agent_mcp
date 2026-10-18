@@ -109,15 +109,13 @@ def test_dry(tmp):
     script = EXAMPLE.read_text(encoding="utf-8")
     head = "设 mod = {mod 或 pkg}"
     for extra, want in (("", "[终止] 成功：导入只用"),
-                        ("设 fast = 0\n", "第 1 次派任务：成功"),
-                        ("设 fast = 0\n设 slow = 0\n", "并行查：成功")):
+                        ("设 fast = 0\n", "[终止] 失败：试了 2 次没成"),
+                        ("设 fast = 0\n设 slow = 0\n", "[终止] 失败：试了 2 次没成")):    # 整理版示例去掉了过程打印和 tries 参数
         err, n, out = dry(script.replace(head, extra + head))
         ok = not err and n == 0 and want in out and "[终止]" in out
         check(ok, f"示例脚本空跑通（{extra.strip() or '快'}）：err={err!r} calls={n}")
         if not ok:
             print(out)
-    err, n, out = dry(script.replace(head, "设 fast = 0\n设 tries = 1\n" + head))
-    check(not err and "[终止] 失败：试了 1 次没成" in out, "改法没套上 → 用完次数终止 失败")
 
 
 def test_example_real(tmp):

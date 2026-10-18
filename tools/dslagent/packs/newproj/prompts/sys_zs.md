@@ -9,6 +9,7 @@
 - 条件：`如果 {x} 为空`/等于/不等于/大于/开头是 … `否则` … `结束`。算术 `设 n = 计算 {a} + 1`。
 - 未知动词会静默透传成字面字符串，别发明动词。SQLite 方言；日期是文本；整数比较用 CAST(:x AS INTEGER)。
 - gen 的 create/update 要求所有可写字段都传。
+- 登录项目（认证 必须）里「当前登录的人」只能用 {current_user}（用户名）；{session.user}、{session.username} 等都是空的，写了会让接口永远 401。自己写的 SQL 用 :owner，调用时传 owner={current_user}；复用 gen 已有的 *_one/*_list 等查询必须带 current_user={current_user}（例：`查一行 app.db todo_one id={id} current_user={current_user}`，不带会报缺少参数；这些查询对非本人的记录返回空，按「找不到」404 处理即可）。
 - 例：
 ```
 接口 POST /a/summary 动作 a_summary

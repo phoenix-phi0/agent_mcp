@@ -55,7 +55,7 @@
    "sys": "f2340bf40c26b6bcba23bbb7efa851c713192d29934dda61259038d4f93e47b3",
    "user": "cfeac01c9dd2633c1c69b70983c7ba8d17bd7f0e82566e6fb935b52a3cc4d9d8",
    "sys_len": 725,
-   "user_len": 1603
+   "user_len": 1587
   }
  ],
  "bound_case": [
@@ -71,15 +71,15 @@
    "sys": "f2340bf40c26b6bcba23bbb7efa851c713192d29934dda61259038d4f93e47b3",
    "user": "d7de9bd524b663e7a41b225242a75afd52264a93f938fda6f89300318b2c7b77",
    "sys_len": 725,
-   "user_len": 1530
+   "user_len": 1514
   }
  ],
  "subtask": [
   {
    "tag": "dsl01",
-   "sys": "9a077e71f9903f3424b8f2d9fe9c48eafff143ff975496b261f730dbf0303d22",
+   "sys": "881318d5a901580e364e8c498407198cba42df5d73ca903448f148a6baa4d228",
    "user": "927fc8071588cbb44095cb13bbfd202b82593b0841841a7555faa0be3102e556",
-   "sys_len": 632,
+   "sys_len": 622,
    "user_len": 333
   },
   {
@@ -114,9 +114,9 @@
   },
   {
    "tag": "SUB_SYS",
-   "sys": "9a077e71f9903f3424b8f2d9fe9c48eafff143ff975496b261f730dbf0303d22",
+   "sys": "881318d5a901580e364e8c498407198cba42df5d73ca903448f148a6baa4d228",
    "user": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-   "sys_len": 632,
+   "sys_len": 622,
    "user_len": 0
   }
  ]
