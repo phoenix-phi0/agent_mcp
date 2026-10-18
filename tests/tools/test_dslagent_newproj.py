@@ -201,20 +201,23 @@ def code_extra(code):
 
 
 class Fake:
-    def __init__(self, ent_tpl=("full",), zs=None, ui=None):
+    def __init__(self, ent_tpl=("full",), zs=None, ui=None, sql=None):
         self.tags, self.ent_tpl, self.zs, self.ui, self.n_ent = [], list(ent_tpl), list(zs or [GOOD_ZS]), list(ui or [GOOD_UI]), 0
-        self.prompts = []
+        self.sql = list(sql or [GOOD_SQL])
+        self.prompts, self.systems, self.kws = [], [], []
 
     def __call__(self, system, user, tag, timeout, model=None, **kw):
         self.tags.append(tag)
         self.prompts.append(user)
+        self.systems.append(system)
+        self.kws.append(dict(kw, model=model))
         if "JSON 对象" in user:
             tpl = self.ent_tpl[min(self.n_ent, len(self.ent_tpl) - 1)]
             self.n_ent += 1
             ent = ENT if tpl != "private" else ENT + "实体 n 笔记\n  字段 owner 文本 必填 索引 所有者\n结束\n"
             return json.dumps({"模板": tpl, "实体文本": ent}, ensure_ascii=False)
         if "SQLite 语句助手" in user:
-            return "=== queries/book_low.sql ===\nSELECT * FROM book WHERE stock < :n\n"
+            return self.sql.pop(0) if len(self.sql) > 1 else self.sql[0]
         if ".zs 接口助手" in user:
             return self.zs.pop(0) if len(self.zs) > 1 else self.zs[0]
         if ".ui 界面助手" in user:
@@ -222,6 +225,7 @@ class Fake:
         return "?"
 
 
+GOOD_SQL = "=== queries/book_low.sql ===\nSELECT * FROM book WHERE stock < :n\n"
 GOOD_ZS = ("=== routes/custom.zs ===\n接口 POST /book/low 动作 book_low\n  用包 db http\n  设 rows = 查询 app.db book_low n={n}\n"
            "  设 group.low = {rows}\n  响应 lists {group}\n结束\n")
 BAD_ZS = "=== routes/custom.zs ===\n接口 POST /book/low 动作 book_low\n  用包 db http\n"
@@ -266,6 +270,83 @@ def t_flow():
     check(r["fixed"], "需求给文件路径也行")
 
 
+def t_fix3():
+    print("newproj 三处修复：系统提示 / 0 文件不放行 / routes")
+    f = verb("拆分隔块", TMP)
+    r = f(json.dumps({"edits": [{"file": "queries/a.sql", "old": "", "new": "SELECT 1"}]}), "queries/")
+    check(r["ok"] == "是" and r["n"] == 1 and r["files"][0] == {"file": "queries/a.sql", "content": "SELECT 1\n"} and r["from_json"] == "是" and r["note"] == "由 JSON 转换",
+          "JSON edits（new）→ files，标注由 JSON 转换", r)
+    r = f('```json\n{"edits":[{"file":"routes/custom.zs","old":"接口 X","new":""}]}\n```', "routes/custom.zs")
+    check(r["n"] == 1 and r["files"][0]["content"] == "接口 X\n", "new 为空取 old；带围栏", r)
+    r = f(json.dumps([{"file": "queries/a.sql", "content": "S1"}, {"file": "other/b.sql", "content": "S2"}]), "queries/")
+    check(r["n"] == 1 and r["rejected"] == ["other/b.sql"] and r["ok"] == "是", "{file, content} 列表也转；前缀外丢掉", r)
+    r = f("=== queries/a.sql ===\nS\n", "queries/")
+    check(r["ok"] == "是" and not r.get("from_json"), "分隔块不标 JSON 转换", r)
+    for txt in ("", "我觉得不需要", '{"edits": []}'):
+        r = f(txt, "queries/")
+        check(r["ok"] == "否" and "没有解析到 === 路径 === 分隔块，按格式重写" in r["msg"], f"0 文件不放行：{txt!r}", r)
+    for mark in ("无", "（无）", " (无)\n"):
+        r = f(mark, "queries/")
+        check(r["ok"] == "是" and r["n"] == 0 and r["none"] == "是", f"无标记允许 0 文件：{mark!r}", r)
+
+    from tools.dslagent import agents as AG
+    np_sys, SUB_SYS = packs.pick("newproj").model_system(), AG.SUB_JSON.system_text()
+    fk = Fake()
+    r, _ = go("sys", fk)
+    check(r["fixed"] and all(x == np_sys and x != SUB_SYS for x in fk.systems), "newproj 模型调用不带子任务 JSON edits 系统提示", [x[:80] for x in fk.systems])
+    check(all("=== 路径 ===" in x for x in fk.systems), "专用系统提示写明分隔块格式")
+
+    fk = Fake(sql=["随便说几句，没有分隔块", GOOD_SQL])
+    r, p = go("sql0", fk)
+    second = [x for x in fk.prompts if "SQLite 语句助手" in x][1]
+    check(r["fixed"] and r["calls"] == 5 and "没有解析到 === 路径 === 分隔块，按格式重写" in second.split("上次的报错：")[1] and (p / "queries/book_low.sql").is_file(),
+          "sql 步回散文 → 带报错重写 1 次", (r["stop"], second[-200:]))
+    fk = Fake(sql=["随便说几句"])
+    r, _ = go("sql0b", fk)
+    check(not r["fixed"] and "定制 sql 两次都没过" in r["stop"] and "分隔块" in r["stop"], "sql 两次 0 文件 → 失败", r["stop"])
+    fk = Fake(zs=["我来写一下接口……", GOOD_ZS])
+    r, p = go("zs0", fk)
+    check(r["fixed"] and r["calls"] == 5 and (p / "routes/custom.zs").is_file(), "zs 步 0 文件 → 重写后通过", r["stop"])
+    fk = Fake(zs=["没有分隔块的话", "还是没有"])
+    r, p = go("zs0b", fk)
+    check(not r["fixed"] and "custom.zs 两次都没过" in r["stop"], "zs 空回复两次 → 失败", r["stop"])
+    fk = Fake(ui=["随便"])
+    r, _ = go("ui0", fk)
+    check(not r["fixed"] and "custom.ui 两次都没过" in r["stop"], "ui 两次 0 文件 → 失败", r["stop"])
+    fk = Fake(sql=["无"], zs=["（无）"], ui=["无"])
+    r, p = go("none", fk)
+    check(r["fixed"] and r["calls"] == 4 and not (p / "routes/custom.zs").exists() and not (p / "ui/custom.ui").exists(),
+          "三步都回「无」→ 允许 0 文件，4 次调用成功", (r["stop"], r["calls"]))
+    fk = Fake(sql=[json.dumps({"edits": [{"file": "queries/book_low.sql", "old": "", "new": "SELECT * FROM book WHERE stock < :n"}]})])
+    r, p = go("jsonconv", fk)
+    check(r["fixed"] and r["calls"] == 4 and (p / "queries/book_low.sql").is_file(), "模型回 JSON edits 也能落盘（不用重写）", r["stop"])
+
+    old = os.environ.get("DSLAGENT_MODELS")
+    os.environ["DSLAGENT_MODELS"] = json.dumps({"sub": "codex:gpt-6-luna:medium"})
+    try:
+        fk = Fake()
+        r, _ = go("routes", fk)
+        calls = json.loads((TMP / "routes/out/calls.json").read_text(encoding="utf-8"))
+        rows = calls if isinstance(calls, list) else calls.get("calls", calls)
+        check(r["fixed"] and rows and all(c.get("engine") == "codex" and c.get("effort") == "medium" and c.get("model") == "gpt-6-luna" for c in rows),
+              "DSLAGENT_MODELS.sub 对 newproj 生效（calls.json 记 codex / medium）", rows[:1])
+        check(all(k.get("model") == "codex:gpt-6-luna:medium" for k in fk.kws) and r["v2"]["模型"]["sub"] == "codex:gpt-6-luna:medium", "传给 backend 的模型串 / 记录里有实际路由")
+        os.environ["DSLAGENT_MODELS"] = "{坏"
+        r, _ = go("routes_bad", Fake())
+        check(not r["fixed"] and "DSLAGENT_MODELS" in r["stop"], "DSLAGENT_MODELS 不合格 → 明确失败", r["stop"])
+        os.environ.pop("DSLAGENT_MODELS")
+        fk = Fake()
+        r, _ = go("routes_def", fk)
+        rows = json.loads((TMP / "routes_def/out/calls.json").read_text(encoding="utf-8"))
+        rows = rows if isinstance(rows, list) else rows.get("calls", rows)
+        check(r["fixed"] and all(c.get("engine") == "claude" for c in rows), "没设 → 默认 claude(sonnet)", rows[:1])
+    finally:
+        if old is None:
+            os.environ.pop("DSLAGENT_MODELS", None)
+        else:
+            os.environ["DSLAGENT_MODELS"] = old
+
+
 def main():
     try:
         t_read()
@@ -275,6 +356,7 @@ def main():
         t_dry()
         t_pack()
         t_flow()
+        t_fix3()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n{'=' * 50}\n通过 {PASS}，失败 {FAIL}")

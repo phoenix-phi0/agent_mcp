@@ -772,8 +772,16 @@ def run_newproj(req, project, out_dir, model=None, wall=WALL, max_calls=NEWPROJ_
     t_start = time.time()
     task = _req_text(req)
     pack = packs.pick("newproj")
-    M = Model(out, backend=model, max_calls=max_calls, deadline=t_start + wall)
-    steps, info = {}, {"检查": [], "重写": False, "子任务模式": "json", "子任务": [], "pack": pack.NAME}
+    try:
+        routes = engines.validate(engines.from_env(), DC.env_mode())      # 同 run：DSLAGENT_MODELS；问 / 问JSON 的调用归 sub 步骤
+    except ValueError as e:
+        routes = {}
+        route_err = str(e)
+    else:
+        route_err = ""
+    M = Model(out, backend=model, max_calls=max_calls, deadline=t_start + wall, routes=routes)
+    steps, info = {}, {"检查": [], "重写": False, "子任务模式": "json", "子任务": [], "pack": pack.NAME,
+                  "模型": engines.effective(routes)}
     res = {"project": str(project), "test_cmd": "", "kind": "newproj", "planner": "v2", "fixed": False,
            "engine_used": "v2", "versions": 0, "calls": 0, "cost": 0.0, "seconds": 0, "stop": "", "dir": str(out),
            "calls_log": str(out / "calls.json"), "version_log": [], "subcalls": [], "changed_files": [], "handoff": "",
@@ -781,6 +789,8 @@ def run_newproj(req, project, out_dir, model=None, wall=WALL, max_calls=NEWPROJ_
     state = {"状态": "失败", "原因": ""}
     base = snapshot(project, pack)
     try:
+        if route_err:
+            raise Stop("DSLAGENT_MODELS 不合格：" + route_err)
         if not task:
             raise Stop("需求为空")
         script = pack.TEMPLATE.read_text(encoding="utf-8")
@@ -796,6 +806,7 @@ def run_newproj(req, project, out_dir, model=None, wall=WALL, max_calls=NEWPROJ_
         eng = Eng(client=Client(M), workdir=project, verbose=False, verbs_root=VERBS, scripts={})
         eng.gate, eng.project, eng.tests = {}, project, []
         eng.model = MODEL
+        eng.system = pack.model_system()       # 不设就落到子任务 JSON edits 的系统提示（SUB_SYS），与模板要求的分隔块格式冲突
         eng.sublog = info["子任务"]
         eng.vars["task"] = task
         err = ""

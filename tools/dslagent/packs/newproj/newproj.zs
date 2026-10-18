@@ -1,5 +1,6 @@
 # newproj.zs —— 新建项目固定模板：实体 → 生成增删改查 → 定制 sql → routes/custom.zs → ui/custom.ui。
 # 变量 task = 需求原文（v2 执行和空跑都会设）；项目目录 = 引擎工作目录。提示词正文在本包 prompts/*.md（读原文 pack:xxx.md）。
+# 拆分隔块 解析不到文件（空回复 / 散文）算该步检查失败；明确无需定制只能回「无」（见各 sys_*.md）。JSON edits 回复由 拆分隔块 转换。
 # 每步检查不过，带报错重写 1 次；custom.zs / custom.ui 检查不过先撤回再重写。不含覆盖 gen 路由文件的分支。
 用包 common text code newproj
 预算 调用 8 秒 900
@@ -62,11 +63,15 @@
 当 {ok} 不等于 是 最多 2 次
   问 sqlTxt = {pSql.text} 需求：{task} 实体：{ent.实体文本} 已有：{sum.text} 上次的报错：{err}
   设 sqlf = 拆分隔块 {sqlTxt} queries/
-  设 c = 预编译sql {sqlf} {ent.实体文本}
-  如果 {c.ok} 等于 是
-    设 ok = 是
+  如果 {sqlf.ok} 不等于 是
+    设 err = {sqlf.msg}
   否则
-    设 err = {c.msg}
+    设 c = 预编译sql {sqlf} {ent.实体文本}
+    如果 {c.ok} 等于 是
+      设 ok = 是
+    否则
+      设 err = {c.msg}
+    结束
   结束
 结束
 如果 {ok} 不等于 是
@@ -84,14 +89,18 @@
 当 {ok} 不等于 是 最多 2 次
   问 zsTxt = {pZs.text} 需求：{task} 第3步sql：{sqlTxt} gen已有接口：{sum.text} 上次的报错：{err}
   设 zsf = 拆分隔块 {zsTxt} routes/custom.zs
-  设 bk = 留底
-  设 w = 写文件 {zsf}
-  设 b = 检查项目
-  如果 {b.ok} 等于 是
-    设 ok = 是
+  如果 {zsf.ok} 不等于 是
+    设 err = {zsf.msg}
   否则
-    设 err = {b.msg}
-    设 u = 撤回 {bk.id}
+    设 bk = 留底
+    设 w = 写文件 {zsf}
+    设 b = 检查项目
+    如果 {b.ok} 等于 是
+      设 ok = 是
+    否则
+      设 err = {b.msg}
+      设 u = 撤回 {bk.id}
+    结束
   结束
 结束
 如果 {ok} 不等于 是
@@ -105,14 +114,18 @@
 当 {ok} 不等于 是 最多 2 次
   问 uiTxt = {pUi.text} 需求：{task} 第4步zs：{zsTxt} 已有：{sum.text} 上次的报错：{err}
   设 uif = 拆分隔块 {uiTxt} ui/custom.ui
-  设 bk = 留底
-  设 w = 写文件 {uif}
-  设 b = 检查项目
-  如果 {b.ok} 等于 是
-    设 ok = 是
+  如果 {uif.ok} 不等于 是
+    设 err = {uif.msg}
   否则
-    设 err = {b.msg}
-    设 u = 撤回 {bk.id}
+    设 bk = 留底
+    设 w = 写文件 {uif}
+    设 b = 检查项目
+    如果 {b.ok} 等于 是
+      设 ok = 是
+    否则
+      设 err = {b.msg}
+      设 u = 撤回 {bk.id}
+    结束
   结束
 结束
 如果 {ok} 不等于 是
