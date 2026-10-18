@@ -474,6 +474,15 @@ def split_table(raw):
     return BT.split_table(raw)
 
 
+def problem_about_table(problem):
+    return BT.problem_about_table(problem)
+
+
+def keep_table(orig, new, problem=""):
+    """plan_fix 后的期望表：由程序保住原表；见 bound_table.keep_table。返回 (表, 记录文字)。"""
+    return BT.keep_table(orig, new, problem)
+
+
 def fixture_notes(text):
     """text 里涉及的模块有专用夹具时，返回追加到规划 / 补表 user 的说明；见 bound_table.fixture_notes。"""
     return BT.fixture_notes(text)

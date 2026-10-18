@@ -441,6 +441,23 @@ def t_flow():
     check(r["reply"]["状态"] == "成功" and f.tags() == ["plan", "bound_judge"] and r["v2"]["边界复核"]["失败条数"] == 1, "同改前 + 断言不满足 → 失败 → 判表错", (f.tags(), r["v2"]["边界复核"]))
 
 
+def t_keep_table():
+    print("六b、keep_table：问题涉及表时允许修表，缩水合并")
+    kt = BT.keep_table
+    orig = [dict(GOOD[0], 参数={"n": i}) for i in range(6)]
+    check(kt(orig, None, "缺 预算")[0] == orig and kt(orig, orig[:1], "缺 预算")[0] == orig, "问题与表无关 → 原表（丢表 / 缩水都一样）")
+    check(kt(None, orig, "缺 预算")[0] == orig, "原来没表 → 用模型的表")
+    new, rec = kt(orig, orig[:5], "期望表第 2 行格式错")
+    check(new == orig[:5] and "模型修表 6→5" in rec, "问题涉及表：修表条数不少于一半 → 用模型表", rec)
+    bad = {"函数": "", "参数": {}}
+    fixed = [dict(GOOD[0], 参数={"n": 99})]
+    new, rec = kt(orig + [bad], fixed, "期望表有问题")
+    check(len(new) == 7 and fixed[0] in new and bad not in new and "警告" in rec, "问题涉及表：修表少于一半 → 原表合格行 + 新表去重合并，记警告", rec)
+    new, rec = kt(orig, orig[:1] + orig[:1], "表行不合格")
+    check(len(new) == 6 and len({json.dumps(x, sort_keys=True, ensure_ascii=False) for x in new}) == 6, "合并去重")
+    check(kt(orig, None, "期望表错")[0] == orig, "问题涉及表但模型没回表 → 原表")
+
+
 def t_plan_table():
     print("六、规划：表不达标补表；plan_fix 保留 / 换表")
     thin = GOOD[:1]
@@ -485,8 +502,8 @@ def t_plan_table():
     check(r["v2"]["重写"] is True and f.tags() == ["plan", "plan_fix"] and et["rows"] == GOOD and r["v2"]["边界复核"]["方式"] == "表" and r["reply"]["状态"] == "成功",
           "plan_fix 重写的回复没有表 → 保留原表，边界复核照走表路径", (f.tags(), r["v2"]["期望表"]))
     fu = next(u for t, _, u in f.log if t == "plan_fix")
-    check("#期望表" not in fu, "plan_fix 的 user 里没有表（表已切出，.zs 以外的内容不进重写入参）")
-    # plan_fix 回复里有新表 → 用新表
+    check('"函数"' not in fu and "#期望表 由系统保留，你不用输出它" in fu, "plan_fix 的 user 里没有表内容，只写明表由系统保留")
+    # plan_fix 回复里有新表，但问题与表无关 → 仍用原表（程序保住）
     new_rows = GOOD + [WRONG]
     f = Fake()
     f.replies["plan"] = plan(GOOD[:2], head="用包 common text code\n")
@@ -494,7 +511,17 @@ def t_plan_table():
     f.replies["bound_judge"] = verdict((1, "期望写错"))
     r, p, out = go("p_new", f)
     et = json.loads((out / "expect_table.json").read_text(encoding="utf-8"))
-    check(et["rows"] == new_rows and r["reply"]["状态"] == "成功", "plan_fix 回复里有新表 → 用新表", (f.tags(), len(et["rows"])))
+    check(et["rows"] == GOOD[:2] and "保留原表 2 条" in r["v2"]["检查"][-1]["plan_fix期望表"], "问题与表无关：plan_fix 回的新表不采用，保留原表并记录",
+          (f.tags(), len(et["rows"]), r["v2"]["检查"][-1].get("plan_fix期望表")))
+    # 丢表 / 缩水表（问题与表无关）→ 都是原表
+    for nm, fixed, nrows in (("p_drop", plan(None), 3), ("p_shrink", plan(GOOD[:1]), 3)):
+        f = Fake()
+        f.replies["plan"] = plan(GOOD, head="用包 common text code\n")
+        f.replies["plan_fix"] = fixed
+        r, p, out = go(nm, f)
+        et = json.loads((out / "expect_table.json").read_text(encoding="utf-8"))
+        check(et["rows"] == GOOD and len(et["rows"]) == nrows and r["v2"]["检查"][-1]["plan_fix期望表"].startswith("期望表：保留原表 3 条"),
+              f"{nm}：plan_fix 丢表 / 缩水表 → 最终仍是原表 3 条", (r["v2"]["检查"][-1].get("plan_fix期望表"), len(et["rows"])))
     # 计划过检查，表只用于边界；强制 .zs 里不含表
     check("期望表" not in (out / "plan.zs").read_text(encoding="utf-8") and "期望表" not in (out / "plan_v1.zs").read_text(encoding="utf-8"), "plan*.zs 里没有表")
     check("期望表" in (out / "plan_v1.raw.txt").read_text(encoding="utf-8"), "plan_vN.raw.txt 留着模型原始回复（含表）")
@@ -507,6 +534,7 @@ def main():
         t_cover()
         t_validate()
         t_flow()
+        t_keep_table()
         t_plan_table()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)

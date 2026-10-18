@@ -26,6 +26,8 @@ DEFAULT = "sonnet"
 CODEX_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 GROK_EFFORTS = ("low", "medium", "high", "xhigh")
 CODEX_EFFORT = "medium"
+CODEX_PLAN_EFFORT = "high"        # codex 用作 plan 且模型串没写强度时的默认
+ESCALATE_ENV = "DSLAGENT_CODEX_ESCALATE"      # 设成 0 关闭「plan 默认 high、plan_fix 升一档」
 GROK_EFFORT = "low"
 GROK_READ_TOOLS = ("read_file", "grep", "list_dir")      # read 规划放开的内置工具（只读）
 GROK_DISABLED = ("write,search_replace,run_terminal_command,kill_command_or_subagent,todo_write,get_command_or_subagent_output,spawn_subagent,"
@@ -116,6 +118,19 @@ def validate(models, subtask="json"):
     if s and subtask == "tool" and s["engine"] != "claude":
         raise ValueError(f"models.sub={m['sub']!r}：DSLAGENT_SUBTASK=tool 时子任务要挂 dsl 工具，只支持 claude")
     return m
+
+
+def plan_effort(sp, tag):
+    """codex 规划步骤的强度调整（只动 codex）：plan 且模型串没写强度 → high；plan_fix 比 plan 的强度高一档（medium→high，high→xhigh，xhigh 不变）。
+    DSLAGENT_CODEX_ESCALATE=0 关闭，回到模型串 / 缺省 medium。sub / fix / bound 等其它步骤不变。返回新的 spec 字典（不改入参）。"""
+    t = (tag or "").removesuffix("_reask")
+    if sp.get("engine") != "codex" or t not in ("plan", "plan_fix") or (os.environ.get(ESCALATE_ENV) or "").strip() == "0":
+        return sp
+    explicit = bool(sp["spec"].partition(":")[2].partition(":")[2])
+    eff = sp["effort"] if explicit else CODEX_PLAN_EFFORT
+    if t == "plan_fix":
+        eff = CODEX_EFFORTS[min(CODEX_EFFORTS.index(eff) + 1, len(CODEX_EFFORTS) - 1)]
+    return dict(sp, effort=eff)
 
 
 def step_of(tag):

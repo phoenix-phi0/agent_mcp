@@ -100,6 +100,24 @@ def t_parse():
     finally:
         del os.environ["DSLAGENT_MODELS"]
     check(E.from_env() == {}, "没设 → {}")
+    # codex 规划强度：plan 缺省 high、plan_fix 升一档，可用 DSLAGENT_CODEX_ESCALATE=0 关闭，只影响 codex 的 plan / plan_fix
+    PE = lambda spec, tag: E.plan_effort(E.parse(spec), tag)["effort"]      # noqa: E731
+    old_esc = os.environ.pop("DSLAGENT_CODEX_ESCALATE", None)
+    try:
+        check(PE("codex:gpt-5", "plan") == "high" and PE("codex:gpt-5", "plan_fix") == "xhigh", "codex 没写强度：plan high，plan_fix xhigh")
+        check(PE("codex:gpt-5:medium", "plan") == "medium" and PE("codex:gpt-5:medium", "plan_fix") == "high", "已写 medium：plan 不变，plan_fix 升到 high")
+        check(PE("codex:gpt-5:xhigh", "plan") == "xhigh" and PE("codex:gpt-5:xhigh", "plan_fix") == "xhigh", "已写 xhigh：plan_fix 不再升")
+        check(PE("codex:gpt-5:low", "plan") == "low" and PE("codex:gpt-5:high", "plan_fix") == "xhigh", "已写 low 不动；high 的 plan_fix 升 xhigh")
+        check(PE("codex:gpt-5", "dsl01") == "medium" and PE("codex:gpt-5", "fix") == "medium" and PE("codex:gpt-5", "table_fill") == "medium",
+              "sub / fix / 补表等其它步骤保持原缺省 medium")
+        check(E.plan_effort(E.parse("sonnet"), "plan")["effort"] is None and E.plan_effort(E.parse("grok"), "plan")["effort"] == "low", "claude / grok 不受影响")
+        os.environ["DSLAGENT_CODEX_ESCALATE"] = "0"
+        check(PE("codex:gpt-5", "plan") == "medium" and PE("codex:gpt-5", "plan_fix") == "medium" and PE("codex:gpt-5:high", "plan_fix") == "high",
+              "DSLAGENT_CODEX_ESCALATE=0 → 关闭，回到模型串 / 缺省 medium")
+    finally:
+        os.environ.pop("DSLAGENT_CODEX_ESCALATE", None)
+        if old_esc is not None:
+            os.environ["DSLAGENT_CODEX_ESCALATE"] = old_esc
 
 
 # ------------------------------------------------------------------ 二、路由（假 Python backend）

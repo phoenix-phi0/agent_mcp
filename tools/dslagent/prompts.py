@@ -12,6 +12,9 @@ TIPS = PF.shared("tips.md")
 SEE = PF.shared("see.txt")
 
 
-def fix_prompt(script, problem):
-    return PF.template("plan_fix", "用户提示词", SEE=SEE, problem=problem,
+TABLE_KEPT = "#期望表 由系统保留，你不用输出它（输出了也会被原表替换）。\n"
+
+
+def fix_prompt(script, problem, table_kept=False):
+    return PF.template("plan_fix", "用户提示词", SEE=SEE, problem=problem, TABLE_NOTE=TABLE_KEPT if table_kept else "",
                        numbered="\n".join(f"{i:3d}| {l}" for i, l in enumerate(script.splitlines(), 1)))

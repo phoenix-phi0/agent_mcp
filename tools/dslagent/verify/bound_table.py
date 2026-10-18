@@ -89,6 +89,35 @@ def split_table(raw):
     return rest, rows, ""
 
 
+_TABLE_WORDS = re.compile(r"期望表|表行|表项")
+
+
+def problem_about_table(problem):
+    """plan_fix 的问题是否指向期望表（check 只看 .zs，通常不会；问题里提到 #期望表 / 表行才算）。"""
+    return bool(_TABLE_WORDS.search(problem or ""))
+
+
+def keep_table(orig, new, problem=""):
+    """plan_fix 后的期望表 → (最终表, 记录)。orig 是 plan_fix 前的表（None = 原来没有可用的表），new 是 plan_fix 回复里切出的表（None = 没有）。
+    问题与表无关：原表原样保留，模型回的表不采用；原来没表则用模型的。问题就出在表：用模型修后的表，条数少于原表一半时，
+    以「原表中通过结构检查的行 + 模型新表」去重合并，并记警告。"""
+    if not orig:
+        return new, f"期望表：原无表，模型{('给表 %d 条' % len(new)) if new else '也没给表'}"
+    if not problem_about_table(problem):
+        return orig, f"期望表：保留原表 {len(orig)} 条" + (f"（忽略模型回的表 {len(new)} 条）" if new else "")
+    if not new:
+        return orig, f"期望表：保留原表 {len(orig)} 条（问题涉及表，但模型没回表）"
+    if len(new) * 2 < len(orig):
+        seen, rows = set(), []
+        for r in [x for x in orig if row_shape_problem(x) is None] + list(new):
+            k = json.dumps(r, ensure_ascii=False, sort_keys=True)
+            if k not in seen:
+                seen.add(k)
+                rows.append(r)
+        return rows, f"期望表：警告 模型修表 {len(orig)}→{len(new)} 少于原表一半，与原表合格行合并去重为 {len(rows)} 条"
+    return new, f"期望表：模型修表 {len(orig)}→{len(new)}"
+
+
 # ------------------------------------------------------------------ 规则候选与覆盖（搬自 bound_code2/common2.py）
 
 SPLIT = r"[。；;\n]"

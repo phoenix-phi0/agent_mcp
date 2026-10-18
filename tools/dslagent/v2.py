@@ -119,7 +119,7 @@ class Model:
         step = engines.step_of(tag)
         s = self.routes.get(step) if step else None
         if s:
-            return engines.parse(s)
+            return engines.plan_effort(engines.parse(s), tag)
         m = model or MODEL           # 旧的透传（DSLAGENT_PLAN_MODEL）：任意串当 claude 模型名，不校验
         return {"engine": "claude", "model": m, "effort": None, "spec": m}
 
@@ -605,22 +605,29 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
             info["收尾"] = wrap
         try:
             for k in range(1 + AG.PLAN.rewrites):
-                user = first_user if k == 0 else DPR.fix_prompt(script, problem)
+                user = first_user if k == 0 else DPR.fix_prompt(script, problem, table_kept=bool(table) and hasattr(ver, "keep_table")
+                                                                  and not ver.problem_about_table(problem))
                 raw = plan_read_call(M, plan_system(pack, M.spec("plan", plan_model)["engine"]), user, "plan" if k == 0 else "plan_fix", project,
                                      plan_model, out, plan_tools, wrap)
                 (out / f"plan_v{k + 1}.raw.txt").write_text(raw, encoding="utf-8")
                 raw, plan_scope = SC.split(raw)       # #范围 块在进 .zs 处理之前切出；命令行 / 参数的范围优先
                 if plan_scope and not scope_arg:
                     scope = plan_scope
+                trec = None
                 if hasattr(ver, "split_table"):
                     raw, rows, note = ver.split_table(raw)       # 表在进 .zs 处理（strip_prose / autoclose / check）之前切出
-                    if rows or k == 0:
+                    if k == 0:
                         table, tnote = rows, ("" if rows else note)
+                    else:       # plan_fix：原表由程序保住（问题与表无关时不采用模型回的表）
+                        table, trec = ver.keep_table(table, rows, problem)
+                        info.setdefault("期望表保留", []).append(trec)
+                        if table:
+                            tnote = ""
                 script, _ = DP.strip_prose(raw)
                 script, n_close, _ = DP.autoclose(script)
                 (out / f"plan_v{k + 1}.zs").write_text(script, encoding="utf-8")
                 problem, main, subs, crec = check(project, out / "dry", script, task, pack)
-                info["检查"].append(dict(crec, 补结束=n_close, 问题=problem[:1500]))
+                info["检查"].append(dict(crec, 补结束=n_close, 问题=problem[:1500], **({"plan_fix期望表": trec} if trec else {})))
                 if not problem:
                     break
                 info["重写"] = True
