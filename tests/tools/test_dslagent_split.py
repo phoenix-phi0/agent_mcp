@@ -47,7 +47,7 @@ SUB_PLAN = T.plan('''
 设 res = 改文件 {r.结果}
 终止 成功 好
 ''')
-BAD = "用包 common text code\n预算 调用 2 秒 60\n设 x = 运行命令 ls\n终止 成功 好\n\n#清单\n改 pkg/util.py:double\n"
+BAD = "用包 common text code\n预算 调用 2 秒 60\n设 x = 转大写 ls\n终止 成功 好\n\n#清单\n改 pkg/util.py:double\n"
 FIXREP = {"结果": {"edits": [{"file": "pkg/other.py", "old": "    return x * 2", "new": "    return x + x"}],
                    "说明": "twice 也改"}, "状态": "成功", "原因": ""}
 

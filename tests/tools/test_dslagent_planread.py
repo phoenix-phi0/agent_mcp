@@ -125,7 +125,7 @@ def t_input():
 
 # ------------------------------------------------------------------ 二、read 的规划调用
 
-BAD = "用包 common text code\n预算 调用 2 秒 60\n设 x = 运行命令 ls\n终止 成功 好\n\n#清单\n改 pkg/util.py:double\n"
+BAD = "用包 common text code\n预算 调用 2 秒 60\n设 x = 转大写 ls\n终止 成功 好\n\n#清单\n改 pkg/util.py:double\n"
 
 
 def t_call():
@@ -149,7 +149,7 @@ def t_call():
     check("mcp_config" in fx[2] and fx[2]["max_turns"] == 12 and "--readonly" in json.loads(
         Path(fx[2]["mcp_config"]).read_text(encoding="utf-8"))["mcpServers"]["dsl"]["args"], "重写也走 read（同样挂只读工具、12 轮）", fx)
     check(system_of(f, "plan_fix") == system_of(f, "plan") and "没通过检查" in user_of(f, "plan_fix")
-          and "运行命令" in user_of(f, "plan_fix"), "重写：system 同 read、user 是 fix_prompt", user_of(f, "plan_fix")[:200])
+          and "转大写" in user_of(f, "plan_fix"), "重写：system 同 read、user 是 fix_prompt", user_of(f, "plan_fix")[:200])
 
     f = RFake(plan=["GUARD:空闲超时", T.PLAN_OK])
     r, p, out = go("rd_retry", f)

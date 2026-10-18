@@ -16,6 +16,7 @@ opencode 不能做规划（engines.validate 提交时报错）。老的 full 规
   1 大纲：pack.plan_outline 确定性收集文件大纲（不调模型）。
   3 规划：一次调用（plan_system()）输出 .zs（#改法、#清单、预算、派任务 / 并行派任务 / 终止）；strip_prose → autoclose →
     白名单 + 包专属检查（pack.plan_problems）→ 假模型空跑；有错带着错误重写 1 次，仍错判失败（不执行）。
+    检查不过先由程序自动修机械错误（plan_autofix.py：赋值右边首词不是动词 / 说明句行 / 派任务参数过多，DSLAGENT_AUTOFIX=0 关闭），修好就不重写。
   4 执行：仓库 DSL 引擎（V2Engine = AgentEngine + 测试闸门）跑计划。计划里的 跑测试 只在结果会改变走向时真跑
     （test_gate：结果变量被 打印 / 终止 以外的语句用到，或所在 如果 的分支不全是 打印 / 终止），否则给「通过」
     的占位结果，验收时统一跑。终止 成功 才往下验收，否则回滚到开局、判失败。
@@ -45,6 +46,7 @@ from . import dataset as DS
 from . import engines, packs, verify
 from . import scope as SC
 from . import promptfile as PF
+from . import plan_autofix as AF
 from . import guard as G
 from .snap import DIFF_CAP, changed, code_hash, diff_text, restore, snapshot  # noqa: F401  旧名仍从 v2 取
 
@@ -633,7 +635,19 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
                 script, n_close, _ = DP.autoclose(script)
                 (out / f"plan_v{k + 1}.zs").write_text(script, encoding="utf-8")
                 problem, main, subs, crec = check(project, out / "dry", script, task, pack)
-                info["检查"].append(dict(crec, 补结束=n_close, 问题=problem[:1500], **({"plan_fix期望表": trec} if trec else {})))
+                fixes, problem0 = [], problem
+                if problem and AF.enabled():       # 先由程序修机械错误（见 plan_autofix.py）；修完没过的带着修过的计划和剩余报错去 plan_fix
+                    (out / f"plan_v{k + 1}.orig.zs").write_text(script, encoding="utf-8")
+                    script, fixes, problem, m2, s2, c2 = AF.autofix(
+                        script, problem, lambda s_: check(project, out / "dry", s_, task, pack), getattr(pack, "EXTRA_VERBS", ()))
+                    if fixes:
+                        main, subs, crec = (m2, s2, c2) if m2 is not None else (main, subs, crec)
+                        (out / f"plan_v{k + 1}.zs").write_text(script, encoding="utf-8")
+                        info.setdefault("自动修复", []).append(f"自动修复：第 {k + 1} 版计划 {len(fixes)} 处（" + "、".join(
+                            f"{t} ×{sum(1 for x in fixes if x['类型'] == t)}" for t in dict.fromkeys(x["类型"] for x in fixes))
+                            + ("；修完检查通过" if not problem else "；仍有报错，交给 plan_fix"))
+                info["检查"].append(dict(crec, 补结束=n_close, 问题=problem0[:1500], **({"plan_fix期望表": trec} if trec else {}),
+                                       **({"自动修复": fixes, "自动修复后问题": problem[:1500]} if fixes else {})))
                 if not problem:
                     break
                 info["重写"] = True

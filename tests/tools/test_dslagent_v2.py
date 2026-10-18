@@ -280,11 +280,11 @@ def t_flow():
     check(f.models == [("plan", None), ("bound", None)] and r["plan_model"] == "sonnet",
           "没设 DSLAGENT_PLAN_MODEL：规划用 sonnet，backend 不多传 model", f.models)
 
-    bad = "用包 common text code\n预算 调用 2 秒 60\n设 x = 运行命令 ls\n终止 成功 好\n\n#清单\n改 pkg/util.py:double\n"
+    bad = "用包 common text code\n预算 调用 2 秒 60\n设 x = 转大写 ls\n终止 成功 好\n\n#清单\n改 pkg/util.py:double\n"
     f = Fake(plan=bad, plan_fix=PLAN_OK)
     r, p, _ = go("rewrite", f)
     fx = next(u for t, _, u in f.log if t == "plan_fix")
-    check(r["reply"]["状态"] == "成功" and r["v2"]["重写"] and "运行命令" in fx and "没通过检查" in fx,
+    check(r["reply"]["状态"] == "成功" and r["v2"]["重写"] and "转大写" in fx and "没通过检查" in fx,
           "计划没过检查 → 带着错误重写 1 次", r["v2"]["检查"])
     f = Fake(plan=bad, plan_fix=bad.replace("预算 调用 2 秒 60\n", ""))
     r, p, _ = go("rewrite2", f)
