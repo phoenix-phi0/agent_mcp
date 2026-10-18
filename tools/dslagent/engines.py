@@ -290,6 +290,29 @@ def _empty_cwd(name):
 
 # ------------------------------------------------------------------ claude
 
+# 被杀的 claude 调用（rc=-9：总超时 / 空闲 / 输出超长）CLI 来不及发 result 事件，total_cost_usd 没有，原来一律记 0.0（kg_v2plan：8 次被杀的子任务全记 0）。
+# 改按流里已有的 usage 估：message_start 的输入 / 缓存 token + 输出 token（message_delta 若已到用它，否则按已流出的字数估），价格 美元/百万 token：
+# (输入, 5 分钟缓存写, 1 小时缓存写, 缓存读, 输出)。估算值在返回里带 cost_est=True，calls.json 可看出来。
+PRICE = {"haiku": (1.0, 1.25, 2.0, 0.10, 5.0), "opus": (5.0, 6.25, 10.0, 0.50, 25.0), "": (3.0, 3.75, 6.0, 0.30, 15.0)}
+CHARS_PER_OUT_TOKEN = 1.5      # 没收到 message_delta 的输出 token 数时，按已流出文本字数 / 1.5 估（中文偏多，宁多勿少）
+
+
+def estimate_cost(model, start_usage, out_tokens=None, streamed_chars=0):
+    """按 message_start 的 usage（dict，可 None）和输出 token 估一次调用的费用；什么都没收到记 0。返回 (cost, usage_dict)。"""
+    u = start_usage or {}
+    inp, w5, w1, rd, out = next((v for k, v in PRICE.items() if k and k in (model or "")), PRICE[""])
+    cc = u.get("cache_creation") or {}
+    c1 = cc.get("ephemeral_1h_input_tokens") or 0
+    c5 = cc.get("ephemeral_5m_input_tokens")
+    if c5 is None:
+        c5 = max(0, (u.get("cache_creation_input_tokens") or 0) - c1)
+    ot = out_tokens if out_tokens else int(streamed_chars / CHARS_PER_OUT_TOKEN)
+    cost = ((u.get("input_tokens") or 0) * inp + c5 * w5 + c1 * w1 + (u.get("cache_read_input_tokens") or 0) * rd + ot * out) / 1e6
+    usage = {"input": u.get("input_tokens"), "output": ot or None, "cache_read": u.get("cache_read_input_tokens"),
+             "cache_creation": u.get("cache_creation_input_tokens")}
+    return round(cost, 6), usage
+
+
 
 def call_claude(system, user, timeout=300, model=None, reply_path=None, idle=None, mcp_config=None, max_turns=1, allow_tool=None,
                 first_cap=None):
@@ -311,6 +334,8 @@ def call_claude(system, user, timeout=300, model=None, reply_path=None, idle=Non
         cmd += ["--mcp-config", str(mcp_config), "--allowedTools", allow_tool or "mcp__dsl__dsl"]
     pr = _Proc(cmd, user, timeout, idle or G.IDLE_SEC, first_cap or G.FIRST_CAP, cwd, child_env(tmp), reply_path, events=False)
     result, ttft, streamed = None, None, ""
+    start_usage, out_tokens = None, 0       # 流里最近一次 message_start 的 usage / 各轮 message_delta 的输出 token 累计（被杀时估费用用）
+    cur_out = 0
     turn_text, total_chars = "", 0          # 当前这一轮的流文本 / 全部轮的累计字数
     text = ""
     msgs, tool_ids = {}, set()              # 消息 id → {text, tool}（按出现顺序），真实工具调用块 id
@@ -328,6 +353,16 @@ def call_claude(system, user, timeout=300, model=None, reply_path=None, idle=Non
             se = ev.get("event") or {}
             if se.get("type") == "message_start":
                 turn_text = ""
+                out_tokens += cur_out
+                cur_out = 0
+                mu = (se.get("message") or {}).get("usage") or {}
+                if start_usage is None:
+                    start_usage = dict(mu)
+                else:        # 多轮：输入侧各轮累加
+                    for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"):
+                        start_usage[k] = (start_usage.get(k) or 0) + (mu.get(k) or 0)
+            if se.get("type") == "message_delta":
+                cur_out = (se.get("usage") or {}).get("output_tokens") or cur_out
             if se.get("type") == "content_block_delta":
                 if ttft is None:
                     ttft = round(time.time() - pr.t0, 2)
@@ -366,10 +401,17 @@ def call_claude(system, user, timeout=300, model=None, reply_path=None, idle=Non
     u = res.get("usage", {}) or {}
     usage = {"input": u.get("input_tokens"), "output": u.get("output_tokens"),
              "cache_read": u.get("cache_read_input_tokens"), "cache_creation": u.get("cache_creation_input_tokens")}
-    return {"text": text, "sec": round(time.time() - pr.t0, 1), "rc": pr.p.returncode, "ttft": ttft,
-            "cost": res.get("total_cost_usd") or 0.0, "usage": usage, "stderr": err[-500:], "reason": reason,
-            "partial": streamed, "num_turns": res.get("num_turns"), "tool_calls": len(tool_ids),
-            "subtype": res.get("subtype")}
+    cost, est = res.get("total_cost_usd") or 0.0, False
+    if result is None and start_usage is not None:       # 被杀 / 没收到 result：按流里的 usage 估，不再记 0
+        cost, usage = estimate_cost(model or DEFAULT, start_usage, out_tokens + cur_out, len(streamed))
+        est = True
+    out = {"text": text, "sec": round(time.time() - pr.t0, 1), "rc": pr.p.returncode, "ttft": ttft,
+           "cost": cost, "usage": usage, "stderr": err[-500:], "reason": reason,
+           "partial": streamed, "num_turns": res.get("num_turns"), "tool_calls": len(tool_ids),
+           "subtype": res.get("subtype")}
+    if est:
+        out["cost_est"] = True
+    return out
 
 
 # ------------------------------------------------------------------ codex

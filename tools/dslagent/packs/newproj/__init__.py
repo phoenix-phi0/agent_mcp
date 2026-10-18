@@ -2,7 +2,7 @@
 
 - EXTRA_VERBS：本包额外放开的动词 = newproj 动词包（verbs/newproj）+ 撤回 / 留底（其它包仍不放开）。
 - EXTRA_PACKS：脚本里 用包 可以写的额外包名。
-- TEMPLATE：固定模板路径；SPLIT_TEMPLATE：按功能分次生成的模板 newproj_split.zs（v2.run_newproj(split=True) 用，旧模板不动）；提示词正文在本目录 prompts/*.md，由 读原文 pack:xxx.md 读取。
+- TEMPLATE：固定模板路径；SPLIT_TEMPLATE：按功能分次生成的模板 newproj_split.zs（v2.run_newproj(split=True) 用，旧模板不动）；分层逐实体生成（run_newproj(layered=True)）不走 DSL 模板，流程在 tools/dslagent/layered.py，提示词 prompts/sys_l*.md；提示词正文在本目录 prompts/*.md，由 读原文 pack:xxx.md 读取。
 - model_system()：模板里模型调用的专用系统提示；模型步骤键 = sub（DSLAGENT_MODELS 的 sub 管 newproj 的全部模型调用），默认 sonnet。
 - files(project)：要做快照的文件 = 项目里的文本文件（同 code 包的遍历规则）。
 """
@@ -19,7 +19,7 @@ PLAN_RULES_END = ""
 TEMPLATE = Path(__file__).with_name("newproj.zs")
 SPLIT_TEMPLATE = Path(__file__).with_name("newproj_split.zs")
 EXTRA_PACKS = ("newproj",)
-EXTRA_VERBS = frozenset({"读原文", "校验实体", "拆分隔块", "生成增删改查", "预编译sql", "项目摘要", "检查项目", "撤回", "留底", "校验清单", "核对规则", "校验角色"})
+EXTRA_VERBS = frozenset({"读原文", "校验实体", "拆分隔块", "生成增删改查", "预编译sql", "项目摘要", "检查项目", "撤回", "留底", "校验清单", "核对规则", "校验角色", "校验分层清单", "参数核对"})
 
 
 def model_system():

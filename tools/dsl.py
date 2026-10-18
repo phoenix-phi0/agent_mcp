@@ -386,7 +386,15 @@ class DSLEngine(ModelMixin, HistoryMixin):
         if "." in expr:
             head, _, path = expr.partition(".")
             if head.strip() in self.vars:
-                return dig(self.vars[head.strip()], path)
+                base = self.vars[head.strip()]
+                if isinstance(base, str) and base.lstrip()[:1] in ("{", "["):
+                    # 变量里存的是 JSON 文本（取字段 / 读文件 / 模型回复都给文本）：点号路径钻进去，
+                    # 不然 {r.结果} 取不到，原样留成 {r.结果} 这串字再被当 JSON 解析（kg_v2plan：写文件 {r1.结果}）
+                    try:
+                        base = json.loads(base)
+                    except ValueError:
+                        pass
+                return dig(base, path)
         return None
 
     def store(self, name: str, value) -> None:
