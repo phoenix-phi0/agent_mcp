@@ -21,13 +21,13 @@ from pathlib import Path
 from . import agents as AG
 from . import guard as G
 
-STEPS = ("plan", "sub", "fix", "bound")
+STEPS = ("plan", "plan_fix", "sub", "fix", "bound")
 DEFAULT = "sonnet"
 CODEX_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 GROK_EFFORTS = ("low", "medium", "high", "xhigh")
 CODEX_EFFORT = "medium"
 CODEX_PLAN_EFFORT = "high"        # codex 用作 plan 且模型串没写强度时的默认
-ESCALATE_ENV = "DSLAGENT_CODEX_ESCALATE"      # 设成 0 关闭「plan 默认 high、plan_fix 升一档」
+ESCALATE_ENV = "DSLAGENT_CODEX_ESCALATE"      # 设成 0 关闭「plan 默认 high、显式写 codex 的 plan_fix 升到 xhigh」
 GROK_EFFORT = "low"
 GROK_READ_TOOLS = ("read_file", "grep", "list_dir")      # read 规划放开的内置工具（只读）
 GROK_DISABLED = ("write,search_replace,run_terminal_command,kill_command_or_subagent,todo_write,get_command_or_subagent_output,spawn_subagent,"
@@ -111,9 +111,10 @@ def validate(models, subtask="json"):
     """normalize + 组合限制：plan 要读代码，只支持 claude / codex / grok（claude / codex 挂只读 dsl 工具，grok 用自带只读工具；opencode 不能做规划）；
     DSLAGENT_SUBTASK=tool 时 sub 只支持 claude。"""
     m = normalize(models)
-    p = parse(m["plan"]) if "plan" in m else None
-    if p and p["engine"] not in ("claude", "codex", "grok"):
-        raise ValueError(f"models.plan={m['plan']!r}：规划要读代码，只支持 claude / codex / grok，{p['engine']} 不能做规划")
+    for k in ("plan", "plan_fix"):
+        p = parse(m[k]) if k in m else None
+        if p and p["engine"] not in ("claude", "codex", "grok"):
+            raise ValueError(f"models.{k}={m[k]!r}：规划要读代码，只支持 claude / codex / grok，{p['engine']} 不能做规划")
     s = parse(m["sub"]) if "sub" in m else None
     if s and subtask == "tool" and s["engine"] != "claude":
         raise ValueError(f"models.sub={m['sub']!r}：DSLAGENT_SUBTASK=tool 时子任务要挂 dsl 工具，只支持 claude")
@@ -121,20 +122,20 @@ def validate(models, subtask="json"):
 
 
 def plan_effort(sp, tag):
-    """codex 规划步骤的强度调整（只动 codex）：plan 且模型串没写强度 → high；plan_fix 比 plan 的强度高一档（medium→high，high→xhigh，xhigh 不变）。
-    DSLAGENT_CODEX_ESCALATE=0 关闭，回到模型串 / 缺省 medium。sub / fix / bound 等其它步骤不变。返回新的 spec 字典（不改入参）。"""
+    """codex 规划步骤的强度调整（只动 codex）：plan 且模型串没写强度 → high；plan_fix 仅当显式指定为 codex 且没写强度时 → xhigh（比 plan 的 high 高一档），
+    写了强度的不动；plan_fix 默认走 sonnet，不涉及。DSLAGENT_CODEX_ESCALATE=0 关闭，回到模型串 / 缺省 medium。其它步骤不变。返回新的 spec 字典（不改入参）。"""
     t = (tag or "").removesuffix("_reask")
     if sp.get("engine") != "codex" or t not in ("plan", "plan_fix") or (os.environ.get(ESCALATE_ENV) or "").strip() == "0":
         return sp
-    explicit = bool(sp["spec"].partition(":")[2].partition(":")[2])
-    eff = sp["effort"] if explicit else CODEX_PLAN_EFFORT
+    if sp["spec"].partition(":")[2].partition(":")[2]:
+        return sp
     if t == "plan_fix":
-        eff = CODEX_EFFORTS[min(CODEX_EFFORTS.index(eff) + 1, len(CODEX_EFFORTS) - 1)]
-    return dict(sp, effort=eff)
+        return dict(sp, effort=CODEX_EFFORTS[CODEX_EFFORTS.index(CODEX_PLAN_EFFORT) + 1])
+    return dict(sp, effort=CODEX_PLAN_EFFORT)
 
 
 def step_of(tag):
-    """调用 tag → 步骤：plan / plan_fix → plan；dslNN[_…] → sub；fix → fix；bound / bfix / bound_judge → bound；table_fill（补表）→ plan；其余 None。"""
+    """调用 tag → 步骤：plan → plan；plan_fix → plan_fix；dslNN[_…] → sub；fix → fix；bound / bfix / bound_judge → bound；table_fill（补表）→ plan；其余 None。"""
     a = AG.of_tag(tag)
     return a.step if a else None
 

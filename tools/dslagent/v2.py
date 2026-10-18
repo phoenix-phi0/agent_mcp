@@ -118,6 +118,8 @@ class Model:
         """这次调用用的 {engine, model, effort, spec}：DSLAGENT_MODELS 里写了该步骤就用它，否则 model 参数（旧的规划模型透传），再否则 sonnet。"""
         step = engines.step_of(tag)
         s = self.routes.get(step) if step else None
+        if step == "plan_fix":       # 补改默认 sonnet，不跟 plan 走（也不吃旧的规划模型透传）
+            return engines.plan_effort(engines.parse(s or engines.DEFAULT), tag)
         if s:
             return engines.plan_effort(engines.parse(s), tag)
         m = model or MODEL           # 旧的透传（DSLAGENT_PLAN_MODEL）：任意串当 claude 模型名，不校验
@@ -527,7 +529,7 @@ def check(project, work, script, task, pack=None):
 # ------------------------------------------------------------------ 主流程
 
 
-def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=MAX_CALLS, boundary=True, scope=None):
+def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=MAX_CALLS, boundary=True, scope=None, plan_fix=None):
     """跑一次 v2。project 里直接改文件；记录写进 out_dir（calls/、calls.json、plan*.zs、outline.md、boundary/、result.json）。
     model：假模型 backend(system, user, tag, timeout) → str|dict（测试用），缺省走 claude CLI。
     scope：允许改动的目录前缀（"a/,b/" 或列表；缺省看计划里的 #范围 块，都没有就不启用范围闸，见 scope.py）。
@@ -544,7 +546,7 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
     try:
         pack, ver = packs.current(), verify.current()
         check_plan_mode()
-        routes = engines.validate(engines.from_env(), DC.env_mode())
+        routes = engines.validate({**engines.from_env(), **({"plan_fix": plan_fix} if plan_fix else {})}, DC.env_mode())
     except ValueError as e:
         pack = ver = None
         pick_err = str(e)
@@ -607,7 +609,11 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
             for k in range(1 + AG.PLAN.rewrites):
                 user = first_user if k == 0 else DPR.fix_prompt(script, problem, table_kept=bool(table) and hasattr(ver, "keep_table")
                                                                   and not ver.problem_about_table(problem))
-                raw = plan_read_call(M, plan_system(pack, M.spec("plan", plan_model)["engine"]), user, "plan" if k == 0 else "plan_fix", project,
+                tag = "plan" if k == 0 else "plan_fix"
+                sp = M.spec(tag, plan_model)
+                if k:
+                    info.setdefault("plan_fix引擎", []).append({"引擎": sp["engine"], "模型": sp["model"], "强度": sp["effort"]})
+                raw = plan_read_call(M, plan_system(pack, sp["engine"]), user, tag, project,
                                      plan_model, out, plan_tools, wrap)
                 (out / f"plan_v{k + 1}.raw.txt").write_text(raw, encoding="utf-8")
                 raw, plan_scope = SC.split(raw)       # #范围 块在进 .zs 处理之前切出；命令行 / 参数的范围优先

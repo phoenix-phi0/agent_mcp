@@ -1,6 +1,6 @@
 ---
 名称: plan_fix
-步骤: plan
+步骤: plan_fix
 工具: 只读dsl；grok：grok自带只读
 最多轮数: 12；grok：20
 回复格式: zs（.zs 计划文本）

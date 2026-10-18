@@ -4,7 +4,7 @@
 公用大块在 agents/shared/；解析、展开插入、选变体在 promptfile.py（见 agents/README.md）。这里只留 Python 才能表达的东西：
 
 每个 Agent：
-  step      models 里的键（plan / sub / fix / bound），决定用哪个引擎和模型（engines.step_of）        ← md「步骤」
+  step      models 里的键（plan / plan_fix / sub / fix / bound），决定用哪个引擎和模型（engines.step_of）        ← md「步骤」
   tools     TOOLS_* 之一：无 / 只读 dsl / grok 自带只读 / 可写 dsl（tools_grok：grok 引擎换成这个）      ← md「工具」
   turns     多轮调用的 --max-turns（没有工具的 agent 是 1）；turns_grok：grok 引擎的轮数                ← md「最多轮数」
   reply     回复格式：zs（.zs 计划文本）/ json（{结果,状态,原因}）/ code（一段 python 代码）            ← md「回复格式」

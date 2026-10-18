@@ -409,7 +409,7 @@ def main():
     d = cbatch.wait(j["job_id"], timeout=60, every=0.2)
     dl = {json.loads(x)["task"]: json.loads(x) for x in DSL_LOG.read_text(encoding="utf-8").splitlines()}
     check(json.loads(dl["DSLOK 字典"]["models"]) == {"plan": "opus", "bound": "grok:high"}
-          and json.loads(dl["DSLOK 简写"]["models"]) == {k: "haiku" for k in ("plan", "sub", "fix", "bound")}
+          and json.loads(dl["DSLOK 简写"]["models"]) == {k: "haiku" for k in ("plan", "plan_fix", "sub", "fix", "bound")}
           and dl["DSLOK 没给"]["models"] is None and d["tasks"][0]["dsl_models"] == {"plan": "opus", "bound": "grok:high"}
           and "dsl_models" not in d["tasks"][2], "models 传到 dsl 进程（字典 / 字符串简写），没给就没有",
           [x["models"] for x in dl.values()])

@@ -90,8 +90,8 @@ def t_parse():
     check(raises(lambda: V_("opencode:a/b", "json"), "不能做规划") is True, "字符串简写 opencode → 报错（plan 也是 opencode）")
     S = E.step_of
     check([S(x) for x in ("plan", "plan_fix", "dsl01", "dsl12_读", "fix", "fix_reask", "bound", "bfix", "bfix_reask", "zzz")]
-          == ["plan", "plan", "sub", "sub", "fix", "fix", "bound", "bound", "bound", None], "tag → 步骤")
-    check(E.effective({"plan": "opus"}) == {"plan": "opus", "sub": "sonnet", "fix": "sonnet", "bound": "sonnet"}, "effective 补缺省 sonnet")
+          == ["plan", "plan_fix", "sub", "sub", "fix", "fix", "bound", "bound", "bound", None], "tag → 步骤")
+    check(E.effective({"plan": "opus"}) == {"plan": "opus", "plan_fix": "sonnet", "sub": "sonnet", "fix": "sonnet", "bound": "sonnet"}, "effective 补缺省 sonnet")
     os.environ["DSLAGENT_MODELS"] = "{坏"
     try:
         check(raises(E.from_env, "JSON") is True, "DSLAGENT_MODELS 不是 JSON → 报错")
@@ -100,14 +100,14 @@ def t_parse():
     finally:
         del os.environ["DSLAGENT_MODELS"]
     check(E.from_env() == {}, "没设 → {}")
-    # codex 规划强度：plan 缺省 high、plan_fix 升一档，可用 DSLAGENT_CODEX_ESCALATE=0 关闭，只影响 codex 的 plan / plan_fix
+    # codex 规划强度：plan 缺省 high、显式写 codex 且没写强度的 plan_fix 升到 xhigh，可用 DSLAGENT_CODEX_ESCALATE=0 关闭，只影响 codex 的 plan / plan_fix
     PE = lambda spec, tag: E.plan_effort(E.parse(spec), tag)["effort"]      # noqa: E731
     old_esc = os.environ.pop("DSLAGENT_CODEX_ESCALATE", None)
     try:
         check(PE("codex:gpt-5", "plan") == "high" and PE("codex:gpt-5", "plan_fix") == "xhigh", "codex 没写强度：plan high，plan_fix xhigh")
-        check(PE("codex:gpt-5:medium", "plan") == "medium" and PE("codex:gpt-5:medium", "plan_fix") == "high", "已写 medium：plan 不变，plan_fix 升到 high")
+        check(PE("codex:gpt-5:medium", "plan") == "medium" and PE("codex:gpt-5:medium", "plan_fix") == "medium", "已写 medium：plan 不变，plan_fix 带强度也不升")
         check(PE("codex:gpt-5:xhigh", "plan") == "xhigh" and PE("codex:gpt-5:xhigh", "plan_fix") == "xhigh", "已写 xhigh：plan_fix 不再升")
-        check(PE("codex:gpt-5:low", "plan") == "low" and PE("codex:gpt-5:high", "plan_fix") == "xhigh", "已写 low 不动；high 的 plan_fix 升 xhigh")
+        check(PE("codex:gpt-5:low", "plan") == "low" and PE("codex:gpt-5:high", "plan_fix") == "high", "已写 low 不动；plan_fix 显式 high 不升")
         check(PE("codex:gpt-5", "dsl01") == "medium" and PE("codex:gpt-5", "fix") == "medium" and PE("codex:gpt-5", "table_fill") == "medium",
               "sub / fix / 补表等其它步骤保持原缺省 medium")
         check(E.plan_effort(E.parse("sonnet"), "plan")["effort"] is None and E.plan_effort(E.parse("grok"), "plan")["effort"] == "low", "claude / grok 不受影响")
@@ -116,6 +116,25 @@ def t_parse():
               "DSLAGENT_CODEX_ESCALATE=0 → 关闭，回到模型串 / 缺省 medium")
     finally:
         os.environ.pop("DSLAGENT_CODEX_ESCALATE", None)
+        # plan_fix 步骤：默认 sonnet（不论 plan 用什么）、可单独指定、校验
+        import tempfile
+        SP = lambda routes, tag="plan_fix", model=None: V.Model(tempfile.mkdtemp(), routes=routes).spec(tag, model)      # noqa: E731
+        sp = SP({"plan": "codex:gpt-5"})
+        check(sp["engine"] == "claude" and sp["model"] == "sonnet" and sp["effort"] is None, "plan_fix 没指定：sonnet，plan 用 codex 也一样", sp)
+        check(SP({"plan": "codex:gpt-5"}, "plan")["effort"] == "high", "同时 plan 仍是 codex high")
+        sp = SP({"plan": "opus"}, model="opus")
+        check(sp["model"] == "sonnet", "plan_fix 默认 sonnet，不吃旧的规划模型透传", sp)
+        sp = SP({"plan_fix": "codex:gpt-5"})
+        check(sp["engine"] == "codex" and sp["effort"] == "xhigh", "显式 plan_fix=codex 没写强度 → 升到 xhigh", sp)
+        sp = SP({"plan_fix": "codex:gpt-5:medium"})
+        check(sp["effort"] == "medium", "显式 plan_fix=codex 带强度 → 不升", sp)
+        sp = SP({"plan_fix": "opus"})
+        check(sp["model"] == "opus", "plan_fix 可单独指定 claude 模型", sp)
+        os.environ["DSLAGENT_CODEX_ESCALATE"] = "0"
+        check(SP({"plan_fix": "codex:gpt-5"})["effort"] == "medium", "关闭升档开关 → 显式 codex 的 plan_fix 保持 medium")
+        os.environ.pop("DSLAGENT_CODEX_ESCALATE", None)
+        check(E.normalize({"plan_fix": "grok"}) == {"plan_fix": "grok"} and raises(lambda: V_({"plan_fix": "opencode:a/b"}, "json"), "不能做规划") is True,
+              "models 认 plan_fix；opencode 不能做 plan_fix")
         if old_esc is not None:
             os.environ["DSLAGENT_CODEX_ESCALATE"] = old_esc
 
@@ -186,7 +205,7 @@ def t_routes():
     from tools.dslagent import v2 as _v2
     check([_v2._rec_model(E.parse(x)) for x in ("grok:low", "codex:gpt-6-luna:high", "sonnet", "opencode:a/b")] == ["grok", "gpt-6-luna", "sonnet", "a/b"],
           "calls.json 记的模型：grok → grok、codex → 模型名、claude 照旧、opencode → 模型名（tool 模式同一函数）")
-    check(r["v2"]["models"] == {"plan": "sonnet", "sub": "grok:high", "fix": "sonnet", "bound": "codex:gpt-5.1:low"}, "result.json 的 v2.models 是生效的四步", r["v2"]["models"])
+    check(r["v2"]["models"] == {"plan": "sonnet", "plan_fix": "sonnet", "sub": "grok:high", "fix": "sonnet", "bound": "codex:gpt-5.1:low"}, "result.json 的 v2.models 是生效的五步", r["v2"]["models"])
     saved = json.loads((out / "result.json").read_text(encoding="utf-8"))
     check(saved["v2"]["models"] == r["v2"]["models"], "写进了 result.json")
     # 字符串简写
@@ -385,7 +404,7 @@ def t_flow():
     calls = json.loads((out / "calls.json").read_text(encoding="utf-8"))
     check([(c["tag"], c["engine"], c["model"], c["effort"]) for c in calls] == [("plan", "codex", "gpt-5.1", "high"), ("bound", "grok", "grok", "high")]
           and calls[0]["tool"] == 1 and calls[0]["tool_calls"] == 1, "calls.json：engine / model / effort（codex 规划记工具调用 1 次）", calls)
-    check(r["v2"]["models"] == {"plan": "codex:gpt-5.1:high", "sub": "sonnet", "fix": "sonnet", "bound": "grok:high"}, "v2.models 记生效的四步", r["v2"]["models"])
+    check(r["v2"]["models"] == {"plan": "codex:gpt-5.1:high", "plan_fix": "sonnet", "sub": "sonnet", "fix": "sonnet", "bound": "grok:high"}, "v2.models 记生效的四步", r["v2"]["models"])
 
     # 规划走 claude（缺省 sonnet），子任务走 opencode，边界复核走 claude haiku（假 claude）
     setup_fake({"opencode": [{"text": json.dumps(REMEDY_FIX, ensure_ascii=False)}], "claude": [{"text": REMEDY_PLAN}, {"text": T.BOUND_OK}]})
