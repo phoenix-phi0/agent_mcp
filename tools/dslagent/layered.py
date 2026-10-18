@@ -112,6 +112,9 @@ class Run:
         return 2 + (2 + (4 if item["规则"] else 0) if item["层"] == "接口" else 2)
 
     # ------------------------------------------------------------ 模型调用
+    def system(self):
+        return model_system()
+
     def ask(self, prompt, rec=None):
         """一次模型调用 → 回复文本。花费熔断 / 总调用或墙钟用完 → Halt；没回应：超长 / 被杀 → FileFail，其它 → _Retry。"""
         if self.cap and self.M.cost >= self.cap:
@@ -119,7 +122,7 @@ class Run:
             raise Halt(f"花费达上限（${self.M.cost:.2f} ≥ ${self.cap:.2f}）", "花费")
         self.k += 1
         try:
-            r = self.M._call(model_system(), prompt, f"dsl{self.k:02d}")
+            r = self.M._call(self.system(), prompt, f"dsl{self.k:02d}")
         except self.Stop as e:
             raise Halt(str(e), "预算") from None
         if rec is not None:
@@ -650,6 +653,15 @@ def run_with_cap(M, task, project, stop_cls, cap=None, max_calls=None):
         for f in r.files:
             if f["路径"] not in r.state:
                 r.new(f["层"], f["路径"], f["实体"], f["依赖"])
+    lay = None
+    if r.layers:
+        lay = {"模板": r.layers["模板"], "角色": r.layers["角色"], "层": r.layers["层"], "规则数": len(r.layers["规则表"]), "文件数": len(r.files),
+               "模式": r.mode, "分批原因": r.mode_why, "批次": [s for s in r.steps if s["步骤"].startswith("文件清单")], "调用上限": M.max_calls}
+    return conclude(r, M, halt, problems, cap, lay)
+
+
+def conclude(r, M, halt, problems, cap, lay):
+    """收尾：按文件结果 / 停止原因算 状态 / 结论 / 原因（layered 与 modbuild 共用）。"""
     for rec in r.recs:
         if rec["结果"] == "未做" and halt:
             rec["失败原因"] = f"未做：{halt}"
@@ -660,10 +672,6 @@ def run_with_cap(M, task, project, stop_cls, cap=None, max_calls=None):
     for x in r.recs:        # 规则核对时被熔断：未核对规则也要报出来
         if x.get("未核对规则"):
             unimpl.setdefault(x["文件"], []).extend(f"（未核对）{t}" for t in x["未核对规则"])
-    lay = None
-    if r.layers:
-        lay = {"模板": r.layers["模板"], "角色": r.layers["角色"], "层": r.layers["层"], "规则数": len(r.layers["规则表"]), "文件数": len(r.files),
-               "模式": r.mode, "分批原因": r.mode_why, "批次": [s for s in r.steps if s["步骤"].startswith("文件清单")], "调用上限": M.max_calls}
     out = {"文件": r.recs, "清单": lay, "步骤": r.steps, "整体问题": problems, "花费": round(M.cost, 4), "codex调用": sum(1 for c in M.log if c.get("engine") == "codex")}
     if r.fatal:
         out.update(状态="失败", 结论="失败", 原因=r.fatal)

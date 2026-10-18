@@ -794,9 +794,10 @@ def _req_text(req):
 
 
 NEWPROJ_LAYERED_WALL = 3600     # layered 模板默认墙钟（文件多，逐个写）
+NEWPROJ_MODULAR_WALL = 5400     # modular 模板默认墙钟（顶层规划 + 层次 + 分层逐文件，更多步）
 
 
-def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, split=False, layered=False, cost_cap=None):
+def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, split=False, layered=False, cost_cap=None, modular=False):
     """新建项目入口：不规划，直接执行 packs/newproj/newproj.zs（pack=newproj）。
     req：需求原文，或一个存在的文本文件路径；project：要新建的项目目录（不存在就建，也是引擎工作目录）；
     out_dir：记录目录（calls/、calls.json、plan.zs、plan_out.txt、result.json）；model：假模型 backend（测试用）。
@@ -807,13 +808,18 @@ def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, sp
     部分成功时 fixed=False、stop 以「部分成功：」开头并列出失败功能（status 仍是 失败）。wall 缺省：旧模板 WALL，split NEWPROJ_SPLIT_WALL。
     layered=True：三级规划、一步步推进（layered.py，不走 DSL 模板）：确认分层 → 确认文件 → 逐层逐文件（每个文件先单独规划再生成，各自检查），失败的文件撤回并让依赖它的文件跳过；
     result.json v2.文件 记每个文件的层 / 实体 / 结果 / 尝试 / 重写 / 失败原因 / 未实现规则；cost_cap（缺省读环境变量 NEWPROJ_COST_CAP，不设不限）：Claude 侧累计花费达到就不再调模型，
-    以「部分成功：花费达上限」结束。总调用上限随进度按文件数放宽（layered.py Run.bump）。wall 缺省 NEWPROJ_LAYERED_WALL。"""
+    以「部分成功：花费达上限」结束。总调用上限随进度按文件数放宽（layered.py Run.bump）。wall 缺省 NEWPROJ_LAYERED_WALL。
+    modular=True：顶层规划 → 层次 × 模块 → 按层逐层构建（modbuild.py）：能力清单（程序）→ 顶层规划（PLAN.md）→ 层次×模块（LAYERS.md）→ 数据 / 查询 / 流程 / 接口 / 界面逐层、
+    层内按构建顺序逐模块，每个文件先规划再生成；capabilities.md / PLAN.md / LAYERS.md 写在 out_dir；result.json v2.文件 每文件记 层 / 模块 / 结果 / 尝试 / 失败原因 / 未实现规则，
+    v2.顶层规划 / v2.层次 记两步的结果。cost_cap、失败隔离同 layered。wall 缺省 NEWPROJ_MODULAR_WALL。"""
     from . import plan as DP
-    if layered:
+    if layered or modular:
         split = False
-    wall = wall or (NEWPROJ_LAYERED_WALL if layered else NEWPROJ_SPLIT_WALL if split else WALL)
+    if modular:
+        layered = False
+    wall = wall or (NEWPROJ_MODULAR_WALL if modular else NEWPROJ_LAYERED_WALL if layered else NEWPROJ_SPLIT_WALL if split else WALL)
     user_max = max_calls
-    max_calls = max_calls or (2 if layered else newproj_split_calls() if split else NEWPROJ_CALLS)
+    max_calls = max_calls or (2 if layered or modular else newproj_split_calls() if split else NEWPROJ_CALLS)
 
     project = Path(project).resolve()
     project.mkdir(parents=True, exist_ok=True)
@@ -843,6 +849,23 @@ def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, sp
             raise Stop("DSLAGENT_MODELS 不合格：" + route_err)
         if not task:
             raise Stop("需求为空")
+        if modular:
+            from . import modbuild as MB
+            from . import layered as LY
+            info.update(split=False, layered=False, modular=True)
+            t0 = time.time()
+            try:
+                out_m = MB.run_modular(M, task, project, Stop, cost_cap if cost_cap is not None else LY.env_cap(), user_max, out_dir=out)
+            finally:
+                steps["执行"] = round(time.time() - t0, 1)
+            info.update(文件=out_m["文件"], 清单=out_m["清单"], 整体问题=out_m["整体问题"], 结论=out_m["结论"], codex调用=out_m["codex调用"],
+                        顶层规划=out_m["顶层规划"], 层次=out_m["层次"], 规则未覆盖=out_m["规则未覆盖"], 预算={"calls": M.n, "max_calls": M.max_calls})
+            (out / "plan_out.txt").write_text(json.dumps(out_m, ensure_ascii=False, indent=1), encoding="utf-8")
+            res["versions"] = 1
+            if out_m["状态"] != "成功":
+                raise Stop(out_m["原因"][:800])
+            state.update(状态="成功", 原因="")
+            return _finish(res, out, M, steps, state, {}, {"跑了": False}, base, snapshot(project, pack), t_start)
         if layered:
             from . import layered as LY
             info.update(split=False, layered=True)
