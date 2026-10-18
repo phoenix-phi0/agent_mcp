@@ -36,11 +36,12 @@ def main(argv=None):
     n.add_argument("req_file", help="需求文件")
     n.add_argument("project", help="项目目录（不存在就建）")
     n.add_argument("--out", required=True)
-    n.add_argument("--wall", type=int, default=900)
+    n.add_argument("--wall", type=int, default=None, help="墙钟秒数；缺省：旧模板 900，--split 2400")
+    n.add_argument("--split", action="store_true", help="按功能分次生成（packs/newproj/newproj_split.zs）：功能清单 → 实体 → 逐个功能 sql / zs / ui；缺省仍是旧模板")
     a = ap.parse_args(argv)
     if a.cmd == "newproj":
         from . import v2
-        res = v2.run_newproj(Path(a.req_file).read_text(encoding="utf-8"), a.project, a.out, wall=a.wall)
+        res = v2.run_newproj(Path(a.req_file).read_text(encoding="utf-8"), a.project, a.out, wall=a.wall, split=a.split)
         print(json.dumps({k: res[k] for k in ("fixed", "calls", "cost", "seconds", "stop", "changed_files")}, ensure_ascii=False))
         return 0
 

@@ -3,6 +3,8 @@
 例如 设 blocks = 拆分隔块 {sqlTxt} queries/
 返回 ok：解析到 ≥1 个文件，或回复仅为「无」标记（无 / （无）/ (无)，明确无需定制，n=0 且 none=是）才是 是；
 其余 0 文件（空回复、没有分隔块的散文）ok=否，msg=「没有解析到 === 路径 === 分隔块，按格式重写」。
+第 3 个参数「不覆盖」（写 是）：解析出的文件在项目里已经存在就不过（ok=否，msg 点名文件），用来防止覆盖 gen 或别的功能写好的文件。
+前缀可以是完整路径（如 routes/book_stats.zs）：只收这一个文件。
 没有分隔块而整个回复是 JSON edits（{edits:[{file, new/old}…]}、{file, content}、或它们的列表）时转成 files
 （new 为空 old 时视为新建内容），返回里 from_json=是、note=由 JSON 转换。
 """
@@ -47,7 +49,7 @@ def _json_items(text):
     return items
 
 
-def 拆分隔块(文本: str = "", 前缀: str = "") -> dict:
+def 拆分隔块(文本: str = "", 前缀: str = "", 不覆盖: str = "") -> dict:
     sys.path.insert(0, str(Path(__file__).parent))
     import _gen as G
     if G.is_dry():       # 空跑：模型回复是占位，放行让模板走完全部步骤
@@ -79,6 +81,11 @@ def 拆分隔块(文本: str = "", 前缀: str = "") -> dict:
     res = {"files": out, "n": len(out), "rejected": rejected}
     if from_json:
         res.update(from_json="是", note="由 JSON 转换")
+    if out and str(不覆盖 or "").strip() in ("是", "true", "True", "1"):
+        root = Path(WORKSPACE).resolve()
+        dup = [o["file"] for o in out if (root / o["file"]).exists()]
+        if dup:
+            return dict(res, ok="否", msg="这些文件已存在（gen 或别的功能已生成），不能覆盖：" + "、".join(dup) + "；换个文件名（sql）或只写本功能自己的文件")
     if out:
         return dict(res, ok="是")
     if text.strip() in NONE_MARKS:

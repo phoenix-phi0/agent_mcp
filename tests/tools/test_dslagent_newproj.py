@@ -347,6 +347,260 @@ def t_fix3():
             os.environ["DSLAGENT_MODELS"] = old
 
 
+# ------------------------------------------------------------------ split 模板（按功能分次生成）
+
+def feat(name, path=None, act=None, sql=None, ui=True, ifaces=True):
+    sql = [name + "_list"] if sql is None else sql
+    f = {"名": name, "说明": name, "实体": ["book"], "sql": [{"名": q, "参数": ["n"], "说明": ""} for q in sql],
+         "接口": [{"路径": path or f"/book/{name}", "动作": act or f"{name}_act", "说明": ""}] if ifaces else [],
+         "界面": [f"{name}页"] if ui else []}
+    return f
+
+
+def inv(*feats, tpl="full"):
+    return json.dumps({"模板": tpl, "功能": list(feats)}, ensure_ascii=False)
+
+
+class FakeS:
+    """split 模板假模型：按功能名从提示词里认出是哪个功能；bad={(功能,步骤):[回复…]} 覆盖默认回复（用完回最后一个）。"""
+
+    def __init__(self, invs, bad=None, ent_tpl="full"):
+        self.invs, self.bad, self.ent_tpl, self.prompts, self.tags, self.n = list(invs), bad or {}, ent_tpl, [], [], {}
+        self.used = {}
+
+    def _pick(self, key, default):
+        if key in self.bad:
+            seq = self.bad[key]
+            i = self.used.get(key, 0)
+            self.used[key] = i + 1
+            return seq[min(i, len(seq) - 1)]
+        return default
+
+    def __call__(self, system, user, tag, timeout, model=None, **kw):
+        self.prompts.append(user)
+        self.tags.append(tag)
+        if "项目拆解助手" in user:
+            return self.invs.pop(0) if len(self.invs) > 1 else self.invs[0]
+        if "应用建模助手" in user:
+            return json.dumps({"模板": self.ent_tpl, "实体文本": ENT}, ensure_ascii=False)
+        import re as _re
+        m = _re.search(r"本功能：(\{.*?\}) (?:本功能sql|全项目|上次)", user, _re.S) or _re.search(r"本功能：(\{.*\})", user, _re.S)
+        f = json.loads(m.group(1)) if m else {"名": "?", "sql": [], "接口": [{"路径": "/x", "动作": "x"}]}
+        n = f["名"]
+        if "SQLite 语句助手" in user:
+            body = "".join(f"=== queries/{q['名']}.sql ===\nSELECT * FROM book WHERE stock < :n\n" for q in f["sql"])
+            return self._pick((n, "sql"), body)
+        if ".zs 接口助手" in user:
+            a = f["接口"][0]
+            q = f["sql"][0]["名"] if f["sql"] else "book_list"
+            body = (f"=== routes/{n}.zs ===\n接口 POST {a['路径']} 动作 {a['动作']}\n  用包 db http\n  设 rows = 查询 app.db {q} n={{n}}\n"
+                    f"  设 group.low = {{rows}}\n  响应 lists {{group}}\n结束\n")
+            return self._pick((n, "zs"), body)
+        if ".ui 界面助手" in user:
+            body = (f"=== ui/{n}.ui ===\n界面 列表 {f['界面'][0]}\n  列表 low 占满\n    列 title 书名\n    列 stock 库存\n  结束\n结束\n")
+            return self._pick((n, "ui"), body)
+        return "?"
+
+
+def gos(name, fake, req="做一个图书管理，有低库存等功能", **kw):
+    d = TMP / name
+    return V.run_newproj(req, d / "proj", d / "out", model=fake, split=True, **kw), d / "proj"
+
+
+def recs(r):
+    return {f["名"]: f for f in r["v2"].get("功能", [])}
+
+
+def t_split_verbs():
+    print("split：校验清单 / 拆分隔块 不覆盖 / 项目摘要 含参数")
+    f = verb("校验清单", TMP)
+    r = f(inv(feat("a"), feat("b")))
+    check(r["ok"] == "是" and r["数量"] == 2 and r["模板"] == "full" and r["调用上限"] == 16, "合法清单：数量 / 模板 / 调用上限 4+6n", r)
+    r = f("```json\n" + inv(feat("a")) + "\n```")
+    check(r["ok"] == "是", "带围栏也行", r)
+    r = f(json.dumps({"模板": "full", "功能": []}))
+    check(r["ok"] == "是" and r["数量"] == 0 and r["调用上限"] == 4, "功能为空（纯增删改查）放行", r)
+    r = f(json.dumps({"模板": "full", "功能": [{"名": "a", "sql": [], "接口": [], "界面": []}]}))
+    check(r["ok"] == "是" and r["功能"][0]["实体"] == [], "缺的列表补 []", r)
+    bad = [
+        ("", "清单为空"), ("不是json", "合法 JSON"), ("[1]", "JSON 对象"),
+        (inv(feat("a"), tpl="x"), "模板"),
+        (inv(feat("Bad Name")), "snake"),
+        (inv(feat("中文")), "snake"),
+        (inv(feat("a"), feat("a", path="/z", act="z")), "功能名「a」重复"),
+        (inv(feat("a", sql=["b_x"])), "要以功能名「a_」开头"),
+        (inv(feat("a", sql=["a_x", "a_x"])), "sql 名「a_x」重复"),
+        (inv(feat("a", sql=["a_x"]), feat("ab", sql=["a_x"], path="/z", act="z")), "sql 名「a_x」重复"),
+        (inv(feat("a", path="/p"), feat("b", path="/p", act="bb")), "接口路径「/p」重复"),
+        (inv(feat("a", act="same"), feat("b", act="same", path="/q")), "动作名「same」重复"),
+        (inv(feat("a", path="nolead")), "要以 / 开头"),
+        (inv(feat("a", act="Bad-Act")), "动作名"),
+        (json.dumps({"模板": "full", "功能": "x"}), "对象列表"),
+    ]
+    for txt, want in bad:
+        r = f(txt)
+        check(r["ok"] == "否" and want in r["errors"], f"清单不过：{want}", r)
+    os.environ["NEWPROJ_SPLIT_MAX_FEATURES"] = "2"
+    try:
+        r = f(inv(feat("a"), feat("b", path="/b", act="b"), feat("c", path="/c", act="c")))
+        check(r["ok"] == "否" and "功能太多" in r["errors"], "功能数超过上限（NEWPROJ_SPLIT_MAX_FEATURES）→ 不过", r)
+    finally:
+        os.environ.pop("NEWPROJ_SPLIT_MAX_FEATURES")
+
+    p = proj("sp_verbs")
+    (p / "routes").mkdir()
+    (p / "routes/book.zs").write_text("gen\n", encoding="utf-8")
+    sp = verb("拆分隔块", p)
+    r = sp("=== routes/book.zs ===\n接口\n", "routes/book.zs", "是")
+    check(r["ok"] == "否" and "routes/book.zs" in r["msg"] and "不能覆盖" in r["msg"], "不覆盖：已存在的文件被拒", r)
+    r = sp("=== routes/book.zs ===\n接口\n", "routes/book.zs")
+    check(r["ok"] == "是", "不带不覆盖旧行为不变", r)
+    r = sp("=== routes/other.zs ===\nx\n", "routes/book.zs", "是")
+    check(r["ok"] == "否" and r["rejected"] == ["routes/other.zs"], "前缀是完整路径：只收这一个文件", r)
+    r = sp("=== routes/new.zs ===\nx\n", "routes/new.zs", "是")
+    check(r["ok"] == "是" and r["n"] == 1, "不覆盖：新文件放行", r)
+    (p / "queries").mkdir()
+    (p / "queries/a_x.sql").write_text("SELECT :id, :n, :id\n", encoding="utf-8")
+    sm = verb("项目摘要", p)
+    check("a_x," not in sm({})["text"] and "a_x" in sm({})["text"], "项目摘要：默认不带参数（旧格式）", sm({})["text"])
+    r = sm({"含参数": "是"})
+    check("a_x(id,n)" in r["text"] and r["queries"] == ["a_x"], "项目摘要 含参数=是：名(参数,…)", r)
+
+
+def t_split_flow():
+    print("split：v2.run_newproj(split=True) 假模型全流程")
+    fk = FakeS([inv(feat("low_stock", path="/book/low", act="book_low"), feat("hot", path="/book/hot", act="book_hot"))])
+    r, p = gos("s_ok", fk)
+    fs = recs(r)
+    check(r["fixed"] and r["v2"]["结论"] == "成功" and r["v2"]["split"] is True, "两个功能全过 = 成功", (r["stop"], r["v2"].get("结论")))
+    check(r["calls"] == 8, "调用数 = 清单 1 + 实体 1 + 每功能 3×2", r["calls"])
+    check(all((p / x).is_file() for x in ("routes/low_stock.zs", "routes/hot.zs", "ui/low_stock.ui", "ui/hot.ui", "queries/low_stock_list.sql", "queries/hot_list.sql")),
+          "每个功能的 sql / zs / ui 按功能名落盘", sorted(str(x.relative_to(p)) for x in p.rglob("*") if x.is_file())[:30])
+    check(not (p / "routes/custom.zs").exists(), "不写 custom.zs")
+    check(fs["hot"]["步骤"]["zs"] == {"结果": "通过", "尝试": 1, "重写": 0} and set(fs) == {"low_stock", "hot"}, "result.json v2.功能 记每步通过 / 重写次数", fs)
+    check(r["v2"]["预算"]["max_calls"] == 16, "预算 调用按功能数放宽 = 4+6×2", r["v2"]["预算"])
+    rj = json.loads((TMP / "s_ok/out/result.json").read_text(encoding="utf-8"))
+    check(rj["v2"]["功能"] and rj["v2"]["结论"] == "成功", "写进 result.json")
+    zs_prompt = next(x for x in fk.prompts if ".zs 接口助手" in x and "hot" in x)
+    sql_hot_prompt = next(x for x in fk.prompts if "SQLite 语句助手" in x and '"名":"hot"' in x)
+    check("low_stock_list(n)" in sql_hot_prompt and "/book/low" in sql_hot_prompt.split("全项目名字摘要")[1], "第 2 个功能的输入带全项目名字摘要（前一功能的 sql 名+参数、接口路径+动作名）", sql_hot_prompt[-400:])
+    check("SELECT * FROM book" not in sql_hot_prompt.split("全项目名字摘要")[1] and "接口 POST /book/low" not in sql_hot_prompt, "摘要只有名字，不给前一功能全文")
+    check("hot_list" in zs_prompt and "本功能sql" in zs_prompt, "zs 输入带本功能刚写的 sql")
+
+    fk = FakeS([inv(feat("a", path="/book/a", act="a_x", ui=False), feat("b", path="/book/b", act="b_x", sql=[], ifaces=False, ui=False))])
+    r, p = gos("s_skip", fk)
+    fs = recs(r)
+    check(r["fixed"] and fs["b"]["步骤"]["sql"]["结果"] == "跳过" and fs["a"]["步骤"]["ui"]["结果"] == "跳过", "清单里为空的步骤跳过不调模型", fs)
+    check(r["calls"] == 4, "跳过空步骤：清单 + 实体 + a 的 sql、zs = 4 次", r["calls"])
+
+    r, _ = gos("s_none", FakeS([json.dumps({"模板": "full", "功能": []})]))
+    check(r["fixed"] and r["calls"] == 2 and r["v2"]["功能"] == [], "功能清单为空 → 只剩实体 + gen，2 次调用成功", (r["stop"], r["calls"]))
+
+
+def t_split_fail():
+    print("split：清单重写 / 单个文件重写 / 单功能失败继续 / 整体结论")
+    A, B, C = feat("a", path="/book/a", act="a_x"), feat("b", path="/book/b", act="b_x"), feat("c", path="/book/c", act="c_x")
+    fk = FakeS([inv(feat("a", sql=["zz"])), inv(A)])
+    r, _ = gos("s_inv_rw", fk)
+    second = [x for x in fk.prompts if "项目拆解助手" in x][1]
+    check(r["fixed"] and "要以功能名「a_」开头" in second.split("上次的报错：")[1], "清单不过 → 带校验报错重写 1 次后通过", (r["stop"], second[-200:]))
+    r, _ = gos("s_inv_bad", FakeS([inv(feat("a", sql=["zz"]))]))
+    check(not r["fixed"] and "功能清单两次都没过" in r["stop"] and r["v2"]["结论"] == "失败", "清单两次都不过 → 失败", r["stop"])
+
+    BAD_ZS = "=== routes/a.zs ===\n接口 POST /book/a 动作 a_x\n  用包 db http\n"
+    fk = FakeS([inv(A)], bad={("a", "zs"): [BAD_ZS]})
+    r, p = gos("s_zs_rw", fk)
+    check(not r["fixed"] and "部分成功" in r["stop"] and "a" in r["stop"], "唯一功能 zs 两次坏 → 部分成功（失败列表含 a）", r["stop"])
+    check(not (p / "routes/a.zs").exists() and not (p / "queries/a_list.sql").exists(), "失败功能已写的 sql 和坏 zs 全部撤回", sorted(str(x.relative_to(p)) for x in p.rglob("*") if x.is_file()))
+
+    class RW(FakeS):
+        """a 的 zs 第 1 次坏、第 2 次好。"""
+        def __call__(self, system, user, tag, timeout, model=None, **kw):
+            out = super().__call__(system, user, tag, timeout, model, **kw)
+            if ".zs 接口助手" in user and '"名":"a"' in user and "上次的报错：无" in user:
+                return BAD_ZS
+            return out
+    fk = RW([inv(A, B)])
+    r, p = gos("s_zs_ok2", fk)
+    fs = recs(r)
+    check(r["fixed"] and fs["a"]["步骤"]["zs"] == {"结果": "通过", "尝试": 2, "重写": 1} and fs["b"]["步骤"]["zs"]["重写"] == 0 and r["calls"] == 9,
+          "单个文件第 1 次不过 → 撤回重写 1 次通过；记重写次数 = 1，总 9 次调用", (r["stop"], fs, r["calls"]))
+    second = [x for x in fk.prompts if ".zs 接口助手" in x and '"名":"a"' in x][1]
+    check("上次的报错：" in second and "上次的报错：无" not in second, "重写提示词带上次报错")
+
+    fk = FakeS([inv(A, B, C)], bad={("b", "zs"): [BAD_ZS.replace("a.zs", "b.zs")], ("c", "ui"): ["随便说几句"]})
+    r, p = gos("s_partial", fk)
+    fs = recs(r)
+    files = sorted(str(x.relative_to(p)) for x in p.rglob("*") if x.is_file() and x.parts[-2] in ("routes", "ui", "queries"))
+    check(not r["fixed"] and r["status"] == "失败" and r["v2"]["结论"] == "部分成功" and r["stop"].startswith("部分成功") and "b" in r["stop"] and "c" in r["stop"],
+          "b、c 失败 → 部分成功并列出失败功能；不终止整个模板", (r["stop"], r["v2"]["结论"]))
+    check(fs["a"]["步骤"]["ui"]["结果"] == "通过" and fs["b"]["步骤"]["zs"]["结果"] == "失败" and fs["b"]["步骤"]["zs"]["尝试"] == 2 and fs["c"]["步骤"]["ui"]["结果"] == "失败"
+          and "ui" not in fs["b"]["步骤"], "记录：a 全过，b 在 zs 失败（后面步骤不再跑），c 在 ui 失败", fs)
+    check("失败原因" in fs["b"] and fs["b"]["失败步骤"] == "zs", "失败功能带失败步骤 / 原因", fs["b"])
+    mine = [x for x in files if "book" not in x]
+    check(mine == ["queries/a_list.sql", "routes/a.zs", "ui/a.ui"], "只剩成功功能 a 的文件（b、c 已撤回，gen 的 book 文件还在）", files)
+
+    fk = FakeS([inv(A, B)], bad={("a", "sql"): ["=== queries/a_list.sql ===\nSELECT nope FROM book\n"]})
+    r, p = gos("s_sqlbad", fk)
+    fs = recs(r)
+    check(fs["a"]["步骤"]["sql"] == {"结果": "失败", "尝试": 2, "重写": 1} and "预编译失败" in fs["a"]["失败原因"] and fs["b"]["步骤"]["ui"]["结果"] == "通过",
+          "sql 预编译两次不过 → a 失败（未写盘），b 继续", fs)
+    check(not (p / "queries/a_list.sql").exists(), "坏 sql 没写盘")
+
+    fk = FakeS([inv(feat("book", path="/book/z", act="z_x", sql=["book_zz"]))], bad={})
+    r, p = gos("s_collide", fk)
+    check(not r["fixed"] and recs(r)["book"]["步骤"]["zs"]["结果"] == "失败" and "不能覆盖" in recs(r)["book"]["失败原因"],
+          "功能名与 gen 路由文件同名 → 不覆盖，该功能失败（gen 的 routes/book.zs 仍在）", (r["stop"], recs(r)))
+    check((p / "routes/book.zs").is_file() and "book_list" in (p / "routes/book.zs").read_text(encoding="utf-8"), "gen 的 routes/book.zs 没被动")
+
+    r, _ = gos("s_budget", FakeS([inv(A)]), max_calls=3)
+    check(not r["fixed"] and "调用" in r["stop"], "总调用上限仍生效（max_calls=3）", r["stop"])
+
+
+def t_split_dry_cli():
+    print("split：空跑 / 包登记 / CLI 参数 / 旧模板不变")
+    np_ = packs.pick("newproj")
+    check(np_.SPLIT_TEMPLATE.is_file() and np_.SPLIT_TEMPLATE != np_.TEMPLATE and "校验清单" in np_.EXTRA_VERBS, "SPLIT_TEMPLATE 登记，旧 TEMPLATE 不动")
+    pj = proj("sp_dry", None)
+    problem, main, subs, rec = V.check(pj, TMP / "sp_dry_work", np_.SPLIT_TEMPLATE.read_text(encoding="utf-8"), "做个图书管理", np_)
+    check(problem == "" and rec.get("空跑假调用") == 5, "split 模板 v2.check 空跑走通（占位功能 1 个：清单 + 实体 + sql/zs/ui = 5 次假调用）", (problem, rec))
+    for n in ("sys_plan", "sys_fsql", "sys_fzs", "sys_fui"):
+        t = (np_.TEMPLATE.parent / "prompts" / f"{n}.md").read_text(encoding="utf-8")
+        check("=== " in t or "JSON" in t, f"提示词 {n}.md 存在")
+    check("<功能名>" in (np_.TEMPLATE.parent / "prompts/sys_fzs.md").read_text(encoding="utf-8") and "custom" not in (np_.TEMPLATE.parent / "prompts/sys_fui.md").read_text(encoding="utf-8").split("## .ui")[0],
+          "zs / ui 提示词按功能名写文件，不再叫 custom")
+    r, p = go("old_still", Fake())
+    check(r["fixed"] and r["calls"] == 4 and "split" in r["v2"] and r["v2"]["split"] is False and (p / "routes/custom.zs").is_file(), "默认仍是旧模板（4 次调用，custom.zs）")
+
+    from tools.dslagent import __main__ as M
+    seen = {}
+    real = V.run_newproj
+    V.run_newproj = lambda req, project, out, wall=None, split=False, **kw: seen.update(split=split, wall=wall, req=req) or {
+        "fixed": True, "calls": 0, "cost": 0, "seconds": 0, "stop": "", "changed_files": []}
+    try:
+        rq = TMP / "cli_req.txt"
+        rq.write_text("需求", encoding="utf-8")
+        M.main(["newproj", "--split", str(rq), str(TMP / "cli_p"), "--out", str(TMP / "cli_o")])
+        check(seen["split"] is True and seen["wall"] is None, "CLI newproj --split → run_newproj(split=True)，--wall 缺省交给 run_newproj", seen)
+        M.main(["newproj", str(rq), str(TMP / "cli_p"), "--out", str(TMP / "cli_o"), "--wall", "100"])
+        check(seen["split"] is False and seen["wall"] == 100, "CLI 不带 --split 仍旧模板", seen)
+    finally:
+        V.run_newproj = real
+    old = os.environ.get("DSLAGENT_MODELS")
+    os.environ["DSLAGENT_MODELS"] = json.dumps({"sub": "codex:gpt-6-luna:medium"})
+    try:
+        fk = FakeS([inv(feat("a", path="/book/a", act="a_x"))])
+        r, _ = gos("s_routes", fk)
+        rows = json.loads((TMP / "s_routes/out/calls.json").read_text(encoding="utf-8"))
+        rows = rows if isinstance(rows, list) else rows.get("calls", rows)
+        check(r["fixed"] and len(rows) == 5 and all(c.get("engine") == "codex" and c.get("effort") == "medium" for c in rows), "DSLAGENT_MODELS.sub 对 split 全部步骤（含清单）生效", rows[:1])
+    finally:
+        if old is None:
+            os.environ.pop("DSLAGENT_MODELS", None)
+        else:
+            os.environ["DSLAGENT_MODELS"] = old
+
+
 def main():
     try:
         t_read()
@@ -357,6 +611,10 @@ def main():
         t_pack()
         t_flow()
         t_fix3()
+        t_split_verbs()
+        t_split_flow()
+        t_split_fail()
+        t_split_dry_cli()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n{'=' * 50}\n通过 {PASS}，失败 {FAIL}")

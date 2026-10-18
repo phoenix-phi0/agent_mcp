@@ -743,6 +743,32 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
 # ------------------------------------------------------------------ 新建项目：跳过规划，直接执行固定模板
 
 NEWPROJ_CALLS = 8        # 模板里 预算 调用 8：实体 / sql / zs / ui 各 ≤ 2 次
+NEWPROJ_SPLIT_WALL = 2400      # split 模板默认墙钟（功能多，逐个写）
+FEATURE_REC = re.compile(r"^功能记录 (\S+) (\S+) (通过|失败|跳过) (\d+)\s*$", re.M)
+FEATURE_ERR = re.compile(r"^功能失败 (\S+) (\S+) (.*)$", re.M)
+
+
+def newproj_split_calls():
+    """split 模板的总调用上限：4 + 功能数上限×6（NEWPROJ_SPLIT_MAX_FEATURES，默认 12）。模板里 预算 按实际功能数再收紧。"""
+    try:
+        n = max(1, int(os.environ.get("NEWPROJ_SPLIT_MAX_FEATURES") or 12))
+    except ValueError:
+        n = 12
+    return 4 + 6 * n
+
+
+def feature_records(output):
+    """从引擎输出里解析「功能记录 名 步骤 结果 次数」「功能失败 名 步骤 原因」→ [{名, 步骤: {结果, 尝试, 重写}}, …]（保持出现顺序）。
+    重写 = 尝试次数 - 1（跳过为 0）。失败的功能带 失败原因。"""
+    feats = {}
+    for m in FEATURE_REC.finditer(output):
+        n, step, res, k = m.group(1), m.group(2), m.group(3), int(m.group(4))
+        f = feats.setdefault(n, {"名": n, "步骤": {}})
+        f["步骤"][step] = {"结果": res, "尝试": k, "重写": max(0, k - 1)}
+    for m in FEATURE_ERR.finditer(output):
+        f = feats.setdefault(m.group(1), {"名": m.group(1), "步骤": {}})
+        f["失败步骤"], f["失败原因"] = m.group(2), m.group(3)[:600]
+    return list(feats.values())
 
 
 def _req_text(req):
@@ -757,13 +783,18 @@ def _req_text(req):
     return s.strip()
 
 
-def run_newproj(req, project, out_dir, model=None, wall=WALL, max_calls=NEWPROJ_CALLS):
+def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, split=False):
     """新建项目入口：不规划，直接执行 packs/newproj/newproj.zs（pack=newproj）。
     req：需求原文，或一个存在的文本文件路径；project：要新建的项目目录（不存在就建，也是引擎工作目录）；
     out_dir：记录目录（calls/、calls.json、plan.zs、plan_out.txt、result.json）；model：假模型 backend（测试用）。
     步骤：模板过 check（白名单 + 空跑）→ 引擎执行（预算、模型调用计数 / 墙钟 / 费用同 v2）→ 终止 成功 才算成功。
-    没有验收层；失败时已生成的文件留在项目里供排查（不回滚）。返回结果字典（同 run 的字段）。"""
+    没有验收层；失败时已生成的文件留在项目里供排查（不回滚）。返回结果字典（同 run 的字段）。
+    split=True：改跑 newproj_split.zs（功能清单 → 实体 → 逐个功能 sql / zs / ui，每个文件单独检查单独重写 1 次）；默认 False 仍是旧模板。
+    split 时某功能两次不过只撤回该功能、继续下一个：结果 v2.功能 记每个功能每步的通过 / 重写次数，v2.结论 = 成功 | 部分成功 | 失败，
+    部分成功时 fixed=False、stop 以「部分成功：」开头并列出失败功能（status 仍是 失败）。wall 缺省：旧模板 WALL，split NEWPROJ_SPLIT_WALL。"""
     from . import plan as DP
+    wall = wall or (NEWPROJ_SPLIT_WALL if split else WALL)
+    max_calls = max_calls or (newproj_split_calls() if split else NEWPROJ_CALLS)
 
     project = Path(project).resolve()
     project.mkdir(parents=True, exist_ok=True)
@@ -793,7 +824,8 @@ def run_newproj(req, project, out_dir, model=None, wall=WALL, max_calls=NEWPROJ_
             raise Stop("DSLAGENT_MODELS 不合格：" + route_err)
         if not task:
             raise Stop("需求为空")
-        script = pack.TEMPLATE.read_text(encoding="utf-8")
+        script = (pack.SPLIT_TEMPLATE if split else pack.TEMPLATE).read_text(encoding="utf-8")
+        info["split"] = bool(split)
         (out / "plan.zs").write_text(script, encoding="utf-8")
         t0 = time.time()
         problem, main, subs, crec = check(project, out / "dry", script, task, pack)
@@ -815,6 +847,8 @@ def run_newproj(req, project, out_dir, model=None, wall=WALL, max_calls=NEWPROJ_
         except Exception as e:  # noqa: BLE001  脚本报错按失败处理
             err = f"{type(e).__name__}: {str(e)[:800]}"
         halted = eng.halted
+        if split:
+            info["功能"] = feature_records("\n".join(eng.output))
         (out / "plan_out.txt").write_text("\n".join(eng.output) + (f"\n\n[报错] {err}" if err else "")
                                           + f"\n\n[终止] {json.dumps(halted, ensure_ascii=False)}", encoding="utf-8")
         info.update(终止=halted, 报错=err, 预算={"calls": eng.usage.calls, "max_calls": eng.usage.max_calls, "max_secs": eng.usage.max_secs})
@@ -825,12 +859,16 @@ def run_newproj(req, project, out_dir, model=None, wall=WALL, max_calls=NEWPROJ_
         if not halted:
             raise Stop("脚本跑完没有 终止（没自报成功）")
         if halted.get("状态") != "成功":
-            raise Stop(f"脚本终止 {halted.get('状态')}：{str(halted.get('原因'))[:400]}")
+            if split and str(halted.get("原因")).startswith("部分成功"):
+                info["结论"] = "部分成功"
+            raise Stop(f"脚本终止 {halted.get('状态')}：{str(halted.get('原因'))[:400]}" if info.get("结论") != "部分成功" else str(halted.get("原因"))[:600])
         state.update(状态="成功", 原因="")
+        info["结论"] = "成功"
     except Stop as e:
         state["原因"] = str(e)
     except Exception as e:  # noqa: BLE001  流程自身出错也要有结果
         state["原因"] = f"newproj 流程出错：{type(e).__name__}: {str(e)[:400]}"
+    info.setdefault("结论", "失败")
     return _finish(res, out, M, steps, state, {}, {"跑了": False}, base, snapshot(project, pack), t_start)
 
 
