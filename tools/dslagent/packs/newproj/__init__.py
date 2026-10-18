@@ -19,7 +19,7 @@ PLAN_RULES_END = ""
 TEMPLATE = Path(__file__).with_name("newproj.zs")
 SPLIT_TEMPLATE = Path(__file__).with_name("newproj_split.zs")
 EXTRA_PACKS = ("newproj",)
-EXTRA_VERBS = frozenset({"读原文", "校验实体", "拆分隔块", "生成增删改查", "预编译sql", "项目摘要", "检查项目", "撤回", "留底", "校验清单"})
+EXTRA_VERBS = frozenset({"读原文", "校验实体", "拆分隔块", "生成增删改查", "预编译sql", "项目摘要", "检查项目", "撤回", "留底", "校验清单", "核对规则", "校验角色"})
 
 
 def model_system():

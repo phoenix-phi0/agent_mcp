@@ -16,7 +16,46 @@ def _gen_errors():
     return ProjectError, DSLError
 
 
-def generate(root, tpl="full", only=None, force=False):
+ROLE_CN = {"teacher": "教师", "student": "学生", "admin": "管理员", "manager": "经理", "user": "用户", "owner": "店主"}
+
+
+def role_files(roles):
+    """清单里的角色 → 接 gen private 登录注册的三处补丁：user 实体加 role 列（注册默认最后一个角色）、
+    queries/user_auth.sql（认证 核对 用，把 role 注入 {current_role}）、routes/auth_roles.zs（认证 核对 + 认证 角色 声明）。"""
+    names = [str(r).strip() for r in roles if str(r).strip()]
+    lines = ["# 角色声明（由 newproj 按功能清单的「角色」写出，接 gen private 的登录注册）。接口行写「角色 <代号>」后，",
+             "# 开着登录（private 的「认证 必须」）时只许该角色调用，别的角色 403。注册时默认角色是最后一个，其余角色要改 user 表的 role 列。",
+             "认证 核对 app.db user_auth"]
+    lines += [f"认证 角色 {r} {ROLE_CN.get(r, r)}" for r in names]
+    return {"queries/user_auth.sql": "-- 「认证 核对」：每个请求按用户名查一次，role 注入成 {current_role}\n"
+                                      "SELECT username, role FROM user WHERE username = :username\n",
+            "routes/auth_roles.zs": "\n".join(lines) + "\n"}, names[-1] if names else ""
+
+
+def apply_roles(root, roles):
+    """在 add_auth 之后、ensure_db 之前调：给 entities/user.entity 加 role 列，写 user_auth.sql 与 auth_roles.zs（已存在的不覆盖）。"""
+    root = Path(root)
+    files, default = role_files(roles)
+    log = []
+    ue = root / "entities" / "user.entity"
+    if ue.is_file():
+        t = ue.read_text(encoding="utf-8")
+        if not re.search(r"^\s*字段\s+role\s", t, re.M):
+            line = f"  字段 role 文本 必填 默认 {default} 角色\n"
+            t = t.replace("\n结束", "\n" + line + "结束", 1) if "\n结束" in t else t + line
+            ue.write_text(t, encoding="utf-8")
+            log.append(f"  user 实体加 role 列（默认 {default}）")
+    for rel, text in files.items():
+        p = root / rel
+        if p.exists():
+            continue
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+        log.append(f"  写入 {rel}")
+    return log
+
+
+def generate(root, tpl="full", only=None, force=False, roles=None):
     from gen import project as P
     PE, _ = _gen_errors()
     root = Path(root)
@@ -25,6 +64,8 @@ def generate(root, tpl="full", only=None, force=False):
         log += P.init(root, sample=False)
         if tpl == "private":
             log += P.add_auth(root)
+            if roles:
+                log += apply_roles(root, roles)
             ents = P.load_entities(root)
             log += P.generate(root, "private", only=only or None, force=force)
             rest = [e.name for e in ents if "owner" not in [f.name for f in e.fields] and (not only or e.name in only)]
@@ -48,6 +89,20 @@ def dup_routes(root):
     return [f"接口 {k[0]} {k[1]} 重复出现在 {'、'.join(v)}" for k, v in seen.items() if len(v) > 1]
 
 
+UI_FAIL = re.compile(r"^\s*\[提示\]\s*(\S+?)：解析失败\s*(.*)$")
+
+
+def ui_parse_failures(lines):
+    """gen build 对解析失败的 .ui 只在返回的提示行里写「<文件>：解析失败 <原话>」并跳过（ui_site.merge 为了让编辑器容忍写到一半的文件），
+    不抛错；检查项目把它当失败：返回「界面 <文件> 解析失败（gen 原话）：…」列表。"""
+    out = []
+    for ln in lines or []:
+        m = UI_FAIL.match(str(ln))
+        if m:
+            out.append(f"界面 ui/{m.group(1)} 编译不过，gen 原话：{m.group(2).strip()}")
+    return out
+
+
 def check_project(root):
     from gen import project as P
     from tools.entity import parse, validate
@@ -62,7 +117,8 @@ def check_project(root):
     errs += dup_routes(root)
     if not errs:
         try:
-            P.build(root)
+            lines = P.build(root)
+            errs += ui_parse_failures(lines)
         except (PE, DE) as e:
             errs.append(f"build：{e}")
         except Exception as e:  # noqa: BLE001

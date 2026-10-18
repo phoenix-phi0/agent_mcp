@@ -504,7 +504,8 @@ def build(root: Path, entry: str = "", title: str = "") -> list:
         # 一个界面都没有。run 那边已经会说「没有 .ui，只起接口」，build
         # 直接调用时也得有同样的退路——否则下面按入口重排时 pop 一个空
         # 列表，抛的是 IndexError，看不出是「没有界面」。
-        return ["  ui/ 下没有界面，跳过编译"]
+        # 全是解析失败的话，原因就在 notes 里（「<文件>：解析失败 …」），也要带出去
+        return ["  ui/ 下没有界面，跳过编译"] + [f"  [提示] {x}" for x in notes if "解析失败" in x]
     if not entry:
         # 入口不给的话，跳过「登录」「注册」：auth.ui 按文件名排在最前，
         # 不跳的话已经登录的人每次打开都先看到登录页。打开的是应用界面，

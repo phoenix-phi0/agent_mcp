@@ -153,6 +153,13 @@ def main() -> int:
         build(proj)
         check(not (web / PAGES_FILE).exists(), "不拆了：pages.json 删了")
         check(c.get("/teacher").status_code == 404, "/teacher 404")
+
+        # 所有 .ui 都解析失败：build 不抛，但返回里要带「<文件>：解析失败 …」（检查项目靠它判不过）
+        for f in (proj / "ui").glob("*.ui"):
+            f.unlink()
+        (proj / "ui" / "bad.ui").write_text("界面 表单 坏页\n  字段 title 书名\n结束\n", encoding="utf-8")
+        lines = build(proj)
+        check(any("bad.ui：解析失败" in x and "分组" in x for x in lines), f"没有任何界面可编译时也带出解析失败：{lines}")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

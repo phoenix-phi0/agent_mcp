@@ -5,9 +5,14 @@
 其余 0 文件（空回复、没有分隔块的散文）ok=否，msg=「没有解析到 === 路径 === 分隔块，按格式重写」。
 第 3 个参数「不覆盖」（写 是）：解析出的文件在项目里已经存在就不过（ok=否，msg 点名文件），用来防止覆盖 gen 或别的功能写好的文件。
 前缀可以是完整路径（如 routes/book_stats.zs）：只收这一个文件。
+前缀也可以是用 | 隔开的几个「路径或带 * 的通配」（* 只匹配同一层目录里的文件名，不跨 /），如
+routes/book_stats.zs|routes/book_stats_*.zs|queries/book_stats_*.sql：一个功能允许多个文件时用，不在范围内的块丢掉（rejected）。
+0 文件时 msg 会列出允许的路径写法（而不是只说没解析到）。第 4 个参数「可空」（写 是）：没有符合的块也算通过（n=0），
+用来从一次回复里单独取附带的 sql 块。
 没有分隔块而整个回复是 JSON edits（{edits:[{file, new/old}…]}、{file, content}、或它们的列表）时转成 files
 （new 为空 old 时视为新建内容），返回里 from_json=是、note=由 JSON 转换。
 """
+import fnmatch
 import json
 import re
 import sys
@@ -49,7 +54,24 @@ def _json_items(text):
     return items
 
 
-def 拆分隔块(文本: str = "", 前缀: str = "", 不覆盖: str = "") -> dict:
+def _allowed(prefix):
+    """前缀 → 判断函数 + 人话描述。含 | 或 * 的按路径/通配匹配（* 不跨目录），否则沿用「以前缀开头」。"""
+    if "|" not in prefix and "*" not in prefix:
+        return (lambda name: name.startswith(prefix)), f"以 {prefix} 开头的路径"
+    pats = [p.strip() for p in prefix.split("|") if p.strip()]
+
+    def ok(name):
+        for p in pats:
+            if "*" in p:
+                if name.count("/") == p.count("/") and fnmatch.fnmatchcase(name, p):
+                    return True
+            elif name == p:
+                return True
+        return False
+    return ok, "、".join(pats)
+
+
+def 拆分隔块(文本: str = "", 前缀: str = "", 不覆盖: str = "", 可空: str = "") -> dict:
     sys.path.insert(0, str(Path(__file__).parent))
     import _gen as G
     if G.is_dry():       # 空跑：模型回复是占位，放行让模板走完全部步骤
@@ -59,6 +81,7 @@ def 拆分隔块(文本: str = "", 前缀: str = "", 不覆盖: str = "") -> dic
     out, rejected = [], []
     if not prefix:
         return {"ok": "否", "files": [], "n": 0, "rejected": [], "msg": "没给路径前缀"}
+    match, allowed = _allowed(prefix)
     parts = HEAD.split(text)
     blocks = [(parts[i], parts[i + 1].strip()) for i in range(1, len(parts) - 1, 2)]
     from_json = False
@@ -74,7 +97,7 @@ def 拆分隔块(文本: str = "", 前缀: str = "", 不覆盖: str = "") -> dic
         if ".." in name.split("/") or name.startswith("/") or "\\" in name or ".." in name:
             rejected.append(name)
             continue
-        if not name.startswith(prefix):
+        if not match(name):
             rejected.append(name)
             continue
         out.append({"file": name, "content": body + "\n"})
@@ -90,5 +113,7 @@ def 拆分隔块(文本: str = "", 前缀: str = "", 不覆盖: str = "") -> dic
         return dict(res, ok="是")
     if text.strip() in NONE_MARKS:
         return dict(res, ok="是", none="是")
-    why = f"（{len(rejected)} 个路径不在 {prefix} 下被丢掉：{'、'.join(rejected[:3])}）" if rejected else ""
+    if str(可空 or "").strip() in ("是", "true", "True", "1"):
+        return dict(res, ok="是")
+    why = f"（{len(rejected)} 个路径不在允许范围被丢掉：{'、'.join(rejected[:3])}；允许的文件路径：{allowed}）" if rejected else f"（允许的文件路径：{allowed}）"
     return dict(res, ok="否", msg=MSG_EMPTY + why)

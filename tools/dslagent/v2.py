@@ -746,15 +746,16 @@ NEWPROJ_CALLS = 8        # 模板里 预算 调用 8：实体 / sql / zs / ui �
 NEWPROJ_SPLIT_WALL = 2400      # split 模板默认墙钟（功能多，逐个写）
 FEATURE_REC = re.compile(r"^功能记录 (\S+) (\S+) (通过|失败|跳过) (\d+)\s*$", re.M)
 FEATURE_ERR = re.compile(r"^功能失败 (\S+) (\S+) (.*)$", re.M)
+FEATURE_UNIMPL = re.compile(r"^功能未实现 (\S+) (.*)$", re.M)
 
 
 def newproj_split_calls():
-    """split 模板的总调用上限：4 + 功能数上限×6（NEWPROJ_SPLIT_MAX_FEATURES，默认 12）。模板里 预算 按实际功能数再收紧。"""
+    """split 模板的总调用上限：4 + 功能数上限×10（NEWPROJ_SPLIT_MAX_FEATURES，默认 12）。模板里 预算 按实际功能数再收紧。"""
     try:
         n = max(1, int(os.environ.get("NEWPROJ_SPLIT_MAX_FEATURES") or 12))
     except ValueError:
         n = 12
-    return 4 + 6 * n
+    return 4 + 10 * n
 
 
 def feature_records(output):
@@ -768,6 +769,13 @@ def feature_records(output):
     for m in FEATURE_ERR.finditer(output):
         f = feats.setdefault(m.group(1), {"名": m.group(1), "步骤": {}})
         f["失败步骤"], f["失败原因"] = m.group(2), m.group(3)[:600]
+    for m in FEATURE_UNIMPL.finditer(output):
+        f = feats.setdefault(m.group(1), {"名": m.group(1), "步骤": {}})
+        try:
+            v = json.loads(m.group(2))
+            f["未实现规则"] = [str(x) for x in v] if isinstance(v, list) else [m.group(2)]
+        except ValueError:
+            f["未实现规则"] = [m.group(2)]
     return list(feats.values())
 
 

@@ -384,7 +384,13 @@ class FakeS:
         if "应用建模助手" in user:
             return json.dumps({"模板": self.ent_tpl, "实体文本": ENT}, ensure_ascii=False)
         import re as _re
-        m = _re.search(r"本功能：(\{.*?\}) (?:本功能sql|全项目|上次)", user, _re.S) or _re.search(r"本功能：(\{.*\})", user, _re.S)
+        if "需求核对员" in user:
+            names = _re.findall(r"=== routes/([a-z0-9]+?)(?:_\w+)?\.zs ===", user)
+            n = names[0] if names else "?"
+            rules = json.loads(_re.search(r"规则：(\[.*?\]) 本功能sql", user, _re.S).group(1))
+            ok = json.dumps([{"序号": i, "规则": r, "实现": "是", "依据": "x"} for i, r in enumerate(rules, 1)], ensure_ascii=False)
+            return self._pick((n, "chk"), ok)
+        m = _re.search(r"本功能：(\{.*?\}) (?:本功能规则|本功能sql|全项目|上次)", user, _re.S) or _re.search(r"本功能：(\{.*\})", user, _re.S)
         f = json.loads(m.group(1)) if m else {"名": "?", "sql": [], "接口": [{"路径": "/x", "动作": "x"}]}
         n = f["名"]
         if "SQLite 语句助手" in user:
@@ -415,7 +421,7 @@ def t_split_verbs():
     print("split：校验清单 / 拆分隔块 不覆盖 / 项目摘要 含参数")
     f = verb("校验清单", TMP)
     r = f(inv(feat("a"), feat("b")))
-    check(r["ok"] == "是" and r["数量"] == 2 and r["模板"] == "full" and r["调用上限"] == 16, "合法清单：数量 / 模板 / 调用上限 4+6n", r)
+    check(r["ok"] == "是" and r["数量"] == 2 and r["模板"] == "full" and r["调用上限"] == 24, "合法清单：数量 / 模板 / 调用上限 4+10n", r)
     r = f("```json\n" + inv(feat("a")) + "\n```")
     check(r["ok"] == "是", "带围栏也行", r)
     r = f(json.dumps({"模板": "full", "功能": []}))
@@ -478,7 +484,7 @@ def t_split_flow():
           "每个功能的 sql / zs / ui 按功能名落盘", sorted(str(x.relative_to(p)) for x in p.rglob("*") if x.is_file())[:30])
     check(not (p / "routes/custom.zs").exists(), "不写 custom.zs")
     check(fs["hot"]["步骤"]["zs"] == {"结果": "通过", "尝试": 1, "重写": 0} and set(fs) == {"low_stock", "hot"}, "result.json v2.功能 记每步通过 / 重写次数", fs)
-    check(r["v2"]["预算"]["max_calls"] == 16, "预算 调用按功能数放宽 = 4+6×2", r["v2"]["预算"])
+    check(r["v2"]["预算"]["max_calls"] == 24, "预算 调用按功能数放宽 = 4+10×2", r["v2"]["预算"])
     rj = json.loads((TMP / "s_ok/out/result.json").read_text(encoding="utf-8"))
     check(rj["v2"]["功能"] and rj["v2"]["结论"] == "成功", "写进 result.json")
     zs_prompt = next(x for x in fk.prompts if ".zs 接口助手" in x and "hot" in x)
@@ -601,6 +607,231 @@ def t_split_dry_cli():
             os.environ["DSLAGENT_MODELS"] = old
 
 
+# ------------------------------------------------------------------ split：规则核对 / ui 解析失败 / 多文件 / 角色
+
+def rfeat(name, rules, **kw):
+    f = feat(name, path=kw.pop("path", f"/book/{name}"), act=kw.pop("act", f"{name}_act"), **kw)
+    f["规则"] = rules
+    return f
+
+
+def zs_body(n, path, act, role="", extra_sql=""):
+    tail = f" 角色 {role}" if role else ""
+    sql = f"=== queries/{extra_sql}.sql ===\nSELECT * FROM book WHERE stock < :n\n" if extra_sql else ""
+    return (f"=== routes/{n}.zs ===\n接口 POST {path} 动作 {act}{tail}\n  用包 db http\n  设 rows = 查询 app.db {n}_list n={{n}}\n"
+            f"  设 group.low = {{rows}}\n  响应 lists {{group}}\n结束\n" + sql)
+
+
+def chk_reply(rules, no=()):
+    return json.dumps([{"序号": i, "规则": r, "实现": "否" if i in no else "是", "依据": "缺少" if i in no else "x"}
+                       for i, r in enumerate(rules, 1)], ensure_ascii=False)
+
+
+def t_split_rules():
+    print("split：规则字段校验 / 拆分隔块多文件 / 检查项目的 ui 解析失败 / 核对规则 / 角色")
+    f = verb("校验清单", TMP)
+    r = f(inv(rfeat("a", ["规则一", "规则二"])))
+    check(r["ok"] == "是" and r["功能"][0]["规则"] == ["规则一", "规则二"], "清单：规则字段是文本列表放行", r)
+    r = f(inv(feat("a")))
+    check(r["ok"] == "是" and r["功能"][0]["规则"] == [], "清单：没写规则补 []", r)
+    for bad, want in ((["x", 1], "规则 要是文本列表"), ("一条文本", "规则 要是文本列表"), (["ok", " "], "规则里有空字符串")):
+        r = f(inv(rfeat("a", bad)))
+        check(r["ok"] == "否" and want in r["errors"], f"清单：规则 {bad!r} 不过", r)
+    # 角色
+    def rinv(roles, tpl="private", role="teacher", **kw):
+        fe = feat("a")
+        if role is not None:
+            fe["接口"][0]["角色"] = role
+        d = {"模板": tpl, "功能": [fe]}
+        if roles is not None:
+            d["角色"] = roles
+        return json.dumps(d, ensure_ascii=False)
+    r = f(rinv(["teacher", "student"]))
+    check(r["ok"] == "是" and r["角色"] == ["teacher", "student"] and r["角色模板"] == "private", "清单：角色 + private 放行，返回角色", r)
+    check(f(rinv(["teacher"], tpl="full"))["ok"] == "否" and "必须是 private" in f(rinv(["teacher"], tpl="full"))["errors"], "清单：有角色模板不是 private → 不过")
+    r = f(rinv(["teacher"], role="boss"))
+    check(r["ok"] == "否" and "不在顶层" in r["errors"], "清单：接口角色不在顶层角色里 → 不过", r)
+    r = f(rinv(["Teacher"], role=None))
+    check(r["ok"] == "否" and "snake" in r["errors"], "清单：角色名要 snake", r)
+    r = f(rinv(None, tpl="private", role=None), "老师登录后可以导入题目")
+    check(r["ok"] == "否" and "必须给「角色」" in r["errors"], "清单：需求提到登录/老师 却没给角色 → 不过", r)
+    check(f(rinv(None, tpl="full", role=None), "做一个图书管理，管库存")["ok"] == "是", "清单：需求没提登录 → 不要求角色")
+    check(f(rinv(["teacher", "student"]), "老师登录后可以导入题目")["ok"] == "是", "清单：给了角色 + 需求提登录 → 放行")
+    ev = verb("校验实体", TMP)
+    r = ev(ENT, "full", "要登录", "private")
+    check(r["ok"] == "否" and "private" in r["errors"], "校验实体：清单定了 private 实体步选 full → 不过", r)
+    check(ev(ENT, "private", "要登录", "private")["ok"] == "是" and ev(ENT, "full", "x")["ok"] == "是", "校验实体：清单模板一致 / 没给 → 放行")
+
+    # 拆分隔块：多文件命名
+    p = proj("sp_multi")
+    sp = verb("拆分隔块", p)
+    pat = "routes/q.zs|routes/q_*.zs"
+    r = sp("=== routes/q.zs ===\na\n=== routes/q_ext.zs ===\nb\n=== routes/other.zs ===\nc\n=== routes/q_a/b.zs ===\nd\n", pat, "是")
+    check(r["ok"] == "是" and [x["file"] for x in r["files"]] == ["routes/q.zs", "routes/q_ext.zs"] and len(r["rejected"]) == 2, "多文件命名：q.zs 与 q_*.zs 放行，别的（含子目录）丢掉", r)
+    r = sp("=== routes/other.zs ===\nc\n", pat, "是")
+    check(r["ok"] == "否" and "routes/q.zs" in r["msg"] and "routes/q_*.zs" in r["msg"] and "routes/other.zs" in r["msg"],
+          "全被丢掉时报错说清允许的命名，而不是只说没解析到", r)
+    r = sp("=== routes/q.zs ===\na\n=== queries/q_x.sql ===\nSELECT 1\n", "queries/q_*.sql", "是", "是")
+    check(r["ok"] == "是" and [x["file"] for x in r["files"]] == ["queries/q_x.sql"], "只取回复里附带的 sql 块", r)
+    r = sp("=== routes/q.zs ===\na\n", "queries/q_*.sql", "是", "是")
+    check(r["ok"] == "是" and r["n"] == 0, "可空：没有 sql 块也算通过（n=0）", r)
+    check(sp("没有块的散文", "queries/q_*.sql", "是", "是")["ok"] == "是", "可空：散文也算没有 sql")
+
+    # 核对规则 / 校验角色 动词
+    cr = verb("核对规则", TMP)
+    rules = ["判题用库里的题", "写作答记录"]
+    r = cr(chk_reply(rules), {"规则": rules})
+    check(r["ok"] == "是" and r["未实现列表"] == [], "核对规则：全是 → ok", r)
+    r = cr("```json\n" + chk_reply(rules, no=(2,)) + "\n```", {"规则": rules})
+    check(r["ok"] == "否" and r["未实现列表"] == ["写作答记录"] and "缺少" in r["未实现"], "核对规则：有『否』→ 未实现带依据（带围栏也行）", r)
+    r = cr(json.dumps([{"序号": 1, "实现": "是"}]), {"规则": rules})
+    check(r["ok"] == "否" and r["未实现列表"] == ["写作答记录"], "核对规则：回复漏了的规则算否", r)
+    r = cr("我觉得都实现了", {"规则": rules})
+    check(r["ok"] == "是" and r["解析"] == "否", "核对规则：回复不是 JSON → 核对不了，不拿它当重写理由", r)
+    check(cr("x", {"规则": []})["ok"] == "是" and cr("x", {"规则": []})["数量"] == 0, "核对规则：规则为空直接过")
+    pr = proj("role_v")
+    (pr / "routes").mkdir()
+    rv = verb("校验角色", pr)
+    fe = {"名": "q", "接口": [{"路径": "/q/a", "动作": "q_a", "角色": "teacher"}, {"路径": "/q/b", "动作": "q_b"}]}
+    check(rv(fe)["ok"] == "否" and "没找到" in rv(fe)["msg"], "校验角色：zs 里找不到接口 → 不过", rv(fe))
+    (pr / "routes/q.zs").write_text("接口 POST /q/a 动作 q_a\n  返回 {}\n结束\n", encoding="utf-8")
+    r = rv(fe)
+    check(r["ok"] == "否" and "角色 teacher" in r["msg"] and "/q/a" in r["msg"], "校验角色：接口行没写角色 → 点名接口和写法", r)
+    (pr / "routes/q.zs").write_text("接口 POST /q/a 动作 q_a\n  返回 {}\n结束\n", encoding="utf-8")
+    (pr / "routes/q_ext.zs").write_text("接口 POST /q/c 动作 q_c 角色 student\n  返回 {}\n结束\n", encoding="utf-8")
+    fe2 = {"名": "q", "接口": [{"路径": "/q/c", "动作": "q_c", "角色": "student"}]}
+    check(rv(fe2)["ok"] == "是", "校验角色：在 routes/<功能>_*.zs 里也认", rv(fe2))
+    (pr / "routes/q.zs").write_text("接口 POST /q/a 动作 q_a 只许 教师\n  返回 {}\n结束\n", encoding="utf-8")
+    check(rv(fe)["ok"] == "是", "校验角色：『只许 教师』等同 角色 teacher；没标角色的接口不查", rv(fe))
+
+    # 检查项目：ui 解析失败 = 检查不过
+    pg = proj("ui_fail")
+    verb("生成增删改查", pg)({"模板": "full"})
+    ck = verb("检查项目", pg)
+    check(ck({})["ok"] == "是", "gen 的项目检查通过")
+    (pg / "ui/badf.ui").write_text("界面 表单 坏页\n  字段 title 书名\n结束\n", encoding="utf-8")
+    r = ck({})
+    check(r["ok"] == "否" and "ui/badf.ui" in r["msg"] and "字段" in r["msg"] and "分组" in r["msg"], "ui 解析失败 → 检查不过，报错带文件名和 gen 原话", r)
+    (pg / "ui/badf.ui").write_text("界面 表单 坏页\n  分组 主体 竖排\n    字段 title 书名\n  结束\n结束\n", encoding="utf-8")
+    check(ck({})["ok"] == "是", "改成字段在分组里 → 通过", ck({}))
+    pg2 = proj("ui_fail_all")
+    verb("生成增删改查", pg2)({"模板": "full"})
+    for x in (pg2 / "ui").glob("*.ui"):
+        x.unlink()
+    (pg2 / "ui/only.ui").write_text("界面 表单 坏页\n  字段 title 书名\n结束\n", encoding="utf-8")
+    r = verb("检查项目", pg2)({})
+    check(r["ok"] == "否" and "ui/only.ui" in r["msg"], "所有 .ui 都解析失败（没有任何界面）也报出来", r)
+
+    # 流程：规则核对
+    R = ["判题用库里的题", "写作答记录"]
+    fk = FakeS([inv(rfeat("a", R))])
+    r, p = gos("r_ok", fk)
+    check(r["fixed"] and r["calls"] == 6 and recs(r)["a"]["步骤"]["核对"] == {"结果": "通过", "尝试": 1, "重写": 0}, "规则核对全是 → 通过，多 1 次调用（共 6 次）", (r["stop"], r["calls"], recs(r)))
+    chk_prompt = next(x for x in fk.prompts if "需求核对员" in x)
+    check("判题用库里的题" in chk_prompt and "routes/a.zs" in chk_prompt and "SELECT * FROM book" in chk_prompt, "核对输入：规则 + 本功能 sql + zs 全文", chk_prompt[-300:])
+    zs_prompt = next(x for x in fk.prompts if ".zs 接口助手" in x)
+    check("本功能规则：" in zs_prompt and "写作答记录" in zs_prompt and "逐条实现" in zs_prompt, "zs 输入带规则列表，提示词要求逐条实现")
+
+    fk = FakeS([inv(feat("a"))])
+    r, _ = gos("r_empty", fk)
+    check(r["fixed"] and r["calls"] == 5 and not any("需求核对员" in x for x in fk.prompts) and recs(r)["a"]["步骤"]["核对"]["结果"] == "跳过", "规则为空 → 跳过核对，不调模型（共 5 次）", (r["calls"], recs(r)))
+
+    bad1 = chk_reply(R, no=(2,))
+    fk = FakeS([inv(rfeat("a", R))], bad={("a", "chk"): [bad1, chk_reply(R)]})
+    r, p = gos("r_rewrite", fk)
+    zs_prompts = [x for x in fk.prompts if ".zs 接口助手" in x]
+    check(r["fixed"] and len(zs_prompts) == 2 and "以下业务规则没有实现" in zs_prompts[1].split("上次的报错：")[1] and "写作答记录" in zs_prompts[1].split("上次的报错：")[1],
+          "核对有『否』→ 撤回 zs 重写 1 次，报错带未实现规则", (r["stop"], len(zs_prompts)))
+    check(r["calls"] == 8 and recs(r)["a"]["步骤"]["zs"]["尝试"] == 2 and "未实现规则" not in recs(r)["a"] and (p / "routes/a.zs").is_file(), "重写后核对通过：8 次调用，无未实现规则", (r["calls"], recs(r)))
+
+    fk = FakeS([inv(rfeat("a", R))], bad={("a", "chk"): [bad1]})
+    r, p = gos("r_unimpl", fk)
+    fa = recs(r)["a"]
+    check(r["v2"]["结论"] == "部分成功" and r["stop"].startswith("部分成功") and not r["fixed"], "重写后仍有未实现 → 部分成功（不判功能失败）", (r["stop"], r["v2"].get("结论")))
+    check(fa["未实现规则"] == ["写作答记录"] and fa["步骤"]["核对"]["结果"] == "失败" and "失败原因" not in fa and (p / "routes/a.zs").is_file(), "记入 v2.功能[*].未实现规则，zs 仍保留", fa)
+    check(r["calls"] == 8, "规则重写最多 1 次：8 次调用", r["calls"])
+
+    # 规则重写那一轮语法两次都不过 → 放回第一版，仍记未实现
+    broken = "=== routes/a.zs ===\n接口 POST /book/a 动作 a_act\n  用包 db http\n"
+    good = zs_body("a", "/book/a", "a_act")
+    fk = FakeS([inv(rfeat("a", R))], bad={("a", "chk"): [bad1], ("a", "zs"): [good, broken]})
+    r, p = gos("r_restore", fk)
+    fa = recs(r)["a"]
+    check(r["v2"]["结论"] == "部分成功" and fa["未实现规则"] == ["写作答记录"] and "失败原因" not in fa and (p / "routes/a.zs").read_text(encoding="utf-8") == good.split("\n", 1)[1],
+          "规则重写的语法重写不过 → 放回第一版（它过了检查），不判失败", (r["stop"], fa))
+
+    # 语法重写与规则重写分开计
+    fk = FakeS([inv(rfeat("a", R))], bad={("a", "zs"): [broken, good, good], ("a", "chk"): [bad1, chk_reply(R)]})
+    r, _ = gos("r_split_count", fk)
+    check(r["fixed"] and recs(r)["a"]["步骤"]["zs"]["尝试"] == 3 and r["calls"] == 9, "语法重写 1 次 + 规则重写 1 次分开计：zs 3 次，共 9 次调用", (r["stop"], r["calls"], recs(r)))
+
+    # zs 回复追加 sql
+    extra = zs_body("a", "/book/a", "a_act", extra_sql="a_extra")
+    fk = FakeS([inv(rfeat("a", R))], bad={("a", "zs"): [extra]})
+    r, p = gos("r_extra_sql", fk)
+    check(r["fixed"] and (p / "queries/a_extra.sql").is_file() and (p / "routes/a.zs").is_file(), "zs 回复追加的 queries/<功能>_*.sql 一并写盘", (r["stop"], sorted(x.name for x in (p / "queries").iterdir())))
+    bad_sql = zs_body("a", "/book/a", "a_act").replace("=== routes", "=== queries/a_bad.sql ===\nSELECT nope FROM book\n=== routes", 1)
+    fk = FakeS([inv(rfeat("a", R))], bad={("a", "zs"): [bad_sql, extra]})
+    r, p = gos("r_extra_bad", fk)
+    zp = [x for x in fk.prompts if ".zs 接口助手" in x]
+    check(r["fixed"] and len(zp) == 2 and "a_bad.sql" in zp[1].split("上次的报错：")[1] and not (p / "queries/a_bad.sql").exists(), "追加的坏 sql 预编译不过 → 带报错重写，坏 sql 不落盘", (r["stop"], len(zp)))
+    dup_sql = zs_body("a", "/book/a", "a_act", extra_sql="a_list")
+    fk = FakeS([inv(rfeat("a", R))], bad={("a", "zs"): [dup_sql, extra]})
+    r, _ = gos("r_extra_dup", fk)
+    zp = [x for x in fk.prompts if ".zs 接口助手" in x]
+    check(r["fixed"] and len(zp) == 2 and "不能覆盖" in zp[1], "追加的 sql 与已有文件重名 → 不覆盖，带报错重写", (r["stop"], len(zp)))
+
+    # 多文件 zs / ui
+    multi = zs_body("a", "/book/a", "a_act") + "=== routes/a_ext.zs ===\n接口 POST /book/a2 动作 a_act2\n  用包 db http\n  设 rows = 查询 app.db a_list n={n}\n  设 group.low = {rows}\n  响应 lists {group}\n结束\n"
+    ui2 = ("=== ui/a.ui ===\n界面 列表 a页\n  列表 low 占满\n    列 title 书名\n  结束\n结束\n"
+           "=== ui/a_more.ui ===\n界面 列表 a更多\n  列表 low 占满\n    列 stock 库存\n  结束\n结束\n")
+    fk = FakeS([inv(feat("a"))], bad={("a", "zs"): [multi], ("a", "ui"): [ui2]})
+    r, p = gos("r_multi", fk)
+    check(r["fixed"] and (p / "routes/a_ext.zs").is_file() and (p / "ui/a_more.ui").is_file() and recs(r)["a"]["步骤"]["zs"]["结果"] == "通过", "一个功能多个 zs / ui 文件（<功能>_*）都落盘", (r["stop"], recs(r)))
+    stray = zs_body("a", "/book/a", "a_act") + "=== routes/account_ext.zs ===\nx\n"
+    other_only = "=== routes/other.zs ===\nx\n"
+    fk = FakeS([inv(feat("a", ui=False))], bad={("a", "zs"): [other_only, zs_body("a", "/book/a", "a_act")]})
+    r, p = gos("r_naming", fk)
+    zp = [x for x in fk.prompts if ".zs 接口助手" in x]
+    err2 = zp[1].split("上次的报错：")[1] if len(zp) > 1 else ""
+    check(r["fixed"] and "routes/a.zs" in err2 and "routes/a_*.zs" in err2 and "routes/other.zs" in err2, "范围外的文件被丢掉，重写报错说清允许的命名", err2[:300])
+
+    # ui 解析失败 → 重写
+    bad_ui = "=== ui/a.ui ===\n界面 表单 a页\n  字段 title 书名\n结束\n"
+    fk = FakeS([inv(feat("a"))], bad={("a", "ui"): [bad_ui]})
+    r, p = gos("r_ui_bad", fk)
+    up = [x for x in fk.prompts if ".ui 界面助手" in x]
+    err3 = up[1].split("上次的报错：")[1] if len(up) > 1 else ""
+    check(len(up) == 2 and "ui/a.ui" in err3 and "分组" in err3 and r["v2"]["结论"] == "部分成功", "ui 解析失败 → 检查不过 → 带文件名和 gen 原话重写；两次都不过该功能失败", (r["stop"], err3[:300]))
+    fk = FakeS([inv(feat("a"))], bad={("a", "ui"): [bad_ui, "=== ui/a.ui ===\n界面 表单 a页\n  分组 主体 竖排\n    字段 title 书名\n  结束\n结束\n"]})
+    r, p = gos("r_ui_fix", fk)
+    check(r["fixed"] and recs(r)["a"]["步骤"]["ui"]["尝试"] == 2, "ui 重写后通过", (r["stop"], recs(r)))
+
+    # 角色
+    RINV = lambda role="teacher", tpl="private": json.dumps({"模板": tpl, "角色": ["teacher", "student"], "功能": [dict(feat("a", ui=False), 接口=[{"路径": "/book/a", "动作": "a_act", "角色": role, "说明": ""}])]}, ensure_ascii=False)
+    fk = FakeS([RINV()], ent_tpl="private", bad={("a", "zs"): [zs_body("a", "/book/a", "a_act"), zs_body("a", "/book/a", "a_act", role="teacher")]})
+    r, p = gos("r_role", fk, req="做一个图书管理，要登录，老师和学生两种账号")
+    zp = [x for x in fk.prompts if ".zs 接口助手" in x]
+    err4 = zp[1].split("上次的报错：")[1] if len(zp) > 1 else ""
+    check(r["fixed"] and len(zp) == 2 and "角色 teacher" in err4 and "/book/a" in err4, "清单标了角色的接口 zs 没写 角色 → 检查不过，带点名报错重写", (r["stop"], err4[:300]))
+    check("角色 teacher" in (p / "routes/a.zs").read_text(encoding="utf-8"), "重写后的 zs 带 角色 teacher")
+    auth = (p / "routes/auth_roles.zs").read_text(encoding="utf-8") if (p / "routes/auth_roles.zs").is_file() else ""
+    check("认证 核对 app.db user_auth" in auth and "认证 角色 teacher 教师" in auth and "认证 角色 student 学生" in auth and (p / "queries/user_auth.sql").is_file(),
+          "角色声明接 gen private 的登录：认证 核对 + 认证 角色 + user_auth.sql", auth)
+    ue = (p / "entities/user.entity").read_text(encoding="utf-8") if (p / "entities/user.entity").is_file() else ""
+    check("字段 role 文本 必填 默认 student" in ue and (p / "routes/auth.zs").is_file(), "user 实体加 role 列（默认最后一个角色），gen 的 auth.zs 还在", ue)
+    import sqlite3
+    cols = [c[1] for c in sqlite3.connect(p / "app.db").execute("PRAGMA table_info(user)")]
+    check("role" in cols, "app.db 的 user 表已有 role 列（先加列再建库）", cols)
+    ent_prompt = next(x for x in fk.prompts if "应用建模助手" in x)
+    check('角色：["teacher","student"]' in ent_prompt.replace(" ", "") or "teacher" in ent_prompt.split("角色：")[-1][:40], "实体输入带角色", ent_prompt[-200:])
+    check(verb("检查项目", p)({})["ok"] == "是", "带角色的 private 项目整体检查通过")
+    # 模板选错
+    fk = FakeS([RINV()], ent_tpl="full")
+    r, _ = gos("r_role_tpl", fk, req="做一个图书管理，要登录，老师和学生两种账号")
+    check(not r["fixed"] and "private" in r["stop"], "有角色而实体步选了别的模板 → 重写仍不过则失败", r["stop"])
+
+
 def main():
     try:
         t_read()
@@ -615,6 +846,7 @@ def main():
         t_split_flow()
         t_split_fail()
         t_split_dry_cli()
+        t_split_rules()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n{'=' * 50}\n通过 {PASS}，失败 {FAIL}")
