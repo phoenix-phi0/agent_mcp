@@ -805,9 +805,9 @@ def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, sp
     split=True：改跑 newproj_split.zs（功能清单 → 实体 → 逐个功能 sql / zs / ui，每个文件单独检查单独重写 1 次）；默认 False 仍是旧模板。
     split 时某功能两次不过只撤回该功能、继续下一个：结果 v2.功能 记每个功能每步的通过 / 重写次数，v2.结论 = 成功 | 部分成功 | 失败，
     部分成功时 fixed=False、stop 以「部分成功：」开头并列出失败功能（status 仍是 失败）。wall 缺省：旧模板 WALL，split NEWPROJ_SPLIT_WALL。
-    layered=True：分层逐实体生成（layered.py，不走 DSL 模板）：分层清单 → 实体 → 查询 → 接口 → 界面，每个文件单独检查，失败的文件撤回并让依赖它的上层文件跳过；
+    layered=True：三级规划、一步步推进（layered.py，不走 DSL 模板）：确认分层 → 确认文件 → 逐层逐文件（每个文件先单独规划再生成，各自检查），失败的文件撤回并让依赖它的文件跳过；
     result.json v2.文件 记每个文件的层 / 实体 / 结果 / 尝试 / 重写 / 失败原因 / 未实现规则；cost_cap（缺省读环境变量 NEWPROJ_COST_CAP，不设不限）：Claude 侧累计花费达到就不再调模型，
-    以「部分成功：花费达上限」结束。总调用上限在清单通过后按文件数设定（layered.py / _layer.calls_cap）。wall 缺省 NEWPROJ_LAYERED_WALL。"""
+    以「部分成功：花费达上限」结束。总调用上限随进度按文件数放宽（layered.py Run.bump）。wall 缺省 NEWPROJ_LAYERED_WALL。"""
     from . import plan as DP
     if layered:
         split = False
