@@ -111,6 +111,7 @@ run DSLv2流程 $PY tests/tools/test_dslagent_v2.py
 run DSLv2拆分 $PY tests/tools/test_dslagent_split.py
 run DSL范围 $PY tests/tools/test_dslagent_scope.py
 run DSL试调 $PY tests/tools/test_dslagent_trial.py
+run DSL接口约定 $PY tests/tools/test_dslagent_contract.py
 run 批量opencode $PY tests/tools/test_obatch.py
 run 批量codex   $PY tests/tools/test_cxbatch.py
 run Colab启动   $PY tests/tools/test_colab_vllm.py

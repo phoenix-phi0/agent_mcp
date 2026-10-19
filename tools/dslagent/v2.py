@@ -806,7 +806,7 @@ NEWPROJ_LAYERED_WALL = 3600     # layered 模板默认墙钟（文件多，逐�
 NEWPROJ_MODULAR_WALL = 5400     # modular 模板默认墙钟（顶层规划 + 层次 + 分层逐文件，更多步）
 
 
-def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, split=False, layered=False, cost_cap=None, modular=False, resume=False, codex_cap=None):
+def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, split=False, layered=False, cost_cap=None, modular=False, resume=False, codex_cap=None, contract=None, from_plan=None):
     """新建项目入口：不规划，直接执行 packs/newproj/newproj.zs（pack=newproj）。
     req：需求原文，或一个存在的文本文件路径；project：要新建的项目目录（不存在就建，也是引擎工作目录）；
     out_dir：记录目录（calls/、calls.json、plan.zs、plan_out.txt、result.json）；model：假模型 backend（测试用）。
@@ -824,7 +824,9 @@ def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, sp
     modular + resume=True（CLI --modular --resume）：继续上次的构建——project / out_dir 就是上次的；不重做顶层规划和层次×模块（读 out_dir/top.json、split.json，老产物从 result.json / calls/ 还原，见 modbuild.restore_state），
     上次通过且仍在磁盘、仍过检查的文件跳过，失败 / 跳过 / 未做的按原顺序重做（失败的带上次失败原因）；cost_cap 只算本次新花的；
     result.json 保留上次记录：v2.运行 逐次追加（序号 / 结论 / 花费 / 本次动过的文件…），v2.累计花费；calls.json 追加、每条标 run 序号；上次的 result.json 另存 result.run<N>.json。
-    还原不了（没有 result.json / 规划还原不了）时不写任何文件，直接返回失败。"""
+    还原不了（没有 result.json / 规划还原不了）时不写任何文件，直接返回失败。
+    modular 默认先约定接口（contract=None/True；contract=False = 原来的逐文件规划，--no-contract）：数据层后每模块一次调用写约定（CONTRACTS.md / contracts.json），程序校验冻结，
+    之后各文件只按约定实现并检查与约定一致，全部实现后试调一轮；v2.约定 记每模块约定项数。from_plan=旧输出目录（--from-plan）：读回旧运行的顶层规划与层次×模块，跳过前两步，新目录从数据层做起。"""
     from . import plan as DP
     if layered or modular:
         split = False
@@ -864,11 +866,22 @@ def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, sp
             raise Stop("需求为空")
         if resume and not modular:
             raise Stop("--resume 只用于 --modular")
+        if from_plan and (not modular or resume):
+            raise Stop("--from-plan 只用于 --modular，且不能和 --resume 一起用")
         if modular:
             from . import modbuild as MB
             from . import layered as LY
             info.update(split=False, layered=False, modular=True)
-            rs = None
+            rs = fp = None
+            use_contract = True if contract is None else bool(contract)       # 先约定接口再按约定实现；--no-contract 走原来的逐文件规划
+            if from_plan:
+                try:
+                    fp = MB.load_plan(from_plan, task)
+                except MB.ResumeError as e:
+                    state["原因"] = f"从已有规划开始：{e}"
+                    res.update(stop=state["原因"], status="失败", fixed=False, reply={"结果": {}, "状态": "失败", "原因": state["原因"]})
+                    return res
+                info["从已有规划"] = {"目录": fp["from"], "从哪还原": fp["restored"]}
             if resume:
                 try:
                     rs = MB.restore_state(out, task)
@@ -878,17 +891,18 @@ def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, sp
                     return res
                 if (out / "result.json").is_file():
                     shutil.copyfile(out / "result.json", out / f"result.run{rs['run_no'] - 1}.json")
+                use_contract = rs["contract"]
                 info["继续构建"] = {"序号": rs["run_no"], "从哪还原": rs["restored"] or ["top.json / split.json"], "上次累计花费": rs["prior_cost"], "上次已用调用": rs["n0"]}
             t0 = time.time()
             try:
-                out_m = MB.run_modular(M, task, project, Stop, cost_cap if cost_cap is not None else LY.env_cap(), user_max, out_dir=out, resume=rs, codex_cap=codex_cap)
+                out_m = MB.run_modular(M, task, project, Stop, cost_cap if cost_cap is not None else LY.env_cap(), user_max, out_dir=out, resume=rs, codex_cap=codex_cap, contract=use_contract, from_plan=fp)
             finally:
                 steps["执行"] = round(time.time() - t0, 1)
             this = dict(out_m["本次"], 结论=out_m["结论"], 状态=out_m["状态"], 原因=out_m["原因"][:400], 花费=round(M.cost, 4), 调用=M.n - M.n0,
                         秒=round(time.time() - t_start, 1), 时间=time.strftime("%Y-%m-%d %H:%M:%S"))
             runs = [*(rs["runs"] if rs else []), this]
             info.update(文件=out_m["文件"], 清单=out_m["清单"], 整体问题=out_m["整体问题"], 结论=out_m["结论"], codex调用=out_m["codex调用"],
-                        顶层规划=out_m["顶层规划"], 层次=out_m["层次"], 规则未覆盖=out_m["规则未覆盖"], 试调=out_m.get("试调"), 预算={"calls": M.n - M.n0, "max_calls": M.max_calls - M.n0},
+                        顶层规划=out_m["顶层规划"], 层次=out_m["层次"], 规则未覆盖=out_m["规则未覆盖"], 试调=out_m.get("试调"), 约定模式=out_m.get("约定模式"), 约定=out_m.get("约定"), contract=bool(out_m.get("约定模式")), 预算={"calls": M.n - M.n0, "max_calls": M.max_calls - M.n0},
                         运行=runs, 累计花费=round(sum(float(x.get("花费") or 0) for x in runs), 4))
             (out / "plan_out.txt").write_text(json.dumps(out_m, ensure_ascii=False, indent=1), encoding="utf-8")
             res["versions"] = 1

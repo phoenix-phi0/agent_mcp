@@ -21,6 +21,21 @@ os.environ.pop("NEWPROJ_COST_CAP", None)
 
 from tools.dslagent import modbuild as MB, v2 as V, loadcheck as LC, engines as E      # noqa: E402
 
+import functools      # noqa: E402
+
+_run_np = V.run_newproj
+
+
+@functools.wraps(_run_np)
+def _run_nc(*a, **kw):
+    """老测试都是「逐文件规划」的做法：modular 默认关掉先约定接口（约定模式的测试见十七之后，显式传 contract=True）。"""
+    if kw.get("modular"):
+        kw.setdefault("contract", False)
+    return _run_np(*a, **kw)
+
+
+V.run_newproj = _run_nc
+
 PASS = FAIL = 0
 REQ = "做一个答题：有题目，作答要记录；交答案时按库里记的题判对错并写作答记录；另有进度模块，看进度时按得分算掌握。"
 ENT_Q = "实体 question 题目\n  字段 title 文本 必填 题干\n  字段 answer 文本 必填 答案\n结束\n"

@@ -9,6 +9,7 @@
 
 判定（只看接口自己的毛病，业务 4xx 算正常）：
 - 500（含「接口出错」「脚本出错」）→ 不过；
+- 接口项带「响应」（接口约定）时，200 的响应缺约定里的 state / lists 键或 messages → 不过；约定里列的业务错误码与 403 / 404 等 4xx 都算正常；
 - 数据库约束错误（外键 / 非空 / 唯一 / 其它 IntegrityError，不管回 409 还是 400）→ 不过。靠 hook 住 tools.db_errors.translate 认，
   手写的 `返回 {...} 409` 不会误伤；
 - 400 参数错、401/403、404 查无此项、502 模型没回应 → 正常。
@@ -259,6 +260,10 @@ def _run(root, ws, items_by_file, rows, out):
                         why = "数据库约束错误：" + hk.hits[0]
                     elif code >= 500 and code != 502:
                         why = "接口出错"
+                    elif code == 200 and it.get("响应"):
+                        miss = missing_keys(body, it["响应"])
+                        if miss:
+                            why = "响应缺约定里的键：" + "、".join(miss)
                     if why:
                         out["problems"].setdefault(rel, []).append(
                             f"[试调不过] {rel} 接口 POST {it['路径']}（{desc}"
@@ -266,6 +271,23 @@ def _run(root, ws, items_by_file, rows, out):
                             f" → {code}：{why}；响应：{_short(body)}")
                         break                      # 同一接口同一角色一个报错够了
     return out
+
+
+def missing_keys(body, spec):
+    """约定的响应键（state / lists 里的键，messages=是）在 200 的响应里找不到的。键可在响应的 state / lists 下，也可直接在顶层（`返回 {...}` 的写法）。"""
+    try:
+        resp = json.loads(body)
+    except ValueError:
+        resp = None
+    if not isinstance(resp, dict):
+        resp = {}
+    miss = []
+    for grp in ("state", "lists"):
+        sub = resp.get(grp) if isinstance(resp.get(grp), dict) else {}
+        miss += [f"{grp}.{k}" for k in spec.get(grp, []) if k not in sub and k not in resp]
+    if spec.get("messages") == "是" and not resp.get("messages"):
+        miss.append("messages")
+    return miss
 
 
 def problems_flat(res):

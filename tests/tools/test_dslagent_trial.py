@@ -9,6 +9,7 @@
 四、副本：不改原项目；跑不起来记「跳过」而不是判接口不过
 五、可选参数空串保护的静态检查
 六、单文件计划里的「可选参数」「可选入参」
+七、接口约定的响应键（带「响应」的接口项：200 的响应缺约定的 state / lists 键或 messages 判不过）
 """
 import json
 import shutil
@@ -212,6 +213,53 @@ def main():
     check(any("可选入参" in x and "zz" in x for x in errs), "可选入参不在入参里 → 计划不过", errs)
     check(MB.norm_fp("sql", {"sql": [{"名": "a", "参数": ["p"], "可选参数": ["p"]}]})["sql"][0]["可选参数"] == ["p"]
           and MB.norm_fp("接口", {"接口": [ia]})["接口"][0]["可选入参"] == ["y"], "resume 还原计划时保留这两个标记")
+
+    print("七、接口约定的响应键（接口项带「响应」）")
+    root = mkproj("r", tpl="default", roles=None)
+    add(root, "routes/r.zs", """
+接口 POST /r/state 动作 r_state
+  用包 db http
+  状态 ok 1
+  消息 bot hi
+结束
+
+接口 POST /r/top 动作 r_top
+  用包 db http
+  返回 {"ok":"1"}
+结束
+
+接口 POST /r/none 动作 r_none
+  用包 db http
+  返回 {"x":"1"}
+结束
+
+接口 POST /r/nf 动作 r_nf
+  用包 db http
+  返回 {"error":"查无此项"} 404
+结束
+""")
+    spec = lambda st=(), li=(), msg="否": {"state": list(st), "lists": list(li), "messages": msg}      # noqa: E731
+
+    def run1(path, **kw):
+        res = T.run(root, {"routes/r.zs": [{"路径": path, "入参": [], "可选入参": [], "角色": "", "响应": spec(**kw)}]})
+        return res, [x for xs in res["problems"].values() for x in xs]
+    res, pr = run1("/r/state", st=["ok"], msg="是")
+    check(res["skipped"] == "" and pr == [], "状态 + 消息 的接口：约定 state.ok / messages=是 都有 → 过", (res, pr))
+    res, pr = run1("/r/top", st=["ok"])
+    check(pr == [], "返回 {\"ok\":…} 的顶层键也认作约定的 state 键 → 过", pr)
+    res, pr = run1("/r/none", st=["ok"])
+    check(len(pr) == 1 and "响应缺约定里的键" in pr[0] and "state.ok" in pr[0] and "/r/none" in pr[0], "响应缺约定里的 state 键 → 不过，报错点名缺哪个", pr)
+    res, pr = run1("/r/state", st=["zz"])
+    check(len(pr) == 1 and "state.zz" in pr[0], "约定 state 里有响应里没有的键 → 不过", pr)
+    res, pr = run1("/r/top", st=["ok"], msg="是")
+    check(len(pr) == 1 and "messages" in pr[0], "约定 messages=是 但响应没有消息 → 不过", pr)
+    res, pr = run1("/r/state", li=["rows"])
+    check(len(pr) == 1 and "lists.rows" in pr[0], "约定 lists 键缺 → 不过", pr)
+    res, pr = run1("/r/nf", st=["ok"], msg="是")
+    check(pr == [], "业务错误（404）不查响应键，算正常", pr)
+    res = T.run(root, {"routes/r.zs": [{"路径": "/r/none", "入参": [], "可选入参": [], "角色": ""}]})
+    check(res["problems"] == {}, "接口项不带「响应」（老计划）→ 不查响应键")
+    check(T.missing_keys("不是 json", spec(st=["a"])) == ["state.a"] and T.missing_keys('{"state":{"a":1},"lists":{"b":[]}}', spec(st=["a"], li=["b"])) == [], "missing_keys：非 JSON 当全缺；state / lists 下的键认")
 
     shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n通过 {PASS}，失败 {FAIL}")

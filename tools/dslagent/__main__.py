@@ -43,13 +43,19 @@ def main(argv=None):
     n.add_argument("--modular", action="store_true", help="顶层规划 → 层次×模块 → 按层逐层构建（modbuild.py）：能力清单 → 顶层规划(PLAN.md) → 层次×模块(LAYERS.md) → 数据/查询/流程/接口/界面，层内按构建顺序逐模块；--cost-cap 同样有效，缺省墙钟 5400 秒")
     n.add_argument("--resume", action="store_true", help="继续上次的 --modular 构建（project / --out 用上次的）：不重做顶层规划和层次×模块，沿用上次通过且仍过检查的文件，失败 / 跳过 / 未做的按原顺序重做；--cost-cap 只算本次新花的，result.json 保留上次记录并追加，calls.json 追加")
     n.add_argument("--codex-cap", type=int, default=None, help="codex 调用次数上限（只对 --modular 有效）：codex 调用不计费、不进 --cost-cap（熔断只看 Claude 侧花费），用这个限次数；达到就停、以「部分成功」结束；缺省不限。规划 / 生成可分别指定模型：DSLAGENT_MODELS 里 mplan（规划类）/ mgen（生成类），没写走 sub")
+    n.add_argument("--no-contract", action="store_true", help="（只对 --modular）不先约定接口：回到逐文件规划、按下层真实文件对接的老做法；缺省先约定接口（CONTRACTS.md）再按约定实现，实现后试调一轮")
+    n.add_argument("--from-plan", default=None, metavar="旧输出目录", help="（只对 --modular）读回旧运行的顶层规划与层次×模块（top.json / split.json，没有就从 result.json 与 calls/ 还原），跳过这两步，在新的 project / --out 里从数据层做起")
     a = ap.parse_args(argv)
     if a.cmd == "newproj":
         from . import v2
         if a.resume and not a.modular:
             ap.error("--resume 要和 --modular 一起用")
+        if (a.from_plan or a.no_contract) and not a.modular:
+            ap.error("--from-plan / --no-contract 要和 --modular 一起用")
+        if a.from_plan and a.resume:
+            ap.error("--from-plan 和 --resume 不能一起用（from-plan 是在新目录重新开始，resume 是接着上次的目录）")
         res = v2.run_newproj(Path(a.req_file).read_text(encoding="utf-8"), a.project, a.out, wall=a.wall, split=a.split,
-                             **({"modular": True, "cost_cap": a.cost_cap, "codex_cap": a.codex_cap, **({"resume": True} if a.resume else {})} if a.modular else {"layered": True, "cost_cap": a.cost_cap} if a.layered else {}))
+                             **({"modular": True, "cost_cap": a.cost_cap, "codex_cap": a.codex_cap, **({"resume": True} if a.resume else {}), **({"contract": False} if a.no_contract else {}), **({"from_plan": a.from_plan} if a.from_plan else {})} if a.modular else {"layered": True, "cost_cap": a.cost_cap} if a.layered else {}))
         print(json.dumps({k: res[k] for k in ("fixed", "calls", "cost", "seconds", "stop", "changed_files")}, ensure_ascii=False))
         return 0
 
