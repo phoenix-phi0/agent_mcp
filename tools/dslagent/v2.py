@@ -821,11 +821,11 @@ def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, sp
     modular=True：顶层规划 → 层次 × 模块 → 按层逐层构建（modbuild.py）：能力清单（程序）→ 顶层规划（PLAN.md）→ 层次×模块（LAYERS.md）→ 数据 / 查询 / 流程 / 接口 / 界面逐层、
     层内按构建顺序逐模块，每个文件先规划再生成；capabilities.md / PLAN.md / LAYERS.md 写在 out_dir；result.json v2.文件 每文件记 层 / 模块 / 结果 / 尝试 / 失败原因 / 未实现规则，
     v2.顶层规划 / v2.层次 记两步的结果。cost_cap、失败隔离同 layered。wall 缺省 NEWPROJ_MODULAR_WALL。
-    modular + resume=True（CLI --modular --resume）：继续上次的构建——project / out_dir 就是上次的；不重做顶层规划和层次×模块（读 out_dir/top.json、split.json，老产物从 result.json / calls/ 还原，见 modbuild.restore_state），
+    modular + resume=True（CLI --modular --resume）：继续上次的构建——project / out_dir 就是上次的；不重做顶层规划和层次×模块（读 out_dir/plan/top.zs、plan/layers.zs，老产物读 top.json / split.json 或从 result.json / calls/ 还原，见 modbuild.restore_state），
     上次通过且仍在磁盘、仍过检查的文件跳过，失败 / 跳过 / 未做的按原顺序重做（失败的带上次失败原因）；cost_cap 只算本次新花的；
     result.json 保留上次记录：v2.运行 逐次追加（序号 / 结论 / 花费 / 本次动过的文件…），v2.累计花费；calls.json 追加、每条标 run 序号；上次的 result.json 另存 result.run<N>.json。
     还原不了（没有 result.json / 规划还原不了）时不写任何文件，直接返回失败。
-    modular 默认先约定接口（contract=None/True；contract=False = 原来的逐文件规划，--no-contract）：数据层后每模块一次调用写约定（CONTRACTS.md / contracts.json），程序校验冻结，
+    modular 默认先约定接口（contract=None/True；contract=False = 原来的逐文件规划，--no-contract）：数据层后每模块一次调用写约定（模型写骨架文件：queries/*.sql、scripts/*.zs、routes/*.zs、ui/*.ui 的头部声明；CONTRACTS.md / contracts.json 由骨架生成），程序校验冻结，
     之后各文件只按约定实现并检查与约定一致，全部实现后试调一轮；v2.约定 记每模块约定项数。from_plan=旧输出目录（--from-plan）：读回旧运行的顶层规划与层次×模块，跳过前两步，新目录从数据层做起。"""
     from . import plan as DP
     if layered or modular:
@@ -892,7 +892,7 @@ def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, sp
                 if (out / "result.json").is_file():
                     shutil.copyfile(out / "result.json", out / f"result.run{rs['run_no'] - 1}.json")
                 use_contract = rs["contract"]
-                info["继续构建"] = {"序号": rs["run_no"], "从哪还原": rs["restored"] or ["top.json / split.json"], "上次累计花费": rs["prior_cost"], "上次已用调用": rs["n0"]}
+                info["继续构建"] = {"序号": rs["run_no"], "从哪还原": rs["restored"] or ["plan/top.zs / plan/layers.zs"], "上次累计花费": rs["prior_cost"], "上次已用调用": rs["n0"]}
             t0 = time.time()
             try:
                 out_m = MB.run_modular(M, task, project, Stop, cost_cap if cost_cap is not None else LY.env_cap(), user_max, out_dir=out, resume=rs, codex_cap=codex_cap, contract=use_contract, from_plan=fp)

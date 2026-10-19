@@ -44,7 +44,7 @@ def main(argv=None):
     n.add_argument("--resume", action="store_true", help="继续上次的 --modular 构建（project / --out 用上次的）：不重做顶层规划和层次×模块，沿用上次通过且仍过检查的文件，失败 / 跳过 / 未做的按原顺序重做；--cost-cap 只算本次新花的，result.json 保留上次记录并追加，calls.json 追加")
     n.add_argument("--codex-cap", type=int, default=None, help="codex 调用次数上限（只对 --modular 有效）：codex 调用不计费、不进 --cost-cap（熔断只看 Claude 侧花费），用这个限次数；达到就停、以「部分成功」结束；缺省不限。规划 / 生成可分别指定模型：DSLAGENT_MODELS 里 mplan（规划类）/ mgen（生成类），没写走 sub")
     n.add_argument("--no-contract", action="store_true", help="（只对 --modular）不先约定接口：回到逐文件规划、按下层真实文件对接的老做法；缺省先约定接口（CONTRACTS.md）再按约定实现，实现后试调一轮")
-    n.add_argument("--from-plan", default=None, metavar="旧输出目录", help="（只对 --modular）读回旧运行的顶层规划与层次×模块（top.json / split.json，没有就从 result.json 与 calls/ 还原），跳过这两步，在新的 project / --out 里从数据层做起")
+    n.add_argument("--from-plan", default=None, metavar="旧输出目录", help="（只对 --modular）读回旧运行的顶层规划与层次×模块（plan/top.zs、plan/layers.zs；旧版 JSON 目录也读，转成 DSL 规划文件；再不行从 result.json 与 calls/ 还原），跳过这两步，在新的 project / --out 里从数据层做起")
     a = ap.parse_args(argv)
     if a.cmd == "newproj":
         from . import v2

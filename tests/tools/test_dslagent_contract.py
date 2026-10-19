@@ -3,7 +3,7 @@
 
     .venv/bin/python tests/tools/test_dslagent_contract.py
 
-一、约定 JSON 校验：引用不存在 / 参数不匹配 / 越层 / 跨模块非法调用 / 未知动词 / 规则未落地 / 命名与范围
+一、约定校验（骨架提取出的 dict 喂 validate_contract；骨架本身的解析 / 冻结见 test_dslagent_dslplan.py）：引用不存在 / 参数不匹配 / 越层 / 跨模块非法调用 / 未知动词 / 规则未落地 / 命名与范围
 二、比对函数：sql 返回列（空库真跑）/ 调用对象 / 响应键 / 界面动作
 三、假模型全流程（约定模式）：约定先于实现、实现只看约定签名、CONTRACTS.md、约定重写与失败
 四、实现与约定不一致被拒：sql 写入 / 可选参数保护 / 流程出参与调用 / 接口动作 / 调用 / 响应键 / 界面动作
@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import test_dslagent_modbuild as TM     # noqa: E402  (带上假模型 Fake、REQ、ZS_* 等夹具；它的 main 不会跑)
-from tools.dslagent import contract as C, modbuild as MB, v2 as V      # noqa: E402
+from tools.dslagent import contract as C, modbuild as MB, v2 as V, skeleton as SK      # noqa: E402
 
 PASS = FAIL = 0
 dump, REQ = TM.dump, TM.REQ
@@ -62,6 +62,20 @@ def contract_obj(m, mut=None):
     return o
 
 
+def skeleton_text(o):
+    """约定 dict → 模型该写的骨架文件文本（`=== 路径 ===` 分隔；程序渲染的规范骨架）。"""
+    o = copy.deepcopy(o)
+    names = {s["名"] for s in o["sql"]} | set(MB.L.gen_sqls(["question", "attempt", "mastery"]))
+    acts = {}
+    for grp, key in (("流程", "调"), ("接口", "调用")):
+        for it in o[grp]:
+            for c in it[key]:
+                c["类"] = "sql" if c["名"] in names else "流程"
+    for a in o["接口"]:
+        acts[a["路径"]] = a["动作"]
+    return "\n".join(f"=== {r} ===\n{t}" for r, t in SK.render(o, acts).items())
+
+
 TOP = MB.validate_top(dump(TM.top_obj()), TM.PACKS)["top"]
 SPLIT = MB.validate_split(dump(TM.split_obj()), TOP, TM.CAPS)["split"]
 ENTS = {"question": {"id", "title", "answer"}, "attempt": {"id", "question_id", "given", "correct"}, "mastery": {"id", "question_id", "score"}}
@@ -95,7 +109,7 @@ def has(r, want):
 
 
 def t_validate():
-    print("一、约定 JSON 校验")
+    print("一、约定校验（dict 形）")
     r = vc("quiz")
     check(r["ok"] and r["contract"]["流程"][0]["调"][0]["类"] == "sql" and r["contract"]["接口"][0]["调用"][0]["类"] == "流程", "合法约定通过，调用项标上 sql / 流程 类别", r["errors"])
     check(vc("progress")["ok"], "progress 调 quiz 的共用流程（顶层允许）→ 通过", vc("progress")["errors"])
@@ -153,8 +167,6 @@ def t_validate():
     o["流程"][0]["调"][0]["给"] = ["question_id"]
     qo = C.validate_contract(o, uctx("quiz"))
     check(qo["ok"] and C.derive_sql(qo["contract"])["sql"][0]["可选参数"] == ["given"], "可选参数 → 单文件计划的「可选参数」（实现要带空串保护）", qo["errors"])
-    sg = C.signature(q)
-    check(sg["sql"][0]["参数"] == ["question_id", "given"] and "作用" not in sg["sql"][0] and sg["流程"][0]["出参"] == ["ok", "n"] and sg["接口"][0]["响应"]["state"] == ["ok"], "signature 只给签名（不带作用 / 规则）")
     md = C.contracts_md(TOP, {"quiz": q})
     check("## quiz" in md and "POST /quiz/answer" in md and "quiz_judge" in md and "## progress" in md and "约定没写成" in md, "CONTRACTS.md 渲染（没写成的模块标出）", md[:300])
 
@@ -197,7 +209,8 @@ class FakeC(TM.Fake):
     def reply(self, user):
         if "接口约定助手" in user:
             m = re.search(r'"模块": "(\w+)"', user).group(1)
-            return self.pick(("约定", m), dump(self.cobj.get(m) or contract_obj(m)))
+            o = self.cobj.get(m) or contract_obj(m)
+            return self.pick(("约定", m), o if isinstance(o, str) else skeleton_text(o))
         return super().reply(user)
 
 
@@ -220,7 +233,7 @@ def t_full():
     fs = files(r)
     check(r["fixed"] and r["v2"]["结论"] == "成功" and r["v2"]["contract"] is True, "约定模式全流程成功", (r["stop"], {k: v["结果"] for k, v in fs.items()}))
     order = [f["文件"] for f in r["v2"]["文件"]]
-    check(order.index("contracts/quiz.json") < order.index("contracts/progress.json") < order.index("queries/quiz_*.sql") and fs["contracts/quiz.json"]["层"] == "约定",
+    check(order.index("contracts/quiz.skel") < order.index("contracts/progress.skel") < order.index("queries/quiz_*.sql") and fs["contracts/quiz.skel"]["层"] == "约定",
           "数据层之后、实现之前先做约定（按构建顺序每个模块一条记录）", order)
     check(len(fk.of("接口约定助手")) == 2 and not any(fk.of(m) for m in ("单文件规划助手（查询层）", "单文件规划助手（流程层）", "单文件规划助手（接口层）", "单文件规划助手（界面层）")),
           "每个模块一次约定调用；查询 / 流程 / 接口 / 界面不再另外做单文件规划", (len(fk.of("接口约定助手")), fk.calls))
@@ -232,28 +245,28 @@ def t_full():
     check("quiz_judge" in p2 and "quiz_log" in p2 and "写库表 app.db quiz_log" not in p2 and "本模块可调的共用流程" in p2, "progress 的约定调用只拿到 quiz 约定的签名（不是实现全文）", p2[-1500:])
     check(fs["scripts/quiz_judge.zs"]["规划尝试"] == 0 and fs["routes/quiz.zs"]["生成尝试"] == 1, "实现文件没有单独规划（计划由约定派生）", fs["routes/quiz.zs"])
     ip = fk.of(".zs 接口助手")
-    check("本文件的约定项（已冻结）" in ip[1] and "约定签名" in ip[1] and "写库表 app.db quiz_log" not in ip[1] and "# 判一道题并写作答记录" not in ip[1], "接口生成：自己的约定项 + 被调流程的约定签名，没有对方实现全文", ip[1][-1200:])
+    check("本文件的约定项（已冻结）" in ip[1] and "骨架头部，不给实现" in ip[1] and "写库表 app.db quiz_log" not in ip[1] and "# 判一道题并写作答记录" not in ip[1], "接口生成：自己的约定项 + 骨架全文 + 被调流程的骨架头部，没有对方实现全文", ip[1][-1200:])
     fp = fk.of(".zs 流程助手")[0]
-    check("本流程的约定项（已冻结）" in fp and "约定签名" in fp and "本模块的 sql 全文" not in fp, "流程生成：自己的约定项 + 本模块 sql 的约定签名", fp[-900:])
+    check("本流程的约定项（已冻结）" in fp and "骨架头部，不给实现" in fp and "骨架文件（" in fp and "=== scripts/quiz_judge.zs ===" in fp and "本模块的 sql 全文" not in fp, "流程生成：自己的约定项 + 骨架全文 + 本模块 sql 的骨架头部", fp[-900:])
     check(len(fk.of("需求核对员")) == 3, "规则核对照旧（流程 R1、quiz 接口 R1、progress 接口 R2）", len(fk.of("需求核对员")))
     check("实体 question" in fk.of("应用建模助手")[1], "数据层照旧：依赖模块实体全文")
     # 约定重写
     cb = contract_obj("quiz", lambda o: [o["sql"][0].update(规则=[]), o["流程"][0].update(规则=[]), o["接口"][0].update(规则=[])])
-    fk = FakeC(bad={("约定", "quiz"): [dump(cb), dump(contract_obj("quiz"))]})
+    fk = FakeC(bad={("约定", "quiz"): [skeleton_text(cb), skeleton_text(contract_obj("quiz"))]})
     r, _, _ = go("c_rw", fk)
-    f = files(r)["contracts/quiz.json"]
+    f = files(r)["contracts/quiz.skel"]
     cp = fk.of("接口约定助手")
     check(r["fixed"] and f["规划尝试"] == 2 and len(cp) == 3 and "规则 R1 没有落在任何约定项上" in cp[1], "约定没过校验 → 报错原话带回重写一次通过", (f, cp[1][-300:]))
     # 约定两次不过 → 失败；本模块实现与依赖它的模块都跳过
-    fk = FakeC(bad={("约定", "quiz"): [dump(cb)]})
+    fk = FakeC(bad={("约定", "quiz"): [skeleton_text(cb)]})
     r, p, _ = go("c_fail", fk)
     fs = files(r)
-    check(fs["contracts/quiz.json"]["结果"] == "失败" and "约定两次没过" in fs["contracts/quiz.json"]["失败原因"] and fs["contracts/progress.json"]["结果"] == "跳过", "约定两次不过 → 该模块失败，依赖它的模块约定跳过", {k: v["结果"] for k, v in fs.items()})
+    check(fs["contracts/quiz.skel"]["结果"] == "失败" and "约定两次没过" in fs["contracts/quiz.skel"]["失败原因"] and fs["contracts/progress.skel"]["结果"] == "跳过", "约定两次不过 → 该模块失败，依赖它的模块约定跳过", {k: v["结果"] for k, v in fs.items()})
     check(all(fs[f]["结果"] == "跳过" for f in ("scripts/quiz_judge.zs", "routes/quiz.zs", "ui/quiz_page.ui", "routes/progress.zs", "ui/progress_page.ui")) and r["v2"]["结论"] != "成功" and not (p / "routes/quiz.zs").exists(), "没有约定的模块，下层文件都跳过（不调模型）")
     check(len(gens(fk, ".zs 接口助手", "routes/quiz.zs")) == 0, "跳过的文件没调模型")
     # 老做法仍可用
     r, _, _ = TM.go("c_old", TM.Fake())
-    check(r["fixed"] and "contracts/quiz.json" not in files(r) and r["v2"]["contract"] is False, "--no-contract（contract=False）：仍是逐文件规划的老做法")
+    check(r["fixed"] and "contracts/quiz.skel" not in files(r) and r["v2"]["contract"] is False, "--no-contract（contract=False）：仍是逐文件规划的老做法")
 
 
 def bad_replies(name, kind, rel, bad, marker, want, fk_kw=None, files_key=None, second=None, ok=True, contracts=None):
@@ -295,13 +308,13 @@ def t_reject():
     check(r["fixed"] and f["生成尝试"] == 2 and "state 里有「ok」" in ps[1], "接口：响应里缺约定的 state 键 → 拒", (f, ps[1][-300:] if len(ps) > 1 else ""))
     zs = TM.ZS_QUIZ.replace("动作 quiz_answer", "动作 other_name")
     fk, r, p, f, ps = bad_replies("c_if_act", "接口", "routes/quiz.zs", f"=== routes/quiz.zs ===\n{zs}", ".zs 接口助手", "")
-    check(r["fixed"] and f["生成尝试"] == 2 and "动作名要是「quiz_answer」" in ps[1], "接口：动作名与约定不符 → 拒", (f, ps[1][-300:] if len(ps) > 1 else ""))
+    check(r["fixed"] and f["生成尝试"] == 2 and "约定部分被改动" in ps[1] and "quiz_answer" in ps[1], "接口：改了头行的动作名 → 拒（约定部分与冻结快照不一致）", (f, ps[1][-300:] if len(ps) > 1 else ""))
     zs = TM.ZS_QUIZ.replace("  设 result = 执行 scripts/quiz_judge.zs question_id={question_id} given={given}\n", "  设 result.ok = 1\n")
     fk, r, p, f, ps = bad_replies("c_if_call", "接口", "routes/quiz.zs", f"=== routes/quiz.zs ===\n{zs}", ".zs 接口助手", "")
     check(r["fixed"] and f["生成尝试"] == 2 and "约定要调流程「quiz_judge」" in ps[1], "接口：没调约定里的流程 → 拒", (f, ps[1][-300:] if len(ps) > 1 else ""))
     zs = TM.ZS_QUIZ + "\n接口 POST /quiz/extra 动作 quiz_extra\n  用包 db http common\n  返回 {\"ok\":\"1\"}\n结束\n"
     fk, r, p, f, ps = bad_replies("c_if_path", "接口", "routes/quiz.zs", f"=== routes/quiz.zs ===\n{zs}", ".zs 接口助手", "")
-    check(r["fixed"] and f["生成尝试"] == 2 and "多写了约定之外的接口 /quiz/extra" in ps[1], "接口：多写约定之外的接口 → 拒", (f, ps[1][-300:] if len(ps) > 1 else ""))
+    check(r["fixed"] and f["生成尝试"] == 2 and "多出约定里没有的「/quiz/extra」" in ps[1], "接口：多写约定之外的接口 → 拒", (f, ps[1][-300:] if len(ps) > 1 else ""))
     co = contract_obj("quiz", lambda o: o["接口"][0]["响应"].update(messages="是"))
     zs_msg = TM.ZS_QUIZ.replace('  返回 {"ok":"{result.ok}"}', "  状态 ok {result.ok}\n  消息 bot hi")
     fk = FakeC(bad={("生成", "接口", "routes/quiz.zs"): [f"=== routes/quiz.zs ===\n{TM.ZS_QUIZ}", f"=== routes/quiz.zs ===\n{zs_msg}"]}, contracts={"quiz": co})
@@ -385,11 +398,11 @@ def t_isolation():
     d = TM.TMP / "c_resume"
     shutil.rmtree(d, ignore_errors=True)
     r1 = V.run_newproj(REQ, d / "proj", d / "out", model=FakeC(bad=bad), modular=True, contract=True)
-    check(files(r1)["routes/progress.zs"]["结果"] == "失败" and files(r1)["contracts/progress.json"]["结果"] == "通过", "（准备）第一次：progress 接口失败，约定都通过")
+    check(files(r1)["routes/progress.zs"]["结果"] == "失败" and files(r1)["contracts/progress.skel"]["结果"] == "通过", "（准备）第一次：progress 接口失败，约定都通过")
     fk = FakeC()
     r2 = V.run_newproj(REQ, d / "proj", d / "out", model=fk, modular=True, resume=True)
     fs = files(r2)
-    check(r2["fixed"] and not fk.of("接口约定助手") and fs["contracts/quiz.json"].get("沿用") and fs["contracts/progress.json"].get("沿用") and r2["v2"]["contract"] is True,
+    check(r2["fixed"] and not fk.of("接口约定助手") and fs["contracts/quiz.skel"].get("沿用") and fs["contracts/progress.skel"].get("沿用") and r2["v2"]["contract"] is True,
           "继续构建：约定模式沿用上次冻结的约定（不再调约定），只重做失败的文件", (r2["stop"], r2["v2"].get("contract"), fk.calls))
     check(fs["routes/progress.zs"]["结果"] == "通过" and fs["routes/progress.zs"].get("上次失败"), "失败的接口文件带上次失败原因重做通过")
 
@@ -407,18 +420,32 @@ def t_from_plan():
     out2 = d2 / "out"
     check(r1["fixed"] and r2["fixed"] and not fk.of("项目架构师") and not fk.of("项目架构助手"), "from-plan：不再调顶层规划 / 层次×模块，新目录里全流程成功", (r2["stop"], fk.calls[:6]))
     check((out2 / "PLAN.md").read_text(encoding="utf-8") == (out1 / "PLAN.md").read_text(encoding="utf-8") and (out2 / "LAYERS.md").read_text(encoding="utf-8") == (out1 / "LAYERS.md").read_text(encoding="utf-8")
-          and json.loads((out2 / "top.json").read_text(encoding="utf-8")) == json.loads((out1 / "top.json").read_text(encoding="utf-8")), "新目录里的 PLAN.md / LAYERS.md / top.json 与旧运行一致")
-    check(r2["v2"]["从已有规划"]["目录"] == str(out1) and (d2 / "proj/routes/quiz.zs").is_file() and r2["v2"]["contract"] is True and "contracts/quiz.json" in files(r2), "记录里写明从哪个目录读的规划；约定模式照常")
+          and MB.PD.parse_top((out2 / "plan/top.zs").read_text(encoding="utf-8")) == MB.PD.parse_top((out1 / "plan/top.zs").read_text(encoding="utf-8")), "新目录里的 PLAN.md / LAYERS.md / plan/top.zs 与旧运行一致")
+    check(r2["v2"]["从已有规划"]["目录"] == str(out1) and (d2 / "proj/routes/quiz.zs").is_file() and r2["v2"]["contract"] is True and "contracts/quiz.skel" in files(r2), "记录里写明从哪个目录读的规划；约定模式照常")
     check(r2["calls"] < r1["calls"] + 2 and (out1 / "result.json").is_file(), "旧目录不被改动（result.json 仍在）")
-    # 没有 top.json / split.json：按 RESUME.md 的还原法（result.json + calls/）
+    # 没有规划文件：按 RESUME.md 的还原法（result.json + calls/）
     d3 = TM.TMP / "fp_old2"
     shutil.copytree(d1, d3)
-    for n in ("top.json", "split.json"):
-        (d3 / "out" / n).unlink()
+    shutil.rmtree(d3 / "out" / "plan")
     lp = MB.load_plan(d3 / "out", REQ)
-    check(lp["top"]["构建顺序"] == ["quiz", "progress"] and set(lp["split"]["模块"]) == {"quiz", "progress"} and lp["restored"], "没有 top.json / split.json → 从 result.json 与 calls/ 还原", lp["restored"])
+    check(lp["top"]["构建顺序"] == ["quiz", "progress"] and set(lp["split"]["模块"]) == {"quiz", "progress"} and lp["restored"], "没有规划文件 → 从 result.json 与 calls/ 还原", lp["restored"])
+    check(not (d3 / "out" / "plan").exists(), "旧目录只读：还原不往旧目录补写文件")
     lp0 = MB.load_plan(out1, REQ)
-    check(lp0["restored"] == ["top.json / split.json"] and lp0["split"]["规则表"] == {"R1": TM.R1, "R2": TM.R2}, "有 top.json / split.json 直接读")
+    check(lp0["restored"] == ["plan/top.zs / plan/layers.zs"] and lp0["split"]["规则表"] == {"R1": TM.R1, "R2": TM.R2}, "有 plan/top.zs / plan/layers.zs 直接读", lp0["restored"])
+    # 旧版输出目录（只有 JSON 的 top.json / split.json）→ 读得到，新目录里写成 DSL 规划文件
+    d5 = TM.TMP / "fp_json"
+    shutil.copytree(d1, d5)
+    shutil.rmtree(d5 / "out" / "plan")
+    (d5 / "out" / "top.json").write_text(json.dumps(lp0["top"], ensure_ascii=False), encoding="utf-8")
+    (d5 / "out" / "split.json").write_text(json.dumps(lp0["split"], ensure_ascii=False), encoding="utf-8")
+    lj = MB.load_plan(d5 / "out", REQ)
+    check(lj["top"] == lp0["top"] and lj["split"] == lp0["split"] and lj["restored"] == ["top.json / split.json"], "旧输出目录里的 JSON 规划（top.json / split.json）也读得到", lj["restored"])
+    d6 = TM.TMP / "fp_json_new"
+    shutil.rmtree(d6, ignore_errors=True)
+    r6 = V.run_newproj(REQ, d6 / "proj", d6 / "out", model=FakeC(), modular=True, contract=True, from_plan=str(d5 / "out"))
+    check(r6["fixed"] and (d6 / "out/plan/top.zs").is_file() and (d6 / "out/plan/layers.zs").is_file() and not (d6 / "out/top.json").exists()
+          and MB.PD.parse_top((d6 / "out/plan/top.zs").read_text(encoding="utf-8")) == MB.PD.parse_top((out1 / "plan/top.zs").read_text(encoding="utf-8")), "from-plan 读 JSON 规划 → 新目录写出 DSL 规划文件（plan/top.zs / plan/layers.zs），全流程成功", r6["stop"])
+    check(MB.validate_split(MB.PD.parse_layers((d6 / "out/plan/layers.zs").read_text(encoding="utf-8")), lj["top"], TM.CAPS)["split"] == lj["split"], "写出的 plan/layers.zs 解析校验后与原 split 完全一致")
     # 读不到
     d4 = TM.TMP / "fp_bad"
     shutil.rmtree(d4, ignore_errors=True)
@@ -456,7 +483,7 @@ def t_from_plan():
     import inspect
     sig = inspect.signature(real).parameters
     check(sig["contract"].default is None and sig["from_plan"].default is None, "run_newproj 新参数 contract / from_plan（缺省 None：modular 默认约定模式）")
-    check((ROOT / "tools/dslagent/packs/newproj/prompts/sys_mcontract.md").is_file() and "{" in (ROOT / "tools/dslagent/packs/newproj/prompts/sys_mcontract.md").read_text(encoding="utf-8"), "sys_mcontract.md 提示词在，带 JSON 示例")
+    check((ROOT / "tools/dslagent/packs/newproj/prompts/sys_mcontract.md").is_file() and "=== queries/quiz_log.sql ===" in (ROOT / "tools/dslagent/packs/newproj/prompts/sys_mcontract.md").read_text(encoding="utf-8"), "sys_mcontract.md 提示词在，带四类骨架示例")
 
 
 def main():

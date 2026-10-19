@@ -19,7 +19,7 @@ os.environ["DSLAGENT_STATE"] = str(TMP / "state")
 os.environ.pop("NEWPROJ_FORCE_SUBPROCESS", None)
 os.environ.pop("NEWPROJ_COST_CAP", None)
 
-from tools.dslagent import modbuild as MB, v2 as V, loadcheck as LC, engines as E      # noqa: E402
+from tools.dslagent import modbuild as MB, v2 as V, loadcheck as LC, engines as E, plandsl as PD, skeleton as SK      # noqa: E402
 
 import functools      # noqa: E402
 
@@ -393,6 +393,57 @@ def t_checks():
 
 # ------------------------------------------------------------------ 四、全流程（假模型）
 
+def as_dsl(text, render):
+    """假模型的规划回复：夹具仍用 dict 写，这里转成模型该写的 DSL 文本（回复本来就不是 JSON 的原样给）。"""
+    t = text.lstrip()
+    if t.startswith("{"):
+        try:
+            return render(json.loads(t))
+        except ValueError:
+            pass
+    return text
+
+
+def fill_skeleton(user, text):
+    """约定模式下假模型「填骨架」：夹具里写的是实现正文，这里把提示词里骨架的约定部分（sql 头注释 / `#@` 行 / 接口头行）原样接上，等于模型照规矩只换了占位。
+    回复里的 `=== 路径 ===` 块逐个处理；提示词里没有那个文件的骨架就原样。"""
+    skel = {}
+    tail = user.split("骨架文件（", 1)[1]
+    for m in re.finditer(r"^=== (\S+) ===\n(.*?)(?=^=== |\Z)", tail, re.S | re.M):
+        skel.setdefault(m.group(1), m.group(2))
+    parts = re.split(r"^=== (\S+) ===\n", text, flags=re.M)
+    out = parts[0]
+    for rel, body in zip(parts[1::2], parts[2::2]):
+        sk = skel.get(rel)
+        if sk is not None:
+            body = fill_one(rel, sk, body)
+        out += f"=== {rel} ===\n{body}"
+    return out
+
+
+def fill_one(rel, sk, body):
+    k = SK.kind_of(rel)
+    if k == "sql":
+        head = [l for l in sk.splitlines() if SK.SQL_LINE.match(l.strip())]
+        return "\n".join(head) + "\n" + body
+    if k in ("flow", "ui"):
+        head = [l for l in sk.splitlines() if l.strip().startswith("#@")]
+        return "\n".join(head) + "\n" + body
+    want = {}
+    for _ln, h, bl in SK.route_blocks(sk):
+        mm = SK.HEAD_RE.match(h.strip())
+        want[mm.group(2)] = (h, [l for _n, l in bl if l.strip().startswith("#@")])
+    out, lines = [], body.splitlines()
+    for ln in lines:
+        mm = SK.HEAD_RE.match(ln.strip()) if ln.startswith("接口 ") else None
+        if mm and mm.group(2) in want and SK.HEAD_RE.match(want[mm.group(2)][0].strip()).group(3) == mm.group(3):      # 路径 + 动作名对得上才接约定头行（改了动作名的照样留着，让检查去拒）
+            h, sharp = want[mm.group(2)]
+            out += [h, *sharp]
+        else:
+            out.append(ln)
+    return "\n".join(out) + "\n"
+
+
 class Fake:
     """按提示词里的角色标记认出是哪一步、哪个文件。bad = {键: [回复…]} 覆盖默认回复（用完回最后一个）：
     ("顶层",) ("拆分",) ("计划", 层, 名) ("生成", 层, 名) ("核对",)。"""
@@ -415,6 +466,8 @@ class Fake:
         self.calls.append(tag)
         self.models.append(model)
         text = self.reply(user)
+        if isinstance(text, str) and "骨架文件（" in user and "=== " in text:
+            text = fill_skeleton(user, text)
         return text if isinstance(text, dict) else {"text": text, "cost": self.cost}
 
     def of(self, marker):
@@ -424,9 +477,9 @@ class Fake:
         mod = lambda: re.search(r'"模块": "(\w+)"', user).group(1)      # noqa: E731
         file = lambda: re.search(r"本文件：(\S+)", user).group(1)        # noqa: E731
         if "项目架构师" in user:
-            return self.pick(("顶层",), dump(self.top))
+            return as_dsl(self.pick(("顶层",), dump(self.top)), PD.render_top)
         if "项目架构助手" in user:
-            return self.pick(("拆分",), dump(self.split))
+            return as_dsl(self.pick(("拆分",), dump(self.split)), PD.render_layers)
         if "单文件规划助手（数据层）" in user:
             m = mod()
             ents = {"quiz": [{"名": "question", "字段": [{"名": "title", "类型": "文本"}, {"名": "answer", "类型": "文本"}], "关联": [], "约束": []},
@@ -696,7 +749,7 @@ def t_resume():
     r1, p, out = go("rs", fk1)
     f1 = files(r1)
     check(not r1["fixed"] and f1["scripts/quiz_judge.zs"]["结果"] == "失败" and f1["routes/quiz.zs"]["结果"] == "跳过", "第一次：流程失败，接口 / 界面跳过", {k: v["结果"] for k, v in f1.items()})
-    check((out / "top.json").is_file() and (out / "split.json").is_file(), "两步规划的结果落盘（top.json / split.json）")
+    check((out / "plan" / "top.zs").is_file() and (out / "plan" / "layers.zs").is_file() and not (out / "top.json").exists(), "两步规划的结果落盘（plan/top.zs / plan/layers.zs，不再写 JSON）")
     n1, cost1 = len(json.loads((out / "calls.json").read_text(encoding="utf-8"))), r1["cost"]
     fk2 = Fake(cost=0.5)
     r2, _, _ = resume("rs", fk2)
@@ -761,11 +814,11 @@ def t_resume():
     check(rc3["fixed"] and rc3["v2"]["结论"] == "成功" and [x["序号"] for x in rjson(outc)["v2"]["运行"]] == [1, 2, 3], "不设上限再继续一次，跑到成功", (rc3["stop"], rc3["calls"]))
     check(not any("项目架构" in x for x in fkc2.prompts + fkc3.prompts), "两次继续都没调规划")
 
-    print("  -- 老产物（没有 top.json / split.json）：从 result.json 与 calls/ 还原")
+    print("  -- 老产物（没有规划文件）：从 result.json 与 calls/ 还原")
     fko = Fake(bad={("生成", "流程", "scripts/quiz_judge.zs"): [f"=== scripts/quiz_judge.zs ===\n{bad_flow}"]})
     ro1, po, outo = go("rs_old", fko)
-    (outo / "top.json").unlink()
-    (outo / "split.json").unlink()
+    (outo / "plan" / "top.zs").unlink()
+    (outo / "plan" / "layers.zs").unlink()
     res = rjson(outo)
     for fl in res["v2"]["文件"]:
         fl.pop("产出", None)                # 老版本没有「产出」
@@ -774,7 +827,7 @@ def t_resume():
     ro2, _, _ = resume("rs_old", fko2)
     fo = files(ro2)
     check(ro2["fixed"] and not fko2.of("项目架构师") and not fko2.of("项目架构助手"), "没有落盘也能继续：不调规划", ro2["stop"])
-    check((outo / "top.json").is_file() and (outo / "split.json").is_file() and rjson(outo)["v2"]["继续构建"]["从哪还原"], "还原后补写 top.json / split.json，result 记从哪还原", rjson(outo)["v2"]["继续构建"])
+    check((outo / "plan" / "top.zs").is_file() and (outo / "plan" / "layers.zs").is_file() and rjson(outo)["v2"]["继续构建"]["从哪还原"], "还原后补写 plan/top.zs / plan/layers.zs，result 记从哪还原", rjson(outo)["v2"]["继续构建"])
     check(fo["queries/quiz_*.sql"].get("沿用") and fo["entities/quiz.entity"].get("沿用"), "沿用的查询文件状态从 calls/ 的规划回复还原", {k: v.get("沿用") for k, v in fo.items()})
     check(not fko2.of("单文件规划助手（查询层）") and ro2["v2"]["结论"] == "成功", "无需重做查询规划")
     st = "接口 GET /a/list 动作 a_list\n  返回 {}\n结束\n\n接口 POST /a/mine 动作 a_mine\n  返回 {}\n结束\n\n接口 POST /a/del 动作 a_del\n  返回 {}\n结束\n"
@@ -1045,9 +1098,12 @@ def t_cli():
     pr = ROOT / "tools/dslagent/packs/newproj/prompts"
     names = ["top", "split", "model", "plan_ent", "plan_sql", "plan_flow", "plan_iface", "plan_ui", "gen_ent", "gen_sql", "gen_flow", "gen_iface", "gen_ui"]
     check(all((pr / f"sys_m{n}.md").is_file() for n in names), "sys_m*.md 提示词齐全")
-    for n in ("top", "split", "plan_flow", "plan_iface"):
+    for n in ("plan_flow", "plan_iface"):
         t = (pr / f"sys_m{n}.md").read_text(encoding="utf-8")
         check("{" in t and "\"" in t and "示例" in t or "{\"" in t, f"sys_m{n}.md 带具体 JSON 示例")
+    for n, kw in (("top", "项目 "), ("split", "模块 ")):
+        t = (pr / f"sys_m{n}.md").read_text(encoding="utf-8")
+        check("完整示例" in t and kw in t and "结束" in t and "JSON" not in t, f"sys_m{n}.md 是 DSL 语法说明 + 完整示例（不再是 JSON）")
 
 
 # ------------------------------------------------------------------ 十六~十九、FIX4：试调 / 可选参数 / luna 回退 / 上游重做 / 示例
