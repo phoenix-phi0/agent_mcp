@@ -18,7 +18,7 @@
   .sql 里的 :k                 k
 
 不扫：注释行、字典里点号后面的键（传给中文动词的参数字典，键就是中文的动词
-参数名）、显示文本里不在 {} 里的字。verbs/ 下用 .zs 写的动词，开头「# 参数：」
+参数名）、显示文本里不在 {} 里的字。verbs/（含 tools/dslagent/verbs/）下用 .zs 写的动词，开头「# 参数：」
 声明的是动词参数名，照规矩中文，也不算。
 
 另外查一条：变量名不能是关键字的英文别名（set、if、end、reset、verdict……，
@@ -166,8 +166,8 @@ def report():
         text = p.read_text(encoding="utf-8")
         if p.name.endswith(".j2"):
             text = strip_jinja(text)
-        # verbs/ 下的 .zs 动词（包顶层、defs/ 里的都算）：声明的参数是动词参数名
-        allowed = parse_param_decl(text) if ROOT / "verbs" in p.parents else ()
+        # verbs/ 下的 .zs 动词（包顶层、defs/ 里的都算；dslagent 私有动词根 tools/dslagent/verbs/ 同）：声明的参数是动词参数名
+        allowed = parse_param_decl(text) if (ROOT / "verbs" in p.parents or ROOT / "tools" / "dslagent" / "verbs" in p.parents) else ()
         hits = scan_zs(text, allowed) if kind == "zs" else scan_sql(text)
         for no, where, name in hits:
             out.append((str(p.relative_to(ROOT)), no, where, name))

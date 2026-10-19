@@ -84,6 +84,8 @@
                                子脚本里：只结束子脚本，「设 r = 执行 子.zs」拿到的
                                就是 {状态, 原因, 停在}（停在 = 「子.zs 第 N 行」），
                                调用方决定接着走还是 终止 {r.状态} {r.原因}。
+                               脚本动词（.zs 动词）里的 终止：调用方没写 设 r = … 接结果时
+                               接着往外传，结束调用方；接了结果的拿到同样的 {状态, 原因, 停在}。
                                状态可以是 {变量}，展开后不是这三个之一就报错
     预算 调用 N 秒 M           整个流程最多调 N 次模型、跑 M 秒墙钟（可只写其一，
                                N、M 是正整数或 {变量}）。从顶层脚本开始累计，含
@@ -1114,6 +1116,11 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
             sub = self._sub_engine()
             sub.vars.update(params)
             text = sub.run(Path(impl).read_text(encoding="utf-8"))
+            if sub.halted is not None and assign_to is None:
+                # 脚本动词里「终止」了、调用方又没接结果（没写 设 r = …）：终止接着往外传，结束调用方；
+                # 接了结果（设 r = 动词 …）的拿到 {状态, 原因, 停在}，自己决定接着走还是终止
+                h = sub.halted
+                raise ScriptHalt(h["状态"], h["原因"], f"{name} {h['停在']}".strip())
             result = sub.returned[0] if sub.returned else text
 
         self._deliver(result, assign_to)

@@ -46,7 +46,24 @@ def main(argv=None):
     n.add_argument("--codex-cap", type=int, default=None, help="codex 调用次数上限（只对 --modular 有效）：codex 调用不计费、不进 --cost-cap（熔断只看 Claude 侧花费），用这个限次数；达到就停、以「部分成功」结束；缺省不限。规划 / 生成可分别指定模型：DSLAGENT_MODELS 里 mplan（规划类）/ mgen（生成类），没写走 sub")
     n.add_argument("--no-contract", action="store_true", help="（只对 --modular）不先约定接口：回到逐文件规划、按下层真实文件对接的老做法；缺省先约定接口（CONTRACTS.md）再按约定实现，实现后试调一轮")
     n.add_argument("--from-plan", default=None, metavar="旧输出目录", help="（只对 --modular）读回旧运行的顶层规划与层次×模块（plan/top.zs、plan/layers.zs；旧版 JSON 目录也读，转成 DSL 规划文件；再不行从 result.json 与 calls/ 还原），跳过这两步，在新的 project / --out 里从数据层做起")
+    v = sp.add_parser("v3", help="v3 流程（v3/v3.zs）：顶层规划 → 约定 → 骨架 → 分配 → 按层做模块；断了重跑同一命令即续跑")
+    v.add_argument("--req", required=True, help="需求文件")
+    v.add_argument("--project", required=True, help="项目目录（不存在就建）")
+    v.add_argument("--out", required=True, help="记录目录：每步产物、检查结果、重写次数、每个模块的 v2 记录目录、花费")
+    v.add_argument("--stop-after", choices=("top", "contract", "build"), default=None, help="跑到这一步的产物写出并通过检查就停")
+    v.add_argument("--cost-cap", type=float, default=None, help="花费上限（美元），达到就以「超出预期」结束")
+    v.add_argument("--wall", type=int, default=None, help="整个流程的墙钟秒数（缺省 36000）")
+    v.add_argument("--module-wall", type=int, default=1500, help="做一个模块时 v2 子进程的墙钟秒数")
     a = ap.parse_args(argv)
+    if a.cmd == "v3":
+        from .v3 import core as V3
+        def on_term(*_):
+            raise SystemExit(143)
+        signal.signal(signal.SIGTERM, on_term)
+        res = V3.run(Path(a.req).read_text(encoding="utf-8"), a.project, a.out, stop_after=a.stop_after, cost_cap=a.cost_cap,
+                     **({"wall": a.wall} if a.wall else {}), module_wall=a.module_wall)
+        print(json.dumps({k: res.get(k) for k in ("状态", "原因", "停在", "花费", "用时", "模型调用")}, ensure_ascii=False))
+        return 0 if res["状态"] == "成功" else 1
     if a.cmd == "newproj":
         from . import v2
         if a.resume and not a.modular:

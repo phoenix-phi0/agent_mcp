@@ -35,13 +35,15 @@
   datalog.py    小 Datalog 求值器（reason 和 legacy/infer 共用）
   rules/        安全.dl
   lib/          示例_分支规划.zs（规划 system 的末尾示例）
-  verbs/        私有动词根：code 包（读、搜、改、写 / 删文件、改模块名、跑测试、运行看看）、dslproj 包（加载检查、比对约定、跑用例），common / text 转发仓库 verbs/
+  verbs/        私有动词根：code 包（读、搜、改、写 / 删文件、改模块名、跑测试、运行看看）、dslproj 包（加载检查、比对约定、跑用例）、v3 包（规划到通过 / 规划一份 / 做模块组 / 做一个模块 四个 .zs 动词 + 写规划 / 检查规划 / 生成骨架 / 做模块 … Python 动词），common / text 转发仓库 verbs/
+  v3/           v3 流程：v3.zs（顶层规划 → 约定 → 骨架 → 分配 → 按层做模块）+ 确定性的部分（顶层 / 约定检查、骨架 / 分配生成、状态与续跑、做模块子进程）+ prompts/，见 v3/__init__.py
   legacy/       旧路径：run.py（执行器）、template.py、infer.py、pool.py、engine.py（LegacyEngine）、prompts.py、
                 reason_rules.py（测试变化 / 完成核对检查 / 退回规划前回滚）、lib/（定位.zs、读改测.zs）、rules/（测试变化.dl、完成核对.dl）
 
 命令行（cbatch 起的就是这个，独立进程）：
     python -m tools.dslagent run --project DIR --task-file F --out DIR [--test-cmd CMD] [--max-plan 2]
     python -m tools.dslagent run --pack dslproj --project DIR --task-file F --out DIR [--scope a/,routes/x*.zs]   # 统一入口：任务文件里写一行「模块 <名>」
+    python -m tools.dslagent v3 --req F --project DIR --out DIR [--stop-after top|contract|build] [--cost-cap USD]   # 一份需求 → 一个 DSL 项目；断了重跑同一命令即续跑
     python -m tools.dslagent auto --project DIR --task-file F [--test-cmd CMD]
 
 修 bug 路径在 shopkit N1–N10 上验证过；任务路径在 plan8 S1–S8、blind_V V5–V10 上验证过。
