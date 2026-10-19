@@ -10,16 +10,18 @@
     注意：.zs 里的插值是单层花括号 {变量}，Jinja 的是双层。单层 Jinja
     不认，直接写就行。 -#}
 {% set pk = e | 主键 %}
+{% block header %}
 # {{ e | 标签 }}的一套增删改查。由实体 {{ e.name }} 用「完整」模板生成。
 # 生成是一次性的——落盘之后就是普通的 .zs，随便改。
 #
 # 配套的五条 SQL 在 queries/ 下，文件名 {{ e.name }}_*.sql。
 # 界面在 ui/{{ e.name }}.ui：列表、编辑、新建三个界面，编辑和新建分开，
 # 各走各的接口。
+{% endblock %}
 
 接口 POST /{{ e.name }}/list 动作 {{ e.name }}_refresh
   用包 db http
-  设 rows = 查询 {{ db }} {{ e.name }}_list limit=50
+  设 rows = 查询 {{ db }} {{ e.name }}_list limit=50{{ 用户参数 | default("") }}
   设 group.{{ e.name }}s = {rows}
   响应 lists {group}
 结束
@@ -27,11 +29,13 @@
 
 接口 POST /{{ e.name }}/one 动作 {{ e.name }}_open
   用包 db http
-  设 record = 查一行 {{ db }} {{ e.name }}_one {{ pk }}={ {{- pk -}} }
+  设 record = 查一行 {{ db }} {{ e.name }}_one {{ pk }}={ {{- pk -}} }{{ 用户参数 | default("") }}
   如果 {record.{{ pk }}} 为空
     返回 {"error":"没有这条记录"} 404
   结束
+{% block one_note %}
   # form：前端填进编辑表单（界面上的「载入」）
+{% endblock %}
   响应 form {record}
 结束
 
@@ -47,7 +51,7 @@
   事务 {{ db }}
     设 affected = 写库表 {{ db }} {{ e.name }}_insert {request}
   结束
-  设 rows = 查询 {{ db }} {{ e.name }}_list limit=50
+  设 rows = 查询 {{ db }} {{ e.name }}_list limit=50{{ 用户参数 | default("") }}
   设 group.{{ e.name }}s = {rows}
   响应 lists {group}
   消息 系统 已新建 ok
@@ -57,18 +61,22 @@
 {# 编辑界面的「保存」。主键在 {request} 里——编辑表单是列表那一行拷过来的。 #}
 接口 POST /{{ e.name }}/update 动作 {{ e.name }}_update
   用包 db http
+{% block update_guard %}
   # 没带主键就别进事务：绑定时报「缺少参数」，在事务里会变成 500
+{% endblock %}
   如果 {request.{{ pk }}} 为空
     返回 {"error":"没有指定要改哪一条"} 400
   结束
   事务 {{ db }}
     设 affected = 写库表 {{ db }} {{ e.name }}_update {request}
   结束
+{% block update_zero %}
   # 影响 0 行说明那条记录没了——可能别人删了，也可能主键没带过来
+{% endblock %}
   如果 {affected} 等于 0
     返回 {"error":"没有这条记录"} 404
   结束
-  设 rows = 查询 {{ db }} {{ e.name }}_list limit=50
+  设 rows = 查询 {{ db }} {{ e.name }}_list limit=50{{ 用户参数 | default("") }}
   设 group.{{ e.name }}s = {rows}
   响应 lists {group}
   消息 系统 已保存 ok
@@ -83,7 +91,9 @@
   事务 {{ db }}
     设 affected = 写库表 {{ db }} {{ e.name }}_delete {request}
   结束
-  设 rows = 查询 {{ db }} {{ e.name }}_list limit=50
+{% block delete_zero %}
+{% endblock %}
+  设 rows = 查询 {{ db }} {{ e.name }}_list limit=50{{ 用户参数 | default("") }}
   设 group.{{ e.name }}s = {rows}
   响应 lists {group}
   消息 系统 已删除 ok

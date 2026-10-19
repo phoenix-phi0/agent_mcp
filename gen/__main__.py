@@ -6,6 +6,7 @@
     py -m gen article --write      写盘
     py -m gen --all --write        所有实体
     py -m gen article --check      只跑自检
+    py -m gen tpl list|show|diff|where|check|render|new|doc   模板集管理（见 gen/tpl.py）
 
 默认只打印不写盘：生成的 SQL 和接口会覆盖已有文件，看清楚再写。
 """
@@ -23,6 +24,9 @@ def main() -> int:
     # 项目命令：py -m gen init|gen|build|run 目录。跟下面按实体生成的老用法
     # 并存——第一个参数是这四个词之一就走项目那边。
     import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "tpl":
+        from .tpl import main as tpl_main
+        return tpl_main(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] in ("init", "gen", "build", "run", "auth"):
         from .project import main as project_main
         return project_main(sys.argv[1:])

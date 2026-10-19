@@ -14,14 +14,15 @@ PRIVATE_HINT = re.compile(r"登录|登陆|账号|帐号|账户|注册|只看自�
 
 def 校验实体(文本: str = "", 模板: str = "", 需求: str = "", 清单模板: str = "") -> dict:
     sys.path.insert(0, str(Path(__file__).parent))
+    import _tplset
     import _gen as G
     if G.is_dry():
         return {"ok": "是", "errors": "", "实体数": 1}
     text = str(文本 or "")
     if not text.strip():
         return {"ok": "否", "errors": "实体文本为空", "实体数": 0}
-    if str(模板 or "").strip() and str(模板).strip() not in ("default", "full", "private"):
-        return {"ok": "否", "errors": f"模板「{模板}」不对，只能是 default / full / private", "实体数": 0}
+    if str(模板 or "").strip() and str(模板).strip() not in _tplset.names():
+        return {"ok": "否", "errors": f"模板「{模板}」不对，只能是 {_tplset.menu()}", "实体数": 0}
     try:
         from tools.entity import parse, validate
         ents = parse(text)

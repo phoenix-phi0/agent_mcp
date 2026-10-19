@@ -19,7 +19,8 @@ SNAKE = re.compile(r"^[a-z][a-z0-9_]*$")
 FENCE = re.compile(r"^```[^\n]*\n(.*?)\n?```[ \t]*$", re.S)
 MAX_FEATURES_ENV = "NEWPROJ_SPLIT_MAX_FEATURES"
 DEFAULT_MAX = 12
-TEMPLATES = ("default", "full", "private")
+from _tplset import names as _tpl_names
+TEMPLATES = _tpl_names()
 
 
 def max_features():
@@ -76,7 +77,7 @@ def 校验清单(清单: str = "", 需求: str = "") -> dict:
     errs = []
     tpl = str(obj.get("模板") or "").strip()
     if tpl not in TEMPLATES:
-        errs.append(f"模板「{tpl}」不对，只能是 default / full / private")
+        errs.append(f"模板「{tpl}」不对，只能是 {' / '.join(TEMPLATES)}")
     feats = obj.get("功能")
     if feats is None:
         feats = []

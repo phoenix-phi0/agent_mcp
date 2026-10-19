@@ -27,4 +27,7 @@ def 读原文(路径: str = "") -> dict:
         return {"ok": "否", "text": "", "msg": f"[读原文] {rel} 读不了：{e}"}
     if len(t) > MAX_CHARS:
         return {"ok": "否", "text": "", "msg": f"[读原文] {rel} 超过 {MAX_CHARS} 字（{len(t)}）"}
+    if rel.startswith(G.PACK_PREFIX):
+        import _tplset
+        t = _tplset.fill(t)
     return {"ok": "是", "text": t}

@@ -37,7 +37,7 @@ def validate_layers(x, task=""):
     errs = []
     tpl = str(obj.get("模板") or "").strip()
     if tpl not in TEMPLATES:
-        errs.append(f"模板「{tpl}」不对，只能是 default / full / private")
+        errs.append(f"模板「{tpl}」不对，只能是 {' / '.join(TEMPLATES)}")
     roles = _strs(obj.get("角色"), "「角色」", errs)
     for r in roles:
         if not SNAKE.match(r):

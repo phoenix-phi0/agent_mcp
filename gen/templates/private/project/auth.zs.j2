@@ -1,0 +1,52 @@
+# 注册、登录、退出。由 py -m gen auth 生成。
+#
+{% if 认证 == "可选" %}
+# 下面这行：平时不要登录；启动时加 --登录（gen run 项目/ --登录）才要求，
+# 那时整个项目的接口都要登录，只有标了「公开」的例外。
+{% else %}
+# 下面这行打开认证：整个项目的接口都要求登录，只有标了「公开」的例外。
+{% endif %}
+# 检查在路由器里做，不靠每个接口自己记得——手写的接口忘了检查，就是一个
+# 不设防的口子。
+
+认证 {{ 认证 }}
+
+
+# 注册成功直接登录。go 是 @来处：回到被要求登录之前的那个界面。
+接口 POST /auth/register 动作 auth_register 公开
+{% if 开放注册 %}
+  用包 auth http
+  设 result = 注册用户 app.db user_insert {request}
+  如果 {result} 开头是 [
+    返回 {"error":"{result}"} 400
+  结束
+  返回 {"go":"@来处","messages":[{"who":"系统","text":"注册成功","kind":"ok"}]}
+{% else %}
+{{ 关注册标记 }}：账号由教师建，不开放自助注册。
+  返回 {"error":"不开放自助注册，请联系老师开通账号"} 403
+{% endif %}
+结束
+
+
+# 登录失败不区分「没这个人」和「密码错」
+接口 POST /auth/login 动作 auth_login 公开
+  用包 auth http
+  设 user = 登录 app.db user_by_name {request}
+  如果 {user} 为空
+    返回 {"error":"用户名或密码不对"} 400
+  结束
+  返回 {"go":"@来处","messages":[{"who":"系统","text":"已登录","kind":"ok"}]}
+结束
+
+
+接口 POST /auth/logout 动作 auth_logout 公开
+  用包 auth http
+  设 result = 退出登录
+  返回 {"go":"登录","messages":[{"who":"系统","text":"已退出","kind":"ok"}]}
+结束
+
+
+# 现在是谁。没登录时 user 是空串。
+接口 POST /auth/me 动作 auth_me 公开
+  返回 {"user":"{current_user}"}
+结束

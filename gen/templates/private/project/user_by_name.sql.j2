@@ -1,0 +1,2 @@
+-- 登录时按用户名取出哈希。「登录」动词要的就是这两列，顺序不能换。
+SELECT username, password_hash FROM user WHERE username = :username

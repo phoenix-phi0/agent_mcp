@@ -1,6 +1,0 @@
-{#- 按主键查一条。主键排最前，别的列跟着。 -#}
--- 按主键查一条{{ e | 标签 }}。
-SELECT {{ e | 主键 }}{% for f in e.fields | 可写 | 除去(e | 主键) %}, {{ f.name }}{% endfor %}
-
-FROM {{ e.name }}
-WHERE {{ e | 主键 }} = :{{ e | 主键 }}

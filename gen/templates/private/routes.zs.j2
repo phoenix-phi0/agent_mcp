@@ -13,79 +13,28 @@
 
     **改、删别人的记录影响 0 行，回 404**——跟不存在一样，不透露那条
     记录在不在。 -#}
-{% set pk = e | 主键 %}
+{% extends "@_base/routes.zs.j2" %}
+{% set 用户参数 = " current_user={current_user}" %}
+{% block header %}
 # {{ e | 标签 }}的一套增删改查，每人只能看、改自己的。由实体 {{ e.name }}
 # 用「私有」模板生成。落盘之后就是普通的 .zs，随便改。
 
 认证 必须
-
-接口 POST /{{ e.name }}/list 动作 {{ e.name }}_refresh
-  用包 db http
-  设 rows = 查询 {{ db }} {{ e.name }}_list limit=50 current_user={current_user}
-  设 group.{{ e.name }}s = {rows}
-  响应 lists {group}
-结束
-
-
-接口 POST /{{ e.name }}/one 动作 {{ e.name }}_open
-  用包 db http
-  设 record = 查一行 {{ db }} {{ e.name }}_one {{ pk }}={ {{- pk -}} } current_user={current_user}
-  如果 {record.{{ pk }}} 为空
-    返回 {"error":"没有这条记录"} 404
-  结束
+{% endblock %}
+{% block one_note %}
   # form：前端填进编辑表单（界面上的「载入」）。别人的记录查不到，跟不存在
   # 一样回 404——打开别人发来的编辑链接也看不到内容
-  响应 form {record}
-结束
-
-
-接口 POST /{{ e.name }}/create 动作 {{ e.name }}_save
-  用包 db http
-  事务 {{ db }}
-    设 affected = 写库表 {{ db }} {{ e.name }}_insert {request}
-  结束
-  设 rows = 查询 {{ db }} {{ e.name }}_list limit=50 current_user={current_user}
-  设 group.{{ e.name }}s = {rows}
-  响应 lists {group}
-  消息 系统 已新建 ok
-结束
-
-
-接口 POST /{{ e.name }}/update 动作 {{ e.name }}_update
-  用包 db http
-  # 没带主键就别进事务：绑定 :{{ pk }} 会报「缺少参数」，在事务里被当成
+{% endblock %}
+{% block update_guard %}
+  # 没带主键就别进事务：绑定 :{{ e | 主键 }} 会报「缺少参数」，在事务里被当成
   # 脚本出错回 500。实际撞上过——打开别人的编辑链接（404、表单是空的）
   # 再点保存。
-  如果 {request.{{ pk }}} 为空
-    返回 {"error":"没有指定要改哪一条"} 400
-  结束
-  事务 {{ db }}
-    设 affected = 写库表 {{ db }} {{ e.name }}_update {request}
-  结束
+{% endblock %}
+{% block update_zero %}
   # 0 行：记录不存在，或者不是你的——两种情况不区分
+{% endblock %}
+{% block delete_zero %}
   如果 {affected} 等于 0
     返回 {"error":"没有这条记录"} 404
   结束
-  设 rows = 查询 {{ db }} {{ e.name }}_list limit=50 current_user={current_user}
-  设 group.{{ e.name }}s = {rows}
-  响应 lists {group}
-  消息 系统 已保存 ok
-结束
-
-
-接口 POST /{{ e.name }}/delete 动作 {{ e.name }}_remove
-  用包 db http
-  如果 {request.{{ pk }}} 为空
-    返回 {"error":"没有指定要删哪一条"} 400
-  结束
-  事务 {{ db }}
-    设 affected = 写库表 {{ db }} {{ e.name }}_delete {request}
-  结束
-  如果 {affected} 等于 0
-    返回 {"error":"没有这条记录"} 404
-  结束
-  设 rows = 查询 {{ db }} {{ e.name }}_list limit=50 current_user={current_user}
-  设 group.{{ e.name }}s = {rows}
-  响应 lists {group}
-  消息 系统 已删除 ok
-结束
+{% endblock %}

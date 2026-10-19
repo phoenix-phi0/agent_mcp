@@ -1,0 +1,33 @@
+# 登录、注册两个界面。由 py -m gen auth 生成，随便改。
+#
+# 界面名「登录」是约定：前端收到 401 时跳到叫这个名字的界面。改名的话
+# 401 就不会自动跳了。
+#
+# 密码框：字段名 password_hash 用来查类型（它在用户表里），「绑 password」
+# 让提交时的键叫 password——注册、登录动词收的是明文 password，在 Python
+# 里哈希，哈希值从不经过前端。
+
+界面 表单 登录
+  分组 主体 竖排 间距 12px
+    字段 username 用户名
+    字段 password_hash 绑 password 控件 密码 密码
+  结束
+
+  分组 底栏 横排 底栏
+    动作 auth_login 提交 远程 登录
+    动作 toregister 次要 切到 注册 没有账号？注册
+  结束
+结束
+
+
+界面 表单 注册
+  分组 主体 竖排 间距 12px
+    字段 username 用户名
+    字段 password_hash 绑 password 控件 密码 密码（至少 6 位）
+  结束
+
+  分组 底栏 横排 底栏
+    动作 auth_register 提交 远程 注册
+    动作 tologin 次要 切到 登录 已有账号？登录
+  结束
+结束

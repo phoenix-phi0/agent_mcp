@@ -56,7 +56,7 @@ from pathlib import Path
 
 from .core import DEFAULT_DB, PARTS
 from .core import generate as gen_entity
-from .templates_ import TemplateError, required_fields
+from .templates_ import TemplateError, project_params, render_project, required_fields
 
 ROOT = Path(__file__).resolve().parent.parent
 VUE_LOCAL = ROOT / "app2" / "assets" / "vue.global.prod.js"
@@ -221,132 +221,32 @@ def generate(root: Path, template_set: str = "full", only=None,
 # 认证
 # ----------------------------------------------------------------------
 
-AUTH_FILES = {
-    "entities/user.entity": """\
-# 用户。由 py -m gen auth 生成。
-#
-# password_hash 存的是 scrypt 哈希，不是密码本身。界面上的密码框绑的是
-# password（见 ui/auth.ui）；注册、登录两个动词在 Python 里哈希和核对，
-# 密码不进数据库，也不经过脚本变量。
+def render_auth(optional: bool = False, roles=None, no_register: bool = False) -> dict:
+    """private 套的账号文件（用户表、注册登录接口与界面；有角色时再加 user_auth.sql、auth_roles.zs）。
 
-实体 user 用户
-  字段 username 文本 必填 唯一 用户名
-  字段 password_hash 文本 必填 密码
-  字段 created_at 文本 必填 默认 now 注册于
-结束
-""",
-    "queries/user_insert.sql": """\
--- 注册。password_hash 由「注册用户」动词算好传进来。
--- username 是唯一的，重名时插入失败，动词报「用户名已被占用」。
-INSERT INTO user(username, password_hash)
-VALUES(:username, :password_hash)
-""",
-    "queries/user_by_name.sql": """\
--- 登录时按用户名取出哈希。「登录」动词要的就是这两列，顺序不能换。
-SELECT username, password_hash FROM user WHERE username = :username
-""",
-    "routes/auth.zs": """\
-# 注册、登录、退出。由 py -m gen auth 生成。
-#
-# 下面这行打开认证：整个项目的接口都要求登录，只有标了「公开」的例外。
-# 检查在路由器里做，不靠每个接口自己记得——手写的接口忘了检查，就是一个
-# 不设防的口子。
-
-认证 必须
+    文本全在 gen/templates/private/project/，参数见 private/set.json 的「参数」。
+    返回 {项目内相对路径: 内容}。
+    """
+    names = [str(r).strip() for r in (roles or []) if str(r).strip()]
+    return render_project("private", {"认证": "可选" if optional else "必须",
+                                      "开放注册": not no_register, "角色": names})
 
 
-# 注册成功直接登录。go 是 @来处：回到被要求登录之前的那个界面。
-接口 POST /auth/register 动作 auth_register 公开
-  用包 auth http
-  设 result = 注册用户 app.db user_insert {request}
-  如果 {result} 开头是 [
-    返回 {"error":"{result}"} 400
-  结束
-  返回 {"go":"@来处","messages":[{"who":"系统","text":"注册成功","kind":"ok"}]}
-结束
-
-
-# 登录失败不区分「没这个人」和「密码错」
-接口 POST /auth/login 动作 auth_login 公开
-  用包 auth http
-  设 user = 登录 app.db user_by_name {request}
-  如果 {user} 为空
-    返回 {"error":"用户名或密码不对"} 400
-  结束
-  返回 {"go":"@来处","messages":[{"who":"系统","text":"已登录","kind":"ok"}]}
-结束
-
-
-接口 POST /auth/logout 动作 auth_logout 公开
-  用包 auth http
-  设 result = 退出登录
-  返回 {"go":"登录","messages":[{"who":"系统","text":"已退出","kind":"ok"}]}
-结束
-
-
-# 现在是谁。没登录时 user 是空串。
-接口 POST /auth/me 动作 auth_me 公开
-  返回 {"user":"{current_user}"}
-结束
-""",
-    "ui/auth.ui": """\
-# 登录、注册两个界面。由 py -m gen auth 生成，随便改。
-#
-# 界面名「登录」是约定：前端收到 401 时跳到叫这个名字的界面。改名的话
-# 401 就不会自动跳了。
-#
-# 密码框：字段名 password_hash 用来查类型（它在用户表里），「绑 password」
-# 让提交时的键叫 password——注册、登录动词收的是明文 password，在 Python
-# 里哈希，哈希值从不经过前端。
-
-界面 表单 登录
-  分组 主体 竖排 间距 12px
-    字段 username 用户名
-    字段 password_hash 绑 password 控件 密码 密码
-  结束
-
-  分组 底栏 横排 底栏
-    动作 auth_login 提交 远程 登录
-    动作 toregister 次要 切到 注册 没有账号？注册
-  结束
-结束
-
-
-界面 表单 注册
-  分组 主体 竖排 间距 12px
-    字段 username 用户名
-    字段 password_hash 绑 password 控件 密码 密码（至少 6 位）
-  结束
-
-  分组 底栏 横排 底栏
-    动作 auth_register 提交 远程 注册
-    动作 tologin 次要 切到 登录 已有账号？登录
-  结束
-结束
-""",
-}
-
-
-def add_auth(root: Path, optional: bool = False) -> list:
+def add_auth(root: Path, optional: bool = False, roles=None, no_register: bool = False) -> list:
     """给项目加上用户表和登录注册。已存在的文件跳过，不覆盖。
 
     optional：写「认证 可选」而不是「认证 必须」——平时照旧不用登录，
     启动时加 --登录 才要求（单人本机用、多人用同一份路由）。
+    roles / no_register：见 private 套的参数（角色、开放注册）。
     """
     _check_root(root)
     out = []
-    for rel, text in AUTH_FILES.items():
+    for rel, text in render_auth(optional, roles, no_register).items():
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         if p.exists():
             out.append(f"  跳过 {rel}（已存在）")
             continue
-        if optional and rel == "routes/auth.zs":
-            text = text.replace(
-                "# 下面这行打开认证：整个项目的接口都要求登录，只有标了「公开」的例外。",
-                "# 下面这行：平时不要登录；启动时加 --登录（gen run 项目/ --登录）才要求，\n"
-                "# 那时整个项目的接口都要登录，只有标了「公开」的例外。").replace(
-                "认证 必须", "认证 可选")
         p.write_text(text, encoding="utf-8")
         out.append(f"  写入 {rel}")
     return out
@@ -359,7 +259,7 @@ def add_auth(root: Path, optional: bool = False) -> list:
 # gen 增删改查五个接口的（路径尾, 动作尾）。模板（default / full / private）三套一致，
 # 靠它认出「这是 gen 生成的块」：模型追加的接口路径 / 动作不会同时撞上这两个
 CRUD_TAILS = {"list": "refresh", "one": "open", "create": "save", "update": "update", "delete": "remove"}
-CLOSED_MARK = "# 自助注册已关闭"
+CLOSED_MARK = project_params("private")["关注册标记"]
 _API_HEAD = re.compile(r"^接口\s+(?:(?:GET|POST|PUT|DELETE)\s+)?(/\S*)(?:\s+动作\s+(\S+))?(\s+公开)?(?:\s+(?:角色|只许)\s+(\S+))?\s*$", re.I)
 
 
@@ -423,16 +323,8 @@ def hide_password_hash(root: Path) -> list:
     return out
 
 
-def close_register(root: Path) -> list:
-    """关掉公开注册：routes/auth.zs 的 /auth/register 保留接口头（界面动作还在），内容换成 403。"""
-    f = root / "routes" / "auth.zs"
-    if not f.is_file():
-        return []
-    raw = f.read_bytes().decode("utf-8")
-    if CLOSED_MARK in raw:
-        return []
-    nl = "\r\n" if "\r\n" in raw else "\n"
-    lines = raw.split(nl)
+def _register_span(lines: list):
+    """/auth/register 接口体在 lines 里的 (头行下标, 结束行下标)；找不到返回 None。"""
     for i, ln in enumerate(lines):
         if re.match(r"^接口\s+(?:POST\s+)?/auth/register\b", ln):
             j = i + 1
@@ -444,15 +336,33 @@ def close_register(root: Path) -> list:
                 elif h in ("结束", "end"):
                     depth -= 1
                     if depth == 0:
-                        break
+                        return i, j
                 j += 1
-            if j >= len(lines):
-                return []
-            lines[i + 1:j] = [CLOSED_MARK + "：账号由教师建，不开放自助注册。",
-                              '  返回 {"error":"不开放自助注册，请联系老师开通账号"} 403']
-            f.write_bytes(nl.join(lines).encode("utf-8"))
-            return ["  routes/auth.zs：/auth/register 改为 403（不开放自助注册）"]
-    return []
+            return None
+    return None
+
+
+def close_register(root: Path) -> list:
+    """关掉公开注册：routes/auth.zs 的 /auth/register 保留接口头（界面动作还在），内容换成 403。
+
+    换成的内容取自 private 套 auth.zs 模板在「开放注册=false」时的渲染，和新项目一致。
+    """
+    f = root / "routes" / "auth.zs"
+    if not f.is_file():
+        return []
+    raw = f.read_bytes().decode("utf-8")
+    if CLOSED_MARK in raw:
+        return []
+    nl = "\r\n" if "\r\n" in raw else "\n"
+    lines = raw.split(nl)
+    span = _register_span(lines)
+    if not span:
+        return []
+    closed = render_auth(no_register=True)["routes/auth.zs"].split("\n")
+    cspan = _register_span(closed)
+    lines[span[0] + 1:span[1]] = closed[cspan[0] + 1:cspan[1]]
+    f.write_bytes(nl.join(lines).encode("utf-8"))
+    return ["  routes/auth.zs：/auth/register 改为 403（不开放自助注册）"]
 
 
 def apply_perms(root: Path, roles, no_register: bool = False) -> list:

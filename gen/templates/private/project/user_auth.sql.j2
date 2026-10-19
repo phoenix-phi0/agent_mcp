@@ -1,0 +1,2 @@
+-- 「认证 核对」：每个请求按用户名查一次，role 注入成 {current_role}
+SELECT username, role FROM user WHERE username = :username

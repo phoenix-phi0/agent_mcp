@@ -1,7 +1,4 @@
-{#- 列表查询。带上主键供界面跳转用。 -#}
--- {{ e | 标签 }}列表。带上 {{ e | 主键 }} 供界面跳转用。
-SELECT {{ e | 主键 }}{% for f in e.fields | 上列表 %}{% if f.name != (e | 主键) %}, {{ f.name }}{% endif %}{% endfor %}
-
-FROM {{ e.name }}
-ORDER BY {{ e | 主键 }} DESC
-LIMIT CAST(:limit AS INTEGER)
+{#- 列表查询。带上主键供界面跳转用，只取前几个短字段（「上列表」）。 -#}
+{% extends "@_base/list.sql.j2" %}
+{% set 列表字段 = e.fields | 上列表 %}
+{% set 列表注 = "%s列表。带上 %s 供界面跳转用。" % (e | 标签, e | 主键) %}

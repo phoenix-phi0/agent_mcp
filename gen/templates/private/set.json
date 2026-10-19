@@ -1,0 +1,70 @@
+{
+  "名": "private",
+  "说明": "私有：在 full 上加登录隔离——每人只看、只改自己的（owner 列），附带账号（用户表、注册登录、角色）项目级文件。",
+  "提示": "每人只看自己的，实体需 `字段 owner 文本 必填 索引`",
+  "继承": "full",
+  "要求字段": [
+    "owner"
+  ],
+  "项目级文件": [
+    {
+      "路径": "entities/user.entity",
+      "模板": "project/user.entity.j2"
+    },
+    {
+      "路径": "queries/user_insert.sql",
+      "模板": "project/user_insert.sql.j2"
+    },
+    {
+      "路径": "queries/user_by_name.sql",
+      "模板": "project/user_by_name.sql.j2"
+    },
+    {
+      "路径": "routes/auth.zs",
+      "模板": "project/auth.zs.j2"
+    },
+    {
+      "路径": "ui/auth.ui",
+      "模板": "project/auth.ui.j2"
+    },
+    {
+      "路径": "queries/user_auth.sql",
+      "模板": "project/user_auth.sql.j2",
+      "当": "角色"
+    },
+    {
+      "路径": "routes/auth_roles.zs",
+      "模板": "project/auth_roles.zs.j2",
+      "当": "角色"
+    }
+  ],
+  "参数": {
+    "认证": {
+      "默认": "必须",
+      "说明": "必须＝整个项目要求登录；可选＝平时不用登录，启动加 --登录 才要求"
+    },
+    "开放注册": {
+      "默认": true,
+      "说明": "false 时 /auth/register 保留接口头但回 403（账号由教师建）"
+    },
+    "角色": {
+      "默认": [],
+      "说明": "角色代号列表（来自功能清单）。非空时 user 加 role 列（默认最后一个）并生成 user_auth.sql、auth_roles.zs"
+    },
+    "角色名": {
+      "默认": {
+        "teacher": "教师",
+        "student": "学生",
+        "admin": "管理员",
+        "manager": "经理",
+        "user": "用户",
+        "owner": "店主"
+      },
+      "说明": "角色代号 → 中文名（auth_roles.zs 的「认证 角色」行）；不在表里的用代号本身"
+    },
+    "关注册标记": {
+      "默认": "# 自助注册已关闭",
+      "说明": "关注册后写进接口体的标记行；close_register 靠它判断是否已关"
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{#- 列表查询。子模板设：列表注（注释整句）、列表字段（要列的字段）、列表条件（WHERE 行，含换行）。
+    默认**取全部列**：编辑流程是列表点「编辑」，前端把那一整行拷进编辑表单，
+    行里缺哪一列，表单里那个字段就是空的，保存时还会把空值写回去。 -#}
+{% set 字段们 = 列表字段 | default(e.fields) %}
+-- {{ 列表注 | default((e | 标签) ~ "列表。取全部列，编辑时整行拷进表单。") }}
+SELECT {{ e | 主键 }}{% for f in 字段们 %}{% if f.name != (e | 主键) %}, {{ f.name }}{% endif %}{% endfor %}
+
+FROM {{ e.name }}
+{{ 列表条件 | default("") }}ORDER BY {{ e | 主键 }} DESC
+LIMIT CAST(:limit AS INTEGER)

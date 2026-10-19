@@ -2,10 +2,7 @@
     :current_user 是路由器从登录 cookie 认出来的，前端改不了——请求体里塞
     「current_user」也会被路由器覆盖。取全部列（owner 除外），编辑时整行拷进
     表单。 -#}
--- {{ e | 标签 }}列表，只含当前用户自己的。
-SELECT {{ e | 主键 }}{% for f in e.fields %}{% if f.name != (e | 主键) and f.name != "owner" %}, {{ f.name }}{% endif %}{% endfor %}
-
-FROM {{ e.name }}
-WHERE owner = :current_user
-ORDER BY {{ e | 主键 }} DESC
-LIMIT CAST(:limit AS INTEGER)
+{% extends "@_base/list.sql.j2" %}
+{% set 列表字段 = e.fields | 除去("owner") %}
+{% set 列表注 = (e | 标签) ~ "列表，只含当前用户自己的。" %}
+{% set 列表条件 = "WHERE owner = :current_user\n" %}

@@ -16,7 +16,8 @@ import re
 
 SNAKE = re.compile(r"^[a-z][a-z0-9_]*$")
 FENCE = re.compile(r"^```[^\n]*\n(.*?)\n?```[ \t]*$", re.S)
-TEMPLATES = ("default", "full", "private")
+from _tplset import names as _tpl_names
+TEMPLATES = _tpl_names()
 GEN_SQL_SUFFIX = ("list", "one", "insert", "update", "delete")      # gen 为每个实体自动生成的 sql / 接口
 GEN_PATH_SUFFIX = ("list", "one", "create", "update", "delete")
 CALLS_PLAN = 2
@@ -110,7 +111,7 @@ def validate(清单, 需求=""):
     errs = []
     tpl = str(obj.get("模板") or "").strip()
     if tpl not in TEMPLATES:
-        errs.append(f"模板「{tpl}」不对，只能是 default / full / private")
+        errs.append(f"模板「{tpl}」不对，只能是 {' / '.join(TEMPLATES)}")
     roles = _strs(obj.get("角色"), "顶层「角色」", errs)
     for r in roles:
         if not SNAKE.match(r):

@@ -1,0 +1,14 @@
+# 用户。由 py -m gen auth 生成。
+#
+# password_hash 存的是 scrypt 哈希，不是密码本身。界面上的密码框绑的是
+# password（见 ui/auth.ui）；注册、登录两个动词在 Python 里哈希和核对，
+# 密码不进数据库，也不经过脚本变量。
+
+实体 user 用户
+  字段 username 文本 必填 唯一 用户名
+  字段 password_hash 文本 必填 密码
+  字段 created_at 文本 必填 默认 now 注册于
+{% if 角色 %}
+  字段 role 文本 必填 默认 {{ 角色[-1] }} 角色
+{% endif %}
+结束

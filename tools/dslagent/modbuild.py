@@ -344,7 +344,7 @@ def validate_split(x, top, caps, task=""):
     errs = []
     tpl = str(obj.get("模板") or "").strip()
     if tpl not in L.TEMPLATES:
-        errs.append(f"模板「{tpl}」不对，只能是 default / full / private")
+        errs.append(f"模板「{tpl}」不对，只能是 {' / '.join(L.TEMPLATES)}")
     roles = _strs(obj.get("角色"), "「角色」", errs)
     top_roles = top["使用者"]["角色"]
     if roles and tpl != "private":

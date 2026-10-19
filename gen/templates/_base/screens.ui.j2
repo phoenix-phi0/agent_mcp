@@ -23,10 +23,12 @@
 {#- 数据库自己填的字段（默认 now 那种）不进表单：它在界面上是个必填的
     空输入框，人会以为得自己填，而填了也不会写进去——insert 和 update
     都排除了它。列表照常显示。 #}
-{% set 自动 = [] %}
-{% for f in e.fields %}{% if (f | 数据库填) or f.system %}{% set _ = 自动.append(f.name) %}{% endif %}{% endfor %}
+{% set 自动 = 自动初值 | default([]) %}
+{% for f in e.fields %}{% if (f | 数据库填) or f.system %}{% if 自动扫描 | default(true) %}{% set _ = 自动.append(f.name) %}{% endif %}{% endif %}{% endfor %}
 {% set 表单字段 = "全部字段 " ~ e.name ~ ((" 除 " ~ 自动 | join(" ")) if 自动 else "") %}
+{% block header %}
 # {{ 名 }}：列表 + 浮层。由实体 {{ e.name }} 用 full 模板生成，随便改。
+{% endblock %}
 
 界面 列表 {{ 名 }}列表
   分组 顶栏 横排 顶栏
@@ -35,7 +37,7 @@
   结束
 
   列表 {{ e.name }}s 占满
-{% for f in e.fields | 上表格 %}
+{% for f in 表格字段 | default(e.fields) | 上表格 %}
     列 {{ f.name }} {{ f | 标题 }}
 {% endfor %}
     动作 edit 打开 {{ 名 }} 带 {{ pk }} 编辑

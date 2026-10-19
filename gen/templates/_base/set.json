@@ -1,0 +1,5 @@
+{
+  "名": "_base",
+  "说明": "抽象基础套：default / full / private 共用的模板骨架（Jinja extends + 变量/块留出差异点）。不能直接用。",
+  "抽象": true
+}

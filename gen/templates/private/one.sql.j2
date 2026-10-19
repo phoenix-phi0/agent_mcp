@@ -1,5 +1,5 @@
--- 按主键查一条{{ e | 标签 }}。不是自己的查不到——跟不存在一样。
-SELECT {{ e | 主键 }}{% for f in e.fields | 可写 | 除去(e | 主键) | 除去("owner") %}, {{ f.name }}{% endfor %}
-
-FROM {{ e.name }}
-WHERE {{ e | 主键 }} = :{{ e | 主键 }} AND owner = :current_user
+{#- 不是自己的查不到——跟不存在一样。 -#}
+{% extends "@_base/one.sql.j2" %}
+{% set 一注 = "。不是自己的查不到——跟不存在一样" %}
+{% set 一排除 = "owner" %}
+{% set 一条件 = " AND owner = :current_user" %}

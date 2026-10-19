@@ -16,24 +16,19 @@ def _gen_errors():
     return ProjectError, DSLError
 
 
-ROLE_CN = {"teacher": "教师", "student": "学生", "admin": "管理员", "manager": "经理", "user": "用户", "owner": "店主"}
-
-
 def role_files(roles):
-    """清单里的角色 → 接 gen private 登录注册的三处补丁：user 实体加 role 列（注册默认最后一个角色）、
-    queries/user_auth.sql（认证 核对 用，把 role 注入 {current_role}）、routes/auth_roles.zs（认证 核对 + 认证 角色 声明）。"""
+    """清单里的角色 → 接 gen private 登录注册的两个补丁文件 queries/user_auth.sql、routes/auth_roles.zs
+    （文本在 gen/templates/private/project/，私有套的参数「角色」），以及注册默认角色（最后一个）。"""
+    from gen.project import render_auth
     names = [str(r).strip() for r in roles if str(r).strip()]
-    lines = ["# 角色声明（由 newproj 按功能清单的「角色」写出，接 gen private 的登录注册）。接口行写「角色 <代号>」后，",
-             "# 开着登录（private 的「认证 必须」）时只许该角色调用，别的角色 403。注册时默认角色是最后一个，其余角色要改 user 表的 role 列。",
-             "认证 核对 app.db user_auth"]
-    lines += [f"认证 角色 {r} {ROLE_CN.get(r, r)}" for r in names]
-    return {"queries/user_auth.sql": "-- 「认证 核对」：每个请求按用户名查一次，role 注入成 {current_role}\n"
-                                      "SELECT username, role FROM user WHERE username = :username\n",
-            "routes/auth_roles.zs": "\n".join(lines) + "\n"}, names[-1] if names else ""
+    allf = render_auth(roles=names)
+    return {k: allf[k] for k in ("queries/user_auth.sql", "routes/auth_roles.zs") if k in allf}, names[-1] if names else ""
 
 
 def apply_roles(root, roles):
-    """在 add_auth 之后、ensure_db 之前调：给 entities/user.entity 加 role 列，写 user_auth.sql 与 auth_roles.zs（已存在的不覆盖）。"""
+    """在 add_auth 之后、ensure_db 之前调：给 entities/user.entity 加 role 列，写 user_auth.sql 与 auth_roles.zs（已存在的不覆盖）。
+    新项目直接用 add_auth(roles=…) 一步到位；这里是对已有项目补上。"""
+    from gen.project import render_auth
     root = Path(root)
     files, default = role_files(roles)
     log = []
@@ -41,7 +36,7 @@ def apply_roles(root, roles):
     if ue.is_file():
         t = ue.read_text(encoding="utf-8")
         if not re.search(r"^\s*字段\s+role\s", t, re.M):
-            line = f"  字段 role 文本 必填 默认 {default} 角色\n"
+            line = next(x for x in render_auth(roles=roles)["entities/user.entity"].splitlines(True) if re.match(r"^\s*字段\s+role\s", x))
             t = t.replace("\n结束", "\n" + line + "结束", 1) if "\n结束" in t else t + line
             ue.write_text(t, encoding="utf-8")
             log.append(f"  user 实体加 role 列（默认 {default}）")
@@ -63,9 +58,9 @@ def generate(root, tpl="full", only=None, force=False, roles=None, no_register=F
     try:
         log += P.init(root, sample=False)
         if tpl == "private":
-            log += P.add_auth(root)
+            log += P.add_auth(root, roles=roles, no_register=no_register)
             if roles:
-                log += apply_roles(root, roles)
+                log += apply_roles(root, roles)    # 已有项目补角色；新项目上一步已写全，这里无事可做
             ents = P.load_entities(root)
             log += P.generate(root, "private", only=only or None, force=force)
             rest = [e.name for e in ents if "owner" not in [f.name for f in e.fields] and (not only or e.name in only)]
