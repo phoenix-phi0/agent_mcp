@@ -43,13 +43,13 @@
 专用夹具（如 cbatch / gbatch 的 jobs）不写在提示正文里：登记在 `verify/fixtures/modules.json`（模块路径 → 夹具构造 + 说明），程序按改动涉及的模块把说明追加到规划 / 补表的 user。
 
 ## 流水线（按顺序）
-1. **规划**（`plan.md`）：user = 任务原文 + 文件大纲（`v2.plan_user_read`；大纲由资料包 `plan_outline` 确定性产出，不含代码）。模型用只读工具自己读代码，输出完整 .zs。空回复 / 引擎出错 / 保险触发就再问同一个问题，最多 2 次。
+1. **规划**（`plan.md`，或包自带的 `PLAN_SYSTEM`）：user = 任务原文 + 资料（`v2.plan_user_read`；资料由资料包 `materials` 确定性产出：code = 文件大纲，不含代码；dslproj = 约定 + 上游函数头 + 现有骨架 + 写法速查）。模型用只读工具自己读代码，输出完整 .zs。空回复 / 引擎出错 / 保险触发就再问同一个问题，最多 2 次。
    规划回复末尾可带 `#期望表` 段（见 `plan_rules_code_table.md`）：程序在进入 .zs 处理（strip_prose / autoclose / check）之前把它切出来，解析成 JSON 存 `expect_table.json`；
    表解析失败 / 不是数组 / 为空都记「无表」，不影响计划；`plan_fix` 的回复里有表就用新表，没有就保留原表。
 2. **检查**：程序做（白名单、有 预算、资料包专属检查、假模型空跑），不调模型。没过就用 `plan_fix.md` 带问题重写 1 次；仍不过整次回滚、判失败。
    计划通过后做表检查（零调用）：任务原文规则覆盖率 ≥70% 且清单里每个改动函数 ≥2 条结构合格的表项；不达标用 `bound_table_fill.md` 补表 1 次，仍不达标记「表不达标」，边界复核走旧路径。
 3. **执行**：引擎跑计划。计划里的 派任务 / 并行派任务 / 问JSON 调子任务：默认 `sub.md`（json 模式，回复不合格带问题重问 1 次）；`dsl_options.subtask=tool` 且引擎是 claude 时用 `sub_tool.md`（两次尝试，用尽退回 `sub.md`）。
-4. **验收**：程序跑测试、找缺口（不调模型）。有缺口就派 `fix.md` 补改 1 次，补改后再验收一次。
+4. **验收**：由资料包给（`verifier()` 或 `accept()`）。code：程序跑测试、找缺口（不调模型）；dslproj：加载检查 + 比对约定 + 跑用例。有缺口就派 `fix.md`（dslproj 是包的 `FIX_SYSTEM`）补改 1 次，补改后再验收一次。
 5. **修**：`fix.md` 回 `{结果:{edits:[…],说明},状态,原因}`，程序套 edits；整体套不上就逐条套。
 6. **边界复核**（可选，记录里 `方式` = 表 / 模型）：
    - **表路径**（有达标的期望表）：程序按改后代码的真实签名校验表项（不对的丢弃并计数），子进程在临时工作区里调用函数（单次 5 秒，结果上限 200000 字符；「同改前」条目在 base 快照还原的改前副本上再跑一次）并判定（性质断言见 `verify/asserts.py`）。全过 → 成功（0 次模型调用）；
@@ -62,7 +62,9 @@
   引擎是 grok 时：plan / plan_fix 的工具、轮数取 frontmatter 里「grok：…」那一项，system 套 `变体：grok`；codex 与 claude 用同一份正文。
 - `planner`（DSLAGENT_PLANNER=v2）：走 v2 流水线（上面 1–6）才用这些文件；缺省的旧路径用 `prompts/legacy/`。
 - `subtask`：`json`（缺省）用 sub.md，`tool` 用 sub_tool.md。
-- `pack`（DSLAGENT_PACK，缺省 code）：决定 plan.md 里 `{{插入 plan_rules_{包}.md}}` 插哪套资料包专属规则，以及大纲 / 验收怎么做。新增资料包要加 `shared/plan_rules_<包名>.md`、`plan_rules_<包名>_end.md` 和 `plan_rules_<包名>_table.md`（该包不出期望表时写一句说明即可，补表 agent 也会引用它）（包名取资料包的 `RULES_KEY`，没有就取 `NAME`）。
+- `pack`（DSLAGENT_PACK / `run(pack=)` / 命令行 `--pack`，缺省 code）：决定资料、动词白名单、验收、范围、规划说明（接口见 `packs/README.md`）。
+  规划 system 有两种来源：包声明了 `PLAN_SYSTEM`（字符串或 `f(engine)`）就整份用它（dslproj：`packs/dslproj/prompts/` 下的 role / verbs / notes / example + `shared/cheat.md`，不经过 plan.md；补改 system 取包的 `FIX_SYSTEM`，不是 fix.md）；
+  没声明（code）就用 plan.md，`{{插入 plan_rules_{包}.md}}` 插该包的专属规则。code 式的包新增要加 `shared/plan_rules_<包名>.md`、`plan_rules_<包名>_end.md` 和 `plan_rules_<包名>_table.md`（该包不出期望表时写一句说明即可，补表 agent 也会引用它）（包名取资料包的 `RULES_KEY`，没有就取 `NAME`）。
 
 ## 改提示词的注意
 - 改完跑 `tests/tools/test_dslagent*.py`；改 plan.md 正文时留意 `变体：grok` 里的「原文」是否还在（不在会直接报错）。

@@ -109,6 +109,8 @@ run DSL工具子任务 $PY tests/tools/test_dslagent_tool.py
 run DSL规划读码 $PY tests/tools/test_dslagent_planread.py
 run DSL测试环境 $PY tests/tools/test_dslagent_testenv.py
 run DSL按步骤模型 $PY tests/tools/test_dslagent_models.py
+run DSL资料包   $PY tests/tools/test_dslagent_packs.py
+run DSL做模块   $PY tests/tools/test_dslagent_dslproj.py
 run DSLv2流程 $PY tests/tools/test_dslagent_v2.py
 run DSLv2拆分 $PY tests/tools/test_dslagent_split.py
 run DSL范围 $PY tests/tools/test_dslagent_scope.py
