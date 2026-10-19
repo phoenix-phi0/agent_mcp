@@ -1035,6 +1035,201 @@ def t_cli():
         check("{" in t and "\"" in t and "示例" in t or "{\"" in t, f"sys_m{n}.md 带具体 JSON 示例")
 
 
+# ------------------------------------------------------------------ 十六~十九、FIX4：试调 / 可选参数 / luna 回退 / 上游重做 / 示例
+
+ZS_QUIZ_FK = ("接口 POST /quiz/answer 动作 quiz_answer\n  用包 db http common\n"
+              "  设 args.question_id = 9999\n  设 args.given = {given}\n  设 args.correct = 0\n  设 w = 写库表 app.db attempt_insert {args}\n"
+              "  设 result = 执行 scripts/quiz_judge.zs question_id={question_id} given={given}\n  返回 {\"ok\":\"{result.ok}\"}\n结束\n")
+SQL_FIND = "SELECT id, given FROM attempt WHERE (:given IS NULL OR :given = '' OR given = :given)\n"
+SQL_FIND_BAD = "SELECT id, given FROM attempt WHERE given = :given\n"
+
+
+def sql_plan(optional):
+    return dump({"sql": [{"名": "quiz_log", "参数": ["question_id", "given"], "说明": "写作答", "规则": ["R1"]},
+                         {"名": "quiz_find", "参数": ["given"], "可选参数": ["given"] if optional else [], "说明": "按作答找", "规则": []}]})
+
+
+def sql_blocks(find):
+    return f"=== queries/quiz_log.sql ===\n{SQL_A}\n=== queries/quiz_find.sql ===\n{find}"
+
+
+def t_trial_build():
+    print("十六、试调检查（接口文件通过静态检查后，项目副本里造数真调）")
+    fk = Fake(bad={("生成", "接口", "routes/quiz.zs"): [f"=== routes/quiz.zs ===\n{ZS_QUIZ_FK}", f"=== routes/quiz.zs ===\n{ZS_QUIZ}"]})
+    r, p, out = go("tr_fk", fk)
+    f = files(r)["routes/quiz.zs"]
+    again = fk.of(".zs 接口助手")[1]
+    check(r["fixed"] and f["生成尝试"] == 2 and "[试调不过]" in again and "FOREIGN KEY" in again and "POST /quiz/answer" in again and "响应：" in again,
+          "接口写了会触发外键错误的插入（REPORT3 的 quiz/start 409 类）→ 试调报错原话带回重写后通过", (f, again[-400:]))
+    check("9999" not in (p / "routes/quiz.zs").read_text(encoding="utf-8"), "出错版本没落盘")
+    check(f.get("试调", {}).get("调用", 0) >= 1 and r["v2"].get("试调", {}).get("调用", 0) >= 2, "记录里有试调次数（文件级 + 整体）", (f.get("试调"), r["v2"].get("试调")))
+    fk = Fake(bad={("生成", "接口", "routes/quiz.zs"): [f"=== routes/quiz.zs ===\n{ZS_QUIZ_FK}"]})
+    r, p, _ = go("tr_fk2", fk)
+    f = files(r)["routes/quiz.zs"]
+    check(f["结果"] == "失败" and "试调不过" in f["失败原因"] and not (p / "routes/quiz.zs").exists() and files(r)["ui/quiz_page.ui"]["结果"] == "跳过", "两次都过不了试调 → 该文件失败撤回，依赖它的界面跳过", f)
+    # 整体检查：全项目试调汇总（把 TR.run 换成「多文件那一次返回问题」）
+    orig = MB.TR.run
+    seen = []
+
+    def fake_run(root, items_by_file, rows=3):
+        seen.append(sorted(items_by_file))
+        if len(items_by_file) >= 2:
+            return {"problems": {"routes/progress.zs": ["[试调不过] routes/progress.zs 接口 POST /progress/recheck（入参全给）入参 {} → 500：接口出错；响应：x"]}, "calls": 2, "skipped": ""}
+        return {"problems": {}, "calls": 1, "skipped": ""}
+    MB.TR.run = fake_run
+    try:
+        r, _, _ = go("tr_final", Fake())
+    finally:
+        MB.TR.run = orig
+    check(any(len(x) >= 2 for x in seen) and r["v2"]["结论"] == "部分成功" and any("[试调不过] routes/progress.zs" in x for x in r["v2"]["整体问题"]), "整体检查：全项目试调一遍，不过的汇总进整体问题 → 部分成功", (seen, r["v2"]["整体问题"]))
+
+    def boom(root, items_by_file, rows=3):
+        return {"problems": {}, "calls": 0, "skipped": "RuntimeError: x"}
+    MB.TR.run = boom
+    try:
+        r, _, _ = go("tr_skip", Fake())
+    finally:
+        MB.TR.run = orig
+    check(r["fixed"] and r["v2"]["试调"]["跳过"], "试调本身跑不起来 → 记跳过，不挡构建", r["v2"].get("试调"))
+
+
+def t_optional_sql():
+    print("十七、可选参数空串保护（sql 提示词 + 静态检查 + 计划里标可选）")
+    ok = {("计划", "查询", "quiz"): [sql_plan(True)], ("生成", "查询", "queries/quiz_*.sql"): [sql_blocks(SQL_FIND)]}
+    fk = Fake(bad=ok)
+    r, p, _ = go("op_ok", fk)
+    check(r["fixed"] and (p / "queries/quiz_find.sql").is_file() and files(r)["queries/quiz_*.sql"]["生成尝试"] == 1, "标可选 + 带保护写法 → 一次通过", files(r)["queries/quiz_*.sql"])
+    check("可选过滤参数" in fk.of("SQLite 语句助手")[0] and "IS NULL OR :p = ''" in fk.of("SQLite 语句助手")[0], "sql 生成提示词写明可选参数不传或空串都当不过滤的写法")
+    check("可选参数" in fk.of("单文件规划助手（查询层）")[0] and "可选入参" in fk.of("单文件规划助手（接口层）")[0], "规划提示词说明可以标可选参数 / 可选入参")
+    bad = {("计划", "查询", "quiz"): [sql_plan(True)], ("生成", "查询", "queries/quiz_*.sql"): [sql_blocks(SQL_FIND_BAD), sql_blocks(SQL_FIND)]}
+    fk = Fake(bad=bad)
+    r, p, _ = go("op_bad", fk)
+    again = fk.of("SQLite 语句助手")[1]
+    check(r["fixed"] and files(r)["queries/quiz_*.sql"]["生成尝试"] == 2 and "可选参数 :given" in again and "IS NULL OR :given = ''" in again, "默写空串过滤（given = :given）→ 静态检查不过，报错带回重写", again[-300:])
+    bad[("生成", "查询", "queries/quiz_*.sql")] = [sql_blocks(SQL_FIND_BAD)]
+    r, p, _ = go("op_bad2", Fake(bad=bad))
+    f = files(r)["queries/quiz_*.sql"]
+    check(f["结果"] == "失败" and "空值保护" in f["失败原因"] and not (p / "queries/quiz_find.sql").exists(), "两次都没保护 → 该文件失败撤回", f)
+    # 没标可选的参数不查
+    r, p, _ = go("op_unmarked", Fake(bad={("计划", "查询", "quiz"): [sql_plan(False)], ("生成", "查询", "queries/quiz_*.sql"): [sql_blocks(SQL_FIND_BAD)]}))
+    check(r["fixed"], "计划里没标可选的参数：直接比较不拦")
+
+
+def t_fallback():
+    print("十八、luna 失败回退 sonnet（mgen_fallback）")
+    check(E.normalize({"mgen": "codex:gpt-6-luna:medium", "mgen_fallback": "sonnet"}) == {"mgen": "codex:gpt-6-luna:medium", "mgen_fallback": "sonnet"} and E.normalize("mplan=opus,mgen_fallback=sonnet") == {"mplan": "opus", "mgen_fallback": "sonnet"}, "engines.normalize 认 mgen_fallback（字典 / 简写）")
+    qz = lambda k: [u for u in k.of(".zs 接口助手") if "本文件：routes/quiz.zs" in u]      # noqa: E731
+    GOOD = f"=== routes/quiz.zs ===\n{ZS_QUIZ}"
+    BAD = f"=== routes/quiz.zs ===\n{BAD_COND_EQ}"
+    old = os.environ.get("DSLAGENT_MODELS")
+    try:
+        os.environ["DSLAGENT_MODELS"] = dump({"mgen": "haiku", "mgen_fallback": "opus"})
+        fk = Fake(bad={("生成", "接口", "routes/quiz.zs"): [BAD, BAD, GOOD]})
+        r, p, out = go("fb1", fk)
+        f = files(r)["routes/quiz.zs"]
+        calls = json.loads((out / "calls.json").read_text(encoding="utf-8"))
+        third = qz(fk)[2]
+        gen_calls = [c for c in calls if c.get("file") == "routes/quiz.zs" and c.get("step") in ("mgen", "mgen_fallback")]
+        check(r["fixed"] and f["结果"] == "通过" and f["生成尝试"] == 3 and f["回退"] == "opus", "mgen 两次没过 → 回退模型再生成 1 次通过，记录写明回退", f)
+        check(len(qz(fk)) == 3 and fk.models[fk.prompts.index(third)] == "opus" and all(fk.models[fk.prompts.index(u)] == "haiku" for u in qz(fk)[:2]), "前两次用 mgen（haiku），第三次用 mgen_fallback（opus）")
+        check("前两次生成都没过检查" in third and third.count("看不懂的条件") >= 2 and "(1)" in third and "(2)" in third, "回退那次带上前两次的报错", third[-500:])
+        fbc = [c for c in calls if c.get("fallback")]
+        check(len(fbc) == 1 and fbc[0]["step"] == "mgen_fallback" and fbc[0]["model"] == "opus" and gen_calls and sum(1 for c in gen_calls if c.get("step") == "mgen") == 2, "calls.json 标明回退（fallback=1，step=mgen_fallback）", fbc)
+        fk = Fake(bad={("生成", "接口", "routes/quiz.zs"): [BAD, BAD, BAD]})
+        r, p, _ = go("fb2", fk)
+        f = files(r)["routes/quiz.zs"]
+        check(f["结果"] == "失败" and "回退模型也没过" in f["失败原因"] and len(qz(fk)) == 3 and not (p / "routes/quiz.zs").exists(), "回退也没过 → 该文件失败（只回退 1 次，不再试）", f)
+        fk = Fake(bad={("生成", "接口", "routes/quiz.zs"): [GOOD]})
+        r, _, out = go("fb3", fk)
+        calls = json.loads((out / "calls.json").read_text(encoding="utf-8"))
+        check(r["fixed"] and not any(c.get("fallback") for c in calls) and "回退" not in files(r)["routes/quiz.zs"], "两次内通过 → 不回退")
+        os.environ["DSLAGENT_MODELS"] = dump({"mgen": "haiku"})
+        fk = Fake(bad={("生成", "接口", "routes/quiz.zs"): [BAD, BAD, GOOD]})
+        r, _, out = go("fb4", fk)
+        f = files(r)["routes/quiz.zs"]
+        check(f["结果"] == "失败" and len(qz(fk)) == 2 and "回退" not in f, "不设 mgen_fallback → 行为不变（两次失败就失败，不多调）", f)
+    finally:
+        if old is None:
+            os.environ.pop("DSLAGENT_MODELS", None)
+        else:
+            os.environ["DSLAGENT_MODELS"] = old
+
+
+ZS_FLOW3 = ZS_FLOW.replace("入参 question_id given；", "入参 question_id given level；").replace("设 args.given = {given}\n", "设 args.given = {given}\n设 args.level = {level}\n")
+ZS_QUIZ3 = ZS_QUIZ.replace("given={given}", "given={given} level={level}")
+
+
+def t_redo():
+    print("十九、上游重做后下游跟着做 + 跳过的排回待做 + 示例进提示词")
+    d = TMP / "rd"
+    shutil.rmtree(d, ignore_errors=True)
+    r1 = V.run_newproj(REQ, d / "proj", d / "out", model=Fake(), modular=True)
+    # 流程文件被改坏 → 重做；这次流程多了入参 level（上游变了）→ 依赖它、上次通过的接口文件要重新过检查，不过就重做
+    (d / "proj" / "scripts" / "quiz_judge.zs").write_text("用包 common\n设 k.{x} = 1\n", encoding="utf-8")
+    flow_plan = dump({"入参": ["question_id", "given", "level"], "可选入参": [], "出参": ["ok", "n"], "用sql": ["quiz_log"], "用流程": [], "用动词": ["写库表"], "规则": ["R1"], "步骤": ["写记录"]})
+    qa = {"路径": "/quiz/answer", "动作": "quiz_answer", "入参": ["question_id", "given", "level"], "角色": "", "用sql": [], "用流程": ["quiz_judge"], "调用": {"quiz_judge": ["question_id", "given", "level"]}, "规则": ["R1"], "说明": "x"}
+    fk = Fake(bad={("计划", "流程", "quiz_judge"): [flow_plan], ("生成", "流程", "scripts/quiz_judge.zs"): [f"=== scripts/quiz_judge.zs ===\n{ZS_FLOW3}"],
+                   ("计划", "接口", "routes/quiz.zs"): [dump({"接口": [qa]})], ("生成", "接口", "routes/quiz.zs"): [f"=== routes/quiz.zs ===\n{ZS_QUIZ3}"]})
+    r2 = V.run_newproj(REQ, d / "proj", d / "out", model=fk, modular=True, resume=True)
+    fs = files(r2)
+    q = fs["routes/quiz.zs"]
+    check(r1["fixed"] and not fs["scripts/quiz_judge.zs"].get("沿用") and not q.get("沿用") and q.get("因上游变化重做") and "因上游变化重做" in "".join(fk.of(".zs 接口助手")[:1]),
+          "上游流程重做且签名变了 → 依赖它的接口文件复查不过 → 重做，记「因上游变化重做」，报错带进提示词", {k: (v.get("沿用"), v.get("因上游变化重做")) for k, v in fs.items()})
+    check(fs["entities/quiz.entity"].get("沿用") and fs["queries/quiz_*.sql"].get("沿用"), "上游没变的数据 / 查询照样沿用")
+    p = fs["routes/progress.zs"]
+    check(p.get("因上游变化重做") is True and not p.get("沿用"), "另一个依赖该流程的接口文件（progress）同样被复查：调用缺新入参 level → 重做，记「因上游变化重做」", p)
+    # 上游重做但签名没变：下游复查通过，沿用并写明
+    d = TMP / "rd2"
+    shutil.rmtree(d, ignore_errors=True)
+    V.run_newproj(REQ, d / "proj", d / "out", model=Fake(), modular=True)
+    (d / "proj" / "scripts" / "quiz_judge.zs").write_text("用包 common\n设 k.{x} = 1\n", encoding="utf-8")
+    fk = Fake()
+    r2 = V.run_newproj(REQ, d / "proj", d / "out", model=fk, modular=True, resume=True)
+    fs = files(r2)
+    check(r2["fixed"] and fs["routes/quiz.zs"].get("沿用") and "通过" in str(fs["routes/quiz.zs"].get("上游变化复查")) and not fk.of(".zs 接口助手"), "上游重做但签名没变 → 下游复查通过、沿用（不调模型），记「上游变化复查」", fs["routes/quiz.zs"])
+    # 上次因依赖失败被跳过 → 这次依赖通过就排回待做
+    d = TMP / "rd3"
+    shutil.rmtree(d, ignore_errors=True)
+    bad = {("生成", "流程", "scripts/quiz_judge.zs"): ["???"]}
+    r1 = V.run_newproj(REQ, d / "proj", d / "out", model=Fake(bad=bad), modular=True)
+    f1 = files(r1)
+    r2 = V.run_newproj(REQ, d / "proj", d / "out", model=Fake(), modular=True, resume=True)
+    fs = files(r2)
+    check(f1["routes/quiz.zs"]["结果"] == "跳过" and r2["fixed"] and fs["routes/quiz.zs"].get("排回待做") and fs["routes/quiz.zs"]["结果"] == "通过", "resume：上次跳过的接口文件，依赖这次通过 → 排回待做并通过", fs["routes/quiz.zs"])
+    # 同一次运行内：跳过的文件，依赖现在通过了就排回待做（用补丁模拟「依赖在本层后面才好」）
+    orig_req = MB.ModRun.requeue_skipped
+
+    def flip(self):
+        r = self.state.get("scripts/quiz_judge.zs")
+        if r and any(x["层"] == "接口" for x in self.recs):
+            r["结果"] = "通过"
+        return orig_req(self)
+    orig_flow = MB.ModRun.layer_flow
+
+    def broken_flow(self, items):
+        orig_flow(self, items)
+        self.state["scripts/quiz_judge.zs"]["结果"] = "失败"
+    MB.ModRun.layer_flow, MB.ModRun.requeue_skipped = broken_flow, flip
+    try:
+        r, p, _ = go("rd4", Fake())
+    finally:
+        MB.ModRun.layer_flow, MB.ModRun.requeue_skipped = orig_flow, orig_req
+    fs = files(r)
+    check(fs["routes/quiz.zs"]["结果"] == "通过" and fs["routes/quiz.zs"].get("排回待做") and fs["routes/progress.zs"].get("排回待做") and (p / "routes/quiz.zs").is_file(), "同一次运行内：被跳过的接口文件，依赖通过后排回待做并重做", fs["routes/quiz.zs"])
+    # 常见错误示例
+    flow_p, iface_p = [(MB.PKG / "packs/newproj/prompts" / n).read_text(encoding="utf-8") for n in ("sys_mgen_flow.md", "sys_mgen_iface.md")]
+    for name, txt in (("sys_mgen_flow", flow_p), ("sys_mgen_iface", iface_p)):
+        check(all(k in txt for k in ("块不配对", "条件符号", "变量名里套变量", "遍历写法", "编造动词")) and "错 → 对" in txt, f"{name}.md 有五类常见错误的「错 → 对」示例")
+    wrongs = {"== 条件": "如果 {a} == 1\n  打印 x\n结束\n", "!= 条件": "如果 {a} != 1\n  打印 x\n结束\n", "< 条件": "如果 {n} < 3\n  打印 x\n结束\n",
+              "变量名": "设 learnable.{k.code} = 1\n", "遍历": "遍历 {rows}\n  打印 x\n结束\n", "块不配对": "如果 {a} 为空\n  打印 x\n"}
+    rights = {"等于": "如果 {a} 等于 1\n  打印 x\n结束\n", "不等于": "如果 {a} 不等于 1\n  打印 x\n结束\n", "小于": "如果 {n} 小于 3\n  打印 x\n结束\n",
+              "变量名": "设 code = {k.code}\n", "遍历": "遍历 row 于 {rows}\n  打印 {row.id}\n结束\n"}
+    check(all(LC.parse_script(t) for t in wrongs.values()) and all(LC.parse_script(t) is None for t in rights.values()), "提示词里的每个「错」写法 loadcheck 都报，「对」写法都过")
+    fk = Fake()
+    go("ex1", fk)
+    check(any("常见写错" in u for u in fk.of(".zs 接口助手")) and any("常见写错" in u for u in fk.of(".zs 流程助手")), "示例随提示词发给模型（流程 / 接口生成）")
+
+
 def main():
     try:
         t_caps()
@@ -1052,6 +1247,10 @@ def main():
         t_loadcheck()
         t_perms()
         t_steps()
+        t_trial_build()
+        t_optional_sql()
+        t_fallback()
+        t_redo()
         t_cli()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)

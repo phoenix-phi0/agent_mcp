@@ -25,6 +25,7 @@ from pathlib import Path
 from . import layered as LY
 from . import guard as G      # noqa: F401
 from . import loadcheck as LC
+from . import trial as TR
 from .layered import FileFail, Halt, _Retry
 
 if str(LY.DEFS) not in sys.path:
@@ -671,6 +672,59 @@ def check_sql_scope(text, rel, allowed):
     return errs
 
 
+def check_optional_sql(name, sql, optional):
+    """计划里标了「可选」的 sql 参数：不传或传空串都当不过滤，所以每处拿它比较的地方要整体括进
+    `(:p IS NULL OR :p = '' OR col = :p)` 这样的保护里（也认 COALESCE(:p,'')=''、IFNULL(:p,'')=''、顺序颠倒的写法）。
+    规则：去掉保护式本身的两处 :p 后，剩下的每一处 :p（真正的比较）必须落在含保护式的同一对括号里。返回问题列表。"""
+    errs = []
+    text = re.sub(r"--[^\n]*", lambda m: " " * len(m.group(0)), sql)
+    for p in optional:
+        col = rf":{re.escape(p)}\b"
+        guards = [m for m in re.finditer(
+            rf"{col}\s+IS\s+NULL\s+OR\s+{col}\s*=\s*''|{col}\s*=\s*''\s+OR\s+{col}\s+IS\s+NULL"
+            rf"|(?:COALESCE|IFNULL)\s*\(\s*{col}\s*,\s*''\s*\)\s*=\s*''", text, re.I)]
+        used = [m.start() for m in re.finditer(col, text)]
+        guarded = {i for g in guards for i in used if g.start() <= i < g.end()}
+        for at in used:
+            if at in guarded:
+                continue
+            ok = False
+            for g in guards:
+                lo, hi = _paren_span(text, g.start())
+                if lo is not None and lo < at < hi:
+                    ok = True
+                    break
+            if not ok:
+                errs.append(f"sql「{name}」的可选参数 :{p} 用来比较时没有空值保护：不传或传空串都要当不过滤，写成 (:{p} IS NULL OR :{p} = '' OR 列 = :{p})，整体括起来")
+                break
+    return errs
+
+
+def _paren_span(text, pos):
+    """pos 所在的最内层括号 (开, 闭) 下标；不在括号里返回 (None, None)。"""
+    depth, lo = 0, None
+    for i in range(pos - 1, -1, -1):
+        c = text[i]
+        if c == ")":
+            depth += 1
+        elif c == "(":
+            if depth == 0:
+                lo = i
+                break
+            depth -= 1
+    if lo is None:
+        return None, None
+    depth = 0
+    for j in range(lo, len(text)):
+        if text[j] == "(":
+            depth += 1
+        elif text[j] == ")":
+            depth -= 1
+            if depth == 0:
+                return lo, j
+    return None, None
+
+
 def wrap_flow(body, name, decl_in):
     """把流程脚本包成一个「接口」块，复用参数核对（入参当请求体字段）；每行缩进两格避免顶格「结束」被当成块尾。"""
     inner = "\n".join("  " + l for l in body.splitlines())
@@ -750,11 +804,15 @@ def plan_sqls(x, mod, rule_nums, taken, gen_names):
         for p in ps:
             if not IDENT.match(p):
                 errs.append(f"sql「{n}」的参数「{p}」不是合法名字")
+        os_ = _strs(s.get("可选参数"), f"sql「{n}」的可选参数", errs)
+        for p in os_:
+            if p not in ps:
+                errs.append(f"sql「{n}」的可选参数「{p}」要先列在「参数」里（可选参数是参数的子集）")
         rs = _strs(s.get("规则"), f"sql「{n}」的规则", errs)
         for h in rs:
             if h not in rule_nums:
                 errs.append(f"sql「{n}」的规则「{h}」不是分给本模块的规则 {sorted(rule_nums)}")
-        out.append({"名": n, "参数": ps, "说明": str(s.get("说明") or ""), "规则": rs})
+        out.append({"名": n, "参数": ps, "可选参数": os_, "说明": str(s.get("说明") or ""), "规则": rs})
     return {"sql": out}, errs
 
 
@@ -831,6 +889,10 @@ def plan_ifaces(x, roles, rule_nums, taken_paths, taken_acts, sqls, flows, must_
         if not isinstance(ins, list) or not all(isinstance(i, str) and IDENT.match(i) for i in ins):
             errs.append(f"接口「{p}」要有「入参」：请求体字段名列表（没有就写 []）")
             ins = []
+        opts = _strs(a.get("可选入参"), f"接口「{p}」的可选入参", errs)
+        for o in opts:
+            if o not in ins:
+                errs.append(f"接口「{p}」的可选入参「{o}」要先列在「入参」里（可选入参是入参的子集）")
         us = _strs(a.get("用sql"), f"接口「{p}」的用sql", errs)
         for s in us:
             if s not in sqls:
@@ -862,7 +924,7 @@ def plan_ifaces(x, roles, rule_nums, taken_paths, taken_acts, sqls, flows, must_
         for h in rs:
             if h not in rule_nums:
                 errs.append(f"接口「{p}」的规则「{h}」不是分给本模块的规则 {sorted(rule_nums)}")
-        out.append({"路径": p, "动作": an, "角色": ar, "入参": ins, "用sql": us, "用流程": uf, "调用": {k: list(v) for k, v in calls.items() if isinstance(v, list)},
+        out.append({"路径": p, "动作": an, "角色": ar, "入参": ins, "可选入参": opts, "用sql": us, "用流程": uf, "调用": {k: list(v) for k, v in calls.items() if isinstance(v, list)},
                     "规则": rs, "说明": str(a.get("说明") or "")})
     for f in must_flows:
         if f not in usedf:
@@ -884,13 +946,13 @@ def norm_fp(key, o):
     """把 calls/ 里还原出的单文件计划规整成 f_query / f_flow / f_iface 存的「产出」形状。"""
     if key == "sql":
         ss = o.get("sql") or []
-        return {"sql": [{"名": s["名"], "参数": _ls(s.get("参数")), "说明": str(s.get("说明") or ""), "规则": _ls(s.get("规则"))} for s in ss]}
+        return {"sql": [{"名": s["名"], "参数": _ls(s.get("参数")), "可选参数": _ls(s.get("可选参数")), "说明": str(s.get("说明") or ""), "规则": _ls(s.get("规则"))} for s in ss]}
     if key == "入参":
         return {k: _ls(o.get(k)) for k in ("入参", "可选入参", "出参", "用sql", "用流程", "用动词", "规则", "步骤")}
     out = []
     for a in o.get("接口") or []:
         calls = a.get("调用") if isinstance(a.get("调用"), dict) else {}
-        out.append({"路径": a["路径"], "动作": a["动作"], "角色": str(a.get("角色") or ""), "入参": _ls(a.get("入参")), "用sql": _ls(a.get("用sql")),
+        out.append({"路径": a["路径"], "动作": a["动作"], "角色": str(a.get("角色") or ""), "入参": _ls(a.get("入参")), "可选入参": _ls(a.get("可选入参")), "用sql": _ls(a.get("用sql")),
                     "用流程": _ls(a.get("用流程")), "调用": {k: _ls(v) for k, v in calls.items()}, "规则": _ls(a.get("规则")), "说明": str(a.get("说明") or "")})
     return {"接口": out}
 
@@ -993,11 +1055,56 @@ def restore_state(out_dir, task, caps=None):
 # ================================================================== 3 逐层构建
 
 class ModRun(LY.Run):
-    STEP_OF_KIND = {"plan": "mplan", "gen": "mgen"}       # DSLAGENT_MODELS 的步骤键：规划类 / 生成类调用分开指定（没写走 sub）
+    STEP_OF_KIND = {"plan": "mplan", "gen": "mgen", "fallback": "mgen_fallback"}       # DSLAGENT_MODELS 的步骤键：规划类 / 生成类调用分开指定（没写走 sub）；mgen_fallback = mgen 两次都没过检查时再生成 1 次用的模型（没写 = 不回退）
     RETRY_SILENT = (G.R_IDLE, G.R_FIRST)           # 空闲超时 / 首字前静默：同一调用重试 1 次再判失败（输出超长、被杀、熔断不重试）
 
+    in_fallback = False                  # gen_loop 的回退那一次：生成类调用改走 mgen_fallback，并在 calls.json 里标 fallback
+
     def ask(self, prompt, rec=None, kind="gen"):
+        if kind == "gen" and self.in_fallback:
+            kind = "fallback"
         return super().ask(prompt, rec, kind)
+
+    def log_mark(self):
+        return {"fallback": 1} if self.in_fallback else None
+
+    def fallback_spec(self):
+        return (getattr(self.M, "routes", None) or {}).get("mgen_fallback")
+
+    def gen_loop(self, rec, attempt):
+        """生成最多 2 次（同 layered）；配了 mgen_fallback 且两次都没过检查，再用回退模型生成 1 次（带前两次的报错）。不配 = 行为不变。"""
+        errs = []
+        err = rec.get("上次失败") or "无"
+        for k in (1, 2):
+            rec["生成尝试"] = k
+            rec["重写"] = k - 1
+            try:
+                why = attempt(err)
+            except _Retry as e:
+                err = str(e)
+                errs.append(err)
+                continue
+            if why is None:
+                rec["结果"] = "通过"
+                return
+            err = why
+            errs.append(why)
+        fb = self.fallback_spec()
+        if not fb:
+            raise FileFail(err[:600])
+        rec["生成尝试"], rec["重写"], rec["回退"] = 3, 2, fb
+        self.bump(1)
+        self.in_fallback = True
+        try:
+            why = attempt("前两次生成都没过检查，报错依次是：" + "；".join(f"({i}) {x}" for i, x in enumerate(errs, 1)))
+        except _Retry as e:
+            why = str(e)
+        finally:
+            self.in_fallback = False
+        if why is None:
+            rec["结果"] = "通过"
+            return
+        raise FileFail(f"回退模型也没过：{why}"[:600])
 
     def __init__(self, M, task, project, stop_cls, cap=None, out_dir=None, verbs_root=None, resume=None, codex_cap=None):
         super().__init__(M, task, project, stop_cls, cap)
@@ -1007,6 +1114,8 @@ class ModRun(LY.Run):
         self.run_no = resume["run_no"] if resume else 1
         self.prev = {r["文件"]: r for r in resume["files"]} if resume else {}      # 上次每个文件的记录
         self.data_changed = False
+        self.changed = set()            # 这次运行里被重做过（调了模型）且通过的文件：依赖它的、上次通过的下游文件要重新过检查
+        self.trials = {"调用": 0, "不过": 0, "跳过": []}
         self.ui_check = None
         M.run_no = self.run_no
         if resume:
@@ -1146,16 +1255,24 @@ class ModRun(LY.Run):
     def run_file(self, layer, file, m, deps, fn, *a):
         old = self.prev.get(file)
         note = ""
+        ups = [d for d in deps if d in self.changed]            # 这次被重做过的上游
         if old and old["结果"] == "通过" and not self.bad_deps({"依赖": deps}):
-            note = self.try_carry(layer, file, m, old, a[0] if a else None)
+            note = self.try_carry(layer, file, m, old, a[0] if a else None, ups)
             if not note:
+                if ups:
+                    self.state[file]["上游变化复查"] = "通过（上游 " + "、".join(ups) + " 重做过）"
                 return self.state[file]
             self.bump(4 if layer in ("数据", "查询", "界面") else 8)
             self.discard_stale(layer, file, old)
-            note = f"上次通过，这次不能沿用：{note}"
+            note = f"因上游变化重做：{note}（上游 {'、'.join(ups)} 这次重做过）" if ups else f"上次通过，这次不能沿用：{note}"
         rec = self.mrec(layer, file, m, deps)
+        if ups and note:
+            rec["因上游变化重做"] = True
         if old and old["结果"] == "失败" and old.get("失败原因"):
             rec["上次失败"] = f"上次运行失败：{old['失败原因']}"
+        elif old and old["结果"] == "跳过":
+            rec["排回待做"] = True
+            rec["上次失败"] = f"上次因依赖没写成而跳过（{old.get('失败原因', '')}），这次依赖已通过，排回重做"
         elif note:
             rec["上次失败"] = note
         bad = self.bad_deps(rec)
@@ -1168,10 +1285,29 @@ class ModRun(LY.Run):
             rec.update(结果="失败", 失败原因=str(e)[:600])
         if layer == "数据" and rec["结果"] == "通过":
             self.data_changed = True
+        if rec["结果"] == "通过":
+            self.changed.add(file)
         return rec
 
+    def requeue_skipped(self):
+        """同一次运行内：之前因依赖失败被「跳过」的文件，只要它依赖的文件现在都通过了，就排回重做（记录里标「排回待做」，替换掉原来的跳过记录）。"""
+        fns = {"数据": self.f_entity, "查询": self.f_query, "流程": self.f_flow, "接口": self.f_iface, "界面": self.f_ui}
+        again = True
+        while again:
+            again = False
+            for it in self.expected:
+                r = self.state.get(it["文件"])
+                if r is None or r["结果"] != "跳过" or self.bad_deps(r) or any(self.state.get(d) is None and d in {x["文件"] for x in self.expected} for d in r["依赖"]):
+                    continue
+                self.recs.remove(r)
+                self.state.pop(it["文件"], None)
+                self.bump(4 if it["层"] in ("数据", "查询", "界面") else 8)
+                rec = self.run_file(it["层"], it["文件"], it["模块"], it["依赖"], fns[it["层"]], it)
+                rec["排回待做"] = True
+                again = True
+
     # ------------------------------------------------------------ 继续构建：沿用上次通过的文件
-    def try_carry(self, layer, file, m, old, it):
+    def try_carry(self, layer, file, m, old, it, ups=()):
         """上次通过的文件：仍在磁盘、仍过检查就沿用（把上次记录原样放回、还原内存里的 sql / 流程 / 接口状态），返回 None；不能沿用返回原因。"""
         p = self.root / file
         fp = None
@@ -1225,9 +1361,16 @@ class ModRun(LY.Run):
             miss = [a["路径"] for a in items if a["路径"] not in have]
             if miss:
                 return f"文件里没有接口块 {miss}"
-            errs = check_zs(self.iface_body(text, items), file, self.vpack, set(self.caps), True)
-            errs += LC.check_text(self.iface_body(text, items), file, True)
+            body = self.iface_body(text, items)
+            errs = check_zs(body, file, self.vpack, set(self.caps), True)
+            errs += LC.check_text(body, file, True)
             errs += check_calls(text, file, self.flowinfo, set(self.accessible_flows(m)), self.disk_scripts())
+            if ups:                      # 上游重做过：入参核对（sql 参数 / 流程入参可能变了）与 sql 范围也要重过
+                pe, _ = P.check_text(body, file, self.root / "queries", {a["路径"]: a["入参"] for a in items}, P.identity_vars(self.root))
+                errs += ["参数核对不过：" + x for x in pe]
+                errs += check_sql_scope(body, file, set(self.visible_sqls(m)))
+            if ups and not errs:         # 上游重做过：接口再试调一遍
+                errs += self.trial({file: items})
             if errs:
                 return "；".join(errs)[:400]
             self.ifaces[file] = items
@@ -1400,6 +1543,7 @@ class ModRun(LY.Run):
             if self.fatal:
                 return
             fns[layer]([f for f in self.expected if f["层"] == layer])
+            self.requeue_skipped()
             if layer == "数据":
                 if self.need_gen():
                     self.gen()
@@ -1484,6 +1628,9 @@ class ModRun(LY.Run):
                 elif got[n] != want[n]:
                     errs.append(f"sql「{n}」的参数与计划不符：计划 {sorted(want[n])}，实际 {sorted(got[n])}")
             errs += [f"多写了计划里没有的 sql「{n}」" for n in got if n not in want]
+            opt = {x["名"]: x["可选参数"] for x in fp["sql"] if x.get("可选参数")}
+            for f in blk["files"]:
+                errs += check_optional_sql(Path(f["file"]).stem, f["content"], opt.get(Path(f["file"]).stem, []))
             if errs:
                 return "；".join(errs)
             c = self.v["预编译sql"](blk, self.ent_text())
@@ -1617,6 +1764,18 @@ class ModRun(LY.Run):
     def after_halt(self, rec):
         rec["结果"] = "通过"
 
+    def trial(self, items_by_file, rec=None):
+        """试调检查：在项目副本里造数、按计划入参调新接口（见 trial.py）。返回问题列表（空 = 过）；试调本身跑不起来记「跳过」不算接口的错。"""
+        res = TR.run(self.root, items_by_file)
+        flat = TR.problems_flat(res)
+        self.trials["调用"] += res["calls"]
+        self.trials["不过"] += len(flat)
+        if res["skipped"]:
+            self.trials["跳过"].append(res["skipped"])
+        if rec is not None:
+            rec["试调"] = {"调用": rec.get("试调", {}).get("调用", 0) + res["calls"], "不过": len(flat), **({"跳过": res["skipped"]} if res["skipped"] else {})}
+        return flat
+
     # -- 接口
     def layer_iface(self, items):
         for it in items:
@@ -1672,6 +1831,8 @@ class ModRun(LY.Run):
             errs = ["参数核对不过：" + x for x in pe]
             errs += check_calls(body, rel, self.flowinfo, set(flows), self.disk_scripts())
             errs += check_sql_scope(body, rel, set(sqls))
+            if not errs:
+                errs += self.trial({rel: fp["接口"]}, rec)
             if errs:
                 self.undo(saved)
                 return "；".join(errs)
@@ -1753,6 +1914,10 @@ class ModRun(LY.Run):
                 problems += check_calls(text, i["文件"], self.flowinfo, set(self.flowinfo), self.disk_scripts())
         # 全项目按服务启动的方式加载一遍（含 gen 的 CRUD 与模型追加的接口）：零「接口出错」
         problems += LC.check_project(self.root)
+        # 全项目试调：所有通过的新接口文件各调一遍，汇总
+        ok_ifaces = {rel: items for rel, items in self.ifaces.items() if by_rel.get(rel) and by_rel[rel]["结果"] == "通过" and (self.root / rel).is_file()}
+        if ok_ifaces:
+            problems += self.trial(ok_ifaces)
         for h, t in self.split["规则表"].items():
             if h not in self.claimed:
                 self.unclaimed.append(f"{h}：{t}")
@@ -1838,10 +2003,10 @@ def run_modular(M, task, project, stop_cls, cap=None, max_calls=None, out_dir=No
         out["原因"] += "；规则没有落到任何文件：" + "；".join(r.unclaimed)
     mine = [x for x in r.recs if x.get("运行") == r.run_no and not x.get("沿用") and not x.get("本次未轮到")]
     out["本次"] = {"序号": r.run_no, "沿用": sum(1 for x in r.recs if x.get("沿用")), "重做": len(mine),
-                 "文件": [{k: x.get(k) for k in ("文件", "层", "模块", "结果", "失败原因", "调用", "规划尝试", "生成尝试", "静默重试", "上次失败") if x.get(k) not in (None, "", 0)} | {"文件": x["文件"], "结果": x["结果"]}
+                 "文件": [{k: x.get(k) for k in ("文件", "层", "模块", "结果", "失败原因", "调用", "规划尝试", "生成尝试", "静默重试", "上次失败", "因上游变化重做", "排回待做", "回退", "试调") if x.get(k) not in (None, "", 0)} | {"文件": x["文件"], "结果": x["结果"]}
                         for x in mine]}
     out.update(顶层规划=r.top, 层次=None if not r.split else {k: r.split[k] for k in ("模板", "角色", "层", "层说明", "全局约束", "规则表")},
-               规则未覆盖=list(r.unclaimed))
+               规则未覆盖=list(r.unclaimed), 试调=r.trials)
     return out
 
 

@@ -126,6 +126,10 @@ class Run:
         return sum((c.get("cost") or 0.0) for c in self.M.log[getattr(self.M, "log_start", 0):] if c.get("engine") in (None, "claude")) \
             if self.STEP_OF_KIND else self.M.cost
 
+    def log_mark(self):
+        """calls.json 这条调用要额外标的键（modbuild：回退那一次标 fallback）；layered 不标。"""
+        return None
+
     def codex_calls(self):
         return sum(1 for c in self.M.log[getattr(self.M, "log_start", 0):] if c.get("engine") == "codex")
 
@@ -148,6 +152,7 @@ class Run:
                 rec["调用"] = rec.get("调用", 0) + 1
             try:
                 self.M.log[-1]["file"] = (rec or {}).get("文件", "")
+                self.M.log[-1].update(self.log_mark() or {})
             except IndexError:
                 pass
             try:

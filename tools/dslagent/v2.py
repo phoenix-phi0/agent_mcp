@@ -888,7 +888,7 @@ def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, sp
                         秒=round(time.time() - t_start, 1), 时间=time.strftime("%Y-%m-%d %H:%M:%S"))
             runs = [*(rs["runs"] if rs else []), this]
             info.update(文件=out_m["文件"], 清单=out_m["清单"], 整体问题=out_m["整体问题"], 结论=out_m["结论"], codex调用=out_m["codex调用"],
-                        顶层规划=out_m["顶层规划"], 层次=out_m["层次"], 规则未覆盖=out_m["规则未覆盖"], 预算={"calls": M.n - M.n0, "max_calls": M.max_calls - M.n0},
+                        顶层规划=out_m["顶层规划"], 层次=out_m["层次"], 规则未覆盖=out_m["规则未覆盖"], 试调=out_m.get("试调"), 预算={"calls": M.n - M.n0, "max_calls": M.max_calls - M.n0},
                         运行=runs, 累计花费=round(sum(float(x.get("花费") or 0) for x in runs), 4))
             (out / "plan_out.txt").write_text(json.dumps(out_m, ensure_ascii=False, indent=1), encoding="utf-8")
             res["versions"] = 1

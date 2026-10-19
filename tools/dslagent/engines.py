@@ -22,7 +22,7 @@ from . import agents as AG
 from . import guard as G
 
 STEPS = ("plan", "plan_fix", "sub", "fix", "bound")
-MSTEPS = ("mplan", "mgen")      # modbuild（newproj --modular）专用：mplan = 规划类调用（顶层规划 / 层次×模块 / 单文件规划 / 规则核对），mgen = 生成类调用（写文件 / 重写）；没写的走 sub
+MSTEPS = ("mplan", "mgen", "mgen_fallback")      # modbuild（newproj --modular）专用：mplan = 规划类调用（顶层规划 / 层次×模块 / 单文件规划 / 规则核对），mgen = 生成类调用（写文件 / 重写）；mgen_fallback = mgen 两次生成都没过检查时再生成 1 次用的模型（没写 = 不回退）；其余没写的走 sub
 DEFAULT = "sonnet"
 CODEX_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 GROK_EFFORTS = ("low", "medium", "high", "xhigh")
