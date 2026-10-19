@@ -150,6 +150,7 @@ import traceback
 from pathlib import Path
 
 from .dsl import DSLEngine, DSLError
+from .dsl_service import get_services
 from .http_ctx import set_bucket, take_auth, take_bucket
 from . import packs
 
@@ -473,6 +474,11 @@ class Router:
         self.real = real
         self.verbose = verbose
         self.table, self.ports, self.warnings = scan_routes(self.routes_dir)
+        # 业务层：workspace/services/*.zs，解析一次缓存，文件改了下个请求重载。
+        # 启动时有解析错误 / 依赖不存在 / 依赖成环就拒绝加载（跟路由出错一样）
+        self.services = get_services(self.workspace / "services")
+        if self.services.errors:
+            raise DSLError("业务层加载失败：\n" + "\n".join(self.services.errors))
         # 「认证 必须」一直开；「认证 可选」看启动时给没给 login。两样都没写的
         # 项目给了 login 是报错而不是悄悄不认人——以为开了登录、其实谁都能进
         cfg = auth_config(self.routes_dir)
@@ -620,6 +626,11 @@ class Router:
                 verbs=packs.registry(DEFAULT_PACKS, self.workspace),
                 verbs_root=packs.verbs_root(),
             )
+            # 业务层：接口属于哪个业务模块按文件名 routes/<模块>*.zs 判定（可调本模块的
+            # 全部公开函数；调别的模块要本模块依赖它）
+            self.services.refresh()
+            engine.services = self.services
+            engine.svc_module = self.services.module_for(ep.src)
             # 请求字段直接当变量：{answer}、{learner} 在脚本里可用
             engine.vars.update(form)
             # 请求体整个给一份，写库表这类动词收字典时用

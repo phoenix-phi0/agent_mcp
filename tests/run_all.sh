@@ -94,6 +94,7 @@ run 命名约定    $PY tests/dsl/test_naming.py
 run 字符串动词  $PY tests/dsl/test_text_verbs.py
 run 条件计算正则 $PY tests/dsl/test_cond_calc_regex.py
 run 循环        $PY tests/dsl/test_loop_while.py
+run 业务层        $PY tests/dsl/test_service_layer.py
 run 终止与派任务 $PY tests/dsl/test_halt_task.py
 run 改法段与预算 $PY tests/dsl/test_edit_budget.py
 run 批量claude  $PY tests/tools/test_cbatch.py

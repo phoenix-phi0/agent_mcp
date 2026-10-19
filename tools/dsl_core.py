@@ -15,6 +15,8 @@ to_text, DSLError` 这类老写法不受影响。
 import json
 import re
 
+from .db_errors import ClientError
+
 # 中文关键字 -> 内部指令名
 KEYWORDS = {
     "用包": "use", "依赖": "use",
@@ -98,7 +100,9 @@ ESC_OR_VAR_RE = re.compile(r"\{\{([^{}]*)\}\}|\{([^{}]+)\}")
 BRACE_RE = re.compile(r"\{\{[^{}]*\}\}|\{[^{}]+\}")
 # 整个值就是一个没展开的 {变量}。未定义变量会原样保留成这个样子，
 # 判空时要当成「没有值」。
-UNEXPANDED_RE = re.compile(r"^\{[^{}]+\}$")
+# 开头不能是引号：{"id":1} 这种只有一层的 JSON 对象不是没展开的变量（否则「如果 {p} 为空」
+# 对一个有内容的扁平结构也成立）
+UNEXPANDED_RE = re.compile(r'^\{(?!\s*")[^{}]+\}$')
 RETRY_RE = re.compile(r"\s+重试\s+(\d+)\s*次?\s+直到\s+(.+)$")
 # 返回值末尾的三位数当状态码。三位而不是任意数字：返回一个纯数字
 # （比如「返回 200」当内容）的情况得能区分，三位数几乎只会是状态码。
@@ -121,12 +125,25 @@ TRIM_CHARS_RE = re.compile(r"^(\d+)\s*(?:字符?|chars?)$", re.I)
 VERB_LIKE_RE = re.compile(r"^[^\s{}=/\\:：]+$")
 
 MAX_CALL_DEPTH = 5
+# 「报错 404 文字」：业务错误（4xx 码 + 文字）。「报错」本身还是 common 包的动词
+# （报错 文字 → 500），只有第一个词是 400–499 的三位码才当业务错误，见 dsl.py _exec_block
+BIZ_ERR_RE = re.compile(r"^(4\d\d)(?:\s+(.*))?$", re.S)
 DEFAULT_TOOL_ROUNDS = 3
 DEFAULT_TRIM_KEEP = 20
 
 
 class DSLError(Exception):
     """脚本语法或运行错误。"""
+
+
+class BizError(ClientError):
+    """「报错 <码> <文字>」抛出的业务错误（码是 4xx）：沿调用链往上传，到接口层回
+    {"error": 文字} + 该码。
+
+    是 db_errors.ClientError 的子类——路由器在错误链上找 ClientError，找到就回
+    {"error": 文字} + 该码（见 db_errors.find_client_error）。引擎的逐行兜底不把它包成
+    DSLError（其他异常会被包），所以业务函数调业务函数，错误原样往上走。
+    """
 
 
 class ScriptReturn(Exception):

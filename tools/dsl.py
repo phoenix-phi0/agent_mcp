@@ -62,6 +62,9 @@
                                （不拼进算式里重新解析）。单独一行「计算 …」打印结果
     事务 库 … 结束             块内的写入要么全成要么全败
     执行 sub.zs key=值          独立作用域，key 在子脚本里就是 {key}
+    调用 模块.函数 键=值 [出错时 e]
+                               业务层（services/<模块>.zs，见 dsl_service）：调公开函数；
+                               报错 404 文字 抛业务错误，接口层回 {"error": 文字} + 码
     后台执行 sub.zs key=值 on_error=fail.zs
                                放到后台线程跑，马上往下走（见 _do_call_bg）
     判定 verdict_of = 提示词 键→输出 … 否则→输出
@@ -232,17 +235,19 @@ from .config import resolve_model
 from .zhipu import ZhipuClient
 from .llm_router import wrap as wrap_client
 from .verbs import VerbRegistry, VerbError
+from . import db_tx
 from .dsl_history import HistoryMixin
 from .dsl_budget import CountingClient, Usage
 from .dsl_sections import split_sections
 from .dsl_model import ModelMixin
+from .dsl_service import ServiceMixin, biz_error_from, parse_call_text
 
 # 重新导出，保持 `from tools.dsl import X` 的老写法能用
 from .dsl_core import (  # noqa: F401
     BLOCK_OPENERS, CALL_PARAM_RE, DSLError, EMPTY_FORMS, ESC_OR_VAR_RE,
     HALT_STATES, ScriptHalt, IN_WORDS, KEYWORDS, LOOP_HEADS, LOOP_MAX, LoopBreak, LoopContinue,
     LoopControl, MAX_CALL_DEPTH, REPEAT_RE, WHILE_LIMIT_RE, PACK_SEP_RE, RESERVED, RET_STATUS_RE,
-    ScriptReturn, TX_BEGIN, TX_COMMIT, TX_ROLLBACK, VAR_RE, VERB_LIKE_RE,
+    BizError, ScriptReturn, TX_BEGIN, TX_COMMIT, TX_ROLLBACK, VAR_RE, VERB_LIKE_RE,
     as_number, check_name, dig, eval_cond_expr, eval_parts, is_empty,
     iter_items, msg_size, normalize, parse_cond_expr, parse_condition, put,
     split_condition_tail, split_head, split_items, to_text,
@@ -325,7 +330,7 @@ def background_reason(exc) -> str:
     return first[:200]
 
 
-class DSLEngine(ModelMixin, HistoryMixin):
+class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
     def __init__(self, client: ZhipuClient | None = None,
                  workdir: Path | None = None, verbose: bool = True,
                  verbs: VerbRegistry | None = None,
@@ -372,6 +377,15 @@ class DSLEngine(ModelMixin, HistoryMixin):
         # 循环的执行记录（每轮迭代、跳出、继续、跑满上限），不进 output——
         # 输出是脚本的结果，接口会把它当消息给人看。子脚本共用父脚本这份
         self.trace: list = []
+        # 业务层（services/*.zs，见 dsl_service）。services：Services 对象，None 表示第一次
+        # 调业务函数时按工作目录下的 services/ 加载；svc_module：调用方所在的业务模块
+        # （接口按文件名判定，业务函数里是它自己的模块，未知是 None）；in_func：本引擎正在跑
+        # 业务函数体；svc_depth / svc_chain：业务函数调用深度和调用链。子脚本沿用
+        self.services = None
+        self.svc_module: str | None = None
+        self.in_func = False
+        self.svc_depth = 0
+        self.svc_chain: tuple = ()
 
     # ------------------------------------------------------------------
     # 变量
@@ -535,6 +549,10 @@ class DSLEngine(ModelMixin, HistoryMixin):
         sub.strict_verbs = self.strict_verbs
         sub.dry_run = self.dry_run
         sub.trace = self.trace
+        sub.services = self.services
+        sub.svc_module = self.svc_module
+        sub.svc_depth = self.svc_depth
+        sub.svc_chain = self.svc_chain
         return sub
 
     def _is_verb(self, head: str) -> bool:
@@ -830,6 +848,13 @@ class DSLEngine(ModelMixin, HistoryMixin):
             if head == "end":
                 raise DSLError(f"第 {i + 1} 行：多余的「结束」")
 
+            if head == "报错":
+                # 「报错 404 文字」是业务错误（沿调用链往上，接口回 {"error": 文字} + 该码）；
+                # 第一个词不是 4xx 码的还是 common 包的报错动词
+                err = biz_error_from(rest, self.expand)
+                if err is not None:
+                    raise err
+
             if self._is_verb(head):
                 try:
                     self._do_verb(head, rest, i)
@@ -840,7 +865,8 @@ class DSLEngine(ModelMixin, HistoryMixin):
 
             try:
                 self._exec_stmt(head, rest, i)
-            except (DSLError, ScriptReturn):
+            except (DSLError, ScriptReturn, BizError):
+                # BizError（业务错误）原样往上走，状态码和文字才不丢。
                 # ScriptReturn 要穿透出去，不能被下面那个兜底 except 包成
                 # DSLError——那样「返回」就成报错了
                 raise
@@ -954,6 +980,13 @@ class DSLEngine(ModelMixin, HistoryMixin):
                 raise DSLError(
                     f"第 {lineno + 1} 行：「事务」需要动词「{name}」，"
                     f"块外先写「用包 db」")
+
+        if self.in_func and getattr(db_tx.TX, "con", None) is not None:
+            # 业务函数在外层事务里被调用：并入外层事务，不另开（db 包不支持嵌套）。
+            # 出错一路抛到外层的「事务」块，由它回滚；这里不提交也不回滚
+            self._trace(f"第 {lineno + 1} 行：事务 并入外层事务")
+            self._exec_block(lines, start, end)
+            return
 
         self._call_tx_verb(TX_BEGIN, target)
         try:
@@ -1144,6 +1177,13 @@ class DSLEngine(ModelMixin, HistoryMixin):
         子脚本里的「返回」只结束子脚本。返回的值优先于输出：显式返回了
         什么就把什么交给父脚本。
         """
+        # 「调用 模块.函数 键=值」是业务函数，不是脚本（见 dsl_service）
+        target, tail, on_err = parse_call_text(rest)
+        hit = self._service_target(target)
+        if hit is not None:
+            self._do_service_call(hit[0], hit[1], tail, on_err, lineno, assign_to)
+            return
+
         if self._depth >= MAX_CALL_DEPTH:
             raise DSLError(f"脚本调用层数超过 {MAX_CALL_DEPTH}，可能存在循环调用")
 

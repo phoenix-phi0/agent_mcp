@@ -71,6 +71,35 @@ def blocks(text):
     return out
 
 
+SVC_MODULE = re.compile(r"^\s*业务\s+(\S+)")
+SVC_FUNC = re.compile(r"^(\s*)(?:公开\s+)?函数\s+(\S+)((?:\s+[^\s#]+)*)\s*(?:#.*)?$")
+
+
+def service_blocks(text):
+    """业务文件（services/<模块>.zs）：返回 ([(\"函数\", \"模块.函数\", 起始行号, [(行号, 行)…])…], {模块.函数: [入参…]})；
+    不是业务文件返回 None。函数体到和「函数」同缩进的「结束」为止。入参（去掉可选的 ?）就是函数体里已定义的变量。"""
+    lines = text.splitlines()
+    mod = next((m.group(1) for m in (SVC_MODULE.match(l) for l in lines) if m), None)
+    if mod is None:
+        return None
+    out, decl, cur, indent = [], {}, None, ""
+    for i, line in enumerate(lines, 1):
+        if cur is not None:
+            if line.strip() == "结束" and line[:len(line) - len(line.lstrip())] == indent:
+                cur = None
+            else:
+                cur[3].append((i, line))
+            continue
+        m = SVC_FUNC.match(line)
+        if m:
+            name = f"{mod}.{m.group(2)}"
+            decl[name] = [t.rstrip("?") for t in m.group(3).split()]
+            cur = ("函数", name, i, [])
+            indent = m.group(1)
+            out.append(cur)
+    return out, decl
+
+
 def _root(ref):
     ref = ref.strip()
     ref = ref.split(" 或", 1)[0].strip()
@@ -86,12 +115,21 @@ def check_text(text, rel, qdir, decl, identity=()):
     errs, n = [], 0
     inj_vars = INJECTED_VARS | set(identity)
     inj_req = INJECTED_REQ | set(identity)
-    for method, path, ln0, lines in blocks(text):
-        where = f"{rel}:{ln0} 接口 {path}"
+    # 业务文件：每个函数当一个块，入参是函数体里已定义的变量（函数是独立作用域，没有 {request} 和路由器注入的变量）
+    svc = service_blocks(text)
+    service = svc is not None
+    if service:
+        block_list, decl = svc
+        inj_vars, inj_req = set(), set()
+    else:
+        block_list = blocks(text)
+    for method, path, ln0, lines in block_list:
+        where = f"{rel}:{ln0} " + (f"函数 {path}" if service else f"接口 {path}")
         strict = decl is not None
         fields = set(decl.get(path, [])) if strict else set()
         defined = set(inj_vars) | fields
-        objs = {"request": set(fields) | inj_req}       # 对象名 → 已知键；不在里面的对象 = 键未知（宽松）
+        # 对象名 → 已知键；不在里面的对象 = 键未知（宽松）。业务函数里没有 request
+        objs = {} if service else {"request": set(fields) | inj_req}
         opaque = set()                                  # 被整体赋成动词结果等的变量：键未知，之后 设 x.k 也不算数
         for ln, raw in lines:
             line = raw.strip()
@@ -129,7 +167,7 @@ def check_text(text, rel, qdir, decl, identity=()):
                             obj = vm.group(1)
                             if obj in objs and (obj != "request" or strict):
                                 keys = objs[obj]
-                            elif obj == "request":
+                            elif obj == "request" and not service:
                                 keys = None                        # 没给接口声明：请求体字段未知，不判
                             elif obj not in defined:
                                 errs.append(f"{where}（第 {ln} 行）{verb} {name} 的参数表 {{{obj}}} 前面没有 设 过")

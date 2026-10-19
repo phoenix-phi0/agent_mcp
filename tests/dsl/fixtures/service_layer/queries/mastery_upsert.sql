@@ -1,0 +1,1 @@
+INSERT INTO mastery(learner, point_id, score, mastered) VALUES(:learner, CAST(:point_id AS INTEGER), CAST(:score AS REAL), CAST(:mastered AS INTEGER)) ON CONFLICT(learner, point_id) DO UPDATE SET score = excluded.score, mastered = excluded.mastered
