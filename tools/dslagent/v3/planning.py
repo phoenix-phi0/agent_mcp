@@ -145,3 +145,63 @@ def tasks(group, req, tries, model):
     """一层的模块（逗号分隔）→ 并行执行用的任务列表（每个模块一项，脚本 = 规划一份）。"""
     names = [x for x in re.split(r"[,，\s]+", group or "") if x]
     return [{"脚本": "规划一份", "参数": {"种类": "约定", "模块": n, "需求": req, "最多": str(tries), "模型": model}} for n in names]
+
+
+REVIEW_FAIL = "未复核"
+
+
+def parse_review(text):
+    """复核回复 → {通过: bool, 问题: [str]}；不是 JSON 或缺字段返回 None。"""
+    import json
+    t = (text or "").strip()
+    a, b = t.find("{"), t.rfind("}")
+    if a < 0 or b <= a:
+        return None
+    try:
+        j = json.loads(t[a:b + 1])
+    except ValueError:
+        return None
+    if not isinstance(j, dict) or "通过" not in j:
+        return None
+    ok = str(j.get("通过")).strip() in ("是", "true", "True", "1", "通过")
+    items = j.get("问题列表") or j.get("问题") or []
+    if isinstance(items, str):
+        items = [items]
+    items = [str(x).strip() for x in items if str(x).strip()]
+    if not ok and not items:
+        return None
+    return {"通过": ok, "问题": items}
+
+
+def review_user(req, module, text):
+    return f"【本轮需求全文】\n{(req or '').strip()}\n\n【模块 {module} 的约定】\n{VT.clean(text).strip()}"
+
+
+def review(ctx, module, text, req="", model="sonnet"):
+    """约定通过程序检查后，调一次模型对照需求复核 → {通过, 问题, 状态}（状态 = 已复核 / 未复核）。
+    回复不是约定的 JSON 时再问一次；还不行就记「未复核」并放行（记录里看得到）。预算 / 花费 / 墙钟用完抛 ScriptHalt。"""
+    if not str(module or "").strip():
+        raise ValueError("复核约定要写模块名")
+    user = review_user(req or ctx.req, module, text)
+    tag = f"v3_review_{re.sub(r'[^A-Za-z0-9_]', '_', module)}"
+    got = None
+    for _ in range(2):
+        ctx.guard()
+        ctx.take_call()
+        try:
+            raw = ctx.M(prompt_text("review.md"), user, tag, model)
+        except V2.Stop as e:
+            raise ScriptHalt("超出预期", str(e), "") from None
+        except RuntimeError as e:
+            ctx.log("规划", 种类="约定", 模块=module, 事件="复核", 状态=REVIEW_FAIL, 原因=f"模型没有回应：{str(e)[:200]}")
+            continue
+        got = parse_review(raw)
+        if got is not None:
+            break
+    if got is None:
+        ctx.log("规划", 种类="约定", 模块=module, 事件="复核", 状态=REVIEW_FAIL, 原因="回复不是 {通过, 问题列表} 的 JSON")
+        return {"通过": True, "问题": [], "状态": REVIEW_FAIL}
+    ok = got["通过"] and not got["问题"]
+    probs = [f"复核（对照需求）：{p}" for p in got["问题"]]
+    ctx.log("规划", 种类="约定", 模块=module, 事件="复核", 状态="已复核", 通过=ok, 条数=len(probs), 问题=got["问题"])
+    return {"通过": ok, "问题": probs, "状态": "已复核"}

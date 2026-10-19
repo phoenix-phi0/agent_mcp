@@ -79,6 +79,8 @@ class Fake:
             return {"text": seq[min(n, len(seq)) - 1], "cost": 0.01}
         if tag == "v3_top":
             return {"text": self.top, "cost": 0.01}
+        if tag.startswith("v3_review_"):
+            return {"text": '{"通过": "是", "问题列表": []}', "cost": 0.01}
         return {"text": contract_text(tag.replace("v3_contract_", "")), "cost": 0.01}
 
     def n(self, prefix=""):
@@ -367,7 +369,7 @@ def test_full_flow_clean():
     check((proj / "plan" / "build.zs").read_text(encoding="utf-8").count("做模块组") == 2, "plan/build.zs 生成了（两层）")
     check(sorted(json.loads((proj / "plan" / "state.json").read_text(encoding="utf-8"))["模块"]) == ["graph", "progress", "vocab"], "state.json 三个模块都标了通过")
     check({r["模块"] for r in rec["模块"]} == {"graph", "vocab", "progress"} and len(rec["模块"]) == 3, "每个模块做了 1 轮", rec["模块"])
-    check(abs(res["花费"] - (0.01 * 6 + 0.25 * 3)) < 1e-6, "总花费 = 规划 + 模块", res["花费"])
+    check(abs(res["花费"] - (0.01 * 9 + 0.25 * 3)) < 1e-6, "总花费 = 规划 + 模块", res["花费"])
     check(all((Path(r["记录目录"]) / "task.txt").is_file() for r in rec["模块"]), "每个模块的记录目录有任务文件")
     check((out / "result.json").is_file() and (out / "v3_log.jsonl").is_file() and (out / "steps" / "top_w2.txt").is_file(), "out 里有 result.json / v3_log.jsonl / steps/")
     # 同层并行：vocab 与 progress 在一层，各自都收到任务
@@ -381,7 +383,7 @@ def test_full_flow_clean():
     check(len(stub_calls(state)) == n_stub and res2["模块花费"] == 0, "续跑：已完成且约定未变的模块不重做", stub_calls(state)[n_stub:])
     check((out / "result_run1.json").is_file() and (out / "result.json").is_file(), "续跑：上一次的 result.json 留成 result_run1.json")
     names = sorted(f.name for f in (out / "calls").glob("*.prompt.txt"))
-    check(len(names) == len(set(n.split("_", 1)[0] for n in names)) == 6, "calls/ 里每次调用一个文件，没有被覆盖", names)
+    check(len(names) == len(set(n.split("_", 1)[0] for n in names)) == 9, "calls/ 里每次调用一个文件，没有被覆盖", names)
     # 约定改了 → 只重做那个模块
     f = proj / "contracts" / "vocab.md"
     f.write_text(f.read_text(encoding="utf-8") + "\n# 改了一行注释\n", encoding="utf-8")
@@ -394,9 +396,51 @@ def test_full_flow_clean():
     f.write_text(f.read_text(encoding="utf-8").replace("依赖 graph", "依赖 无", 1), encoding="utf-8")
     fk4 = Fake()
     res4 = run_v3(proj, out, fk4)
-    check(res4["状态"] == "成功" and [c["tag"] for c in fk4.calls] == ["v3_contract_vocab"], "续跑：不过检查的约定重写，别的跳过", [c["tag"] for c in fk4.calls])
+    check(res4["状态"] == "成功" and [c["tag"] for c in fk4.calls] == ["v3_contract_vocab", "v3_review_vocab"], "续跑：不过检查的约定重写，别的跳过", [c["tag"] for c in fk4.calls])
     u = fk4.calls[0]["user"]
     check("【你上次写的内容】" in u and "两边要一致" in u and "依赖 无" in u, "续跑重写时输入带盘上那份约定和检查问题", u[-500:])
+
+
+def test_review():
+    print("约定对照需求复核")
+    bad = '{"通过": "否", "问题列表": ["需求第九节要求讲解调模型回答，约定改成了模板"]}'
+    ok = '{"通过": "是", "问题列表": []}'
+    proj, out, state = fresh("p"), fresh("o"), fresh("st") / "state"
+    stub_env(state)
+    fk = Fake(scripts={"v3_review_graph": [bad, "```json\n" + ok + "\n```"]})
+    res = run_v3(proj, out, fk, stop_after="contract")
+    check(res["状态"] == "成功", "复核打回一次后通过，流程成功", {k: res[k] for k in ("状态", "原因")})
+    rv = [r for r in res["记录"]["规划"] if r["模块"] == "graph" and r["事件"] == "复核"]
+    check([r["通过"] for r in rv] == [False, True] and "模板" in rv[0]["问题"][0] and rv[0]["状态"] == "已复核", "记录里有复核结果：打回、通过", rv)
+    check(fk.n("v3_review_graph") == 2 and fk.n("v3_contract_graph") == 2, "打回后重写一次再复核（各 2 次）", [c["tag"] for c in fk.calls])
+    rw = [c for c in fk.calls if c["tag"] == "v3_contract_graph"][1]["user"]
+    check("【检查发现的问题" in rw and "复核（对照需求）：需求第九节要求讲解调模型回答" in rw, "复核问题当上次问题带回重写", rw[-300:])
+    rq = [c for c in fk.calls if c["tag"] == "v3_review_graph"][0]
+    check("【本轮需求全文】" in rq["user"] and "做一个学习系统" in rq["user"] and "【模块 graph 的约定】" in rq["user"] and "## 函数" in rq["user"]
+          and "【顶层规划" not in rq["user"], "复核入参 = 需求全文 + 该模块约定", rq["user"][:200])
+    check(rq["model"] in (None, "sonnet") or "sonnet" in str(rq["model"]), "复核默认 sonnet", rq["model"])
+    check(fk.n("v3_review_") == 4 and fk.n("v3_contract_") == 4, "三个模块各复核一次（graph 两次）", [c["tag"] for c in fk.calls])
+    # 一直打回：计入最多次数，三次后失败
+    proj2, out2 = fresh("p"), fresh("o")
+    fk2 = Fake(scripts={"v3_review_graph": [bad]})
+    res2 = run_v3(proj2, out2, fk2, stop_after="contract")
+    check(res2["状态"] == "失败" and "模板" in res2["原因"] and fk2.n("v3_contract_graph") == 3 and fk2.n("v3_review_graph") == 3,
+          "复核一直不过：写 3 次后终止失败", {k: res2[k] for k in ("状态", "原因")})
+    check(not (proj2 / "contracts" / "graph.md").exists(), "没通过的约定不存盘")
+    # 程序检查不过时不调复核
+    proj3, out3 = fresh("p"), fresh("o")
+    broken = contract_text("graph").replace("模块 graph", "模块 nope", 1)
+    fk3 = Fake(scripts={"v3_contract_graph": [broken, contract_text("graph")]})
+    run_v3(proj3, out3, fk3, stop_after="contract")
+    check(fk3.n("v3_review_graph") == 1 and fk3.n("v3_contract_graph") == 2, "程序检查不过的稿子不进复核", [c["tag"] for c in fk3.calls])
+    # 回复不是 JSON：再问一次；仍不行记「未复核」放行
+    proj4, out4 = fresh("p"), fresh("o")
+    fk4 = Fake(scripts={"v3_review_graph": ["我觉得挺好"]})
+    res4 = run_v3(proj4, out4, fk4, stop_after="contract")
+    rv4 = [r for r in res4["记录"]["规划"] if r["模块"] == "graph" and r["事件"] == "复核"]
+    check(res4["状态"] == "成功" and fk4.n("v3_review_graph") == 2 and rv4 and rv4[-1]["状态"] == "未复核", "复核回复坏掉：问两次后记未复核并放行", rv4)
+    check(PL.parse_review('{"通过": "否", "问题列表": []}') is None and PL.parse_review('x {"通过":"是"} y') == {"通过": True, "问题": []},
+          "parse_review：否且没问题视为无效；容忍前后文字")
 
 
 def test_stop_after():
@@ -439,7 +483,7 @@ def test_top_fails():
     # 续跑：已通过的约定不重写
     fk2 = Fake()
     res2 = run_v3(proj, out, fk2)
-    check(res2["状态"] == "成功" and sorted(c["tag"] for c in fk2.calls) == ["v3_contract_vocab"], "续跑：只补写没通过的 vocab", [c["tag"] for c in fk2.calls])
+    check(res2["状态"] == "成功" and sorted(c["tag"] for c in fk2.calls) == ["v3_contract_vocab", "v3_review_vocab"], "续跑：只补写没通过的 vocab", [c["tag"] for c in fk2.calls])
 
 
 def test_group_retry():
@@ -501,6 +545,7 @@ def test_verb_decls():
     want = {"规划到通过": "zs", "规划一份": "zs", "做模块组": "zs", "做一个模块": "zs"}
     for n, k in want.items():
         check(reg.has(n) and reg.kind_of(n) == "script", f"{n} 是 .zs 动词")
+    check(reg.has("复核约定") and reg.kind_of("复核约定") == "python", "复核约定 是 Python 动词")
     for n in ("写规划", "检查规划", "存规划", "已有规划", "依赖分层", "生成骨架", "生成分配", "做模块", "已完成", "标记完成"):
         check(reg.has(n) and reg.kind_of(n) == "python", f"{n} 是 Python 动词")
     check(not reg.warnings, "加载没有警告", reg.warnings)
@@ -509,6 +554,7 @@ def test_verb_decls():
     check(sig("做模块组") == "<模块> <最多=3> <末次模型=opus> <并发=3>", "做模块组 签名", sig("做模块组"))
     check(sig("做模块") == "<模块> <上次失败?> <模型=sonnet>" or sig("做模块").startswith("<模块> <上次失败"), "做模块 签名", sig("做模块"))
     check(sig("写规划").startswith("<种类> <需求?> <模块?> <上次问题?>"), "写规划 签名", sig("写规划"))
+    check(sig("复核约定") == "<模块> <文本> <需求?> <模型=sonnet>", "复核约定 签名", sig("复核约定"))
     flow = (core.HERE / "v3.zs").read_text(encoding="utf-8")
     check(all(s in flow for s in ("规划到通过 顶层", "规划到通过 约定", "生成骨架", "生成分配", "执行 plan/build.zs", "预算 调用 120 秒 36000")), "v3.zs 是流程脚本", flow)
 
@@ -521,6 +567,7 @@ if __name__ == "__main__":
         test_skeleton_build_state()
         test_engine_bits()
         test_full_flow_clean()
+        test_review()
         test_stop_after()
         test_top_fails()
         test_group_retry()

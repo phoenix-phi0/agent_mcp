@@ -78,6 +78,22 @@ def _numbered(text):
     return "\n".join(f"{i:4d}| {l}" for i, l in enumerate(text.splitlines(), 1))
 
 
+def service_verbs(project, module):
+    """本模块可用的动词表：services/<模块>.zs 和 routes/<模块>*.zs 里「用包」点名的包（再加 db）各自的动词，含签名。
+    补改 / 规划都带上它，免得模型凭空编动词。"""
+    from ... import loadcheck as LC
+    root = Path(project)
+    texts = [root / "services" / f"{module}.zs"] + [f for f in P.route_files(project, module, P.all_modules(project))]
+    packs = ["db"]
+    for f in texts:
+        if f.is_file():
+            packs += [x for x in LC.declared_packs(f.read_text(encoding="utf-8")) if x not in packs]
+    reg = LC.load_verbs(root, packs)
+    body = reg.describe(by_pack=True)
+    return ("## 本模块可用的动词（按「用包」点名的包列出；业务层 / 接口里只能用这些动词和 调用 / 返回 / 报错 / 设 / 如果 等语句，不要用表里没有的动词）\n"
+            f"已加载的包：{'、'.join(packs)}\n{body}")
+
+
 def materials(task, project, scope):
     module = P.require_module(task)
     c, text = P.load_contract(project, module)
@@ -95,6 +111,7 @@ def materials(task, project, scope):
         shown.append(f"### {rel}（共 {len(t.splitlines())} 行）\n```\n{_numbered(t)}\n```")
     parts.append("## 本模块现有文件（行号前缀不是内容）\n" + ("\n\n".join(shown) if shown else "（还没有文件）"))
     parts.append(SYNTAX)
+    parts.append(service_verbs(project, module))
     return {"text": "\n\n".join(parts), "记录": {"模块": module, "约定函数": [f["名"] for f in c["函数"]], "依赖": c["依赖"],
                                               "现有文件": [r for r, _ in cur]}}
 
@@ -131,7 +148,7 @@ def fix_input(project, ctx, probs):
     return "\n\n".join([f"【任务原文】\n{ctx['task']}", f"【本模块约定（不能改）】\n{text.strip()}",
                         "【上游模块公开函数】\n" + ("\n\n".join(ups) or "（无）"),
                         "【验收发现的问题】\n" + "\n".join(f"{i}. {p}" for i, p in enumerate(probs, 1)),
-                        f"【本模块现有文件的完整当前内容（行号前缀不是内容）】\n{cur}", SYNTAX])
+                        f"【本模块现有文件的完整当前内容（行号前缀不是内容）】\n{cur}", SYNTAX, service_verbs(project, module)])
 
 
 def plan_problems(main, body, cl, generic):

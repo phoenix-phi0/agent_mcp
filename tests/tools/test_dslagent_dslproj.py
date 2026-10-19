@@ -421,6 +421,16 @@ def t_flow():
     check("用例 加边_成环：应该报错 409" in fu and "【本模块约定（不能改）】" in fu and "services/graph.zs" in fu and "## DSL 项目写法速查" in fu
           and "contracts/graph.md" not in fu.split("【本模块现有文件")[1], "补改入参：失败用例原因 + 约定 + 本模块现有文件 + 写法速查", fu[:300])
     check(f.log[1][1] == DP_PACK.FIX_SYSTEM, "补改 system = 包的 FIX_SYSTEM")
+    check("## 本模块可用的动词" in fu and "已加载的包：db" in fu and "【db】" in fu and "查一行 <库> <查询名>" in fu and "写库 <库> <语句名>" in fu,
+          "补改入参：带本模块可用的动词表（含签名）", fu[fu.find("## 本模块可用的动词"):][:200])
+    check("补改入参里的" not in fu and fu.find("## DSL 项目写法速查") < fu.find("## 本模块可用的动词"), "补改入参：写法速查在前、动词表在后")
+    # 按 services 里 用包 点名的包列出
+    pv = skeleton("fl_verbs")
+    sv = pv / "services" / "graph.zs"
+    sv.write_text(sv.read_text(encoding="utf-8").replace("业务 graph\n", "业务 graph\n  用包 text\n", 1), encoding="utf-8")
+    vt = DP_PACK.service_verbs(pv, "graph")
+    check("已加载的包：db、text" in vt and "【text】" in vt and "【db】" in vt, "service_verbs：services 里 用包 的包 + db", vt[:200])
+    check("【db】" in DP_PACK.materials("模块 graph", pv, None)["text"] and "## 本模块可用的动词" in DP_PACK.materials("模块 graph", pv, None)["text"], "做模块规划的资料里也带动词表")
     check(len(r["v2"]["验收"]["验收记录"]) == 2 and not r["v2"]["验收"]["验收记录"][0]["通过"] and r["v2"]["验收"]["验收记录"][1]["通过"], "验收记录：第一次不过、补改后通过")
     # 4 计划想改约定 / 别的模块的文件：被拦（整体没写），失败、项目回滚
     p4 = skeleton("fl_oos", modules=("progress",))
