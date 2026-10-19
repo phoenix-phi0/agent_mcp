@@ -112,6 +112,13 @@ class V3Engine(DSLEngine):
         return sub
 
 
+def _load_json(path, default):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+
+
 def ctx_of(engine=None):
     from tools.dsl import current_engine
     eng = engine or current_engine()
@@ -132,6 +139,15 @@ def run(req, project, out, stop_after=None, backend=None, cost_cap=None, wall=WA
     if stop_after and not stop:
         raise ValueError(f"--stop-after 只能是 top / contract / build，收到 {stop_after!r}")
     M = V2.Model(out, backend=backend, max_calls=MAX_CALLS, deadline=time.time() + wall)
+    prev_calls = _load_json(out / "calls.json", [])
+    seen = [int(f.name.split("_", 1)[0]) for f in (out / "calls").glob("*_*.prompt.txt") if f.name.split("_", 1)[0].isdigit()]
+    M.n = max([len(prev_calls)] + seen)                    # 续跑：calls/ 里的文件接着编号，不覆盖上一次的
+    old = out / "result.json"
+    if old.is_file():                                      # 续跑：上一次的 result.json 留着（result_run<k>.json）
+        k = 1
+        while (out / f"result_run{k}.json").exists():
+            k += 1
+        old.rename(out / f"result_run{k}.json")
     ctx = Ctx(project, out, req, M, cost_cap=cost_cap, module_cmd=module_cmd, module_wall=module_wall)
     eng = V3Engine(client=V2.Client(M), workdir=project, verbose=False, verbs_root=C.VERBS)
     eng.v3, ctx.usage = ctx, eng.usage
@@ -149,5 +165,6 @@ def run(req, project, out, stop_after=None, backend=None, cost_cap=None, wall=WA
     if err is not None:
         import traceback
         res["堆栈"] = "".join(traceback.format_exception(err))[-3000:]
+    (out / "calls.json").write_text(json.dumps(prev_calls + M.log, ensure_ascii=False, indent=1), encoding="utf-8")
     (out / "result.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
     return res

@@ -41,8 +41,27 @@ def check(text, name, top, project):
     for t in c["表"]:
         if t["名"] != name and not t["名"].startswith(name + "_"):
             probs.append(f"第 {t['行']} 行：表名「{t['名']}」要以「{name}_」开头（各模块的表不重名）")
+    probs += optional_empty(c)
     seen = set()
     return [p for p in probs if not (p in seen or seen.add(p))]
+
+
+def optional_empty(c):
+    """用例里给「可选入参」传「空」：可选入参不传和传空串都是空串，函数里分不出来，这样的用例没法由实现满足
+    （常见错法：'传空表示清空、不传表示不改'）。→ 问题列表。"""
+    fns = {f["名"]: f for f in c["函数"]}
+    probs = []
+    for u in c["用例"]:
+        call = u["调用"]
+        f = fns.get(call["目标"]) if call else None
+        if f is None:
+            continue
+        opt = set(C.params(f)[1])
+        for k, v in call["参数"].items():
+            if k in opt and v in ("空", ""):
+                probs.append(f"第 {call['行']} 行：用例 {u['名']} 给可选入参 {k} 传了「空」，可选入参不传和传空串都是空串，函数分不出来，"
+                             f"这样的用例实现没法满足（想表达清空 / 置空，请把它改成必填入参或另做一个函数）")
+    return probs
 
 
 def load(project, name):

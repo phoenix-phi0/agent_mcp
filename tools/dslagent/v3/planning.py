@@ -123,7 +123,7 @@ def write(ctx, kind, req="", module="", problems="", model="sonnet"):
     ctx.take_call()
     with ctx.lock:
         ctx.attempts[key] = n = ctx.attempts.get(key, 0) + 1
-        prev = ctx.last_text.get(key, "")
+        prev = ctx.last_text.get(key) or existing(ctx, kind, module)       # 续跑时上一轮不是本进程写的：拿盘上不过检查的那份当"上次的内容"
     user = user_text(ctx, kind, req or ctx.req, module, problems, prev)
     tag = "v3_top" if kind == "顶层" else f"v3_contract_{re.sub(r'[^A-Za-z0-9_]', '_', module)}"
     try:

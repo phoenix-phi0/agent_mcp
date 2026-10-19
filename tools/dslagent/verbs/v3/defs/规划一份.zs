@@ -12,6 +12,10 @@
 设 passed = 否
 设 problems =
 设 brief =
+如果 {old} 不为空
+  设 problems = {c.问题}
+  设 brief = {c.摘要}
+结束
 当 {passed} 不等于 是 最多 {最多} 次
   设 n = 计算 {n} + 1
   设 text = 写规划 {种类} 需求={需求} 模块={模块} 上次问题={problems} 模型={模型}

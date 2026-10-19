@@ -16,6 +16,7 @@ from .. import common as C
 from ..packs.dslproj import project as P
 
 COPY_IGNORE = shutil.ignore_patterns(".*", "__pycache__", "node_modules", "*.pyc", "*.db", "*.db-*", "sessions")
+MAX_FAIL = 4000        # 上一轮失败原因带进任务的最大字数
 MODEL_STEPS = ("plan", "plan_fix", "sub", "fix", "bound")
 
 
@@ -47,7 +48,7 @@ def sync_back(work, project, module):
 def task_text(module, last_fail):
     t = f"模块 {module}\n"
     if (last_fail or "").strip():
-        t += f"\n上一轮做完后的验收没有通过，问题如下（项目里是上一轮的结果，针对这些问题改；约定不能改）：\n{last_fail.strip()}\n"
+        t += f"\n上一轮没有做成（做模块的结果 + 验收），问题如下，针对这些问题改；约定不能改：\n{last_fail.strip()[:MAX_FAIL]}\n"
     return t
 
 
@@ -65,7 +66,10 @@ def last_json(stdout):
 def run_module(ctx, module, last_fail="", model="sonnet"):
     ctx.guard()
     with ctx.lock:
-        ctx.rounds[module] = n = ctx.rounds.get(module, 0) + 1
+        if module not in ctx.rounds:          # 续跑：轮号接着上一次的，不覆盖已有的记录目录
+            done = [int(d.name[1:]) for d in (ctx.out / "modules" / module).glob("r[0-9]*") if d.name[1:].isdigit()]
+            ctx.rounds[module] = max(done, default=0)
+        ctx.rounds[module] = n = ctx.rounds[module] + 1
     rec = ctx.out / "modules" / module / f"r{n}"
     work = rec / "proj"
     shutil.rmtree(rec, ignore_errors=True)

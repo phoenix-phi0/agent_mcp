@@ -188,6 +188,11 @@ def test_contract_check():
     check(any("一条验收用例都没有" in x for x in probs), "公开函数没用例被查出", probs)
     probs = VC.check(contract_text("graph").replace("-> 加边", "-> 没有这个"), "graph", top, p)
     check(any("不是本模块的公开函数" in x for x in probs), "接口指向非公开函数被查出", probs)
+    bad = contract_text("graph").replace("公开 函数 取知识点 code", "公开 函数 取知识点 code extra?", 1).replace(
+        "调用 取知识点 code=P1\n  得 code=P1 title=一次函数", "调用 取知识点 code=P1 extra=空\n  得 code=P1 title=一次函数", 1)
+    probs = VC.check(bad, "graph", top, p)
+    check(any("可选入参 extra 传了「空」" in x for x in probs), "给可选入参传「空」的用例被查出", probs)
+    check(VC.check(bad.replace(" extra=空", ""), "graph", top, p) == [], "不传可选入参的用例通过")
     probs = VC.check("这不是约定", "graph", top, p)
     check(probs != [], "格式不对被查出", probs)
     # 模型把 ``` 围栏带进来：写规划时 clean 掉
@@ -374,6 +379,9 @@ def test_full_flow_clean():
     res2 = run_v3(proj, out, fk2)
     check(res2["状态"] == "成功" and fk2.calls == [], "续跑：已通过的规划一个模型调用都没有", [c["tag"] for c in fk2.calls])
     check(len(stub_calls(state)) == n_stub and res2["模块花费"] == 0, "续跑：已完成且约定未变的模块不重做", stub_calls(state)[n_stub:])
+    check((out / "result_run1.json").is_file() and (out / "result.json").is_file(), "续跑：上一次的 result.json 留成 result_run1.json")
+    names = sorted(f.name for f in (out / "calls").glob("*.prompt.txt"))
+    check(len(names) == len(set(n.split("_", 1)[0] for n in names)) == 6, "calls/ 里每次调用一个文件，没有被覆盖", names)
     # 约定改了 → 只重做那个模块
     f = proj / "contracts" / "vocab.md"
     f.write_text(f.read_text(encoding="utf-8") + "\n# 改了一行注释\n", encoding="utf-8")
@@ -381,11 +389,14 @@ def test_full_flow_clean():
     res3 = run_v3(proj, out, fk3)
     again = stub_calls(state)[n_stub:]
     check(res3["状态"] == "成功" and fk3.calls == [] and [c["模块"] for c in again] == ["vocab"], "续跑：约定改了的模块重做，别的不动", again)
-    # 约定被改坏（与 top 不一致）→ 续跑时只重写它
+    check(sorted(d.name for d in (out / "modules" / "vocab").iterdir()) == ["r1", "r2"], "续跑：模块轮号接着走，上一次的记录目录还在", sorted(d.name for d in (out / "modules" / "vocab").iterdir()))
+    # 约定被改坏（与 top 不一致）→ 续跑时只重写它，且重写的输入带盘上那份和问题
     f.write_text(f.read_text(encoding="utf-8").replace("依赖 graph", "依赖 无", 1), encoding="utf-8")
     fk4 = Fake()
     res4 = run_v3(proj, out, fk4)
     check(res4["状态"] == "成功" and [c["tag"] for c in fk4.calls] == ["v3_contract_vocab"], "续跑：不过检查的约定重写，别的跳过", [c["tag"] for c in fk4.calls])
+    u = fk4.calls[0]["user"]
+    check("【你上次写的内容】" in u and "两边要一致" in u and "依赖 无" in u, "续跑重写时输入带盘上那份约定和检查问题", u[-500:])
 
 
 def test_stop_after():
@@ -442,7 +453,7 @@ def test_group_retry():
     ms = [json.loads(c["models"])["plan"] for c in calls]
     check(ms == ["sonnet", "sonnet", "opus"], "末次换模型（前两轮 sonnet，第 3 轮 opus）", ms)
     check(set(json.loads(calls[2]["models"]).values()) == {"opus"}, "末次所有步骤都用 opus", calls[2]["models"])
-    check("验收没有通过" not in calls[0]["task"] and "验收没有通过" in calls[1]["task"] and "验收没有通过" in calls[2]["task"], "第 2、3 轮的任务带上一轮的失败原因", calls[1]["task"])
+    check("上一轮没有做成" not in calls[0]["task"] and "上一轮没有做成" in calls[1]["task"] and "上一轮没有做成" in calls[2]["task"], "第 2、3 轮的任务带上一轮的失败原因", calls[1]["task"])
     check("加载检查" in calls[1]["task"] and "比对约定" in calls[1]["task"] and "跑用例" in calls[1]["task"], "失败原因含三项验收的结果", calls[1]["task"])
     acc = [r for r in res["记录"]["验收"] if r["模块"] == "graph"]
     check([r["通过"] for r in acc] == [False, False, True], "验收记录：否 否 是", acc)
