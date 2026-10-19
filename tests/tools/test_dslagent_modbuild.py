@@ -19,7 +19,7 @@ os.environ["DSLAGENT_STATE"] = str(TMP / "state")
 os.environ.pop("NEWPROJ_FORCE_SUBPROCESS", None)
 os.environ.pop("NEWPROJ_COST_CAP", None)
 
-from tools.dslagent import modbuild as MB, v2 as V      # noqa: E402
+from tools.dslagent import modbuild as MB, v2 as V, loadcheck as LC, engines as E      # noqa: E402
 
 PASS = FAIL = 0
 REQ = "做一个答题：有题目，作答要记录；交答案时按库里记的题判对错并写作答记录；另有进度模块，看进度时按得分算掌握。"
@@ -383,7 +383,7 @@ class Fake:
     ("顶层",) ("拆分",) ("计划", 层, 名) ("生成", 层, 名) ("核对",)。"""
 
     def __init__(self, bad=None, cost=0.0, top=None, split=None, ents=None):
-        self.bad, self.cost, self.prompts, self.used, self.calls = bad or {}, cost, [], {}, []
+        self.bad, self.cost, self.prompts, self.used, self.calls, self.models = bad or {}, cost, [], {}, [], []
         self.top, self.split = top or top_obj(), split or split_obj()
         self.ents = ents or {"quiz": ENT_Q + "\n" + ENT_A, "progress": ENT_M}
 
@@ -398,6 +398,7 @@ class Fake:
     def __call__(self, system, user, tag, timeout, model=None, **kw):
         self.prompts.append(user)
         self.calls.append(tag)
+        self.models.append(model)
         text = self.reply(user)
         return text if isinstance(text, dict) else {"text": text, "cost": self.cost}
 
@@ -793,6 +794,214 @@ def t_resume():
         V.run_newproj = real
 
 
+# ------------------------------------------------------------------ 十三、加载检查（服务启动同样的方式）
+
+BAD_COND_EQ = "接口 POST /quiz/answer 动作 quiz_answer\n  用包 db http common\n  如果 {given} == \"\"\n    返回 {\"error\":\"空\"} 400\n  结束\n  设 result = 执行 scripts/quiz_judge.zs question_id={question_id} given={given}\n  返回 {\"ok\":\"{result.ok}\"}\n结束\n"
+
+
+def t_loadcheck():
+    print("十三、加载检查（复用服务运行时解析：DSLEngine 的条件 / 变量名 / 遍历 / 循环解析点）")
+    cases = {
+        "条件 ==": ("用包 common\n如果 {a} == 1\n打印 x\n结束\n", "看不懂的条件"),
+        "条件 !=": ("用包 common\n如果 {a} != {b}\n打印 x\n结束\n", "看不懂的条件"),
+        "条件 <": ("用包 common\n如果 {s.sort_order} < 0\n打印 x\n结束\n", "看不懂的条件"),
+        "否则如果 条件 >": ("用包 common\n如果 {a} 等于 1\n打印 x\n否则如果 {a} > 2\n打印 y\n结束\n", "看不懂的条件"),
+        "变量名 learnable.{k.code}": ("用包 common\n设 learnable.{k.code} = 1\n", "非法变量名：learnable.{k.code}"),
+        "{intent} 讲解 条件": ("用包 common\n如果 {intent} 讲解\n打印 x\n结束\n", "看不懂的条件「{intent} 讲解」"),
+        "非法遍历": ("用包 common\n遍历 {a}.b 于 {x}\n打印 x\n结束\n", "非法变量名"),
+        "遍历缺 于": ("用包 common\n遍历 x\n打印 x\n结束\n", "循环语法"),
+        "当 没写上限": ("用包 common\n当 {a} 等于 1\n打印 x\n结束\n", "必须写上限"),
+        "循环外跳出": ("用包 common\n跳出\n", "只能写在循环"),
+        "多余的结束": ("用包 common\n结束\n", "多余的"),
+    }
+    for name, (text, want) in cases.items():
+        e = LC.parse_script(text)
+        check(e is not None and want in e, f"流程文本：{name} → 报错原话带回", e)
+    ok = "用包 common db\n如果 {a} 等于 1 且 {b} 不为空\n  打印 x\n否则如果 {a} 大于 2\n  打印 y\n否则\n  打印 z\n结束\n遍历 x 于 {l}\n  打印 {x}\n结束\n设 r = 查询 app.db q_list a={a}\n"
+    check(LC.parse_script(ok) is None, "合法脚本（等于 / 大于 / 且 / 否则如果 / 遍历）不误报")
+    check(LC.parse_script("") is None and LC.parse_script("# 只有注释\n") is None, "空脚本 / 只有注释不报")
+    # 接口文件：切块（与服务 split_endpoints 同一个）后逐块解析，报错带接口路径
+    probs = LC.check_text(BAD_COND_EQ, "routes/quiz.zs", True)
+    check(len(probs) == 1 and probs[0].startswith("[接口出错] routes/quiz.zs") and "POST /quiz/answer" in probs[0] and "看不懂的条件" in probs[0], "接口文件：[接口出错] 文件 接口 报错原话（与服务打印同款）", probs)
+    check(LC.check_text(ZS_QUIZ, "routes/quiz.zs", True) == [] and LC.check_text(ZS_FLOW, "scripts/quiz_judge.zs", False) == [], "合法的接口 / 流程文件通过")
+    probs = LC.check_text("接口 POST /a\n  打印 x\n", "routes/a.zs", True)
+    check(len(probs) == 1 and "没有对应的「结束」" in probs[0], "接口块没有结束 → 同服务启动时一样报", probs)
+    # 磁盘：整项目
+    d = TMP / "lc_proj"
+    (d / "routes").mkdir(parents=True)
+    (d / "scripts").mkdir()
+    (d / "routes" / "a.zs").write_text(BAD_COND_EQ, encoding="utf-8")
+    (d / "routes" / "b.zs").write_text(ZS_PROG, encoding="utf-8")
+    (d / "scripts" / "f.zs").write_text("用包 common\n设 x.{y} = 1\n", encoding="utf-8")
+    probs = LC.check_project(d)
+    check(len(probs) == 2 and any("routes/a.zs" in x for x in probs) and any("scripts/f.zs" in x and "非法变量名" in x for x in probs), "全项目加载：逐个文件，合法的不报", probs)
+    (d / "routes" / "dup.zs").write_text(ZS_PROG, encoding="utf-8")
+    check(any("接口重复" in x for x in LC.check_project(d)), "全项目加载：接口重复（scan_routes 抛的）也报")
+    # 生成时：流程带 == → 报错原话带回重写
+    bad_flow = ZS_FLOW.replace("设 n = ", "如果 {given} == \"\"\n  返回 {\"ok\":\"0\",\"n\":\"0\"}\n结束\n设 n = ")
+    fk = Fake(bad={("生成", "流程", "scripts/quiz_judge.zs"): [f"=== scripts/quiz_judge.zs ===\n{bad_flow}", f"=== scripts/quiz_judge.zs ===\n{ZS_FLOW}"]})
+    r, p, _ = go("lc_flow", fk)
+    f = files(r)["scripts/quiz_judge.zs"]
+    again = fk.of(".zs 流程助手")[1]
+    check(r["fixed"] and f["生成尝试"] == 2 and "[接口出错]" in again and "看不懂的条件" in again and "==" in again, "流程生成条件写 == → 带「接口出错」报错原话重写后通过", f)
+    # 接口：条件 == 同样
+    fk = Fake(bad={("生成", "接口", "routes/quiz.zs"): [f"=== routes/quiz.zs ===\n{BAD_COND_EQ}", f"=== routes/quiz.zs ===\n{ZS_QUIZ}"]})
+    r, p, _ = go("lc_iface", fk)
+    f = files(r)["routes/quiz.zs"]
+    check(r["fixed"] and f["生成尝试"] == 2 and "[接口出错] routes/quiz.zs" in fk.of(".zs 接口助手")[1] and "== \"\"" not in (p / "routes/quiz.zs").read_text(encoding="utf-8"), "接口生成写 == → 重写，坏版本没落盘", f)
+    fk = Fake(bad={("生成", "接口", "routes/quiz.zs"): [f"=== routes/quiz.zs ===\n{BAD_COND_EQ}"]})
+    r, p, _ = go("lc_iface2", fk)
+    f = files(r)["routes/quiz.zs"]
+    check(f["结果"] == "失败" and "看不懂的条件" in f["失败原因"] and not (p / "routes/quiz.zs").exists(), "两次都写 == → 该文件失败并撤回", f)
+    # 整体检查：项目里别的文件（计划外、模型追加的）加载不过 → 整体问题里报「接口出错」，零「接口出错」才算成功
+    d = TMP / "lc_final"
+    shutil.rmtree(d, ignore_errors=True)
+    (d / "proj" / "routes").mkdir(parents=True)
+    (d / "proj" / "routes" / "extra.zs").write_text(BAD_COND_EQ.replace("/quiz/answer", "/extra/x").replace("quiz_answer", "extra_x"), encoding="utf-8")
+    r = V.run_newproj(REQ, d / "proj", d / "out", model=Fake(), modular=True)
+    check(not r["fixed"] and r["v2"]["结论"] == "部分成功" and any("[接口出错] routes/extra.zs" in x for x in r["v2"]["整体问题"]), "整体检查：全项目加载有「接口出错」→ 部分成功", r["v2"]["整体问题"])
+    r, _, _ = go("lc_final_ok", Fake())
+    check(r["fixed"] and not any("接口出错" in x for x in r["v2"]["整体问题"]), "整体检查：零「接口出错」→ 成功")
+    # 继续构建：通过的接口文件被改成坏条件 → 不沿用、重做
+    d = TMP / "lc_resume"
+    shutil.rmtree(d, ignore_errors=True)
+    r1 = V.run_newproj(REQ, d / "proj", d / "out", model=Fake(), modular=True)
+    (d / "proj" / "routes" / "quiz.zs").write_text(BAD_COND_EQ, encoding="utf-8")
+    (d / "proj" / "scripts" / "quiz_judge.zs").write_text("用包 common\n设 k.{x} = 1\n", encoding="utf-8")
+    fk = Fake()
+    r2 = V.run_newproj(REQ, d / "proj", d / "out", model=fk, modular=True, resume=True)
+    fs = files(r2)
+    check(r1["fixed"] and r2["fixed"] and not fs["routes/quiz.zs"].get("沿用") and not fs["scripts/quiz_judge.zs"].get("沿用") and fs["entities/quiz.entity"].get("沿用") and fs["queries/quiz_*.sql"].get("沿用"),
+          "resume：加载检查不过的接口 / 流程文件不沿用、重做；没坏的数据 / 查询沿用", {k: v.get("沿用") for k, v in fs.items()})
+    check("看不懂的条件" not in (d / "proj" / "routes" / "quiz.zs").read_text(encoding="utf-8") and LC.check_project(d / "proj") == [], "重做后磁盘上的文件加载零「接口出错」")
+
+
+# ------------------------------------------------------------------ 十四、gen private 权限（程序套）
+
+def private_objs(extra_cut=None, roles=("teacher", "student")):
+    top, sp = top_obj(), split_obj()
+    top["使用者"]["角色"] = list(roles)
+    sp["模板"], sp["角色"] = "private", list(roles)
+    if extra_cut:
+        top["横切"]["全局约束"] = [*top["横切"]["全局约束"], extra_cut]
+    return top, sp
+
+
+def t_perms():
+    print("十四、gen private 权限：增删改查带角色 / user 不出 password_hash / 关公开注册 / resume 重套")
+    top, sp = private_objs()
+    r, p, out = go("perm1", Fake(top=top, split=sp), req=REQ + "学生和老师要登录。")
+    uz, qz = (p / "routes/user.zs").read_text(encoding="utf-8"), (p / "routes/question.zs").read_text(encoding="utf-8")
+    heads = [l for l in (uz + qz).splitlines() if l.startswith("接口 ")]
+    check(r["fixed"] and len(heads) == 10 and all(h.endswith(" 角色 teacher") for h in heads), "private + 两个角色：gen 的增删改查（user / question 共 10 个接口）都带「角色 teacher」（第一个角色）", heads)
+    check("password_hash" not in (p / "queries/user_list.sql").read_text(encoding="utf-8") and "password_hash" not in (p / "queries/user_one.sql").read_text(encoding="utf-8")
+          and "password_hash" not in (p / "queries/user_update.sql").read_text(encoding="utf-8"), "user_list / user_one / user_update 不选 / 不写 password_hash")
+    auth = (p / "routes/auth.zs").read_text(encoding="utf-8")
+    check("接口 POST /auth/register 动作 auth_register 公开" in auth and "403" not in auth.split("/auth/login")[0], "没写「学生不能自己注册」→ /auth/register 照旧公开")
+    check("角色 teacher" not in (p / "routes/quiz.zs").read_text(encoding="utf-8"), "模型写的接口文件不被改")
+    # 横切里写了 → 关注册
+    top, sp = private_objs("学生不能自己注册，账号由教师创建")
+    r, p, out = go("perm2", Fake(top=top, split=sp), req=REQ + "学生和老师要登录。")
+    auth = (p / "routes/auth.zs").read_text(encoding="utf-8")
+    seg = auth.split("接口 POST /auth/register")[1].split("结束")[0]
+    check(r["fixed"] and "403" in seg and MB.NO_REGISTER_RE.search("学生不能自己注册") and "注册用户" not in seg and "动作 auth_register 公开" in auth, "横切全局约束写了学生不能自己注册 → /auth/register 回 403（接口头保留，界面动作还在）", seg)
+    check(LC.check_project(p) == [], "套完权限的项目加载零「接口出错」")
+    # 清单标记
+    top, sp = private_objs()
+    sp["关闭注册"] = "是"
+    r, p, _ = go("perm3", Fake(top=top, split=sp), req=REQ + "学生和老师要登录。")
+    check("403" in (p / "routes/auth.zs").read_text(encoding="utf-8").split("/auth/login")[0], "层次×模块清单标记 关闭注册＝是 → 同样关")
+    # 只有一个角色：不加角色；password_hash 仍隐藏
+    top, sp = private_objs(roles=("teacher",))
+    r, p, _ = go("perm4", Fake(top=top, split=sp), req=REQ + "老师要登录。")
+    check(r["fixed"] and "角色 teacher" not in (p / "routes/user.zs").read_text(encoding="utf-8") and "password_hash" not in (p / "queries/user_list.sql").read_text(encoding="utf-8"), "只有一个角色 → 不加角色；user 查询仍不出 password_hash")
+    # 非 private 不动
+    r, p, _ = go("perm5", Fake())
+    check(r["fixed"] and "角色" not in (p / "routes/question.zs").read_text(encoding="utf-8").split("结束")[0] and not (p / "routes/auth.zs").exists(), "非 private 模板：gen 的接口不加角色，没有 auth")
+    # resume：被改掉的 gen 权限（比如重新生成覆盖）重新套上，追加的接口保留
+    top, sp = private_objs()
+    d = TMP / "perm_resume"
+    shutil.rmtree(d, ignore_errors=True)
+    r1 = V.run_newproj(REQ + "学生和老师要登录。", d / "proj", d / "out", model=Fake(top=top, split=sp), modular=True)
+    qf = d / "proj" / "routes" / "question.zs"
+    appended = "\n\n接口 POST /question/extra 动作 question_extra\n  用包 db http\n  返回 {\"ok\":\"1\"}\n结束\n"
+    qf.write_text(qf.read_text(encoding="utf-8").replace(" 角色 teacher", "") + appended, encoding="utf-8")
+    uf = d / "proj" / "queries" / "user_list.sql"
+    uf.write_text("SELECT id, username, password_hash FROM user\n", encoding="utf-8")
+    r2 = V.run_newproj(REQ + "学生和老师要登录。", d / "proj", d / "out", model=Fake(top=top, split=sp), modular=True, resume=True)
+    t = qf.read_text(encoding="utf-8")
+    check(r1["fixed"] and r2["fixed"] and t.count(" 角色 teacher") == 5, "resume：gen 的 5 个增删改查块重新带上角色", t[-400:])
+    check("接口 POST /question/extra 动作 question_extra\n" in t and t.endswith(appended.lstrip("\n")), "resume：模型追加的接口原样保留（头行不加角色，位置不变）", t[-200:])
+    check("password_hash" not in uf.read_text(encoding="utf-8"), "resume：user_list.sql 被还原成带 password_hash 后重新去掉")
+
+
+# ------------------------------------------------------------------ 十五、规划 / 生成分开指定模型
+
+class Fake2(Fake):
+    """codex 的调用返回 cost 5（模拟误带费用）：熔断不该看它。"""
+
+    def __call__(self, system, user, tag, timeout, model=None, **kw):
+        t = super().__call__(system, user, tag, timeout, model, **kw)
+        if model and str(model).startswith("codex"):
+            t = dict(t, cost=5.0)
+        return t
+
+
+def t_steps():
+    print("十五、mplan / mgen 步骤键、codex 不计费、--codex-cap")
+    check(E.normalize({"mplan": "sonnet", "mgen": "codex:gpt-6-luna:medium"}) == {"mplan": "sonnet", "mgen": "codex:gpt-6-luna:medium"}, "engines.normalize 认 mplan / mgen")
+    check(E.normalize("mplan=sonnet,mgen=codex:gpt-6-luna:medium") == {"mplan": "sonnet", "mgen": "codex:gpt-6-luna:medium"}, "简写 mplan=…,mgen=… 也认")
+    check(E.normalize("opus") == {k: "opus" for k in E.STEPS}, "字符串简写仍只设原来的步骤（不影响老行为）")
+    try:
+        E.normalize({"mplanx": "sonnet"})
+        check(False, "未知步骤名应报错")
+    except ValueError as e:
+        check("mplan" in str(e) and "mgen" in str(e), "未知步骤名 → 报错并列出可用步骤（含 mplan / mgen）")
+    check(E.effective({}) == {k: "sonnet" for k in E.STEPS}, "effective 不变（老测试口径）")
+    old = os.environ.get("DSLAGENT_MODELS")
+    PLAN = ("项目架构师", "项目架构助手", "单文件规划助手", "需求核对员")
+    GEN = ("应用建模助手", "SQLite 语句助手", ".zs 流程助手", ".zs 接口助手", ".ui 界面助手")
+    try:
+        os.environ["DSLAGENT_MODELS"] = dump({"mplan": "opus", "mgen": "haiku"})
+        fk = Fake()
+        r, p, out = go("st1", fk)
+        pm = {m for u, m in zip(fk.prompts, fk.models) if any(k in u for k in PLAN)}
+        gm = {m for u, m in zip(fk.prompts, fk.models) if any(k in u for k in GEN)}
+        check(r["fixed"] and pm == {"opus"} and gm == {"haiku"}, "规划类调用用 mplan（opus），生成类用 mgen（haiku）", (pm, gm))
+        calls = json.loads((out / "calls.json").read_text(encoding="utf-8"))
+        steps = {c.get("step"): c.get("model") for c in calls}
+        check(steps.get("mplan") == "opus" and steps.get("mgen") == "haiku" and all(c.get("engine") == "claude" for c in calls), "calls.json 每条记 step 与实际 engine / model", steps)
+        os.environ["DSLAGENT_MODELS"] = dump({"sub": "haiku"})
+        fk = Fake()
+        r, _, out = go("st2", fk)
+        check(r["fixed"] and set(fk.models) == {"haiku"}, "没写 mplan / mgen → 都走 sub", set(fk.models))
+        os.environ.pop("DSLAGENT_MODELS")
+        fk = Fake()
+        r, _, out = go("st3", fk)
+        check(r["fixed"] and set(fk.models) == {None}, "什么都没写 → 走原来的默认模型（不传 model）", set(fk.models))
+        os.environ["DSLAGENT_MODELS"] = "mplan=sonnet,mgen=codex:gpt-6-luna:medium"
+        fk = Fake2()
+        r, _, out = go("st4", fk, cost_cap=0.5)
+        calls = json.loads((out / "calls.json").read_text(encoding="utf-8"))
+        cx = [c for c in calls if c["engine"] == "codex"]
+        check(r["fixed"] and cx and all(c["step"] == "mgen" and c["model"] == "gpt-6-luna" and c["effort"] == "medium" for c in cx) and r["v2"]["结论"] == "成功" and r["v2"]["codex调用"] == len(cx),
+              "codex 只管生成类；cost 5/次的 codex 调用不触发 --cost-cap 0.5（熔断只看 Claude 侧）；codex调用数记进结果", (r["stop"][:200], len(cx)))
+        fk = Fake2()
+        r, _, out = go("st5", fk, codex_cap=3)
+        calls = json.loads((out / "calls.json").read_text(encoding="utf-8"))
+        n_cx = sum(1 for c in calls if c["engine"] == "codex")
+        check(not r["fixed"] and n_cx == 3 and "codex 调用已满 3 次" in r["stop"] and r["v2"]["结论"] == "部分成功", "--codex-cap 3：codex 调用到 3 次就停（部分成功）", (n_cx, r["stop"][:200]))
+        fk = Fake2()
+        r, _, out = go("st6", fk, codex_cap=1000)
+        check(r["fixed"], "codex-cap 够大不影响")
+    finally:
+        if old is None:
+            os.environ.pop("DSLAGENT_MODELS", None)
+        else:
+            os.environ["DSLAGENT_MODELS"] = old
+
+
+
 def t_cli():
     print("九、CLI / 登记 / 提示词")
     from tools.dslagent import __main__ as M
@@ -805,6 +1014,9 @@ def t_cli():
         rq.write_text("需求", encoding="utf-8")
         M.main(["newproj", "--modular", "--cost-cap", "2.5", str(rq), str(TMP / "cli_p"), "--out", str(TMP / "cli_o")])
         check(seen.get("modular") is True and seen.get("cost_cap") == 2.5 and not seen.get("layered"), "CLI newproj --modular --cost-cap → run_newproj(modular=True, cost_cap=2.5)", seen)
+        seen.clear()
+        M.main(["newproj", "--modular", "--codex-cap", "7", str(rq), str(TMP / "cli_p"), "--out", str(TMP / "cli_o")])
+        check(seen.get("modular") is True and seen.get("codex_cap") == 7, "CLI --codex-cap N → run_newproj(codex_cap=N)", seen)
         seen.clear()
         M.main(["newproj", "--layered", str(rq), str(TMP / "cli_p"), "--out", str(TMP / "cli_o")])
         check(seen.get("layered") is True and not seen.get("modular"), "--layered 仍走旧路径", seen)
@@ -837,6 +1049,9 @@ def main():
         t_gen_ents()
         t_silent()
         t_resume()
+        t_loadcheck()
+        t_perms()
+        t_steps()
         t_cli()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)

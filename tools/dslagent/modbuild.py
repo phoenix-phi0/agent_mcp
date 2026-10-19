@@ -24,6 +24,7 @@ from pathlib import Path
 
 from . import layered as LY
 from . import guard as G      # noqa: F401
+from . import loadcheck as LC
 from .layered import FileFail, Halt, _Retry
 
 if str(LY.DEFS) not in sys.path:
@@ -45,6 +46,8 @@ ACCOUNT_ENTS = ("user", "users", "account", "accounts")
 DEFAULT_PACKS = ("db", "http", "common")
 SKIP_PACKS = ("probe",)
 HEAD_OK = set(KEYWORDS.values())
+NO_REGISTER_RE = re.compile(r"(不(?:能|得|可|许|允许|开放|支持|提供).{0,8}(?:自己|自助|自行|公开|自由)?.{0,3}注册|(?:禁止|关闭|取消|去掉).{0,6}注册|无法.{0,6}注册"
+                            r"|(?:账号|账户|学生|学习者|用户).{0,10}(?:由|靠|须由).{0,3}(?:教师|老师|管理员).{0,6}(?:建|创建|开通|添加|新增|导入)|(?:教师|老师|管理员).{0,4}(?:统一)?(?:建|创建|开通)(?:账号|账户|学生))")
 CALL_RE = re.compile(r"^(?:设\s+\S+\s*=\s*)?(执行|后台执行)\s+(scripts/\S+?\.zs)(?:\s+(.*))?$")
 KV_RE = re.compile(r"(\w+)=(\{[^{}]*\}|\S+)")
 RET_KEYS = re.compile(r'"(\w+)"\s*:')
@@ -524,6 +527,7 @@ def validate_split(x, top, caps, task=""):
         v["能力"] = cap_final[n]
     return {"ok": True, "errors": [], "split": {
         "模板": tpl, "角色": roles, "角色模板": "private" if roles else "", "层": order, "层说明": layer_desc, "全局约束": glob,
+        "关闭注册": "是" if str(obj.get("关闭注册") or "").strip() in ("是", "true", "True", "1") else "",
         "规则表": rules_all, "模块": norm}}
 
 
@@ -989,10 +993,15 @@ def restore_state(out_dir, task, caps=None):
 # ================================================================== 3 逐层构建
 
 class ModRun(LY.Run):
+    STEP_OF_KIND = {"plan": "mplan", "gen": "mgen"}       # DSLAGENT_MODELS 的步骤键：规划类 / 生成类调用分开指定（没写走 sub）
     RETRY_SILENT = (G.R_IDLE, G.R_FIRST)           # 空闲超时 / 首字前静默：同一调用重试 1 次再判失败（输出超长、被杀、熔断不重试）
 
-    def __init__(self, M, task, project, stop_cls, cap=None, out_dir=None, verbs_root=None, resume=None):
+    def ask(self, prompt, rec=None, kind="gen"):
+        return super().ask(prompt, rec, kind)
+
+    def __init__(self, M, task, project, stop_cls, cap=None, out_dir=None, verbs_root=None, resume=None, codex_cap=None):
         super().__init__(M, task, project, stop_cls, cap)
+        self.codex_cap = codex_cap
         self.out = Path(out_dir) if out_dir else self.root
         self.resume = resume                # restore_state() 的结果；None = 全新运行
         self.run_no = resume["run_no"] if resume else 1
@@ -1045,13 +1054,29 @@ class ModRun(LY.Run):
         if not self.ok_ents():
             self.fatal = "没有一个模块的实体写成：" + "；".join(f"{r['文件']}：{r['失败原因']}" for r in self.recs if r["层"] == "数据")[:500]
             return
-        g = self.v["生成增删改查"]({"项目目录": ".", "模板": self.layers["模板"], "角色": self.layers["角色"]})
+        g = self.v["生成增删改查"]({"项目目录": ".", "模板": self.layers["模板"], "角色": self.layers["角色"], "关闭注册": "是" if self.no_register() else "否"})
         if g["ok"] != "是":
             self.fatal = f"生成增删改查不过：{g['msg']}"
             return
         b = self.v["检查项目"]({})
         if b["ok"] != "是":
             self.fatal = f"gen 生成的项目检查不过：{b['msg']}"
+
+    def no_register(self):
+        """要不要关公开注册：顶层规划横切（账号与权限 / 全局约束）、层次×模块的全局约束里写了「学生不能自己注册、由教师建」，或清单带标记 关闭注册＝是。"""
+        if str((self.split or {}).get("关闭注册") or "") in ("是", "true", "True", "1"):
+            return True
+        c = (self.top or {}).get("横切") or {}
+        texts = [str(c.get("账号与权限") or ""), *[str(x) for x in c.get("全局约束") or []], *[str(x) for x in (self.split or {}).get("全局约束") or []]]
+        return bool(self.layers["角色"]) and any(NO_REGISTER_RE.search(t) for t in texts)
+
+    def reapply_perms(self):
+        """对磁盘上已有的 gen 产物重新套权限（resume / 模型追加过接口之后）：只改 gen 生成的增删改查块，保留追加部分。可重复。"""
+        if self.layers["模板"] != "private" or self.fatal:
+            return
+        g = self.v["生成增删改查"]({"项目目录": ".", "模板": "private", "角色": self.layers["角色"], "只套权限": "是", "关闭注册": "是" if self.no_register() else "否"})
+        if g["ok"] != "是":
+            self.fatal = f"套 gen 权限不过：{g['msg']}"
 
     def gen_ents(self):
         """gen 生成的实体文件（entities/ 里不属于任何业务模块的，如 private 的 user）全文。"""
@@ -1180,7 +1205,7 @@ class ModRun(LY.Run):
             name = it["流程"]
             body = p.read_text(encoding="utf-8")
             flows, sqls = self.accessible_flows(m), self.visible_sqls(m)
-            errs = check_zs(body, file, self.vpack, set(self.caps), False)
+            errs = check_zs(body, file, self.vpack, set(self.caps), False) + LC.check_text(body, file, False)
             if not errs:
                 wrapped, decl = wrap_flow(body, name, [*fp["入参"], *fp["可选入参"]])
                 errs += P.check_text(wrapped, file, self.root / "queries", decl, P.identity_vars(self.root))[0]
@@ -1201,6 +1226,7 @@ class ModRun(LY.Run):
             if miss:
                 return f"文件里没有接口块 {miss}"
             errs = check_zs(self.iface_body(text, items), file, self.vpack, set(self.caps), True)
+            errs += LC.check_text(self.iface_body(text, items), file, True)
             errs += check_calls(text, file, self.flowinfo, set(self.accessible_flows(m)), self.disk_scripts())
             if errs:
                 return "；".join(errs)[:400]
@@ -1228,8 +1254,10 @@ class ModRun(LY.Run):
         return None
 
     def discard_stale(self, layer, file, old):
-        """不能沿用的旧产物先清掉，免得重做时撞名（旧 sql 名被占 / 接口块追加后重复）。流程、数据、界面重做时整个文件覆盖，不用清。"""
-        if layer == "查询":
+        """不能沿用的旧产物先清掉，免得重做时撞名（旧 sql 名被占 / 接口块追加后重复 / 旧流程文件「已存在，不能覆盖」）。数据、界面重做时整个文件覆盖，不用清。"""
+        if layer == "流程":
+            (self.root / file).unlink(missing_ok=True)
+        elif layer == "查询":
             fp = old.get("产出") or self.replay_plan(file, "sql")
             for sq in (fp or {}).get("sql", []):
                 (self.root / "queries" / f"{sq['名']}.sql").unlink(missing_ok=True)
@@ -1267,7 +1295,7 @@ class ModRun(LY.Run):
         for k in (1, 2):
             rec["规划尝试"] = k
             try:
-                text = self.ask(f"{sysp}\n需求：{self.task}\n{body}\n上次的报错：{err}", rec)
+                text = self.ask(f"{sysp}\n需求：{self.task}\n{body}\n上次的报错：{err}", rec, "plan")
             except _Retry as e:
                 err = str(e)
                 continue
@@ -1293,7 +1321,7 @@ class ModRun(LY.Run):
         for k in (1, 2):
             st["尝试"] = k
             try:
-                text = self.ask(f"{self.pm['top']}\n需求：{self.task}\n现有动词包（能力清单，只列动词名）：\n{cap_text(self.caps, brief=True)}\n上次的报错：{err}", st)
+                text = self.ask(f"{self.pm['top']}\n需求：{self.task}\n现有动词包（能力清单，只列动词名）：\n{cap_text(self.caps, brief=True)}\n上次的报错：{err}", st, "plan")
             except _Retry as e:
                 err = str(e)
                 continue
@@ -1318,7 +1346,7 @@ class ModRun(LY.Run):
         for k in (1, 2):
             st["尝试"] = k
             try:
-                text = self.ask(f"{self.pm['split']}\n需求：{self.task}\n顶层规划：{self.top_view()}\n能力清单（动词名按包分）：\n{cap_text(self.caps, brief=True)}\n上次的报错：{err}", st)
+                text = self.ask(f"{self.pm['split']}\n需求：{self.task}\n顶层规划：{self.top_view()}\n能力清单（动词名按包分）：\n{cap_text(self.caps, brief=True)}\n上次的报错：{err}", st, "plan")
             except _Retry as e:
                 err = str(e)
                 continue
@@ -1372,8 +1400,10 @@ class ModRun(LY.Run):
             if self.fatal:
                 return
             fns[layer]([f for f in self.expected if f["层"] == layer])
-            if layer == "数据" and self.need_gen():
-                self.gen()
+            if layer == "数据":
+                if self.need_gen():
+                    self.gen()
+                self.reapply_perms()
 
     def need_gen(self):
         """全新运行总要 gen；继续构建时只有数据层有文件重做过、或 gen 的产物不全才再 gen（gen 不覆盖已有文件）。"""
@@ -1514,7 +1544,7 @@ class ModRun(LY.Run):
             if blk["ok"] != "是" or blk["n"] != 1:
                 return blk.get("msg") or f"要恰好一个 {rel} 块"
             body = blk["files"][0]["content"]
-            errs = check_zs(body, rel, self.vpack, set(self.caps), False)
+            errs = check_zs(body, rel, self.vpack, set(self.caps), False) + LC.check_text(body, rel, False)
             if not errs:
                 wrapped, decl = wrap_flow(body, name, decl_in)
                 pe, _ = P.check_text(wrapped, rel, self.root / "queries", decl, P.identity_vars(self.root))
@@ -1556,7 +1586,7 @@ class ModRun(LY.Run):
         for rr in (1, 2):
             sqltxt, body = ctx_fn()
             try:
-                chk = self.ask(f"{self.p['rule']}\n规则：{json.dumps(texts, ensure_ascii=False)} 本功能sql：{sqltxt} zs全文：{body}", rec)
+                chk = self.ask(f"{self.p['rule']}\n规则：{json.dumps(texts, ensure_ascii=False)} 本功能sql：{sqltxt} zs全文：{body}", rec, "plan")
             except (_Retry, FileFail):
                 return []                         # 核对不了不拿它当理由重写
             except Halt:
@@ -1625,7 +1655,7 @@ class ModRun(LY.Run):
             if blk["ok"] != "是" or blk["n"] != 1:
                 return blk.get("msg") or f"要恰好一个 {rel} 块（sql 在查询层已经建好，这里不要写）"
             body = blk["files"][0]["content"]
-            errs = check_zs(body, rel, self.vpack, set(self.caps), True)
+            errs = check_zs(body, rel, self.vpack, set(self.caps), True) + LC.check_text(body, rel, True)
             if errs:
                 return "；".join(errs)
             merged = (path.read_text(encoding="utf-8").rstrip("\n") + "\n\n" + body) if path.is_file() else body      # routes/<实体>.zs 是 gen 的 CRUD 文件：追加不覆盖
@@ -1694,6 +1724,9 @@ class ModRun(LY.Run):
     # ------------------------------------------------------------ 4 整体检查
     def final(self):
         problems = []
+        self.reapply_perms()      # 模型追加接口后再确认一遍 gen 块的权限
+        if self.fatal:
+            problems.append(self.fatal)
         b = self.v["检查项目"]({})
         if b["ok"] != "是":
             problems.append("整体检查不过：" + b["msg"])
@@ -1707,15 +1740,19 @@ class ModRun(LY.Run):
                 problems += [x for x in pe if any(f"接口 {a['路径']}" in x for a in items)]     # gen 的 CRUD 在同一文件里：只认本计划声明过路径的接口块
                 problems += [x for x in check_calls(text, rel, self.flowinfo, set(self.flowinfo), self.disk_scripts())]
                 problems += [x for x in check_zs(self.iface_body(text, items), rel, self.vpack, set(self.caps), True)]
+                problems += LC.check_text(self.iface_body(text, items), rel, True)
         for name, i in self.flowinfo.items():
             f = self.root / i["文件"]
             r = by_rel.get(i["文件"])
             if r and r["结果"] == "通过" and f.is_file():
                 text = f.read_text(encoding="utf-8")
                 problems += check_zs(text, i["文件"], self.vpack, set(self.caps), False)
+                problems += LC.check_text(text, i["文件"], False)
                 wrapped, decl = wrap_flow(text, name, [*i["入参"], *i["可选入参"]])
                 problems += P.check_text(wrapped, i["文件"], self.root / "queries", decl, ident)[0]
                 problems += check_calls(text, i["文件"], self.flowinfo, set(self.flowinfo), self.disk_scripts())
+        # 全项目按服务启动的方式加载一遍（含 gen 的 CRUD 与模型追加的接口）：零「接口出错」
+        problems += LC.check_project(self.root)
         for h, t in self.split["规则表"].items():
             if h not in self.claimed:
                 self.unclaimed.append(f"{h}：{t}")
@@ -1761,10 +1798,10 @@ class ModRun(LY.Run):
         self.plan_files()
 
 
-def run_modular(M, task, project, stop_cls, cap=None, max_calls=None, out_dir=None, verbs_root=None, resume=None):
+def run_modular(M, task, project, stop_cls, cap=None, max_calls=None, out_dir=None, verbs_root=None, resume=None, codex_cap=None):
     """跑完整个流程，返回 {状态, 结论, 原因, 文件, 清单, 整体问题, 花费, codex调用, 顶层规划, 层次, 本次}。不抛业务错误（Stop 在这里接住）。
     resume：restore_state() 的结果，给了就是继续构建（不重做两步规划，沿用上次通过且仍过检查的文件，其余按原顺序重做；cap 只算本次新花的）。"""
-    r = ModRun(M, task, project, stop_cls, cap, out_dir, verbs_root, resume)
+    r = ModRun(M, task, project, stop_cls, cap, out_dir, verbs_root, resume, codex_cap)
     r.user_max = max_calls
     halt = None
     try:

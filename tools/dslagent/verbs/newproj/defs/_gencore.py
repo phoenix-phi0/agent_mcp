@@ -55,7 +55,7 @@ def apply_roles(root, roles):
     return log
 
 
-def generate(root, tpl="full", only=None, force=False, roles=None):
+def generate(root, tpl="full", only=None, force=False, roles=None, no_register=False):
     from gen import project as P
     PE, _ = _gen_errors()
     root = Path(root)
@@ -71,6 +71,8 @@ def generate(root, tpl="full", only=None, force=False, roles=None):
             rest = [e.name for e in ents if "owner" not in [f.name for f in e.fields] and (not only or e.name in only)]
             if rest:
                 log += P.generate(root, "full", only=rest, force=force)
+            # 权限由程序套：角色 ≥2 时 gen 的增删改查只许第一个（教师类）角色、user 查询不出 password_hash、按需关公开注册
+            log += P.apply_perms(root, roles, no_register)
         else:
             log += P.generate(root, tpl, only=only or None, force=force)
         log.append(P.ensure_db(root))
@@ -78,6 +80,17 @@ def generate(root, tpl="full", only=None, force=False, roles=None):
         return {"ok": "否", "msg": str(e)[:MSG_CAP]}
     except Exception as e:  # noqa: BLE001  模板缺失等也要变成 msg
         return {"ok": "否", "msg": f"{type(e).__name__}: {e}"[:MSG_CAP]}
+    return {"ok": "是", "msg": "\n".join(x.rstrip() for x in log)[:MSG_CAP]}
+
+
+def apply_perms(root, roles=None, no_register=False):
+    """对已有项目重新套 gen 权限（resume 用）。只改 gen 生成的增删改查接口头行 / user 查询 / 注册块，模型追加的内容不动；可重复调用。"""
+    from gen import project as P
+    PE, _ = _gen_errors()
+    try:
+        log = P.apply_perms(Path(root), roles or [], no_register)
+    except PE as e:
+        return {"ok": "否", "msg": str(e)[:MSG_CAP]}
     return {"ok": "是", "msg": "\n".join(x.rstrip() for x in log)[:MSG_CAP]}
 
 
@@ -215,7 +228,7 @@ def dsl_verify(root, ui_files=()):
             "msg": ("；".join(f"{e['步']}：{e['msg']}" for e in errs) if errs else "通过")[:MSG_CAP * 2]}
 
 
-OPS = {"generate": generate, "check_project": check_project, "dsl_verify": dsl_verify}
+OPS = {"generate": generate, "apply_perms": apply_perms, "check_project": check_project, "dsl_verify": dsl_verify}
 
 
 def call(op, args):

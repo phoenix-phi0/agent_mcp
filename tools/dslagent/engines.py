@@ -22,6 +22,7 @@ from . import agents as AG
 from . import guard as G
 
 STEPS = ("plan", "plan_fix", "sub", "fix", "bound")
+MSTEPS = ("mplan", "mgen")      # modbuild（newproj --modular）专用：mplan = 规划类调用（顶层规划 / 层次×模块 / 单文件规划 / 规则核对），mgen = 生成类调用（写文件 / 重写）；没写的走 sub
 DEFAULT = "sonnet"
 CODEX_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 GROK_EFFORTS = ("low", "medium", "high", "xhigh")
@@ -90,14 +91,19 @@ def normalize(value):
     """dsl_options.models（字典 / 字符串 / 空）→ {步骤: 模型串}，只含写了的步骤（字符串 = 四步都用它）。不合格报 ValueError。"""
     if value in (None, "", {}):
         return {}
+    if isinstance(value, str) and "=" in value.split(":", 1)[0]:        # 简写 mplan=sonnet,mgen=codex:gpt-6-luna:medium
+        pairs = [x.partition("=") for x in value.split(",") if x.strip()]
+        if any(not sep for _k, sep, _v in pairs):
+            raise ValueError(f"models 简写要写成 步骤=模型串,步骤=模型串，收到：{value!r}")
+        value = {k.strip(): v.strip() for k, _s, v in pairs}
     if isinstance(value, str):
         parse(value)
         return {k: value.strip() for k in STEPS}
     if not isinstance(value, dict):
         raise ValueError(f"models 要是字典或字符串，收到：{value!r}")
-    bad = [k for k in value if k not in STEPS]
+    bad = [k for k in value if k not in STEPS + MSTEPS]
     if bad:
-        raise ValueError(f"models 里步骤名不认识：{'、'.join(map(str, bad))}。可用：{'、'.join(STEPS)}")
+        raise ValueError(f"models 里步骤名不认识：{'、'.join(map(str, bad))}。可用：{'、'.join(STEPS + MSTEPS)}")
     out = {}
     for k, v in value.items():
         if v in (None, ""):
@@ -150,6 +156,8 @@ def from_env():
     raw = (os.environ.get(ENV) or "").strip()
     if not raw:
         return {}
+    if not raw.startswith(("{", '"')) and "=" in raw.split(":", 1)[0]:
+        return normalize(raw)
     try:
         val = json.loads(raw)
     except ValueError as e:

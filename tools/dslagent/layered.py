@@ -118,16 +118,30 @@ class Run:
 
     RETRY_SILENT = ()                             # 这类失败（空闲超时 / 首字前静默）同一调用自动重试 1 次；layered 缺省不重试
 
-    def ask(self, prompt, rec=None):
+    codex_cap = None                              # codex 调用次数上限（modbuild 用；None = 不限）
+    STEP_OF_KIND = {}                             # ask(kind=…) → 模型步骤键（modbuild：plan → mplan、gen → mgen）；layered 不分，走 sub
+
+    def spent(self):
+        """熔断看的花费：Claude 侧。codex / grok / opencode 的调用费用记 0 本来就进不来，这里再按引擎过滤一道，防它们将来带上估算值。"""
+        return sum((c.get("cost") or 0.0) for c in self.M.log[getattr(self.M, "log_start", 0):] if c.get("engine") in (None, "claude")) \
+            if self.STEP_OF_KIND else self.M.cost
+
+    def codex_calls(self):
+        return sum(1 for c in self.M.log[getattr(self.M, "log_start", 0):] if c.get("engine") == "codex")
+
+    def ask(self, prompt, rec=None, kind=None):
         """一次模型调用 → 回复文本。花费熔断 / 总调用或墙钟用完 → Halt；没回应：超长 / 被杀 → FileFail，其它 → _Retry。
         RETRY_SILENT 里的失败（空闲超时 / 首字前静默）原样重试 1 次再判；输出超长、被杀、熔断不重试。"""
         for attempt in (1, 2):
-            if self.cap and self.M.cost >= self.cap:
+            if self.cap and self.spent() >= self.cap:
                 self.capped = True
-                raise Halt(f"花费达上限（${self.M.cost:.2f} ≥ ${self.cap:.2f}）", "花费")
+                raise Halt(f"花费达上限（${self.spent():.2f} ≥ ${self.cap:.2f}）", "花费")
+            if self.codex_cap and self.codex_calls() >= self.codex_cap:
+                raise Halt(f"codex 调用已满 {self.codex_cap} 次（--codex-cap）", "codex调用")
             self.k += 1
             try:
-                r = self.M._call(self.system(), prompt, f"dsl{self.k:02d}")
+                step = self.STEP_OF_KIND.get(kind)
+                r = self.M._call(self.system(), prompt, f"dsl{self.k:02d}", **({"step": step} if step else {}))
             except self.Stop as e:
                 raise Halt(str(e), "预算") from None
             if rec is not None:

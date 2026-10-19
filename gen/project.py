@@ -47,6 +47,7 @@ NOT EXISTS，不 DROP、不改已有的列，对不上的只告警。见 tools/m
 """
 
 import argparse
+import re
 import shutil
 import sqlite3
 import sys
@@ -348,6 +349,125 @@ def add_auth(root: Path, optional: bool = False) -> list:
                 "认证 必须", "认证 可选")
         p.write_text(text, encoding="utf-8")
         out.append(f"  写入 {rel}")
+    return out
+
+
+# ----------------------------------------------------------------------
+# 权限（程序套，不靠模型）：private 项目里 gen 的增删改查默认只许教师类角色
+# ----------------------------------------------------------------------
+
+# gen 增删改查五个接口的（路径尾, 动作尾）。模板（default / full / private）三套一致，
+# 靠它认出「这是 gen 生成的块」：模型追加的接口路径 / 动作不会同时撞上这两个
+CRUD_TAILS = {"list": "refresh", "one": "open", "create": "save", "update": "update", "delete": "remove"}
+CLOSED_MARK = "# 自助注册已关闭"
+_API_HEAD = re.compile(r"^接口\s+(?:(?:GET|POST|PUT|DELETE)\s+)?(/\S*)(?:\s+动作\s+(\S+))?(\s+公开)?(?:\s+(?:角色|只许)\s+(\S+))?\s*$", re.I)
+
+
+def gen_block(head: str, entities) -> str:
+    """接口头行是不是 gen 为某个实体生成的增删改查之一。是则返回实体名，否则空串。"""
+    m = _API_HEAD.match(head.strip())
+    if not m or not m.group(2) or m.group(3):
+        return ""
+    parts = m.group(1).strip("/").split("/")
+    if len(parts) != 2 or parts[0] not in entities or parts[1] not in CRUD_TAILS:
+        return ""
+    return parts[0] if m.group(2) == f"{parts[0]}_{CRUD_TAILS[parts[1]]}" else ""
+
+
+def lock_crud(root: Path, role: str) -> list:
+    """routes/*.zs 里 gen 生成的增删改查接口头行补上「角色 <role>」。
+
+    只改 gen 块的头行：已有「角色 / 只许」的不动，模型追加的接口、其余内容与换行原样保留。
+    重复调用结果不变（resume 时对已有项目重新套）。
+    """
+    out = []
+    if not role:
+        return out
+    ents = {e.name for e in load_entities(root)}
+    for f in sorted((root / "routes").glob("*.zs")):
+        raw = f.read_bytes().decode("utf-8")
+        lines = raw.splitlines(keepends=True)
+        n = 0
+        for i, ln in enumerate(lines):
+            body = ln.rstrip("\r\n")
+            if body.startswith("接口 ") and gen_block(body, ents):
+                m = _API_HEAD.match(body.strip())
+                if not m.group(4):
+                    lines[i] = body.rstrip() + f" 角色 {role}" + ln[len(body):]
+                    n += 1
+        if n:
+            f.write_bytes("".join(lines).encode("utf-8"))
+            out.append(f"  {f.relative_to(root)}：{n} 个增删改查接口加「角色 {role}」")
+    return out
+
+
+def hide_password_hash(root: Path) -> list:
+    """user 的列表 / 单条查询不再选 password_hash；update 不再写它（表单里本来就没有了）。"""
+    out = []
+    for name in ("user_list", "user_one", "user_update"):
+        f = root / "queries" / f"{name}.sql"
+        if not f.is_file():
+            continue
+        t = f.read_bytes().decode("utf-8")
+        if "password_hash" not in t:
+            continue
+        if name == "user_update":
+            t2 = re.sub(r",\s*\r?\n\s*password_hash = :password_hash", "", t)
+            t2 = re.sub(r"\n\s*password_hash = :password_hash,[ \t]*(\r?\n)", r"\1", t2) if t2 == t else t2
+        else:
+            t2 = re.sub(r"password_hash,\s*", "", t, count=1)
+            t2 = re.sub(r",\s*password_hash\b", "", t2, count=1) if t2 == t else t2
+        if t2 != t:
+            f.write_bytes(t2.encode("utf-8"))
+            out.append(f"  {f.relative_to(root)}：去掉 password_hash")
+    return out
+
+
+def close_register(root: Path) -> list:
+    """关掉公开注册：routes/auth.zs 的 /auth/register 保留接口头（界面动作还在），内容换成 403。"""
+    f = root / "routes" / "auth.zs"
+    if not f.is_file():
+        return []
+    raw = f.read_bytes().decode("utf-8")
+    if CLOSED_MARK in raw:
+        return []
+    nl = "\r\n" if "\r\n" in raw else "\n"
+    lines = raw.split(nl)
+    for i, ln in enumerate(lines):
+        if re.match(r"^接口\s+(?:POST\s+)?/auth/register\b", ln):
+            j = i + 1
+            depth = 1
+            while j < len(lines):
+                h = lines[j].strip().split(" ")[0]
+                if h in ("如果", "若", "遍历", "事务", "if", "each", "tx"):
+                    depth += 1
+                elif h in ("结束", "end"):
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            if j >= len(lines):
+                return []
+            lines[i + 1:j] = [CLOSED_MARK + "：账号由教师建，不开放自助注册。",
+                              '  返回 {"error":"不开放自助注册，请联系老师开通账号"} 403']
+            f.write_bytes(nl.join(lines).encode("utf-8"))
+            return ["  routes/auth.zs：/auth/register 改为 403（不开放自助注册）"]
+    return []
+
+
+def apply_perms(root: Path, roles, no_register: bool = False) -> list:
+    """private 项目的权限，一次套全（可对已有项目重复调用）：
+    角色 ≥2 个时 gen 增删改查加「角色 <第一个角色>」（第一个 = 教师类，默认注册角色是最后一个）；
+    user 查询不返回 password_hash；no_register 时关公开注册。"""
+    root = Path(root)
+    _check_root(root)
+    roles = [str(r).strip() for r in (roles or []) if str(r).strip()]
+    out = []
+    if len(roles) >= 2:
+        out += lock_crud(root, roles[0])
+    out += hide_password_hash(root)
+    if no_register:
+        out += close_register(root)
     return out
 
 

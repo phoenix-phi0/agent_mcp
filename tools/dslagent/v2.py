@@ -118,10 +118,13 @@ class Model:
         self.lock = threading.Lock()
         (self.out / "calls").mkdir(parents=True, exist_ok=True)
 
-    def spec(self, tag, model=None):
-        """这次调用用的 {engine, model, effort, spec}：DSLAGENT_MODELS 里写了该步骤就用它，否则 model 参数（旧的规划模型透传），再否则 sonnet。"""
-        step = engines.step_of(tag)
+    def spec(self, tag, model=None, step=None):
+        """这次调用用的 {engine, model, effort, spec}：DSLAGENT_MODELS 里写了该步骤就用它，否则 model 参数（旧的规划模型透传），再否则 sonnet。
+        step 显式给（modbuild 的 mplan / mgen）时按它选；这两步没写就跟 sub 走。"""
+        step = step or engines.step_of(tag)
         s = self.routes.get(step) if step else None
+        if step in engines.MSTEPS and not s:
+            s = self.routes.get("sub")
         if step == "plan_fix":       # 补改默认 sonnet，不跟 plan 走（也不吃旧的规划模型透传）
             return engines.plan_effort(engines.parse(s or engines.DEFAULT), tag)
         if s:
@@ -150,7 +153,7 @@ class Model:
         """一次带工具的多轮调用：claude / codex 挂 mcp_config（dslmcp），grok 且给了 read_cwd 用自带只读工具。返回 backend 的 dict（含 failed / call_n）。"""
         return self._call(system, user, tag, model, tools={"mcp_config": mcp_config, "max_turns": max_turns, "read_cwd": read_cwd})
 
-    def _call(self, system, user, tag, model=None, retry=None, tools=None):
+    def _call(self, system, user, tag, model=None, retry=None, tools=None, step=None):
         with self.lock:
             if self.n >= self.max_calls:
                 raise Stop(f"总模型调用已满 {self.max_calls} 次（{tag}）")
@@ -160,7 +163,7 @@ class Model:
             n = self.n
         t0 = time.time()
         tmo = G.call_timeout((self.deadline - t0) if self.deadline else None)
-        sp = self.spec(tag, model)
+        sp = self.spec(tag, model, step)
         system = AG.for_engine(system, tag, sp["engine"])
         rp = self.out / "calls" / f"{n:02d}_{tag}.reply.txt"
         kw = {"reply_path": rp} if self.real else {}
@@ -183,6 +186,8 @@ class Model:
                "sys_chars": len(system), "user_chars": len(user), "t_start": round(t0, 3)}
         if self.run_no:
             rec["run"] = self.run_no
+        if step:
+            rec["step"] = step          # modbuild：mplan / mgen（calls.json 里连同实际 engine / model 一起记）
         if r.get("cost_est"):
             rec["cost_est"] = 1        # 被杀的调用没有 result 事件，费用是按流里 usage 估的
         if tools is not None:
@@ -801,7 +806,7 @@ NEWPROJ_LAYERED_WALL = 3600     # layered 模板默认墙钟（文件多，逐�
 NEWPROJ_MODULAR_WALL = 5400     # modular 模板默认墙钟（顶层规划 + 层次 + 分层逐文件，更多步）
 
 
-def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, split=False, layered=False, cost_cap=None, modular=False, resume=False):
+def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, split=False, layered=False, cost_cap=None, modular=False, resume=False, codex_cap=None):
     """新建项目入口：不规划，直接执行 packs/newproj/newproj.zs（pack=newproj）。
     req：需求原文，或一个存在的文本文件路径；project：要新建的项目目录（不存在就建，也是引擎工作目录）；
     out_dir：记录目录（calls/、calls.json、plan.zs、plan_out.txt、result.json）；model：假模型 backend（测试用）。
@@ -876,7 +881,7 @@ def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, sp
                 info["继续构建"] = {"序号": rs["run_no"], "从哪还原": rs["restored"] or ["top.json / split.json"], "上次累计花费": rs["prior_cost"], "上次已用调用": rs["n0"]}
             t0 = time.time()
             try:
-                out_m = MB.run_modular(M, task, project, Stop, cost_cap if cost_cap is not None else LY.env_cap(), user_max, out_dir=out, resume=rs)
+                out_m = MB.run_modular(M, task, project, Stop, cost_cap if cost_cap is not None else LY.env_cap(), user_max, out_dir=out, resume=rs, codex_cap=codex_cap)
             finally:
                 steps["执行"] = round(time.time() - t0, 1)
             this = dict(out_m["本次"], 结论=out_m["结论"], 状态=out_m["状态"], 原因=out_m["原因"][:400], 花费=round(M.cost, 4), 调用=M.n - M.n0,
