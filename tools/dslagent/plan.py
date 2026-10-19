@@ -24,10 +24,12 @@ PKG = Path(__file__).resolve().parent
 ROOT = PKG.parents[1]
 SUB, LOC = "读改测.zs", "定位.zs"
 LIBS = (SUB, LOC)
-ALLOWED_VERBS = {"列文件", "搜索代码", "读片段", "运行代码", "改文件", "跑测试", "写文件", "删文件", "改模块名",
-                 "匹配", "找全部", "替换", "截取", "相等", "挑行", "按正则切分", "列表加项", "归一化",
-                 "解析JSON", "列表长度", "转数字", "取字段", "当前时间",
-                 "派任务", "并行派任务", "查引用"}
+# 与任务类型无关的动词（common / text 包 + 派任务）；任务类型相关的动词由资料包声明（packs/<名>.VERBS），白名单 = 这里 ∪ 包的 VERBS
+BASE_VERBS = frozenset({"匹配", "找全部", "替换", "截取", "相等", "挑行", "按正则切分", "列表加项", "归一化",
+                        "解析JSON", "列表长度", "转数字", "取字段", "当前时间", "派任务", "并行派任务"})
+# code 包的动词（packs/code.py 的 VERBS 用它；旧路径 / 没传包的 whitelist_check 缺省 = BASE ∪ CODE）
+CODE_VERBS = frozenset({"列文件", "搜索代码", "读片段", "运行代码", "改文件", "跑测试", "写文件", "删文件", "改模块名", "查引用"})
+ALLOWED_VERBS = BASE_VERBS | CODE_VERBS
 # 所有包里的动词名（白名单外的也要认出来，才能判「用了白名单外的动词」）
 ALL_VERBS = {p.stem for p in (PKG / "verbs").rglob("defs/*.py") if not p.stem.startswith("_")} | \
             {p.stem for p in (ROOT / "verbs").rglob("defs/*.py") if not p.stem.startswith("_")}
@@ -82,11 +84,12 @@ def split_subs(script):
     return "\n".join(main + secs), {k: "\n".join(v) for k, v in subs.items()}
 
 
-def whitelist_check(script, subs, libs=LIBS, verbs=(), packs=()):
+def whitelist_check(script, subs, libs=LIBS, verbs=(), packs=(), only=None):
     """静态白名单：每行的语句头、动词、「设 x = 动词」右边、问 的后缀、执行 的目标。返回问题列表。
-    verbs / packs：资料包额外放开的动词和 用包 可写的包名（缺省不放开，其它包行为不变）。"""
-    allowed = ALLOWED_VERBS | set(verbs)
-    use_ok = ("common", "text", "code") + tuple(packs)
+    verbs / packs：资料包额外放开的动词和 用包 可写的包名（缺省不放开，其它包行为不变）。
+    only = (动词集合, 用包集合)：白名单整体由资料包给（packs.verbs_of / use_of），不再叠加 code 缺省；v2 用它。"""
+    allowed = set(only[0]) if only else ALLOWED_VERBS | set(verbs)
+    use_ok = tuple(only[1]) if only else ("common", "text", "code") + tuple(packs)
     split_head, KW = _heads()
     from tools.dsl_core import normalize
     probs = []

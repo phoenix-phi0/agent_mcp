@@ -109,7 +109,7 @@ def t_input():
 
     # 包没实现 plan_outline → 只有任务原文
     mod = types.ModuleType("tests_pack_nooutline")
-    mod.__dict__.update({k: v for k, v in K.__dict__.items() if k != "plan_outline" and not k.startswith("__")})
+    mod.__dict__.update({k: v for k, v in K.__dict__.items() if k not in ("plan_outline", "materials") and not k.startswith("__")})
     mod.NAME = "nooutline"
     sys.modules[mod.__name__] = mod
     packs.REGISTRY["nooutline"] = mod.__name__

@@ -1,11 +1,12 @@
-"""验收（verify）：v2 规划核心按任务类型插拔的「验收 / 补改」那一半。选择：环境变量 DSLAGENT_VERIFY，缺省跟随 DSLAGENT_PACK
-（再缺省 code）。目前只有 code（全量测试、清单核对、残留检查、边界复核、补改入参组装）。
+"""验收（verify）：v2 规划核心按任务类型插拔的「验收 / 补改」那一半。由资料包给（packs.verifier_of）：包写了 verifier() 就用它，
+只写了 accept(project, ctx) 就用 simple.py 包成完整验收；环境变量 DSLAGENT_VERIFY 显式指定时以它为准（本目录 REGISTRY 里的名字）。
+本目录：code.py（全量测试、清单核对、残留检查、边界复核、补改入参组装）、simple.py（把 accept 包成下面的接口）。
 
-接口（模块级名字）：
+接口（模块级名字 / 对象属性）：
   NAME                  str，取值名。
-  detect_cmd(project, given) -> str|None   验收要用的命令（code：测试命令；given 优先，探测不到给 None）。
-  MISSING_MSG           str，detect_cmd 给 None 时判失败的原因。
-  setup(out, cmd)       计划执行前设好验收要的环境（code：测试命令 / 超时的环境变量）。
+  prepare(project, given, out) -> (配置, 错误)   验收开工前：定下验收要用的配置并设好环境（code：探测 / 取测试命令并设环境变量；
+                        探测不到 → (None, 错误文字) 判失败）。核心不认配置是什么，只把它记进 result.json 的 test_cmd。
+  （旧名 detect_cmd / MISSING_MSG / setup 仍在 code.py 里，prepare 调它们。）
   check(project, plan_result, checklist) -> dict
       验收一次。plan_result：{"task": 任务原文, "base": 开局快照, "cur": 当前快照, "main": 计划主脚本, "tests": 计划内
       测试记录（可复用，引擎和验收共用同一个 list）, "accept": 验收记录（check 往里写字段）, "test_cmd", "stage":

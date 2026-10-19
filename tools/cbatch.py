@@ -70,6 +70,7 @@ CLAUDE_CODE_SESSION_ID 这些。原样传给子进程，claude -p 会以为自�
 规划路径：提交时环境变量 DSLAGENT_PLANNER（如 v2）记进这批的 options.dsl_planner，起 dsl 进程时原样设给它
 （dsl_options 的 planner 逐条覆盖）；不设就是 dslagent 的缺省路径。
 资料包：dsl_options 的 pack（如 code）设成 dsl 进程的 DSLAGENT_PACK（验收 DSLAGENT_VERIFY 缺省跟随它）；不设用环境里的 / 缺省 code。
+非 code 的包（如 dslproj）另加命令行 --pack，走统一入口 entry.run_pack（v2 规划路径，与 DSLAGENT_PLANNER 无关）；dsl_options.scope（字符串或列表，路径 / glob）传 --scope。
 取值不认识在提交时就报错，列出可用的（见 tools/dslagent/packs/）。
 规划方式：只有一种——任务原文 + 文件大纲 + 只读 dsl 工具按需读代码。老的 plan_mode=full（资料包全文 + 补查）已移除：dsl_options.plan_mode 传 full
 （或别的值）提交时报错，传 read 等于没传；DSLAGENT_PLAN_MODE 环境变量同。
@@ -878,6 +879,10 @@ def _run_dsl(d: dict, t: dict, i: int) -> dict:
         cmd += ["--test-cmd", t["test_cmd"]]
     if o.get("template") is False:
         cmd.append("--no-template")
+    if o.get("pack") and str(o["pack"]).strip().lower() != "code":
+        cmd += ["--pack", str(o["pack"]).strip().lower()]       # 非 code 的资料包走统一入口（v2 规划路径），与 DSLAGENT_PLANNER 无关；code 仍是旧命令
+    if o.get("scope"):
+        cmd += ["--scope", str(o["scope"]) if not isinstance(o["scope"], (list, tuple)) else ",".join(map(str, o["scope"]))]
     if o.get("inject"):
         cmd += ["--inject", json.dumps(o["inject"], ensure_ascii=False)]
     t["calls_log"] = str(tdir / "calls.json")

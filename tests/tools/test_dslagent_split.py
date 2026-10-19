@@ -120,7 +120,7 @@ def t_select():
     from tools.dslagent import packs, verify
     env = {k: os.environ.pop(k, None) for k in ("DSLAGENT_PACK", "DSLAGENT_VERIFY")}
     try:
-        check(packs.available() == ["code", "newproj"] and verify.available() == ["code"], "资料包有 code、newproj；验收目前只有 code", (packs.available(), verify.available()))
+        check(packs.available() == ["code", "dslproj", "newproj"] and verify.available() == ["code"], "资料包有 code、dslproj、newproj；验收目前只有 code", (packs.available(), verify.available()))
         check(packs.current().NAME == "code" and verify.current().NAME == "code", "缺省 code")
         os.environ["DSLAGENT_PACK"] = "code"
         check(packs.current().NAME == "code" and verify.current().NAME == "code", "显式 code")

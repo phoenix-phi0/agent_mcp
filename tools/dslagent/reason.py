@@ -314,7 +314,13 @@ def safety_facts(op, root, path, content=None):
 
 
 def check(op, root, path, content=None):
-    """返回 ''（放行）或拦截原因（并记进 STATE['log']）。关掉规则时只做越界/测试文件检查。"""
+    """返回 ''（放行）或拦截原因（并记进 STATE['log']）。先过范围闸（scope.guard，包声明的允许写 / 删路径）；关掉规则时只做越界/测试文件检查。"""
+    import importlib
+    _SC = importlib.import_module("tools.dslagent.scope")      # 动词里可能是按文件路径单独加载的本模块，不用相对 import
+    why = _SC.guard(path if not os.path.isabs(str(path)) else os.path.relpath(str(path), str(root)))
+    if why:
+        STATE["log"].append({"op": op, "file": str(path), "why": why, "code": "out_of_scope"})
+        return why
     f, extra = safety_facts(op, root, path, content)
     if not enabled():
         if f.get("outside") or f.get("is_test"):

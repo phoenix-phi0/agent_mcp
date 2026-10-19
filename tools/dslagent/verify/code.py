@@ -25,6 +25,7 @@ import time
 from pathlib import Path
 
 from .. import agents as AG
+from .. import scope as SC
 from . import bound_table as BT
 from . import dsl as DSLV
 from ..packs import code as K
@@ -66,6 +67,9 @@ def apply_edits(project, edits):
             return False, f"不允许改项目外的 {rel}"
         if K.is_test(rel):
             return False, f"不允许改测试文件 {rel}"
+        why = SC.guard(rel)         # 包声明的允许改动范围（补改套用同样按它拦）
+        if why:
+            return False, why
         cur = new_txt.get(rel, p.read_text(encoding="utf-8") if p.is_file() else None)
         if e["old"] == "":
             if cur is not None and cur.strip():
@@ -678,6 +682,15 @@ def boundary(M, project, plan_result):
 def detect_cmd(project, given):
     from ..common import detect_test_cmd
     return given or detect_test_cmd(project)
+
+
+def prepare(project, given, out):
+    """验收开工前：定下验收要用的命令并设好环境。返回 (配置, 错误)：探测不到命令 → (None, MISSING_MSG)。"""
+    cmd = detect_cmd(project, given)
+    if not cmd:
+        return None, MISSING_MSG
+    setup(out, cmd)
+    return cmd, ""
 
 
 def setup(out, cmd):

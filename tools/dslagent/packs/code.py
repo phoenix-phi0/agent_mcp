@@ -1,6 +1,7 @@
 """资料包 code（改代码任务）：规划路径 v2 的确定性数据包（不调模型），由 plan35/proto 的 pack.py + proto2 的补查 / 测试断言
-改成对任意项目目录用。实现 packs/__init__.py 里写的资料包接口（plan_outline / files / TASK_DESC / PACK_DESC /
-PLAN_RULES / PLAN_RULES_END / plan_problems），配套验收是 verify/code.py。旧路径 tools.dslagent.v2pack 转发到这里。
+改成对任意项目目录用。实现 packs/__init__.py 里写的资料包接口：资料 materials（= 文件大纲 plan_outline）、动词 VERBS / VERB_PACKS /
+WRITE_VERBS / GATED_VERBS（code 动词包）、验收 verifier()（verify/code.py：全量测试 + 清单 + 残留 + 边界复核）、规划说明 PLAN_RULES、
+计划检查 plan_problems。旧路径 tools.dslagent.v2pack 转发到这里。
 
 - build(project, task)：从任务原文抽名字 → 按区分度给非测试 .py 打分选种子模块 → 沿 import 走一跳 → 小文件全文、
   大文件只给文件头和命中的函数；登记处行（同列名字共现、ALLOWED_/注册/白名单 一类）；被点名字的引用行；
@@ -9,12 +10,14 @@ PLAN_RULES / PLAN_RULES_END / plan_problems），配套验收是 verify/code.py�
 文件遍历跳过隐藏目录、__pycache__、node_modules、venv 等（同 verbs/code/defs/_sandbox.py 的 SKIP_DIRS）。
 """
 import ast
+import importlib
 import math
 import os
 import re
 from pathlib import Path
 
 from .. import promptfile as PF
+from ..plan import CODE_VERBS
 
 NAME = "code"
 PACK_CHARS = 40000       # 数据包总字符上限（含测试断言）
@@ -385,9 +388,26 @@ PLAN_RULES = PF.shared("plan_rules_code.md")       # 规划 system（agents/plan
 PLAN_RULES_END = PF.shared("plan_rules_code_end.md")
 
 
+VERB_PACKS = ("code",)
+VERBS = tuple(sorted(CODE_VERBS))                    # 列文件 搜索代码 读片段 运行代码 改文件 跑测试 写文件 删文件 改模块名 查引用
+WRITE_VERBS = ("改文件", "写文件", "删文件", "改模块名")      # 过安全约束（reason.check）的写 / 删动词，范围拦截也挂在那里
+GATED_VERBS = ("跑测试",)                            # 计划里只在结果会改变走向时才真跑（v2.test_gate），其余给「通过」占位，验收时统一跑
+GATE_NOTE = "未跑（这次测试的结果不改变计划走向，验收时统一跑一次全量测试）"
+
+
 def files(project):
     """快照 / 对比用：项目里的文本文件。"""
     return text_files(project)
+
+
+def materials(task, project, scope):
+    """资料 = 文件大纲（见 plan_outline）；code 不用 scope。"""
+    return plan_outline(task, project)
+
+
+def verifier():
+    """验收：verify/code.py（全量测试、清单、旧写法残留、DSL 文件检查、边界复核）。"""
+    return importlib.import_module("tools.dslagent.verify.code")
 
 
 def plan_outline(task, project):

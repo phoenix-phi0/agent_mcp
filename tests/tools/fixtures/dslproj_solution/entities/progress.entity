@@ -1,0 +1,6 @@
+实体 answer 作答
+  字段 learner 文本 必填 索引 学习者
+  字段 point_code 文本 必填 索引 知识点编号
+  字段 correct 整数 必填 是否答对
+  字段 at 文本 必填 作答日期
+结束

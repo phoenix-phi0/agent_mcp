@@ -87,6 +87,9 @@ def check_plan_mode(value=None):
 def plan_system(pack=None, engine=None):
     """规划的 system：agents/plan.md 展开（公用块在 agents/shared/，资料包专属的规则按包名取）；engine=grok 时套 plan.md 里的 grok 变体。"""
     pack = pack or packs.current()
+    ps = getattr(pack, "PLAN_SYSTEM", None)          # 包自带整份规划 system（要点 + 示例 .zs）；没有就是 code 式的 agents/plan.md
+    if ps is not None:
+        return ps(engine) if callable(ps) else ps
     return AG.PLAN.system_text(engine, getattr(pack, "RULES_KEY", pack.NAME))
 
 
@@ -363,10 +366,10 @@ class Client:
 # ------------------------------------------------------------------ 计划里的 跑测试：要不要真跑
 
 
-def test_gate(script):
-    """主脚本里每个 跑测试 语句的行号（0 起，同引擎的 _at）→ 要不要真跑。
+def test_gate(script, verbs=("跑测试",)):
+    """主脚本里每个「闸门动词」（包的 GATED_VERBS，缺省 跑测试）语句的行号（0 起，同引擎的 _at）→ 要不要真跑。
     真跑 ⇔ 结果变量被 打印 / 终止 以外的语句用到；如果 / 否则如果 的条件用到它时，整条 如果 链的各分支都只有 打印 / 终止、
-    且（有 否则，或分支里没有 终止，或链后面到块尾也只有 打印 / 终止）才算不影响走向。不赋值的 跑测试 不真跑。"""
+    且（有 否则，或分支里没有 终止，或链后面到块尾也只有 打印 / 终止）才算不影响走向。不赋值的闸门动词不真跑。"""
     from tools.dsl_core import BLOCK_OPENERS, normalize, split_head
     from tools.dsl_sections import split_sections
     body = split_sections(script)[0]
@@ -451,21 +454,24 @@ def test_gate(script):
 
     gate = {}
     for i, (h, rest) in enumerate(heads):
-        if h == "跑测试":
+        if h in verbs:
             gate[i] = False
         elif h == "set":
             name, _, val = rest.partition("=")
-            if split_head(val.strip())[0] == "跑测试":
+            if split_head(val.strip())[0] in verbs:
                 gate[i] = needed(name.strip(), i)
     return gate
 
 
-def _engine_cls():
+def _engine_cls(pack=None):
     from .engine import AgentEngine
+    gated = tuple(pack.GATED_VERBS) if pack is not None and hasattr(pack, "GATED_VERBS") else ("跑测试",)
+    gate_note = getattr(pack, "GATE_NOTE", SKIP_NOTE)
 
     class V2Engine(AgentEngine):
-        """AgentEngine + 测试闸门：主脚本里 test_gate 判为不影响走向的 跑测试 不真跑，给通过的占位结果；
-        真跑的记下当时的代码哈希和结果（验收时代码没变就复用）。空跑时 跑测试 一律给占位结果。"""
+        """AgentEngine + 闸门：主脚本里 test_gate 判为不影响走向的闸门动词（包的 GATED_VERBS，code = 跑测试）不真跑，给通过的占位结果；
+        真跑的记下当时的代码哈希和结果（验收时代码没变就复用）。空跑时闸门动词一律给占位结果。"""
+        gated_verbs = gated
         gate = None
         project = None
         tests = None
@@ -490,14 +496,14 @@ def _engine_cls():
         def _do_verb(self, name, rest, lineno, assign_to=None):
             if name == "改文件" and self.subtask_mode == "tool" and not self.dry_run and self._no_edits(rest):
                 return self._deliver({"ok": "是", "msg": "（结果里没有 edits：子任务在工具里已改好，空操作）", "n": 0}, assign_to)
-            if name != "跑测试":
+            if name not in self.gated_verbs:
                 return super()._do_verb(name, rest, lineno, assign_to)
             if self.dry_run:
-                return self._deliver({"passed": "是", "summary": "（空跑）" + SKIP_NOTE}, assign_to)
+                return self._deliver({"passed": "是", "summary": "（空跑）" + gate_note}, assign_to)
             log = self.tests if self.tests is not None else []
             if self._depth == 0 and self.gate is not None and not self.gate.get(self._at, True):
                 log.append({"line": self._at + 1, "mode": "skipped"})
-                return self._deliver({"passed": "是", "summary": SKIP_NOTE}, assign_to)
+                return self._deliver({"passed": "是", "summary": gate_note}, assign_to)
             t0 = time.time()
             super()._do_verb(name, rest, lineno, assign_to)
             res = self.vars.get(assign_to) if assign_to else None
@@ -526,19 +532,19 @@ def check(project, work, script, task, pack=None):
     pack = pack or packs.current()
     rec = {}
     main, subs = DP.split_subs(script)
-    probs = DP.whitelist_check(main, subs, libs=(), verbs=getattr(pack, "EXTRA_VERBS", ()), packs=getattr(pack, "EXTRA_PACKS", ()))      # v2 计划不用 执行 定位.zs / 读改测.zs
+    probs = DP.whitelist_check(main, subs, libs=(), only=(packs.verbs_of(pack), packs.use_of(pack)))      # 白名单由包生成；v2 计划不用 执行 定位.zs / 读改测.zs
     body, _, cl, _ = split_sections(main)
     generic = []
     if not re.search(r"^\s*预算\s", body, re.M):
         generic.append("开头缺 预算 语句（第二行写 预算 调用 N 秒 M）")
-    probs += pack.plan_problems(main, body, cl, generic)
+    probs += pack.plan_problems(main, body, cl, generic) if hasattr(pack, "plan_problems") else generic
     if not probs:
         probs += DC.edit_problems(project, main)
     if probs:
         rec["阶段"] = "静态"
         return "白名单 / 格式检查没过：\n" + "\n".join(probs[:12]), main, subs, rec
     t0 = time.time()
-    err, n, out = DP.dry_run(project, work, main, subs, task, scripts_for, MODEL, engine_cls=_engine_cls())
+    err, n, out = DP.dry_run(project, work, main, subs, task, scripts_for, MODEL, engine_cls=_engine_cls(pack))
     rec.update(阶段="空跑", 空跑秒=round(time.time() - t0, 1), 空跑假调用=n)
     return (f"用假模型空跑报错：{err}" if err else ""), main, subs, rec
 
@@ -546,10 +552,12 @@ def check(project, work, script, task, pack=None):
 # ------------------------------------------------------------------ 主流程
 
 
-def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=MAX_CALLS, boundary=True, scope=None, plan_fix=None):
+def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=MAX_CALLS, boundary=True, scope=None, plan_fix=None, pack=None):
     """跑一次 v2。project 里直接改文件；记录写进 out_dir（calls/、calls.json、plan*.zs、outline.md、boundary/、result.json）。
     model：假模型 backend(system, user, tag, timeout) → str|dict（测试用），缺省走 claude CLI。
-    scope：允许改动的目录前缀（"a/,b/" 或列表；缺省看计划里的 #范围 块，都没有就不启用范围闸，见 scope.py）。
+    scope：允许改动的路径（目录前缀 / 精确文件 / glob，"a/,b/" 或列表；缺省取包的 scope_for，再缺省看计划里的 #范围 块，都没有就不启用范围闸，见 scope.py）。
+    pack：资料包名或包对象（缺省看环境变量 DSLAGENT_PACK，再缺省 code；接口见 packs/__init__.py）。
+    test_cmd：交给验收 prepare 的「给定配置」（code 是测试命令，别的包不用）。
     返回结果字典（runner.run 同款字段 + reply / v2）。"""
     from . import plan as DP
     from . import prompts as DPR
@@ -561,14 +569,16 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
     plan_tools, routes, reads = [], {}, {}
     record = model is None and call_claude is engines.call_claude or bool(os.environ.get(DS.ENV))      # 假模型的测试运行不写训练数据（除非显式给了目录）
     try:
-        pack, ver = packs.current(), verify.current()
+        pack = packs.pick(pack) if pack is not None else packs.current()
+        bad = packs.validate(pack)
+        if bad:
+            raise ValueError(f"资料包 {pack.NAME} 的声明不合格：" + "；".join(bad))
+        ver = packs.verifier_of(pack)
         check_plan_mode()
         routes = engines.validate({**engines.from_env(), **({"plan_fix": plan_fix} if plan_fix else {})}, DC.env_mode())
     except ValueError as e:
         pack = ver = None
         pick_err = str(e)
-    else:
-        test_cmd = ver.detect_cmd(project, test_cmd)
     M = Model(out, backend=model, max_calls=max_calls, deadline=t_start + wall, routes=routes)
     steps, info = {}, {"检查": [], "重写": False, "子任务模式": DC.env_mode(), "子任务": []}
     res = {"project": str(project), "test_cmd": test_cmd, "kind": "task", "planner": "v2", "fixed": False,
@@ -579,6 +589,12 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
     accept, bound = {}, {"跑了": False}
     scope_arg = SC.parse(scope)
     scope = scope_arg
+    if pack is not None:
+        try:
+            scope = scope_arg = packs.scope_of(pack, task, project, scope)      # 命令行 / 参数优先，其次包声明的 scope_for
+        except Exception as e:  # noqa: BLE001  包的 scope_for 出错按声明不合格处理
+            pack = None
+            pick_err = f"资料包 scope_for 出错：{type(e).__name__}: {str(e)[:200]}"
 
     def step(name, t0):
         steps[name] = round(time.time() - t0, 1)
@@ -586,12 +602,15 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
     if pack is None:
         state["原因"] = pick_err
         return _recorded(_finish(res, out, M, steps, state, accept, bound, {}, {}, t_start), record, project, task, reads)
-    if not test_cmd:
-        state["原因"] = ver.MISSING_MSG
+    cfg, cfg_err = ver.prepare(project, test_cmd, out)          # 验收开工前的准备（code：探测测试命令并设环境）
+    res["test_cmd"] = cfg
+    if cfg_err:
+        state["原因"] = cfg_err
         return _recorded(_finish(res, out, M, steps, state, accept, bound, {}, {}, t_start), record, project, task, reads)
+    test_cmd = cfg
+    info["pack"] = pack.NAME
     info["models"] = engines.effective({**routes, **({} if "plan" in routes or not os.environ.get("DSLAGENT_PLAN_MODEL")
                                                      else {"plan": os.environ["DSLAGENT_PLAN_MODEL"]})})
-    ver.setup(out, test_cmd)
     from . import reason as _R
     _R.STATE.update(snap=None, root=None, task="", log=[], fires=[])      # 上一次运行的开局快照不带过来；这次第一次写文件时再设
     base = snapshot(project, pack)
@@ -600,11 +619,11 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
     try:
         # ---- 1 大纲（没有资料包全文、没有补查）
         t0 = time.time()
-        outline = ""
-        if hasattr(pack, "plan_outline"):
-            o = pack.plan_outline(task, project)
-            outline = o["text"]
-            info.update(o.get("记录") or {})
+        o = packs.materials_of(pack, task, project, scope_arg)          # 资料：包给规划模型看什么（code = 文件大纲）
+        outline = o["text"]
+        info.update(o["记录"])
+        strict = bool(getattr(pack, "STRICT_SCOPE", False))
+        SC.activate(scope_arg if strict else None)           # 包声明 STRICT_SCOPE：规划时的空跑也按范围拦写；计划里的 #范围 块定下来后执行前再换一次
         info["大纲字符"] = len(outline)
         (out / "outline.md").write_text(outline, encoding="utf-8")
         first_user = plan_user_read(task, outline, ver.fixture_notes(outline) if hasattr(ver, "fixture_notes") else "")
@@ -654,7 +673,7 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
                 if problem and AF.enabled():       # 先由程序修机械错误（见 plan_autofix.py）；修完没过的带着修过的计划和剩余报错去 plan_fix
                     (out / f"plan_v{k + 1}.orig.zs").write_text(script, encoding="utf-8")
                     script, fixes, problem, m2, s2, c2 = AF.autofix(
-                        script, problem, lambda s_: check(project, out / "dry", s_, task, pack), getattr(pack, "EXTRA_VERBS", ()))
+                        script, problem, lambda s_: check(project, out / "dry", s_, task, pack), packs.verbs_of(pack))
                     if fixes:
                         main, subs, crec = (m2, s2, c2) if m2 is not None else (main, subs, crec)
                         (out / f"plan_v{k + 1}.zs").write_text(script, encoding="utf-8")
@@ -680,11 +699,12 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
         (out / "plan.zs").write_text(script, encoding="utf-8")
         # ---- 4 执行
         t0 = time.time()
-        gate = test_gate(main)
+        SC.activate(scope if strict else None)
+        gate = test_gate(main, tuple(pack.GATED_VERBS) if hasattr(pack, "GATED_VERBS") else ("跑测试",))
         info["测试闸门"] = {str(k + 1): v for k, v in gate.items()}
         plan_dir = out / "plan_subs"
         DP.write_subs(plan_dir, subs)
-        Eng = _engine_cls()
+        Eng = _engine_cls(pack)
         eng = Eng(client=Client(M), workdir=project, verbose=False, verbs_root=VERBS,
                   scripts=scripts_for(plan_dir, subs))
         eng.gate, eng.project, eng.tests = gate, project, []
@@ -714,7 +734,7 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
         t0 = time.time()
         cur, oos = _scope_gate(project, pack, base, scope, accept, "验收")
         pr = {"task": task, "base": base, "cur": cur, "main": main, "tests": eng.tests, "accept": accept,
-              "test_cmd": test_cmd, "stage": "验收", "out": out, "bound": bound, "expect_table": exp}
+              "test_cmd": test_cmd, "stage": "验收", "out": out, "bound": bound, "expect_table": exp, "scope": scope or []}
         chk = ver.check(project, pr, eng.checklist)
         if oos:
             _scope_merge(chk, task, oos, scope)
@@ -747,6 +767,8 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
             state["状态"] = "失败"
     except Exception as e:  # noqa: BLE001  流程自身出错不能让 cbatch 拿不到结果
         state.update(状态="失败", 原因=f"v2 流程出错：{type(e).__name__}: {str(e)[:400]}")
+    finally:
+        SC.activate(None)
     if state["状态"] != "成功" and not accept:
         # 计划没跑成（检查没过 / 报错 / 没自报成功）：回滚到开局，项目保持原样
         now = snapshot(project, pack)
