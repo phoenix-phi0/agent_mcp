@@ -15,8 +15,10 @@ import re
 
 from tools.dsl import DSLEngine
 from tools.dsl_core import (
-    CALL_PARAM_RE, DSLError, normalize, single_eq_hint, parse_cond_expr, split_head, split_raw_cmp,
+    CALL_PARAM_RE, DSLError, PACK_SEP_RE, RESERVED, normalize, single_eq_hint, parse_cond_expr,
+    split_head, split_raw_cmp,
 )
+from tools.verbs import VerbRegistry
 from tools.dsl_http import scan_routes, split_endpoints
 from tools.dsl_service import Services, parse_call_text, split_target
 
@@ -147,6 +149,51 @@ def check_calls(lines, svc, caller, in_func, label, funcs=None, base=0):
     return probs
 
 
+def declared_packs(text):
+    """脚本 / 接口文件里「用包 a b」点名的包。"""
+    out = []
+    for raw in text.splitlines():
+        head, rest = split_head(normalize(raw).strip())
+        if head == "use":
+            out += [x for x in PACK_SEP_RE.split(rest) if x]
+    return out
+
+
+def load_verbs(root, packs, _cache=None):
+    """按「用包」点名的包建一个动词表（先看项目下的 verbs/，再看全局动词包目录）。
+    包不存在就跳过：这里只做参数检查，缺包的报错留给运行期。"""
+    from tools import packs as _packs
+    reg = VerbRegistry(reserved=RESERVED)
+    for name in packs:
+        for base in (Path(root) / "verbs", _packs.verbs_root()):
+            if (base / name).is_dir():
+                reg.load_pack(base / name, workspace=Path(root))
+                break
+    return reg
+
+
+def check_verb_calls(lines, reg, label, base=0):
+    """动词调用的静态检查：缺必填、同一参数给两次、位置参数过多（规则和运行期 bind 同一套）。
+    只看词的个数和键，不求值。返回报错原话列表。"""
+    probs = []
+    for i, raw in enumerate(lines):
+        line = normalize(raw).strip()
+        if not line or line.startswith("#"):
+            continue
+        head, rest = split_head(line)
+        if head == "set":
+            _, sep, value = rest.partition("=")
+            if not sep:
+                continue
+            head, rest = split_head(value.strip())
+        if head in RESERVED or not reg.has(head):
+            continue
+        problem = reg.check_call(head, rest.split())
+        if problem:
+            probs.append(f"[接口出错] {label}: 第 {base + i + 1} 行：{problem}")
+    return probs
+
+
 def check_services(root):
     """services/*.zs：解析错误、依赖指向不存在的模块、依赖成环（Services 加载时报）；每个函数体走一遍引擎的
     解析点；函数里的调用（不存在 / 非公开 / 未声明依赖 / 缺必填 / 多出未知键）；「报错」的码要是 4xx。"""
@@ -233,6 +280,11 @@ def check_project(root):
     sdir = root / "scripts"
     for f in sorted(sdir.rglob("*.zs")) if sdir.is_dir() else []:
         probs += check_file(f, str(f.relative_to(root)))
+    # 动词调用：按每个文件「用包」点名的包查参数（缺必填 / 给两次 / 位置参数过多）
+    for f in sorted(routes.rglob("*.zs")) if routes.is_dir() else []:
+        probs += _check_file_verbs(root, f, True)
+    for f in sorted(sdir.rglob("*.zs")) if sdir.is_dir() else []:
+        probs += _check_file_verbs(root, f, False)
     # 业务层：services/*.zs，以及接口 / 脚本里对业务函数的调用
     probs += check_services(root)
     if (root / "services").is_dir() and any((root / "services").glob("*.zs")):
@@ -242,6 +294,26 @@ def check_project(root):
         for f in sorted(sdir.rglob("*.zs")) if sdir.is_dir() else []:
             lines = f.read_text(encoding="utf-8").splitlines()
             probs += check_calls(lines, svc, None, False, str(f.relative_to(root)))
+    return probs
+
+
+def _check_file_verbs(root, f, route):
+    text = f.read_text(encoding="utf-8")
+    packs = declared_packs(text)
+    if not packs:
+        return []
+    reg = load_verbs(root, packs)
+    rel = str(f.relative_to(root))
+    if not route:
+        return check_verb_calls(text.splitlines(), reg, rel)
+    try:
+        eps, _ports = split_endpoints(text, Path(rel))
+    except DSLError:
+        return []
+    probs = []
+    for ep in eps:
+        probs += check_verb_calls(ep.body, reg, f"{rel} 接口 {ep.method} {ep.path}（文件第 {ep.line} 行起）",
+                                  base=ep.line)
     return probs
 
 

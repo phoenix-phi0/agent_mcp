@@ -7,6 +7,9 @@
     模型/系统/温度             配置。「模型 快」只管本脚本（含它调起的子脚本），
                                不改共用的客户端；名字可以是档位（快/平衡/强）、
                                别名或模型真名，见下面「模型档位」
+    动词 参数 键=值            位置参数在前，可混用 键=值（键须是动词声明的参数名）。
+                               .zs 动词头 `# 参数：甲 乙? 丙=默认`：乙可选（空串）、丙默认值，
+                               甲必填；声明里没有 ? 和 = 的旧文件少传不报错
     设 name = 值               变量（右侧是纯变量引用时保留结构）
     设 card.title = 值         往结构里写，中间层不存在会自动建
     问 reply = 提示词          调模型
@@ -1084,8 +1087,11 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
     def _do_verb(self, name: str, rest: str, lineno: int,
                  assign_to: str | None = None) -> None:
         """执行一个动词。参数转文本，但返回值保留结构。"""
-        args = [self.expand(a) for a in rest.split()] if rest.strip() else []
-        params = self.verbs.bind(name, args)
+        pos, kws, late = self.verbs.split_call(name, rest.split()) if rest.strip() else ([], [], [])
+        args = [self.expand(a) for a in pos]
+        # 键=值 的值整个是变量引用时保留结构（列表 / 对象）
+        params = self.verbs.bind(name, args, [(k, self._resolve_items(v)) for k, v in kws],
+                                 [self.expand(a) for a in late])
         kind, impl = self.verbs.resolve(name)
 
         if kind == "python":

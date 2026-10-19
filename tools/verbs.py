@@ -67,12 +67,17 @@ DSL 表达不了的原子能力用 Python 写（查询、算术、外部接口�
 放 .zs，第二行注释声明参数顺序：
 
     # 词汇讲解：讲解一组单词
-    # 参数：词表、级别
+    # 参数：词表 级别? 最多=3
     逐项 词 于 {词表}
       问 讲解 = 讲解「{词}」（{级别}）
     结束
 
 包顶层和「动词」子目录里的 .zs 都会被扫到。
+
+参数声明：分隔符是空白、顿号、逗号、全角逗号。`名` 必填；`名?` 可选（不传
+为空串）；`名=值` 有默认值（字面文本，不展开变量；`名=` 等同 `名?`）。声明里
+没有任何 `?` 或 `=` 的旧文件保持旧行为（少传为空、不报错）；有任意一个就按
+新规则（裸名必填）。Python 动词取函数签名：没有默认值的必填。
 
 ## 数据放外面
 
@@ -100,8 +105,14 @@ DSL 表达不了的原子能力用 Python 写（查询、算术、外部接口�
     词汇讲解 {词表} N5              直接执行，输出进结果
     设 结果 = 挑题 {题库} 3          返回值赋给变量
 
-参数按位置绑定。值里不能有空格——需要传含空格的内容时先用「设」存进
-变量，再用 {变量} 传入。
+参数按位置绑定，也可以写 `键=值`（位置参数写在前面、可混用；写在 键=值 后面的
+位置参数依次填还没给的参数）：
+
+    词汇讲解 {词表} 级别=N5
+
+词形如 `键=值` 且「键」是该动词声明的参数名时才当关键字参数，否则照位置参数
+原样处理。同一参数给两次、必填没给、位置参数多于声明都报错。值里不能有空格
+——需要传含空格的内容时先用「设」存进变量，再用 {变量} 传入。
 """
 
 import importlib.util
@@ -109,10 +120,12 @@ import inspect
 import json
 import re
 from pathlib import Path
-from typing import Callable
+from typing import Callable, NamedTuple
 
-# 从脚本注释里读参数声明：# 参数：甲、乙、丙
+# 从脚本注释里读参数声明：# 参数：甲 乙? 丙=默认
 PARAM_DECL_RE = re.compile(r"#\s*参数\s*[：:]\s*(.+)$")
+PARAM_SEP_RE = re.compile(r"[\s、,，]+")
+KW_TOKEN_RE = re.compile(r"^([^\s=]+)=(.*)$", re.S)
 
 # 包入口
 PACK_PY = "_verbs.py"
@@ -130,18 +143,83 @@ class VerbError(Exception):
     """动词注册或调用出错。"""
 
 
-def parse_param_decl(script: str) -> list[str]:
-    """从脚本开头的注释里读出参数顺序，没有声明就返回空列表。"""
-    for line in script.splitlines():
+class ParamSpec(NamedTuple):
+    """一个参数。required：不传就报错；default：不传时的值（None 表示没有默认）。
+    omit：不传时不往实现里传这个参数（Python 动词让函数自己的默认值生效）。"""
+    name: str
+    required: bool = True
+    default: object = None
+    omit: bool = False
+
+    def show(self) -> str:
+        """签名里的样子：<名> / <名?> / <名=默认>"""
+        if self.required:
+            return f"<{self.name}>"
+        if self.default is None or self.default == "":
+            return f"<{self.name}?>"
+        return f"<{self.name}={self.default}>"
+
+
+def parse_param_specs(script: str) -> tuple[list[ParamSpec], bool, int]:
+    """读脚本开头的参数声明：(参数列表, 是否新规则, 声明所在行号 1 起)。
+
+    新规则：声明里有任意一个 `?` 或 `=`；否则是旧文件，少传不报错。
+    没有声明返回 ([], False, 0)。
+    """
+    for n, line in enumerate(script.splitlines(), 1):
         s = line.strip()
         if not s.startswith("#"):
             if s:                      # 遇到第一条实际语句就不再找
                 break
             continue
         m = PARAM_DECL_RE.match(s)
-        if m:
-            return [p.strip() for p in re.split(r"[、,，]", m.group(1)) if p.strip()]
-    return []
+        if not m:
+            continue
+        specs, strict = [], False
+        for tok in PARAM_SEP_RE.split(m.group(1).strip()):
+            if not tok:
+                continue
+            name, eq, val = tok.partition("=")
+            name = name.strip()
+            opt = name.endswith(("?", "？"))
+            name = name.rstrip("?？").strip()
+            if not name:
+                continue
+            if eq:
+                strict = True
+                specs.append(ParamSpec(name, False, val))
+            elif opt:
+                strict = True
+                specs.append(ParamSpec(name, False, ""))
+            else:
+                specs.append(ParamSpec(name, True))
+        return specs, strict, n
+    return [], False, 0
+
+
+def parse_param_decl(script: str) -> list[str]:
+    """从脚本开头的注释里读出参数顺序（只要名字），没有声明就返回空列表。"""
+    return [p.name for p in parse_param_specs(script)[0]]
+
+
+def _python_specs(fn: Callable, names: list[str]) -> list[ParamSpec]:
+    """Python 动词的参数：没有默认值的必填，有默认值的不传时让函数自己用默认。"""
+    try:
+        sig = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        sig = {}
+    out = []
+    for n in names:
+        p = sig.get(n)
+        if p is None or p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD):
+            out.append(ParamSpec(n, False, None, True) if p is not None
+                       else ParamSpec(n, True))
+        elif p.default is inspect.Parameter.empty:
+            out.append(ParamSpec(n, True))
+        else:
+            d = p.default
+            out.append(ParamSpec(n, False, "" if d is None else d, True))
+    return out
 
 
 def load_data(pack_dir: Path | str, name: str, default=None):
@@ -216,7 +294,7 @@ def scan_verbs(reg: "VerbRegistry", directory: Path | str,
     count = 0
 
     for f in sorted(directory.glob("*.zs")):
-        reg.register_script(f.stem, f, parse_param_decl(f.read_text(encoding="utf-8")))
+        reg.register_script(f.stem, f, f.read_text(encoding="utf-8"))
         count += 1
 
     for f in sorted(directory.glob("*.py")):
@@ -255,6 +333,8 @@ class VerbRegistry:
     def __init__(self, reserved: set[str] | None = None):
         # 名字 -> (参数名列表, 类型, 实现, 来自哪个包)
         self._verbs: dict[str, tuple[list[str], str, object, str]] = {}
+        # 名字 -> (参数规格列表, 新规则?, 声明所在 "文件 第 N 行")
+        self._sigs: dict[str, tuple[list[ParamSpec], bool, str]] = {}
         self.reserved = reserved or set()
         self.warnings: list[str] = []
         self.packs: list[str] = []
@@ -283,17 +363,29 @@ class VerbRegistry:
                 f"动词「{name}」：{new_pack} 覆盖了 {old_pack} 的同名{kind}"
             )
 
-    def register_script(self, name: str, path: Path, params: list[str]) -> None:
+    def register_script(self, name: str, path: Path,
+                        script: "str | list[str]") -> None:
+        """script 是 .zs 的全文（读头部的参数声明）；给名字列表也行（全必填、旧规则）。"""
         if not self._check_name(name, "脚本"):
             return
         self._note_override(name, "定义")
-        self._verbs[name] = (params, "script", path, self._current_pack)
+        if isinstance(script, str):
+            specs, strict, ln = parse_param_specs(script)
+        else:
+            specs, strict, ln = [ParamSpec(n) for n in script], False, 0
+        where = f"{Path(path).name} 第 {ln} 行" if ln else Path(path).name
+        self._verbs[name] = ([p.name for p in specs], "script", path, self._current_pack)
+        self._sigs[name] = (specs, strict, where)
 
     def register_python(self, name: str, fn: Callable, params: list[str]) -> None:
         if not self._check_name(name, "Python"):
             return
         self._note_override(name, "定义")
         self._verbs[name] = (params, "python", fn, self._current_pack)
+        code = getattr(fn, "__code__", None)
+        where = (f"{Path(code.co_filename).name} 第 {code.co_firstlineno} 行"
+                 if code else name)
+        self._sigs[name] = (_python_specs(fn, params), True, where)
 
     def verb(self, description: str = "", name: str | None = None):
         """装饰器：注册一个 Python 动词。参数顺序取自函数签名。"""
@@ -316,8 +408,7 @@ class VerbRegistry:
             return 0
         count = 0
         for f in sorted(directory.glob("*.zs")):
-            params = parse_param_decl(f.read_text(encoding="utf-8"))
-            self.register_script(f.stem, f, params)
+            self.register_script(f.stem, f, f.read_text(encoding="utf-8"))
             count += 1
         return count
 
@@ -416,16 +507,78 @@ class VerbRegistry:
     def pack_of(self, name: str) -> str:
         return self._verbs[name][3] if name in self._verbs else ""
 
-    def bind(self, name: str, args: list[str]) -> dict[str, str]:
-        """按位置把实参绑到参数名上。"""
+    def specs_of(self, name: str) -> list[ParamSpec]:
+        return list(self._sigs[name][0]) if name in self._sigs else []
+
+    def split_call(self, name: str, tokens: list[str]) -> tuple[list[str], list[tuple[str, str]], list[str]]:
+        """把调用的词拆成 (位置参数, 键=值, 写在 键=值 后面的位置参数)。词形如 `键=值`
+        且键是该动词声明的参数名才算关键字参数，别的词都是位置参数。"""
+        names = set(self.params_of(name))
+        pos: list[str] = []
+        kws: list[tuple[str, str]] = []
+        late: list[str] = []
+        for t in tokens:
+            m = KW_TOKEN_RE.match(t)
+            if m and m.group(1) in names:
+                kws.append((m.group(1), m.group(2)))
+            elif kws:
+                late.append(t)
+            else:
+                pos.append(t)
+        return pos, kws, late
+
+    def bind(self, name: str, args: list, kwargs: "list[tuple[str, object]] | None" = None,
+             late: "list | None" = None) -> dict:
+        """把实参绑到参数名上：args 按位置，kwargs 是 [(键, 值)]，late 是写在 键=值
+        后面的位置参数（依次填还没给的参数，旧脚本 `推理 规则=x {甲} {乙}` 是这么写的）。
+
+        同一参数给两次、位置参数过多报错；缺必填：新规则（和 Python 动词）报错，
+        旧规则的 .zs 少传就是没有这个变量。
+        """
         params = self.params_of(name)
-        if len(args) > len(params):
-            raise VerbError(
+        specs, strict, where = self._sigs.get(name, ([ParamSpec(p) for p in params], False, name))
+        sig = " ".join(p.show() for p in specs) or "无"
+        late = list(late or [])
+
+        def too_many(n):
+            return VerbError(
                 f"「{name}」最多接受 {len(params)} 个参数"
-                f"（{'、'.join(params) or '无'}），这次给了 {len(args)} 个。"
+                f"（{'、'.join(params) or '无'}），这次给了 {n} 个。"
                 f"值里有空格的话，先用「设」存进变量再用 {{变量}} 传入。"
-            )
-        return dict(zip(params, args))
+                f"（声明：{where}）")
+
+        if len(args) > len(params):
+            raise too_many(len(args) + len(kwargs or []) + len(late))
+        got = dict(zip(params, args))
+        for k, v in kwargs or []:
+            if k not in params:
+                raise VerbError(f"「{name}」没有参数「{k}」，有：{'、'.join(params) or '无'}（声明：{where}）")
+            if k in got:
+                raise VerbError(f"「{name}」的参数「{k}」给了两次（声明：{where}）")
+            got[k] = v
+        for v in late:
+            slot = next((p for p in params if p not in got), None)
+            if slot is None:
+                raise too_many(len(args) + len(kwargs or []) + len(late))
+            got[slot] = v
+        for sp in specs:
+            if sp.name in got:
+                continue
+            if sp.required:
+                if strict:
+                    raise VerbError(f"「{name}」缺少必填参数「{sp.name}」，签名：{name} {sig}（声明：{where}）")
+            elif not sp.omit:
+                got[sp.name] = sp.default
+        return got
+
+    def check_call(self, name: str, tokens: list[str]) -> str | None:
+        """静态检查一次调用（只看词的个数和键，不求值）。没问题返回 None。"""
+        try:
+            pos, kws, late = self.split_call(name, tokens)
+            self.bind(name, ["x"] * len(pos), [(k, "x") for k, _ in kws], ["x"] * len(late))
+        except VerbError as e:
+            return str(e)
+        return None
 
     def resolve(self, name: str) -> tuple[str, object]:
         """返回 (类型, 实现)。类型是 'script' 或 'python'。"""
@@ -451,7 +604,7 @@ class VerbRegistry:
                     if s.startswith("#") and not PARAM_DECL_RE.match(s):
                         desc = s.lstrip("#").strip()
                         break
-            sig = " ".join(f"<{p}>" for p in params)
+            sig = " ".join(p.show() for p in self._sigs[n][0])
             return f"  {n} {sig}  [{tag}] {desc}"
 
         if not by_pack:

@@ -48,6 +48,7 @@ run() {
 cd $M
 run 引擎        $PY -m tools.test_dsl
 run 序号和默认值 $PY tests/dsl/test_loop_default.py
+run 动词参数    $PY tests/dsl/test_verb_params.py
 run 界面编译    $PY -m tools.test_ui
 run 会话        $PY tests/http/test_session.py
 run 库出错      $PY tests/http/test_db_errors.py
