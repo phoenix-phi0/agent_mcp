@@ -153,7 +153,7 @@ class Model:
         """一次带工具的多轮调用：claude / codex 挂 mcp_config（dslmcp），grok 且给了 read_cwd 用自带只读工具。返回 backend 的 dict（含 failed / call_n）。"""
         return self._call(system, user, tag, model, tools={"mcp_config": mcp_config, "max_turns": max_turns, "read_cwd": read_cwd})
 
-    def _call(self, system, user, tag, model=None, retry=None, tools=None, step=None):
+    def _call(self, system, user, tag, model=None, retry=None, tools=None, step=None, limits=None):
         with self.lock:
             if self.n >= self.max_calls:
                 raise Stop(f"总模型调用已满 {self.max_calls} 次（{tag}）")
@@ -163,14 +163,18 @@ class Model:
             n = self.n
         t0 = time.time()
         tmo = G.call_timeout((self.deadline - t0) if self.deadline else None)
+        if limits:          # 单个步骤放宽超时（modular 约定步骤）：总超时取 limits.timeout（仍不超过剩余墙钟），空闲超时传给引擎
+            tmo = max(G.CALL_MIN, min(limits["timeout"], (self.deadline - t0) + 5)) if self.deadline else limits["timeout"]
         sp = self.spec(tag, model, step)
         system = AG.for_engine(system, tag, sp["engine"])
         rp = self.out / "calls" / f"{n:02d}_{tag}.reply.txt"
         kw = {"reply_path": rp} if self.real else {}
+        if limits:
+            kw["idle"] = limits["idle"]
         if sp["spec"] != MODEL:
             kw["model"] = sp["spec"]
         if tools is None:
-            r = engines.call(sp, system, user, tmo, reply_path=rp) if self.real and sp["engine"] != "claude" \
+            r = engines.call(sp, system, user, tmo, reply_path=rp, **({"idle": limits["idle"]} if limits else {})) if self.real and sp["engine"] != "claude" \
                 else self.backend(system, user, tag, tmo, **kw)
         elif self.real and sp["engine"] == "grok" and tools["read_cwd"]:
             r = engines.call(sp, system, user, tmo, reply_path=rp, read_cwd=str(tools["read_cwd"]))     # grok 自带只读工具，不挂 dsl MCP

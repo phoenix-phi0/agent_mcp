@@ -682,10 +682,48 @@ def check_sql_scope(text, rel, allowed):
     return errs
 
 
+_FILTER_KW = {"WHERE", "ON", "HAVING"}
+_NONFILTER_KW = {"SELECT", "VALUES", "SET", "LIMIT", "OFFSET", "FROM", "BY", "RETURNING", "INTO", "UPDATE", "DELETE", "INSERT", "JOIN", "UNION"}
+_PAREN_KW = {"AND", "OR", "NOT", "IN", "EXISTS", "ANY", "ALL", "WHERE", "ON", "HAVING", "WHEN", "THEN", "ELSE", "CASE", "BETWEEN", "LIKE", "IS", "NULL",
+             "SELECT", "VALUES", "SET", "LIMIT", "OFFSET", "FROM", "BY", "AS", "UNION", "JOIN", "RETURNING", "DISTINCT", "INTO"}
+_TOKEN = re.compile(r"'(?:[^']|'')*'|\"[^\"]*\"|:\w+|\w+|[()]|[^\s\w()]")
+
+
+def _opt_context(text, at):
+    """:p 出现在 at 位置时所处的语句成分：「过滤」（WHERE / ON / HAVING 里的比较，要保护）或别的（INSERT 的 VALUES / SELECT 投影、UPDATE 的 SET、
+    LIMIT / OFFSET、函数实参、ORDER / GROUP BY——不要求保护）。从该处往回扫到同层最近的子句关键字；跨出括号时，括号前是函数名就是函数实参。"""
+    toks = [(m.start(), m.group(0)) for m in _TOKEN.finditer(text)]
+    i = next((k for k, (st, _t) in enumerate(toks) if st == at), None)
+    if i is None:
+        return "其它"
+    depth = 0
+    for k in range(i - 1, -1, -1):
+        t = toks[k][1]
+        if t == ")":
+            depth += 1
+        elif t == "(":
+            if depth:
+                depth -= 1
+                continue
+            prev = toks[k - 1][1] if k else ""
+            if re.match(r"[A-Za-z_]\w*$", prev) and prev.upper() not in _PAREN_KW:
+                return "函数实参"
+            if prev.upper() == "VALUES":
+                return "VALUES"
+        elif depth == 0:
+            u = t.upper()
+            if u in _FILTER_KW:
+                return "过滤"
+            if u in _NONFILTER_KW:
+                return u
+    return "其它"
+
+
 def check_optional_sql(name, sql, optional):
-    """计划里标了「可选」的 sql 参数：不传或传空串都当不过滤，所以每处拿它比较的地方要整体括进
-    `(:p IS NULL OR :p = '' OR col = :p)` 这样的保护里（也认 COALESCE(:p,'')=''、IFNULL(:p,'')=''、顺序颠倒的写法）。
-    规则：去掉保护式本身的两处 :p 后，剩下的每一处 :p（真正的比较）必须落在含保护式的同一对括号里。返回问题列表。"""
+    """计划里标了「可选」的 sql 参数：不传或传空串都当不过滤，所以每处**拿它做过滤比较**的地方（WHERE / ON / HAVING 里的 `列 = :p`、`:p = 列`、LIKE、< 等）
+    要整体括进 `(:p IS NULL OR :p = '' OR col = :p)` 这样的保护里（也认 COALESCE(:p,'')=''、IFNULL(:p,'')=''、顺序颠倒的写法）。
+    INSERT 的 VALUES / SELECT 投影、UPDATE 的 SET 赋值、LIMIT / OFFSET、函数实参（NULLIF(:p,'') 等）、ORDER / GROUP BY 里的可选参数不是过滤，不要求保护。
+    规则：去掉保护式本身的两处 :p 后，剩下的每一处过滤里的 :p（真正的比较）必须落在含保护式的同一对括号里。返回问题列表。"""
     errs = []
     text = re.sub(r"--[^\n]*", lambda m: " " * len(m.group(0)), sql)
     for p in optional:
@@ -696,7 +734,7 @@ def check_optional_sql(name, sql, optional):
         used = [m.start() for m in re.finditer(col, text)]
         guarded = {i for g in guards for i in used if g.start() <= i < g.end()}
         for at in used:
-            if at in guarded:
+            if at in guarded or _opt_context(text, at) != "过滤":
                 continue
             ok = False
             for g in guards:
@@ -705,7 +743,7 @@ def check_optional_sql(name, sql, optional):
                     ok = True
                     break
             if not ok:
-                errs.append(f"sql「{name}」的可选参数 :{p} 用来比较时没有空值保护：不传或传空串都要当不过滤，写成 (:{p} IS NULL OR :{p} = '' OR 列 = :{p})，整体括起来")
+                errs.append(f"sql「{name}」的可选参数 :{p} 在 WHERE / ON / HAVING 里用来比较时没有空值保护：不传或传空串都要当不过滤，写成 (:{p} IS NULL OR :{p} = '' OR 列 = :{p})，整体括起来")
                 break
     return errs
 
@@ -1142,7 +1180,7 @@ def load_plan(old_dir, task, caps=None):
 # ================================================================== 3 逐层构建
 
 class ModRun(LY.Run):
-    STEP_OF_KIND = {"plan": "mplan", "gen": "mgen", "fallback": "mgen_fallback"}       # DSLAGENT_MODELS 的步骤键：规划类 / 生成类调用分开指定（没写走 sub）；mgen_fallback = mgen 两次都没过检查时再生成 1 次用的模型（没写 = 不回退）
+    STEP_OF_KIND = {"plan": "mplan", "contract": "mplan", "gen": "mgen", "fallback": "mgen_fallback"}       # DSLAGENT_MODELS 的步骤键：规划类 / 生成类调用分开指定（没写走 sub）；mgen_fallback = mgen 两次都没过检查时再生成 1 次用的模型（没写 = 不回退）
     RETRY_SILENT = (G.R_IDLE, G.R_FIRST)           # 空闲超时 / 首字前静默：同一调用重试 1 次再判失败（输出超长、被杀、熔断不重试）
 
     in_fallback = False                  # gen_loop 的回退那一次：生成类调用改走 mgen_fallback，并在 calls.json 里标 fallback
@@ -1151,6 +1189,9 @@ class ModRun(LY.Run):
         if kind == "gen" and self.in_fallback:
             kind = "fallback"
         return super().ask(prompt, rec, kind)
+
+    def call_limits(self, kind):
+        return G.contract_limits() if kind == "contract" else None       # 约定步骤的空闲 / 总超时单独放宽（DSLAGENT_CONTRACT_IDLE / DSLAGENT_CONTRACT_TOTAL 可配）
 
     def log_mark(self):
         return {"fallback": 1} if self.in_fallback else None
@@ -1755,9 +1796,12 @@ class ModRun(LY.Run):
                 "taken_paths": (gen_paths | {i["路径"] for i in every}) - own["paths"], "taken_acts": ({x["action"] for x in routes if x.get("action")} | {i["动作"] for i in every}) - own["acts"],
                 "ui_paths": ui_paths, "verbs": {x["名"] for p in packs for x in self.caps.get(p, [])}, "roles": self.layers["角色"],
                 "other_flows": {f["名"] for mm in self.split["模块"].values() for f in mm["流程"]},
+                "flow_calls": {f["名"]: {"flows": [c["名"] for c in f["调"] if c.get("类") == "流程"], "sql": [c["名"] for c in f["调"] if c.get("类") == "sql"]}
+                              for mm, c in self.contracts.items() if mm != m for f in c["流程"]},
                 "must_by_file": {f["文件"]: [fl["名"] for mm in self.split["模块"].values() for fl in mm["流程"] if f["文件"] in fl["用于"]] for f in v["接口"]}}
 
-    def contract_prompt(self, m, ctx, err):
+    def contract_prompt(self, m, ctx, err, part=0, head=""):
+        """part：0 = 一次写全；1 = 拆分的第一次（只写 sql + 流程）；2 = 拆分的第二次（只写接口 + 界面，head 是第一次已校验通过的骨架）。"""
         scope = self.dscope(m) - {m}
         deps = "\n".join(f"=== {rel} ===\n{txt.strip()}" for d in sorted(scope) for rel, txt in (self.frozen.get(d) or {}).items()) or "（无）"
         shared = "\n".join(f"=== scripts/{k}.zs ===\n" + "\n".join(SK.flow_head(f)) for k, f in ctx["flows_ext"].items()) or "（无）"
@@ -1768,7 +1812,11 @@ class ModRun(LY.Run):
                 f"项目里已有的接口（gen 的增删改查等，路径不能重复）：{summary}\n依赖模块已冻结的约定（骨架头部，只给签名，参数后带 ? = 可选；不给实现）：\n{deps}\n"
                 f"本模块可调的共用流程（骨架头部）：\n{shared}\n接口文件 → 必须调用的流程：{json.dumps(ctx['must_by_file'], ensure_ascii=False)}\n"
                 f"本模块要写的流程：{json.dumps([f['名'] for f in self.mod(m)['流程']], ensure_ascii=False)}；接口文件：{json.dumps([f['文件'] for f in self.mod(m)['接口']], ensure_ascii=False)}；界面页：{json.dumps([u['名'] for u in self.mod(m)['界面']], ensure_ascii=False)}\n"
-                f"项目角色：{json.dumps(self.layers['角色'], ensure_ascii=False)}\n能力清单（本模块用到的包）：\n{self.cap_for(m)}\n分配的规则：{self.rule_view(self.mod(m)['规则号'])}\n上次的报错：{err}")
+                f"项目角色：{json.dumps(self.layers['角色'], ensure_ascii=False)}\n能力清单（本模块用到的包）：\n{self.cap_for(m)}\n分配的规则：{self.rule_view(self.mod(m)['规则号'])}\n"
+                + {0: "", 1: "【拆成两次调用】这一次只输出 queries/*.sql 与 scripts/*.zs 骨架（sql + 流程）；接口 routes/*.zs 与界面 ui/*.ui 下一次再写，现在不要写。\n",
+                   2: "【拆成两次调用】sql 与流程骨架已在上一次写好并校验通过（只读，原样不要再输出；接口调用的参数、规则要与它们对得上）：\n" + head
+                   + "\n这一次只输出 routes/*.zs 与 ui/*.ui 骨架文件。\n"}[part]
+                + f"上次的报错：{err}")
 
     def action_map(self):
         """接口路径 → 动作名（本项目已约定的 + gen 的增删改查），界面骨架里的远程动作用。"""
@@ -1847,15 +1895,29 @@ class ModRun(LY.Run):
             return errs, []
         return [], saved
 
-    def f_contract(self, rec, it):
-        """一个模块的约定：模型写出骨架文件（≤2 次，程序解析 + 校验 + 加载检查，不过带报错重写）；通过就把规范骨架落到真实路径、冻结约定部分的快照。"""
+    def f_contract(self, rec, it, own=None):
+        """一个模块的约定：模型写出骨架文件（≤2 次，程序解析 + 校验 + 加载检查，不过带报错重写）；通过就把规范骨架落到真实路径、冻结约定部分的快照。
+        整份写超时（空闲 / 首字前静默 / 被杀，约定步骤的超时已单独放宽）或输出超长 → 改拆两次调用：先 sql + 流程，校验过再带着它们的骨架写 接口 + 界面。"""
         m = it["模块"]
-        ctx = self.contract_ctx(m)
+        ctx = self.contract_ctx(m, own)      # own：重新约定时，上次冻结约定里本模块自己的 sql / 路径 / 动作（磁盘上已有实现，不算「被占用」）
         err = rec.get("上次失败") or "无"
+        split = {}                           # 拆分模式的状态：{"head": 第一次已校验通过的 {路径: 文本}}；空 = 还没拆
+        use_split = False
         for k in (1, 2):
             rec["规划尝试"] = k
             try:
-                text = self.ask(self.contract_prompt(m, ctx, err), rec, "plan")
+                if use_split:
+                    text = self.contract_split(rec, m, ctx, err, split)
+                else:
+                    try:
+                        text = self.ask(self.contract_prompt(m, ctx, err), rec, "contract")
+                    except FileFail as e:
+                        if "模型没有完成输出" not in str(e):
+                            raise
+                        use_split = True
+                        rec["拆分约定"] = str(e)[:120]
+                        self.bump(2)
+                        text = self.contract_split(rec, m, ctx, err, split)
             except _Retry as e:
                 err = str(e)
                 continue
@@ -1873,6 +1935,46 @@ class ModRun(LY.Run):
                 return
             err = "；".join(lerrs)
         raise FileFail(f"约定两次没过：{err}"[:600])
+
+    @staticmethod
+    def _join_files(files):
+        return "\n".join(f"=== {r} ===\n{t.rstrip()}" for r, t in files.items()) + "\n"
+
+    def contract_split(self, rec, m, ctx, err, st):
+        """拆分约定：第一次只写 sql + 流程（解析 + validate_contract 的 sql / 流程部分过了才算数，≤2 次，结果存进 st["head"]，之后重写第二次不再重做第一次）；
+        第二次带着第一次已校验通过的骨架写 接口 + 界面。返回合起来的骨架文本，交给 f_contract 做整体校验。"""
+        if "head" not in st:
+            e1 = err
+            for _k in (1, 2):
+                try:
+                    t1 = self.ask(self.contract_prompt(m, ctx, e1, part=1), rec, "contract")
+                except _Retry as e:
+                    e1 = str(e)
+                    continue
+                files, perr = SK.split_files(t1)
+                late = [r for r in files if SK.kind_of(r) in ("route", "ui")]
+                if late:
+                    e1 = "这一次只写 queries/*.sql 与 scripts/*.zs，不要写 " + "、".join(late) + "（接口和界面下一次再写）"
+                    continue
+                obj, perr2 = SK.extract(files) if files else ({}, [])
+                if perr or perr2:
+                    e1 = "；".join(perr + perr2)
+                    continue
+                r = C.validate_contract(obj, {**ctx, "part": "sql_flow"})
+                if not r["ok"]:
+                    e1 = "；".join(r["errors"])
+                    continue
+                st["head"] = files
+                rec["拆分第一次"] = "通过"
+                break
+            else:
+                raise FileFail(f"约定拆成两次调用，第一次（sql + 流程）没过：{e1}"[:600])
+        t2 = self.ask(self.contract_prompt(m, ctx, err, part=2, head=self._join_files(st["head"])), rec, "contract")
+        files2, perr = SK.split_files(t2)
+        if perr:
+            raise _Retry("；".join(perr))
+        keep = {r: t for r, t in files2.items() if SK.kind_of(r) in ("route", "ui")}      # 第二次误写的 sql / 流程丢掉，以第一次校验过的为准
+        return self._join_files({**st["head"], **keep})
 
     def accept_contract(self, rec, m, contract):
         """校验过的约定 → 规范骨架落盘 + 加载检查 + 冻结快照。加载检查不过返回错误列表（调用方当一次失败尝试，带报错重写）。"""
@@ -1958,13 +2060,21 @@ class ModRun(LY.Run):
                 continue
             if old and old["结果"] == "通过":
                 self.bump(2)                 # 上次通过的约定这次不能沿用，要重新约定：补预算（bump_budget 没算它）
+            own = None
             if m in self.loaded_frozen:
                 self.skel.setdefault(m, {})
                 self.drop_skeleton(m)
+                try:
+                    old_obj, _e = SK.thaw(self.loaded_frozen[m])
+                    own = {"sql": {x["名"] for x in old_obj["sql"]}, "paths": {x["路径"] for x in old_obj["接口"]}, "acts": {x["动作"] for x in old_obj["接口"]}}
+                except (KeyError, TypeError, AttributeError):
+                    own = None
             try:
-                self.f_contract(rec, it)
+                self.f_contract(rec, it, own)
             except FileFail as e:
                 rec.update(结果="失败", 失败原因=str(e)[:600])
+            if rec["结果"] == "通过":
+                self.changed.add(file)       # 约定重做过：依赖它的、上次通过的下游实现要重新按冻结快照比对，对不上就重做
         self.save_contracts()
 
     def skel_block(self, m, kind, rel=None):

@@ -10,6 +10,8 @@ MAX_OUT = 20000          # 单次调用累计输出超过这么多字符就杀�
 TOOL_MARKS = ("<invoke", "<function_calls")   # 流里出现这些 = 模型在写工具调用格式
 CALL_MAX = 300           # 单次调用总超时上限
 CALL_MIN = 30            # 剩余墙钟再少也给这么多
+CONTRACT_IDLE = 180      # modular 约定步骤（一次输出一个模块的全部骨架，又长又要先想清楚）：首 token 之后的空闲超时，比逐字流的 IDLE_SEC 宽
+CONTRACT_CALL_MAX = 600  # 约定步骤的单次调用总超时上限
 
 R_TOTAL = "总超时"
 R_FIRST = "首字前静默超时"
@@ -31,6 +33,18 @@ def call_timeout(left):
     if left is None:
         return CALL_MAX
     return max(CALL_MIN, min(CALL_MAX, left + 5))
+
+
+def contract_limits():
+    """约定步骤单独放宽的 {idle, timeout}：缺省 CONTRACT_IDLE / CONTRACT_CALL_MAX，环境变量 DSLAGENT_CONTRACT_IDLE / DSLAGENT_CONTRACT_TOTAL（秒）可改。"""
+    import os
+
+    def num(k, d):
+        try:
+            return max(1, int(os.environ.get(k) or d))
+        except ValueError:
+            return d
+    return {"idle": num("DSLAGENT_CONTRACT_IDLE", CONTRACT_IDLE), "timeout": num("DSLAGENT_CONTRACT_TOTAL", CONTRACT_CALL_MAX)}
 
 
 def has_mark(text):

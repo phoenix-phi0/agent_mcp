@@ -409,6 +409,23 @@ def t_resume():
     fk = TC.FakeC()
     r3 = V.run_newproj(TM.REQ, d2 / "proj", d2 / "out", model=fk, modular=True, resume=True)
     check(len(fk.of("接口约定助手")) >= 1 and TC.files(r3)["contracts/quiz.skel"].get("沿用") is None, "快照坏了（读不通 / 校验不过）→ 不沿用，重新让模型约定", (r3["stop"], fk.calls[:4]))
+    # 重复调用校验：冻结快照里 progress 的接口既调 quiz_judge 又直接调它已调的写入 sql → 按新校验不过，重新约定；依赖它的实现按约定变化重做
+    d3 = TM.TMP / "rs3"
+    shutil.rmtree(d3, ignore_errors=True)
+    V.run_newproj(TM.REQ, d3 / "proj", d3 / "out", model=TC.FakeC(), modular=True, contract=True)
+    fz = json.loads((d3 / "out" / "contracts_frozen.json").read_text(encoding="utf-8"))
+    fz["progress"]["routes/progress.zs"] = fz["progress"]["routes/progress.zs"].replace("#@ 调用 scripts/quiz_judge.zs question_id=… given=…\n", "#@ 调用 scripts/quiz_judge.zs question_id=… given=…\n#@ 调用 sql quiz_log question_id=… given=…\n")
+    check("sql quiz_log" in fz["progress"]["routes/progress.zs"], "（造一份重复调用的冻结快照）")
+    (d3 / "out" / "contracts_frozen.json").write_text(json.dumps(fz, ensure_ascii=False), encoding="utf-8")
+    co = TC.contract_obj("progress", lambda o: o["接口"][0].update(作用="重新判题（约定变了）"))
+    fk = TC.FakeC(contracts={"progress": co})
+    r4 = V.run_newproj(TM.REQ, d3 / "proj", d3 / "out", model=fk, modular=True, resume=True)
+    fs = TC.files(r4)
+    cp = fk.of("接口约定助手")
+    check(len(cp) == 1 and '"模块": "progress"' in cp[0] and fs["contracts/quiz.skel"].get("沿用") and fs["contracts/progress.skel"].get("沿用") is None,
+          "resume：冻结快照按新校验重验，重复调用的 progress 重新约定，quiz 照旧沿用", (r4["stop"], len(cp), fs["contracts/progress.skel"].get("失败原因"), fk.calls[:4]))
+    check(fs["routes/progress.zs"]["结果"] == "通过" and not fs["routes/progress.zs"].get("沿用") and "重新判题（约定变了）" in (d3 / "proj/routes/progress.zs").read_text(encoding="utf-8"),
+          "依赖它的实现文件按约定变化重做（接口文件带上新约定头）", (fs["routes/progress.zs"], r4["stop"]))
 
 
 def main():

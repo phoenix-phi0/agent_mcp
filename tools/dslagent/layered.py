@@ -126,6 +126,10 @@ class Run:
         return sum((c.get("cost") or 0.0) for c in self.M.log[getattr(self.M, "log_start", 0):] if c.get("engine") in (None, "claude")) \
             if self.STEP_OF_KIND else self.M.cost
 
+    def call_limits(self, kind):
+        """这类调用单独放宽的 {idle, timeout}（modbuild 的约定步骤）；None = 用缺省保险。"""
+        return None
+
     def log_mark(self):
         """calls.json 这条调用要额外标的键（modbuild：回退那一次标 fallback）；layered 不标。"""
         return None
@@ -145,7 +149,8 @@ class Run:
             self.k += 1
             try:
                 step = self.STEP_OF_KIND.get(kind)
-                r = self.M._call(self.system(), prompt, f"dsl{self.k:02d}", **({"step": step} if step else {}))
+                lim = self.call_limits(kind)
+                r = self.M._call(self.system(), prompt, f"dsl{self.k:02d}", **({"step": step} if step else {}), **({"limits": lim} if lim else {}))
             except self.Stop as e:
                 raise Halt(str(e), "预算") from None
             if rec is not None:

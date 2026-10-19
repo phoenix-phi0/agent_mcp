@@ -122,6 +122,7 @@ def validate_contract(obj, ctx):
         return {"ok": False, "errors": ["约定要是 JSON 对象 {sql, 流程, 接口, 界面}"], "contract": None}
     m, v = ctx["mod"], ctx["v"]
     ents, nums = ctx["ents"], set(v["规则号"])
+    part1 = ctx.get("part") == "sql_flow"      # 拆分约定的第一次调用只写 sql + 流程：接口 / 界面 / 必调流程 / 规则覆盖留到第二次整体校验
     errs = []
     own_tables = set(ctx.get("own_tables") or ())
     # ---- sql
@@ -230,7 +231,7 @@ def validate_contract(obj, ctx):
             if not str(e["码"]).isdigit() or not 400 <= int(e["码"]) < 500:
                 errs.append(f"接口「{p}」的业务错误码「{e['码']}」要是 4xx")
         ifaces.append(item)
-    for fl in files:
+    for fl in () if part1 else files:
         if not any(i["文件"] == fl for i in ifaces):
             errs.append(f"接口文件「{fl}」里一个接口也没约定")
     # ---- 界面
@@ -249,7 +250,7 @@ def validate_contract(obj, ctx):
             if p not in avail:
                 errs.append(f"界面「{u['页']}」用的接口「{p}」不存在（可用：{sorted(avail)[:40]}）")
         uis.append({"页": u["页"], "用接口": used, "字段": _names(u.get("字段"), f"界面「{u['页']}」的字段", errs)})
-    for pg in pages - seen_u:
+    for pg in set() if part1 else pages - seen_u:
         errs.append(f"层次×模块里的界面「{pg}」没有约定（不许少）")
     # ---- 引用 / 参数 / 层次 / 规则
     sigs = {**{k: s for k, s in ctx["sql_known"].items()}, **{s["名"]: s for s in sqls}}
@@ -303,14 +304,21 @@ def validate_contract(obj, ctx):
     cyc = _cycle({f["名"]: [c["名"] for c in f["调"] if c["名"] in seen_f] for f in flows})
     if cyc:
         errs.append("流程互调成环：" + " → ".join(cyc))
-    for fl in files:
+    # ---- 重复调用：已经被自己调的流程（直接 / 间接）调到的流程或写入 sql，不许再直接调一遍（会重复执行，比如记两遍作答）
+    graph = dict(ctx.get("flow_calls") or {})
+    for k, fx in fsigs.items():
+        graph[k] = {"flows": [c["名"] for c in fx.get("调", []) if c["名"] not in sigs], "sql": [c["名"] for c in fx.get("调", []) if c["名"] in sigs]}
+    writes = {n for n, x in sigs.items() if x.get("返回") == "写入"}
+    for owner, cs in [(f"流程「{f['名']}」", f["调"]) for f in flows] + [(f"接口「{i['路径']}」", i["调用"]) for i in ifaces]:
+        errs += dup_calls(owner, cs, graph, sigs, writes)
+    for fl in () if part1 else files:
         need = ctx.get("must_by_file", {}).get(fl, [])
         called = {c["名"] for i in ifaces if i["文件"] == fl for c in i["调用"]}
         for n in need:
             if n not in called:
                 errs.append(f"层次×模块规定流程「{n}」给接口文件「{fl}」用，但这个文件的接口调用里没有它")
     covered = {h for grp in (sqls, flows, ifaces) for it in grp for h in it["规则"]}
-    for h in v["规则号"]:
+    for h in () if part1 else v["规则号"]:
         if h not in covered:
             errs.append(f"本模块的规则 {h} 没有落在任何约定项上（sql / 流程 / 接口的「规则」里要写它）")
     if errs:
@@ -320,6 +328,33 @@ def validate_contract(obj, ctx):
             for c in it.get("调", it.get("调用", [])):
                 c["类"] = "sql" if c["名"] in sigs else "流程"
     return {"ok": True, "errors": [], "contract": {"模块": m, "sql": sqls, "流程": flows, "接口": ifaces, "界面": uis}}
+
+
+def dup_calls(owner, calls, graph, sigs, writes):
+    """owner 直接调的流程里，若 A 已（直接或间接）调了 B，则 owner 不许同时直接调 B；owner 直接调的写入 sql，若 A 里已调同一条，也不许再直接调。
+    graph：流程名 → {flows, sql}（它直接调的）。报错点名调用链。"""
+    direct_f = [c["名"] for c in calls if c["名"] not in sigs]
+    direct_s = [c["名"] for c in calls if c["名"] in sigs]
+    errs = []
+    for a in dict.fromkeys(direct_f):
+        chains, todo = {a: [a]}, [a]
+        while todo:
+            cur = todo.pop(0)
+            for nxt in (graph.get(cur) or {}).get("flows", []):
+                if nxt not in chains:
+                    chains[nxt] = chains[cur] + [nxt]
+                    todo.append(nxt)
+        for b in dict.fromkeys(direct_f):
+            if b != a and b in chains:
+                errs.append(f"{owner}同时直接调了流程「{a}」和「{b}」，但「{a}」已经调了「{b}」（调用链：{' → '.join(chains[b])}），不要重复调「{b}」，只调「{a}」")
+        for sq in dict.fromkeys(direct_s):
+            if sq not in writes:
+                continue
+            for f, ch in chains.items():
+                if sq in (graph.get(f) or {}).get("sql", []):
+                    errs.append(f"{owner}直接调了写入 sql「{sq}」，但流程「{a}」已经调了它（调用链：{' → '.join(ch + [sq])}），不要重复写入，只调「{a}」")
+                    break
+    return errs
 
 
 def _biz(v, keys, what, errs):

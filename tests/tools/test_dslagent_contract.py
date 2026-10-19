@@ -171,6 +171,41 @@ def t_validate():
     check("## quiz" in md and "POST /quiz/answer" in md and "quiz_judge" in md and "## progress" in md and "约定没写成" in md, "CONTRACTS.md 渲染（没写成的模块标出）", md[:300])
 
 
+def t_dup():
+    print("一b、重复调用校验（quiz 例子：quiz_judge 已调 record_answer，/quiz/answer 又直接调一遍）")
+    rec = {"名": "record_answer", "入参": Pm("question_id", "given"), "出参": ["ok"], "写哪些表": ["attempt"], "调": []}
+    rec_log = dict(rec, 调=[{"名": "quiz_log", "给": ["question_id", "given"], "类": "sql"}])       # 它自己写 quiz_log
+    ext = {"record_answer": rec}
+    call_rec = {"名": "record_answer", "给": ["question_id", "given"]}
+    judge_calls_rec = lambda o: o["流程"][0]["调"].append(dict(call_rec))               # noqa: E731
+    both = lambda o: (judge_calls_rec(o), o["接口"][0]["调用"].append(dict(call_rec)))   # noqa: E731
+    r = vc("quiz", both, flows_ext=ext, other_flows=set())
+    check(has(r, "同时直接调了流程「quiz_judge」和「record_answer」") and has(r, "调用链：quiz_judge → record_answer") and has(r, "接口「/quiz/answer」"), "接口同时调 quiz_judge 与它已调的 record_answer → 拒，点名调用链", r["errors"])
+    check(vc("quiz", judge_calls_rec, flows_ext=ext, other_flows=set())["ok"], "只有 quiz_judge 调 record_answer，接口只调 quiz_judge → 通过")
+    check(vc("quiz", lambda o: o["接口"][0]["调用"].append(dict(call_rec)), flows_ext=ext, other_flows=set())["ok"], "接口调 quiz_judge 与别的没被它调的流程 → 通过")
+    # 间接：quiz_judge → mid → record_answer
+    mid = {"名": "mid_flow", "入参": Pm("question_id", "given"), "出参": ["ok"], "写哪些表": [], "调": [{"名": "record_answer", "给": ["question_id", "given"], "类": "流程"}]}
+    ext2 = {"record_answer": rec, "mid_flow": mid}
+    r = vc("quiz", lambda o: (o["流程"][0]["调"].append({"名": "mid_flow", "给": ["question_id", "given"]}), o["接口"][0]["调用"].append(dict(call_rec))), flows_ext=ext2, other_flows=set())
+    check(has(r, "quiz_judge → mid_flow → record_answer"), "间接调用也算（A → mid → B），调用链完整", r["errors"])
+    # 流程里同样
+    r = vc("quiz", lambda o: o["流程"][0]["调"].extend([{"名": "mid_flow", "给": ["question_id", "given"]}, dict(call_rec)]), flows_ext=ext2, other_flows=set())
+    check(has(r, "流程「quiz_judge」同时直接调了流程「mid_flow」和「record_answer」"), "流程里同时直接调 A 与 A 已调的 B → 拒", r["errors"])
+    # sql：接口直接调 quiz_log，而 quiz_judge 已经调了它
+    r = vc("quiz", lambda o: o["接口"][0]["调用"].append({"名": "quiz_log", "给": ["question_id", "given"]}))
+    check(has(r, "直接调了写入 sql「quiz_log」") and has(r, "quiz_judge → quiz_log"), "接口再直接调被调流程里已调的写入 sql → 拒", r["errors"])
+    r = vc("quiz", lambda o: (o["流程"][0]["调"].pop(0), o["流程"][0]["调"].append(dict(call_rec)), o["接口"][0]["调用"].append({"名": "quiz_log", "给": ["question_id", "given"]})), flows_ext={"record_answer": rec_log}, other_flows=set())
+    check(has(r, "quiz_judge → record_answer → quiz_log"), "写入 sql 经间接流程（quiz_judge → record_answer）重复也点名完整链", r["errors"])
+    # 读 sql 重复不算
+    r = vc("quiz", lambda o: (o["sql"].append({"名": "quiz_peek", "参数": Pm("question_id"), "返回": ["id"], "作用": "读", "表": ["attempt"], "用列": ["attempt.id"], "规则": []}),
+                              o["流程"][0]["调"].append({"名": "quiz_peek", "给": ["question_id"]}), o["接口"][0]["调用"].append({"名": "quiz_peek", "给": ["question_id"]})))
+    check(r["ok"], "读 sql 重复不算", r["errors"])
+    # 跨模块：别的模块的流程调用图（flow_calls）里已调 record_answer
+    other = {"hidden": {"flows": ["record_answer"], "sql": []}}
+    r = vc("quiz", lambda o: o["接口"][0]["调用"].append(dict(call_rec)), flows_ext=ext, other_flows=set(), flow_calls=other)
+    check(r["ok"], "flow_calls 里别的流程的调用图不影响本接口没直接调的情形", r["errors"])
+
+
 def t_compare():
     print("二、实现比对函数")
     ents_sql = "CREATE TABLE attempt (id INTEGER PRIMARY KEY, question_id INTEGER, given TEXT);"
@@ -224,6 +259,91 @@ def files(r):
 
 def gens(fk, marker, file):
     return [u for u in fk.of(marker) if f"本文件：{file}" in u]
+
+
+class FakeSplit(FakeC):
+    """约定步骤：整份写（没有「拆成两次调用」标记）→ 按 whole 回（默认空闲超时）；拆分第一次 / 第二次各自只回 sql + 流程 / 接口 + 界面。记下每次调用的 idle / timeout。"""
+
+    def __init__(self, whole=None, part1=None, part2=None, **kw):
+        super().__init__(**kw)
+        self.whole = whole or {"text": "", "rc": 0, "reason": "空闲超时", "cost": 0.0}
+        for key, seq in (("约定1", part1), ("约定2", part2)):
+            if seq:
+                self.bad[(key, "quiz")] = seq
+        self.limits = []
+
+    def __call__(self, system, user, tag, timeout, model=None, **kw):
+        self.limits.append(("接口约定助手" in user, timeout, kw.get("idle")))
+        return super().__call__(system, user, tag, timeout, model=model, **kw)
+
+    def reply(self, user):
+        if "接口约定助手" in user and '"模块": "quiz"' in user:
+            full = skeleton_text(contract_obj("quiz"))
+            if "只输出 queries/*.sql 与 scripts/*.zs" in user:
+                return self.pick(("约定1", "quiz"), self._sel(full, ("queries/", "scripts/")))
+            if "只输出 routes/*.zs 与 ui/*.ui" in user:
+                return self.pick(("约定2", "quiz"), self._sel(full, ("routes/", "ui/")))
+            return self.whole
+        return super().reply(user)
+
+    @staticmethod
+    def _sel(full, pres):
+        return "".join("=== " + b for b in full.split("=== ")[1:] if b.startswith(pres))
+
+
+def t_split():
+    print("一c、约定步骤超时放宽 + 拆两次调用")
+    from tools.dslagent import guard as G
+    fk = FakeSplit()
+    r, p, out = go("c_split", fk)
+    f = files(r)["contracts/quiz.skel"]
+    cq = [x for x in fk.limits if x[0]]
+    check(r["fixed"] and f["结果"] == "通过" and f.get("拆分约定") and f.get("拆分第一次") == "通过", "整份约定空闲超时 → 拆两次调用，通过", (r["stop"], f))
+    check(cq[0][2] == G.CONTRACT_IDLE and cq[0][1] >= 30, "约定调用带放宽的空闲超时（总超时不超过剩余墙钟）", cq[:3])
+    check(all(x[2] == G.CONTRACT_IDLE for x in cq) and all(x[2] is None for x in fk.limits if not x[0]), "只有约定步骤放宽，其它步骤用缺省保险", fk.limits[:6])
+    sp = [u for u in fk.of("接口约定助手") if '"模块": "quiz"' in u]
+    check(len(sp) >= 3 and "【拆成两次调用】这一次只输出 queries/*.sql" in sp[-2] and "已在上一次写好并校验通过" in sp[-1] and "=== queries/quiz_log.sql ===" in sp[-1] and "=== scripts/quiz_judge.zs ===" in sp[-1], "第二次带着第一次已校验通过的 sql + 流程骨架", [x[-200:] for x in sp])
+    check(fs_ok(r), "拆分后的约定照常冻结、实现照常往下做", {k: v["结果"] for k, v in files(r).items()})
+    # 第一次里夹了接口 → 拒，带原话重写
+    full = skeleton_text(contract_obj("quiz"))
+    fk = FakeSplit(part1=[full, FakeSplit._sel(full, ("queries/", "scripts/"))])
+    r, p, out = go("c_split_late", fk)
+    sp = [u for u in fk.of("接口约定助手") if "只输出 queries/*.sql" in u]
+    check(r["fixed"] and len(sp) == 2 and "不要写 routes/quiz.zs" in sp[1], "拆分第一次写了接口 / 界面 → 拒，带原话重写一次", (r["stop"], [x[-300:] for x in sp]))
+    # 第一次两次都不过 → 该模块约定失败
+    bad1 = FakeSplit._sel(full, ("queries/", "scripts/")).replace("-- 表: attempt", "-- 表: ghost")
+    fk = FakeSplit(part1=[bad1])
+    r, p, out = go("c_split_bad", fk)
+    f = files(r)["contracts/quiz.skel"]
+    check(f["结果"] == "失败" and "第一次（sql + 流程）没过" in f["失败原因"] and "ghost" in f["失败原因"], "拆分第一次两次都不过 → 约定失败，点名原因", f)
+    # 第二次有校验错误（接口调用缺参数）→ 整体校验报错，重写第二次时不重做第一次
+    bad2 = FakeSplit._sel(full, ("routes/", "ui/")).replace("#@ 调用 scripts/quiz_judge.zs question_id=… given=…", "#@ 调用 scripts/quiz_judge.zs question_id=…")
+    fk = FakeSplit(part2=[bad2, FakeSplit._sel(full, ("routes/", "ui/"))])
+    r, p, out = go("c_split_p2", fk)
+    n1 = len([u for u in fk.of("接口约定助手") if "只输出 queries/*.sql" in u])
+    n2 = [u for u in fk.of("接口约定助手") if "只输出 routes/*.zs" in u]
+    check(r["fixed"] and n1 == 1 and len(n2) == 2 and "缺必填参数" in n2[1], "拆分第二次整体校验不过 → 只重写第二次（第一次沿用）", (r["stop"], n1, len(n2), n2[-1][-300:] if n2 else ""))
+    # 整份没超时 → 不拆
+    fk = FakeC()
+    r, p, out = go("c_nosplit", fk)
+    check(r["fixed"] and not any("拆成两次调用" in u for u in fk.prompts) and not files(r)["contracts/quiz.skel"].get("拆分约定"), "没超时就一次写全，不拆")
+    # 环境变量可配
+    import os
+    old = {k: os.environ.get(k) for k in ("DSLAGENT_CONTRACT_IDLE", "DSLAGENT_CONTRACT_TOTAL")}
+    os.environ["DSLAGENT_CONTRACT_IDLE"], os.environ["DSLAGENT_CONTRACT_TOTAL"] = "77", "444"
+    try:
+        check(G.contract_limits() == {"idle": 77, "timeout": 444}, "DSLAGENT_CONTRACT_IDLE / _TOTAL 可配")
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    check(G.contract_limits() == {"idle": G.CONTRACT_IDLE, "timeout": G.CONTRACT_CALL_MAX} and G.CONTRACT_IDLE > G.IDLE_SEC and G.CONTRACT_CALL_MAX > G.CALL_MAX, "缺省比普通调用宽")
+
+
+def fs_ok(r):
+    return all(v["结果"] == "通过" for v in files(r).values())
 
 
 def t_full():
@@ -289,7 +409,8 @@ def t_reject():
     co = contract_obj("quiz", lambda o: o["sql"][0].update(参数=Pm("question_id", "given", opt=["given"])))
     co["流程"][0]["调"][0]["给"] = ["question_id"]
     SQL_G = "=== queries/quiz_log.sql ===\nINSERT INTO attempt(question_id, given, correct) SELECT :question_id, 'x', 0 FROM question q WHERE q.id = :question_id AND (:given IS NULL OR :given = '' OR q.answer = :given)\n"
-    fk = FakeC(bad={("生成", "查询", "queries/quiz_*.sql"): [f"=== queries/quiz_log.sql ===\n{TM.SQL_A}", SQL_G]}, contracts={"quiz": co})
+    SQL_B = "=== queries/quiz_log.sql ===\nINSERT INTO attempt(question_id, given, correct) SELECT :question_id, :given, 0 FROM question q WHERE q.id = :question_id AND q.answer = :given\n"   # 投影里的 :given 不要求保护，WHERE 里的比较要
+    fk = FakeC(bad={("生成", "查询", "queries/quiz_*.sql"): [SQL_B, SQL_G]}, contracts={"quiz": co})
     r, p, out = go("c_opt", fk)
     f = files(r)["queries/quiz_*.sql"]
     ps = gens(fk, "SQLite 语句助手", "queries/quiz_*.sql")
@@ -489,6 +610,8 @@ def t_from_plan():
 def main():
     try:
         t_validate()
+        t_dup()
+        t_split()
         t_compare()
         t_full()
         t_reject()
