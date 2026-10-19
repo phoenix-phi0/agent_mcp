@@ -34,6 +34,7 @@ opencode 不能做规划（engines.validate 提交时报错）。老的 full 规
 import json
 import os
 import re
+import shutil
 import sys
 import threading
 import time
@@ -113,6 +114,7 @@ class Model:
         self.backend = backend or (lambda s, u, tag, timeout, model=None, **kw: call_claude(s, u, timeout, model, **kw))
         self.max_calls, self.deadline = max_calls, deadline
         self.n, self.cost, self.log = 0, 0.0, []
+        self.n0, self.log_start, self.run_no = 0, 0, None      # 继续构建（modular --resume）：之前已有的调用数 / calls.json 条数；本次运行序号
         self.lock = threading.Lock()
         (self.out / "calls").mkdir(parents=True, exist_ok=True)
 
@@ -179,6 +181,8 @@ class Model:
                "cost": r.get("cost") or 0.0, "usage": r.get("usage"), "rc": r.get("rc"),
                "engine": sp["engine"], "model": _rec_model(sp), "effort": sp["effort"],
                "sys_chars": len(system), "user_chars": len(user), "t_start": round(t0, 3)}
+        if self.run_no:
+            rec["run"] = self.run_no
         if r.get("cost_est"):
             rec["cost_est"] = 1        # 被杀的调用没有 result 事件，费用是按流里 usage 估的
         if tools is not None:
@@ -797,7 +801,7 @@ NEWPROJ_LAYERED_WALL = 3600     # layered 模板默认墙钟（文件多，逐�
 NEWPROJ_MODULAR_WALL = 5400     # modular 模板默认墙钟（顶层规划 + 层次 + 分层逐文件，更多步）
 
 
-def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, split=False, layered=False, cost_cap=None, modular=False):
+def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, split=False, layered=False, cost_cap=None, modular=False, resume=False):
     """新建项目入口：不规划，直接执行 packs/newproj/newproj.zs（pack=newproj）。
     req：需求原文，或一个存在的文本文件路径；project：要新建的项目目录（不存在就建，也是引擎工作目录）；
     out_dir：记录目录（calls/、calls.json、plan.zs、plan_out.txt、result.json）；model：假模型 backend（测试用）。
@@ -811,7 +815,11 @@ def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, sp
     以「部分成功：花费达上限」结束。总调用上限随进度按文件数放宽（layered.py Run.bump）。wall 缺省 NEWPROJ_LAYERED_WALL。
     modular=True：顶层规划 → 层次 × 模块 → 按层逐层构建（modbuild.py）：能力清单（程序）→ 顶层规划（PLAN.md）→ 层次×模块（LAYERS.md）→ 数据 / 查询 / 流程 / 接口 / 界面逐层、
     层内按构建顺序逐模块，每个文件先规划再生成；capabilities.md / PLAN.md / LAYERS.md 写在 out_dir；result.json v2.文件 每文件记 层 / 模块 / 结果 / 尝试 / 失败原因 / 未实现规则，
-    v2.顶层规划 / v2.层次 记两步的结果。cost_cap、失败隔离同 layered。wall 缺省 NEWPROJ_MODULAR_WALL。"""
+    v2.顶层规划 / v2.层次 记两步的结果。cost_cap、失败隔离同 layered。wall 缺省 NEWPROJ_MODULAR_WALL。
+    modular + resume=True（CLI --modular --resume）：继续上次的构建——project / out_dir 就是上次的；不重做顶层规划和层次×模块（读 out_dir/top.json、split.json，老产物从 result.json / calls/ 还原，见 modbuild.restore_state），
+    上次通过且仍在磁盘、仍过检查的文件跳过，失败 / 跳过 / 未做的按原顺序重做（失败的带上次失败原因）；cost_cap 只算本次新花的；
+    result.json 保留上次记录：v2.运行 逐次追加（序号 / 结论 / 花费 / 本次动过的文件…），v2.累计花费；calls.json 追加、每条标 run 序号；上次的 result.json 另存 result.run<N>.json。
+    还原不了（没有 result.json / 规划还原不了）时不写任何文件，直接返回失败。"""
     from . import plan as DP
     if layered or modular:
         split = False
@@ -849,17 +857,34 @@ def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, sp
             raise Stop("DSLAGENT_MODELS 不合格：" + route_err)
         if not task:
             raise Stop("需求为空")
+        if resume and not modular:
+            raise Stop("--resume 只用于 --modular")
         if modular:
             from . import modbuild as MB
             from . import layered as LY
             info.update(split=False, layered=False, modular=True)
+            rs = None
+            if resume:
+                try:
+                    rs = MB.restore_state(out, task)
+                except MB.ResumeError as e:         # 还原不了就原样返回：不能让失败的 _finish 把上次的 result.json / calls.json 盖掉
+                    state["原因"] = f"继续构建：{e}"
+                    res.update(stop=state["原因"], status="失败", fixed=False, reply={"结果": {}, "状态": "失败", "原因": state["原因"]})
+                    return res
+                if (out / "result.json").is_file():
+                    shutil.copyfile(out / "result.json", out / f"result.run{rs['run_no'] - 1}.json")
+                info["继续构建"] = {"序号": rs["run_no"], "从哪还原": rs["restored"] or ["top.json / split.json"], "上次累计花费": rs["prior_cost"], "上次已用调用": rs["n0"]}
             t0 = time.time()
             try:
-                out_m = MB.run_modular(M, task, project, Stop, cost_cap if cost_cap is not None else LY.env_cap(), user_max, out_dir=out)
+                out_m = MB.run_modular(M, task, project, Stop, cost_cap if cost_cap is not None else LY.env_cap(), user_max, out_dir=out, resume=rs)
             finally:
                 steps["执行"] = round(time.time() - t0, 1)
+            this = dict(out_m["本次"], 结论=out_m["结论"], 状态=out_m["状态"], 原因=out_m["原因"][:400], 花费=round(M.cost, 4), 调用=M.n - M.n0,
+                        秒=round(time.time() - t_start, 1), 时间=time.strftime("%Y-%m-%d %H:%M:%S"))
+            runs = [*(rs["runs"] if rs else []), this]
             info.update(文件=out_m["文件"], 清单=out_m["清单"], 整体问题=out_m["整体问题"], 结论=out_m["结论"], codex调用=out_m["codex调用"],
-                        顶层规划=out_m["顶层规划"], 层次=out_m["层次"], 规则未覆盖=out_m["规则未覆盖"], 预算={"calls": M.n, "max_calls": M.max_calls})
+                        顶层规划=out_m["顶层规划"], 层次=out_m["层次"], 规则未覆盖=out_m["规则未覆盖"], 预算={"calls": M.n - M.n0, "max_calls": M.max_calls - M.n0},
+                        运行=runs, 累计花费=round(sum(float(x.get("花费") or 0) for x in runs), 4))
             (out / "plan_out.txt").write_text(json.dumps(out_m, ensure_ascii=False, indent=1), encoding="utf-8")
             res["versions"] = 1
             if out_m["状态"] != "成功":
@@ -963,17 +988,17 @@ def _recorded(res, record, project, task, reads):
 def _finish(res, out, M, steps, state, accept, bound, base, now, t_start):
     ch = changed(base, now) if base is not None else []
     res.update(fixed=state["状态"] == "成功", stop="" if state["状态"] == "成功" else state["原因"],
-               calls=M.n, cost=round(M.cost, 4), seconds=round(time.time() - t_start, 1), changed_files=ch,
+               calls=M.n - M.n0, cost=round(M.cost, 4), seconds=round(time.time() - t_start, 1), changed_files=ch,
                diff=diff_text(base, now, 3000) if base is not None else "", status=state["状态"])
     res["calls_by_purpose"] = {}
-    for c in M.log:
+    for c in M.log[M.log_start:]:
         k = re.sub(r"\d+$|_reask$", "", c["tag"])
         res["calls_by_purpose"][k] = res["calls_by_purpose"].get(k, 0) + 1
     res["v2"].update(步骤秒=steps, 验收=accept, 边界复核=bound)
     tests = res["v2"].get("计划内测试") or []
     res["final_test"] = (accept.get("测试摘要") or "")[:2000]
     res["reply"] = {"结果": {"改动文件": ch, "测试": accept.get("测试摘要", "")[:300],
-                           "边界复核": bound.get("结论", "未跑"), "步骤秒": steps, "调用": M.n,
+                           "边界复核": bound.get("结论", "未跑"), "步骤秒": steps, "调用": M.n - M.n0,
                            "费用": round(M.cost, 4), "测试次数": {
                                "真跑": sum(1 for x in tests if x["mode"] == "real"),
                                "跳过": sum(1 for x in tests if x["mode"] == "skipped"),

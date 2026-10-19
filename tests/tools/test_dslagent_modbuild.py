@@ -618,6 +618,181 @@ def t_kill():
     check(f["结果"] == "失败" and "输出超长" in f["失败原因"] and len(fk.of(".ui 界面助手")) == 1, "规划输出超长 → 该界面失败，不进生成", f)
 
 
+def resume(name, fake, req=REQ, **kw):
+    d = TMP / name
+    return V.run_newproj(req, d / "proj", d / "out", model=fake, modular=True, resume=True, **kw), d / "proj", d / "out"
+
+
+def rjson(out):
+    return json.loads((out / "result.json").read_text(encoding="utf-8"))
+
+
+def t_gen_ents():
+    print("十、gen 生成的实体（private 的 user）给查询 / 流程 / 接口")
+    top, sp = top_obj(), split_obj()
+    top["使用者"]["角色"] = ["teacher", "student"]
+    sp["模板"], sp["角色"] = "private", ["teacher", "student"]
+    fk = Fake(top=top, split=sp)
+    r, p, _ = go("gen_ents", fk, req=REQ + "学生和老师要登录，只看自己的数据。")
+    check(r["fixed"] and (p / "entities/user.entity").is_file(), "private：gen 生成了 user.entity，整个流程成功", (r["stop"], sorted(x.name for x in (p / "entities").iterdir()) if (p / "entities").is_dir() else ""))
+    for what, marker in (("查询规划", "单文件规划助手（查询层）"), ("查询生成", "SQLite 语句助手"), ("流程规划", "单文件规划助手（流程层）"), ("流程生成", ".zs 流程助手"),
+                         ("接口规划", "单文件规划助手（接口层）"), ("接口生成", ".zs 接口助手")):
+        ps = fk.of(marker)
+        check(ps and all("实体 user" in x and "password_hash" in x and "账号表是 user（gen 生成）" in x for x in ps), f"{what}的输入带 gen 生成的 user 实体全文 + 账号表说明", [x[-300:] for x in ps][:1])
+    check(not any("gen 生成的实体全文" in x for x in fk.of("应用建模助手")), "数据层（gen 之前）不带")
+    fk = Fake()
+    r, _, _ = go("gen_ents_none", fk)
+    check(r["fixed"] and not any("gen 生成的实体全文" in x for x in fk.of("SQLite 语句助手")), "没有 gen 实体（非 private）时不加这一段")
+
+
+def t_silent():
+    print("十一、空闲超时 / 首字前静默：同一调用重试 1 次；超长不重试")
+    idle = {"text": "", "rc": 0, "reason": "空闲超时", "cost": 0.1}
+    first = {"text": "", "rc": 0, "reason": "首字前静默超时", "cost": 0.1}
+    good = f"=== queries/quiz_log.sql ===\n{SQL_A}"
+    fk = Fake(bad={("生成", "查询", "queries/quiz_*.sql"): [idle, good]})
+    r, _, _ = go("idle1", fk)
+    f = files(r)["queries/quiz_*.sql"]
+    check(r["fixed"] and f["结果"] == "通过" and f["静默重试"] == 1 and len(fk.of("SQLite 语句助手")) == 2 and f["生成尝试"] == 1, "查询生成空闲超时 → 重试 1 次后通过（不占生成尝试）", f)
+    check(fk.of("SQLite 语句助手")[0] == fk.of("SQLite 语句助手")[1], "重试的是同一输入")
+    fk = Fake(bad={("计划", "流程", "quiz_judge"): [first, dump({"入参": ["question_id", "given"], "可选入参": [], "出参": ["ok", "n"], "用sql": ["quiz_log"], "用流程": [], "用动词": ["写库表"], "规则": ["R1"], "步骤": ["写记录"]})]})
+    r, _, _ = go("first1", fk)
+    check(r["fixed"] and files(r)["scripts/quiz_judge.zs"]["静默重试"] == 1, "规划首字前静默 → 同样重试 1 次", files(r)["scripts/quiz_judge.zs"])
+    fk = Fake(bad={("生成", "接口", "routes/quiz.zs"): [idle]})
+    r, _, _ = go("idle2", fk)
+    f = files(r)["routes/quiz.zs"]
+    check(f["结果"] == "失败" and "空闲超时" in f["失败原因"] and "已重试 1 次" in f["失败原因"] and len([x for x in fk.of(".zs 接口助手") if "本文件：routes/quiz.zs" in x]) == 2 and f["静默重试"] == 1, "重试后仍空闲超时 → 该文件失败（只重试 1 次，不是无限）", f)
+    check(files(r)["routes/progress.zs"]["结果"] == "通过" and files(r)["ui/quiz_page.ui"]["结果"] == "跳过", "失败隔离不变")
+    long_ = {"text": "x", "rc": 0, "reason": "输出超长", "cost": 0.1}
+    fk = Fake(bad={("生成", "接口", "routes/quiz.zs"): [long_]})
+    r, _, _ = go("long2", fk)
+    f = files(r)["routes/quiz.zs"]
+    check(f["结果"] == "失败" and "输出超长" in f["失败原因"] and len([x for x in fk.of(".zs 接口助手") if "本文件：routes/quiz.zs" in x]) == 1 and "静默重试" not in f, "输出超长不重试", f)
+    fk = Fake(bad={("生成", "接口", "routes/quiz.zs"): [idle, idle]}, cost=0.0)
+    r, _, _ = go("idle_cap", fk, cost_cap=0.35)
+    check("花费达上限" in r["stop"] or r["v2"]["结论"] != "成功", "重试前仍检查花费熔断（不绕过 cap）", r["stop"][:200])
+
+
+def t_resume():
+    print("十二、继续构建 --resume")
+    bad_flow = ZS_FLOW.replace("写库表 app.db quiz_log {args}", "魔法写入 app.db quiz_log {args}")
+    fk1 = Fake(bad={("生成", "流程", "scripts/quiz_judge.zs"): [f"=== scripts/quiz_judge.zs ===\n{bad_flow}"]}, cost=0.5)
+    r1, p, out = go("rs", fk1)
+    f1 = files(r1)
+    check(not r1["fixed"] and f1["scripts/quiz_judge.zs"]["结果"] == "失败" and f1["routes/quiz.zs"]["结果"] == "跳过", "第一次：流程失败，接口 / 界面跳过", {k: v["结果"] for k, v in f1.items()})
+    check((out / "top.json").is_file() and (out / "split.json").is_file(), "两步规划的结果落盘（top.json / split.json）")
+    n1, cost1 = len(json.loads((out / "calls.json").read_text(encoding="utf-8"))), r1["cost"]
+    fk2 = Fake(cost=0.5)
+    r2, _, _ = resume("rs", fk2)
+    f2 = files(r2)
+    check(r2["fixed"] and r2["v2"]["结论"] == "成功" and all(v["结果"] == "通过" for v in f2.values()), "继续构建：全部通过", (r2["stop"], {k: v["结果"] for k, v in f2.items()}))
+    check(not fk2.of("项目架构师") and not fk2.of("项目架构助手"), "不重做顶层规划和层次×模块")
+    check(not fk2.of("应用建模助手") and not fk2.of("SQLite 语句助手") and not fk2.of("单文件规划助手（数据层）") and not fk2.of("单文件规划助手（查询层）"), "已通过的数据 / 查询文件跳过，不调模型")
+    check(len(fk2.of(".zs 流程助手")) == 1 and len(fk2.of(".zs 接口助手")) == 2 and len(fk2.of(".ui 界面助手")) == 2, "失败的流程 + 跳过的接口 / 界面按原顺序重做")
+    fp = fk2.of(".zs 流程助手")[0]
+    check("上次运行失败" in fp and "魔法写入" in fp, "失败的文件把上次失败原因当「上次的报错」带入生成提示", fp[-400:])
+    fpl = fk2.of("单文件规划助手（流程层）")[0]
+    check("上次运行失败" in fpl, "规划提示也带上次失败原因")
+    check(f2["entities/quiz.entity"].get("沿用") and f2["queries/quiz_*.sql"].get("沿用") and not f2["scripts/quiz_judge.zs"].get("沿用"), "沿用的文件标「沿用」，重做的不标", {k: v.get("沿用") for k, v in f2.items()})
+    check(f2["scripts/quiz_judge.zs"]["运行"] == 2 and f2["entities/quiz.entity"]["运行"] == 1, "每个文件记是第几次运行产生的")
+    check((p / "scripts/quiz_judge.zs").is_file() and "scripts/quiz_judge.zs" in (p / "routes/progress.zs").read_text(encoding="utf-8"), "产物齐全，共用流程被两个接口调用")
+    res = rjson(out)
+    runs = res["v2"]["运行"]
+    check([x["序号"] for x in runs] == [1, 2] and runs[0]["结论"] == "部分成功" and runs[1]["结论"] == "成功", "result.json 保留上次记录并追加本次（v2.运行）", [(x["序号"], x["结论"]) for x in runs])
+    check(abs(res["v2"]["累计花费"] - (cost1 + r2["cost"])) < 1e-6 and abs(r2["cost"] - 0.5 * len(fk2.calls)) < 1e-6, "累计花费 = 上次 + 本次；cost 是本次的", (res["v2"]["累计花费"], cost1, r2["cost"]))
+    check(runs[1]["沿用"] == 4 and runs[1]["重做"] == 5 and {x["文件"] for x in runs[1]["文件"]} == {"scripts/quiz_judge.zs", "routes/quiz.zs", "routes/progress.zs", "ui/quiz_page.ui", "ui/progress_page.ui"}, "本次记录：沿用 4 个，重做 5 个", runs[1]["文件"])
+    log = json.loads((out / "calls.json").read_text(encoding="utf-8"))
+    check(len(log) == n1 + len(fk2.calls) and [c["run"] for c in log] == [1] * n1 + [2] * len(fk2.calls), "calls.json 追加不覆盖，每条标运行序号", (len(log), n1))
+    check(len({c["n"] for c in log}) == len(log) and len(list((out / "calls").glob("*.reply.txt"))) == len(log), "调用编号接着往下排，calls/ 里旧文件没被覆盖")
+    check((out / "result.run1.json").is_file() and rjson(out)["calls"] == len(fk2.calls), "上次 result.json 另存 result.run1.json；calls 是本次调用数", rjson(out)["calls"])
+    # 再继续一次：全部沿用，零调用
+    fk3 = Fake()
+    r3, _, _ = resume("rs", fk3)
+    check(r3["fixed"] and not fk3.prompts and [x["序号"] for x in rjson(out)["v2"]["运行"]] == [1, 2, 3], "全部通过后再继续：全部沿用，不调模型", len(fk3.prompts))
+
+    print("  -- 通过的文件被删 / 改坏 → 不沿用，重做")
+    (p / "scripts/quiz_judge.zs").unlink()
+    (p / "queries/quiz_log.sql").write_text("SELECT FROM WHERE", encoding="utf-8")
+    fk4 = Fake()
+    r4, _, _ = resume("rs", fk4)
+    f4 = files(r4)
+    check(r4["fixed"] and not f4["scripts/quiz_judge.zs"].get("沿用") and not f4["queries/quiz_*.sql"].get("沿用"), "文件不在磁盘 / 预编译不过的「通过」文件重做", {k: v.get("沿用") for k, v in f4.items()})
+    check(len(fk4.of("SQLite 语句助手")) == 1 and len(fk4.of(".zs 流程助手")) == 1 and "不能沿用" in fk4.of("SQLite 语句助手")[0], "重做时带「上次通过，这次不能沿用」原因", fk4.of("SQLite 语句助手")[0][-300:])
+    check(f4["routes/quiz.zs"].get("沿用") and f4["entities/quiz.entity"].get("沿用"), "没问题的上游 / 下游文件照常沿用")
+    print("  -- 接口文件被改坏 → 清掉旧块再重做，不重复")
+    q = p / "routes/quiz.zs"
+    q.write_text(q.read_text(encoding="utf-8").replace("scripts/quiz_judge.zs", "scripts/nope.zs"), encoding="utf-8")
+    fk5 = Fake()
+    r5, _, _ = resume("rs", fk5)
+    f5 = files(r5)
+    txt = q.read_text(encoding="utf-8")
+    check(r5["fixed"] and not f5["routes/quiz.zs"].get("沿用") and txt.count("接口 POST /quiz/answer") == 1 and "nope.zs" not in txt, "旧的接口块清掉后重做，文件里只有一份", (r5["stop"], txt))
+    check(f5["routes/progress.zs"].get("沿用") and len(fk5.of(".zs 接口助手")) == 1, "同批没坏的接口文件仍沿用", len(fk5.of(".zs 接口助手")))
+
+    print("  -- 熔断：cost-cap 只算本次新花的")
+    fkc = Fake(cost=1.0)
+    rc1, _, outc = go("rs_cap", fkc, cost_cap=4.5)
+    check(rc1["v2"]["结论"] == "部分成功" and rc1["calls"] == 5, "第一次花到上限停下（5 次 5.0）", (rc1["stop"], rc1["calls"], rc1["cost"]))
+    fkc2 = Fake(cost=1.0)
+    rc2, _, _ = resume("rs_cap", fkc2, cost_cap=3.5)
+    check(rc2["calls"] == 4 and abs(rc2["cost"] - 4.0) < 1e-6 and "花费达上限" in rc2["stop"], "继续构建的上限 3.5 只算本次：新花 4.0 才熔断（若算累计 5.0 会 0 次就停）", (rc2["calls"], rc2["cost"], rc2["stop"][:120]))
+    vv = rjson(outc)["v2"]
+    check(abs(vv["累计花费"] - 9.0) < 1e-6 and [x["序号"] for x in vv["运行"]] == [1, 2], "累计花费记 9.0（5.0 + 4.0）", vv["累计花费"])
+    f = files(rc2)
+    check(f["entities/quiz.entity"].get("沿用") and f["entities/progress.entity"]["运行"] == 2 and f["entities/progress.entity"]["结果"] == "通过", "上次熔断时「未做」的文件这次做了", {k: (v["结果"], v["运行"]) for k, v in f.items()})
+    fkc3 = Fake(cost=0.0)
+    rc3, _, _ = resume("rs_cap", fkc3)
+    check(rc3["fixed"] and rc3["v2"]["结论"] == "成功" and [x["序号"] for x in rjson(outc)["v2"]["运行"]] == [1, 2, 3], "不设上限再继续一次，跑到成功", (rc3["stop"], rc3["calls"]))
+    check(not any("项目架构" in x for x in fkc2.prompts + fkc3.prompts), "两次继续都没调规划")
+
+    print("  -- 老产物（没有 top.json / split.json）：从 result.json 与 calls/ 还原")
+    fko = Fake(bad={("生成", "流程", "scripts/quiz_judge.zs"): [f"=== scripts/quiz_judge.zs ===\n{bad_flow}"]})
+    ro1, po, outo = go("rs_old", fko)
+    (outo / "top.json").unlink()
+    (outo / "split.json").unlink()
+    res = rjson(outo)
+    for fl in res["v2"]["文件"]:
+        fl.pop("产出", None)                # 老版本没有「产出」
+    (outo / "result.json").write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
+    fko2 = Fake()
+    ro2, _, _ = resume("rs_old", fko2)
+    fo = files(ro2)
+    check(ro2["fixed"] and not fko2.of("项目架构师") and not fko2.of("项目架构助手"), "没有落盘也能继续：不调规划", ro2["stop"])
+    check((outo / "top.json").is_file() and (outo / "split.json").is_file() and rjson(outo)["v2"]["继续构建"]["从哪还原"], "还原后补写 top.json / split.json，result 记从哪还原", rjson(outo)["v2"]["继续构建"])
+    check(fo["queries/quiz_*.sql"].get("沿用") and fo["entities/quiz.entity"].get("沿用"), "沿用的查询文件状态从 calls/ 的规划回复还原", {k: v.get("沿用") for k, v in fo.items()})
+    check(not fko2.of("单文件规划助手（查询层）") and ro2["v2"]["结论"] == "成功", "无需重做查询规划")
+    st = "接口 GET /a/list 动作 a_list\n  返回 {}\n结束\n\n接口 POST /a/mine 动作 a_mine\n  返回 {}\n结束\n\n接口 POST /a/del 动作 a_del\n  返回 {}\n结束\n"
+    got = MB.strip_blocks(st, {"/a/mine"})
+    check("/a/mine" not in got and "/a/list" in got and "/a/del" in got and got.count("结束") == 2 and MB.strip_blocks(st, {"/a/list", "/a/mine", "/a/del"}) == "", "strip_blocks 只去掉指定接口块，其余原样（全去光返回空）", got)
+    print("  -- 还原不了：不写任何文件")
+    d = TMP / "rs_none"
+    shutil.rmtree(d, ignore_errors=True)
+    rn = V.run_newproj(REQ, d / "proj", d / "out", model=Fake(), modular=True, resume=True)
+    check(not rn["fixed"] and "继续构建" in rn["stop"] and "result.json" in rn["stop"] and not (d / "out/result.json").exists() and not (d / "out/calls.json").exists(), "没有上次的 result.json → 失败，不写 result / calls", rn["stop"])
+    rn = V.run_newproj(REQ, TMP / "rs_old/proj", TMP / "rs_old/out", model=Fake(), resume=True)
+    check(not rn["fixed"] and "--modular" in rn["stop"], "--resume 不带 --modular → 失败", rn["stop"])
+    print("  -- CLI")
+    from tools.dslagent import __main__ as M
+    seen = {}
+    real = V.run_newproj
+    V.run_newproj = lambda req, project, out, **kw: seen.update(kw) or {"fixed": True, "calls": 0, "cost": 0, "seconds": 0, "stop": "", "changed_files": []}
+    try:
+        rq = TMP / "cli_req2.txt"
+        rq.write_text("需求", encoding="utf-8")
+        M.main(["newproj", "--modular", "--resume", "--cost-cap", "2", str(rq), str(TMP / "cli_p"), "--out", str(TMP / "cli_o")])
+        check(seen.get("modular") is True and seen.get("resume") is True and seen.get("cost_cap") == 2.0, "CLI newproj --modular --resume → run_newproj(modular=True, resume=True)", seen)
+        seen.clear()
+        M.main(["newproj", "--modular", str(rq), str(TMP / "cli_p"), "--out", str(TMP / "cli_o")])
+        check(not seen.get("resume"), "不带 --resume 不继续", seen)
+        try:
+            M.main(["newproj", "--resume", str(rq), str(TMP / "cli_p"), "--out", str(TMP / "cli_o")])
+            check(False, "--resume 不带 --modular 应报错")
+        except SystemExit as e:
+            check(e.code == 2, "--resume 不带 --modular → 参数错误")
+    finally:
+        V.run_newproj = real
+
+
 def t_cli():
     print("九、CLI / 登记 / 提示词")
     from tools.dslagent import __main__ as M
@@ -659,6 +834,9 @@ def main():
         t_plans_retry()
         t_cap()
         t_kill()
+        t_gen_ents()
+        t_silent()
+        t_resume()
         t_cli()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)

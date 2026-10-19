@@ -41,11 +41,14 @@ def main(argv=None):
     n.add_argument("--layered", action="store_true", help="分层逐实体生成（layered.py）：分层清单 → 实体 → 查询 → 接口 → 界面，每个文件单独检查，失败的文件让依赖它的上层跳过；缺省仍是旧模板")
     n.add_argument("--cost-cap", type=float, default=None, help="Claude 侧累计花费上限（美元），达到就不再调模型、以「部分成功：花费达上限」结束；缺省读环境变量 NEWPROJ_COST_CAP，都没有 = 不限（只对 --layered 有效）")
     n.add_argument("--modular", action="store_true", help="顶层规划 → 层次×模块 → 按层逐层构建（modbuild.py）：能力清单 → 顶层规划(PLAN.md) → 层次×模块(LAYERS.md) → 数据/查询/流程/接口/界面，层内按构建顺序逐模块；--cost-cap 同样有效，缺省墙钟 5400 秒")
+    n.add_argument("--resume", action="store_true", help="继续上次的 --modular 构建（project / --out 用上次的）：不重做顶层规划和层次×模块，沿用上次通过且仍过检查的文件，失败 / 跳过 / 未做的按原顺序重做；--cost-cap 只算本次新花的，result.json 保留上次记录并追加，calls.json 追加")
     a = ap.parse_args(argv)
     if a.cmd == "newproj":
         from . import v2
+        if a.resume and not a.modular:
+            ap.error("--resume 要和 --modular 一起用")
         res = v2.run_newproj(Path(a.req_file).read_text(encoding="utf-8"), a.project, a.out, wall=a.wall, split=a.split,
-                             **({"modular": True, "cost_cap": a.cost_cap} if a.modular else {"layered": True, "cost_cap": a.cost_cap} if a.layered else {}))
+                             **({"modular": True, "cost_cap": a.cost_cap, **({"resume": True} if a.resume else {})} if a.modular else {"layered": True, "cost_cap": a.cost_cap} if a.layered else {}))
         print(json.dumps({k: res[k] for k in ("fixed", "calls", "cost", "seconds", "stop", "changed_files")}, ensure_ascii=False))
         return 0
 

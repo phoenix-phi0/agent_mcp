@@ -11,6 +11,10 @@
     失败的文件撤回、记失败，依赖它的上层文件跳过；超长 / 被杀＝该文件失败不终止；花费熔断（--cost-cap）沿用。
   4 整体检查：检查项目 + 全部 zs 的动词 / 参数 / 调用核对 → 成功 / 部分成功 / 失败。
 模型调用、单文件失败隔离、熔断、检查动词（校验实体 / 预编译sql / 检查项目 / 校验角色 / 核对规则 / 参数核对）都复用 layered.py。
+
+继续构建（run_modular(resume=…)，CLI newproj --modular --resume）：不重做顶层规划与层次×模块（读 out/top.json、split.json；没有就从 result.json 与 calls/ 里的原始回复还原，见 restore_state），
+已「通过」且仍在磁盘、仍过检查的文件跳过（状态从文件的「产出」或 calls/ 里的规划回复还原），「失败」「跳过」「未做」的按原顺序重做（失败的带上次失败原因当报错）；
+--cost-cap 只算本次新花的，result.json 保留上次记录（v2.运行 逐次累加），calls.json 追加并给每条标 run 序号。
 """
 import json
 import re
@@ -862,12 +866,144 @@ def plan_ifaces(x, roles, rule_nums, taken_paths, taken_acts, sqls, flows, must_
     return {"接口": out}, errs
 
 
+# ================================================================== 继续构建：还原上次状态
+
+class ResumeError(Exception):
+    pass
+
+
+def _ls(v):
+    return [str(x) for x in v] if isinstance(v, list) else []
+
+
+def norm_fp(key, o):
+    """把 calls/ 里还原出的单文件计划规整成 f_query / f_flow / f_iface 存的「产出」形状。"""
+    if key == "sql":
+        ss = o.get("sql") or []
+        return {"sql": [{"名": s["名"], "参数": _ls(s.get("参数")), "说明": str(s.get("说明") or ""), "规则": _ls(s.get("规则"))} for s in ss]}
+    if key == "入参":
+        return {k: _ls(o.get(k)) for k in ("入参", "可选入参", "出参", "用sql", "用流程", "用动词", "规则", "步骤")}
+    out = []
+    for a in o.get("接口") or []:
+        calls = a.get("调用") if isinstance(a.get("调用"), dict) else {}
+        out.append({"路径": a["路径"], "动作": a["动作"], "角色": str(a.get("角色") or ""), "入参": _ls(a.get("入参")), "用sql": _ls(a.get("用sql")),
+                    "用流程": _ls(a.get("用流程")), "调用": {k: _ls(v) for k, v in calls.items()}, "规则": _ls(a.get("规则")), "说明": str(a.get("说明") or "")})
+    return {"接口": out}
+
+
+def strip_blocks(text, paths):
+    """去掉文件里 paths 这几个路径的接口块（含结尾的「结束」和块后一个空行）；其它块（gen 的 CRUD 等）原样保留。"""
+    lines = text.splitlines(keepends=True)
+    drop = set()
+    for _m, path, ln0, body in P.blocks(text):
+        if path in paths:
+            end = (body[-1][0] if body else ln0) + 1
+            if end > len(lines) or not lines[end - 1].startswith("结束"):
+                end = body[-1][0] if body else ln0
+            drop.update(range(ln0 - 1, end))
+            if end < len(lines) and not lines[end].strip():
+                drop.add(end)
+    out = "".join(l for i, l in enumerate(lines) if i not in drop)
+    return out.rstrip("\n") + "\n" if out.strip() else ""
+
+
+def reply_text(out, c):
+    """calls/<n>_<tag>.reply.txt 里的模型原始回复（去掉末尾 [stderr] 段）。读不到返回 ""。"""
+    f = Path(out) / "calls" / f"{int(c['n']):02d}_{c['tag']}.reply.txt"
+    try:
+        return f.read_text(encoding="utf-8").split("\n\n[stderr]\n")[0]
+    except (OSError, KeyError, ValueError):
+        return ""
+
+
+def _read_json(p):
+    try:
+        return json.loads(Path(p).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def restore_state(out_dir, task, caps=None):
+    """从上次的输出目录还原继续构建要的状态：{top, split, files, calls, runs, run_no, n0, prior_cost, restored}；还原不了抛 ResumeError。
+    顶层规划：out/top.json → result.json 的 v2.顶层规划 → calls/ 里「顶层规划」那几次回复（重新校验，取最后一个通过的）。
+    层次×模块：out/split.json → calls/ 里「层次×模块」的回复（result.json 的 v2.层次 只有层 / 规则表等，不含各模块的流程 / 接口 / 界面细节，还原不了模块）。
+    老版本（没落盘 top.json / split.json）的产物走后两条，还原成功会把 top.json / split.json 补写到 out。"""
+    out = Path(out_dir)
+    res = _read_json(out / "result.json")
+    if not isinstance(res, dict) or not isinstance(res.get("v2"), dict):
+        raise ResumeError(f"{out}/result.json 读不到或不是 newproj 的结果，无法继续构建")
+    v2 = res["v2"]
+    if not v2.get("modular"):
+        raise ResumeError("上次不是 --modular 运行，无法继续构建")
+    caps = caps if caps is not None else capabilities()
+    calls = _read_json(out / "calls.json")
+    calls = calls if isinstance(calls, list) else []
+    restored = []
+    top = None
+    for src, obj in (("top.json", _read_json(out / "top.json")), ("result.json 的 v2.顶层规划", v2.get("顶层规划"))):
+        if isinstance(obj, dict):
+            r = validate_top(obj, set(caps), task)
+            if r["ok"]:
+                top = r["top"]
+                if src != "top.json":
+                    restored.append(src)
+                break
+    if top is None:
+        for c in reversed([c for c in calls if c.get("file") == "顶层规划"]):
+            r = validate_top(reply_text(out, c), set(caps), task)
+            if r["ok"]:
+                top = r["top"]
+                restored.append(f"calls/ 第 {c['n']} 次回复（顶层规划）")
+                break
+    if top is None:
+        raise ResumeError("顶层规划还原不了（没有 top.json，result.json 里的顶层规划不合格，calls/ 里也没有通过校验的回复）")
+    split = None
+    sj = _read_json(out / "split.json")
+    if isinstance(sj, dict) and set(sj.get("模块") or {}) == {m["名"] for m in top["模块"]} and sj.get("规则表") is not None:
+        split = sj
+    if split is None:
+        for c in reversed([c for c in calls if c.get("file") == "层次×模块"]):
+            r = validate_split(reply_text(out, c), top, caps, task)
+            if r["ok"]:
+                split = r["split"]
+                restored.append(f"calls/ 第 {c['n']} 次回复（层次×模块）")
+                break
+    if split is None:
+        raise ResumeError("层次×模块还原不了（没有 split.json，calls/ 里也没有能通过校验的「层次×模块」回复）")
+    if restored:
+        (out / "top.json").write_text(json.dumps(top, ensure_ascii=False, indent=1), encoding="utf-8")
+        (out / "split.json").write_text(json.dumps(split, ensure_ascii=False, indent=1), encoding="utf-8")
+    files = [r for r in (v2.get("文件") or []) if isinstance(r, dict) and r.get("文件")]
+    runs = v2.get("运行")
+    if not isinstance(runs, list) or not runs:      # 老结果没有逐次记录：把上次整个当第 1 次
+        runs = [{"序号": 1, "结论": v2.get("结论", ""), "状态": res.get("status", ""), "原因": str(res.get("stop") or "")[:400], "花费": float(res.get("cost") or 0),
+                 "调用": int(res.get("calls") or 0), "秒": res.get("seconds"), "文件": files}]
+    for c in calls:
+        c.setdefault("run", 1)
+    ns = [int(c["n"]) for c in calls if str(c.get("n", "")).isdigit()]
+    ns += [int(f.name.split("_", 1)[0]) for f in (out / "calls").glob("*_*.txt") if f.name.split("_", 1)[0].isdigit()]
+    return {"top": top, "split": split, "files": files, "calls": calls, "runs": runs, "run_no": max(int(r.get("序号") or 0) for r in runs) + 1,
+            "n0": max(ns, default=0), "prior_cost": round(sum(float(r.get("花费") or 0) for r in runs), 4), "restored": restored}
+
+
 # ================================================================== 3 逐层构建
 
 class ModRun(LY.Run):
-    def __init__(self, M, task, project, stop_cls, cap=None, out_dir=None, verbs_root=None):
+    RETRY_SILENT = (G.R_IDLE, G.R_FIRST)           # 空闲超时 / 首字前静默：同一调用重试 1 次再判失败（输出超长、被杀、熔断不重试）
+
+    def __init__(self, M, task, project, stop_cls, cap=None, out_dir=None, verbs_root=None, resume=None):
         super().__init__(M, task, project, stop_cls, cap)
         self.out = Path(out_dir) if out_dir else self.root
+        self.resume = resume                # restore_state() 的结果；None = 全新运行
+        self.run_no = resume["run_no"] if resume else 1
+        self.prev = {r["文件"]: r for r in resume["files"]} if resume else {}      # 上次每个文件的记录
+        self.data_changed = False
+        self.ui_check = None
+        M.run_no = self.run_no
+        if resume:
+            self.n0 = self.k = M.n0 = M.n = resume["n0"]
+            M.log[:0] = resume["calls"]
+            M.log_start = len(resume["calls"])
         self.caps = capabilities(verbs_root)
         self.vpack = verb_packs(self.caps)
         self.pm = {n: _prompt(f"sys_m{n}.md") for n in ("top", "split", "plan_ent", "plan_sql", "plan_flow", "plan_iface", "plan_ui",
@@ -917,6 +1053,23 @@ class ModRun(LY.Run):
         if b["ok"] != "是":
             self.fatal = f"gen 生成的项目检查不过：{b['msg']}"
 
+    def gen_ents(self):
+        """gen 生成的实体文件（entities/ 里不属于任何业务模块的，如 private 的 user）全文。"""
+        d = self.root / "entities"
+        mods = {m["名"] for m in self.top["模块"]}
+        fs = [f for f in sorted(d.glob("*.entity")) if f.stem not in mods] if d.is_dir() else []
+        return "\n\n".join(f.read_text(encoding="utf-8").strip() for f in fs), [f.stem for f in fs]
+
+    def ents_with_gen(self, names):
+        """业务实体全文 + gen 生成的实体全文（含真实表名 / 列名）。查询 / 流程 / 接口的规划与生成输入都用它。"""
+        text = self.ent_text(names)
+        gen, stems = self.gen_ents()
+        if not gen:
+            return text
+        acc = [x for x in stems if x in ACCOUNT_ENTS]
+        note = (f"账号表是 {acc[0]}（gen 生成）；" if acc else "") + "它们不属于任何业务模块、所有模块都能直接用；表名就是实体名，列名以实体里的「字段」为准（另有隐含 id）"
+        return f"{text or '（无）'}\n\ngen 生成的实体全文（{note}）：\n{gen}"
+
     def ok_mods(self, layer):
         return {r["模块"] for r in self.recs if r["层"] == layer and r["结果"] == "通过"}
 
@@ -962,10 +1115,24 @@ class ModRun(LY.Run):
     def mrec(self, layer, file, m, deps=()):
         rec = self.new(layer, file, m, deps)
         rec["模块"] = m
+        rec["运行"] = self.run_no
         return rec
 
     def run_file(self, layer, file, m, deps, fn, *a):
+        old = self.prev.get(file)
+        note = ""
+        if old and old["结果"] == "通过" and not self.bad_deps({"依赖": deps}):
+            note = self.try_carry(layer, file, m, old, a[0] if a else None)
+            if not note:
+                return self.state[file]
+            self.bump(4 if layer in ("数据", "查询", "界面") else 8)
+            self.discard_stale(layer, file, old)
+            note = f"上次通过，这次不能沿用：{note}"
         rec = self.mrec(layer, file, m, deps)
+        if old and old["结果"] == "失败" and old.get("失败原因"):
+            rec["上次失败"] = f"上次运行失败：{old['失败原因']}"
+        elif note:
+            rec["上次失败"] = note
         bad = self.bad_deps(rec)
         if bad:
             rec.update(结果="跳过", 失败原因="依赖的文件没写成：" + "、".join(bad))
@@ -974,11 +1141,129 @@ class ModRun(LY.Run):
             fn(rec, *a)
         except FileFail as e:
             rec.update(结果="失败", 失败原因=str(e)[:600])
+        if layer == "数据" and rec["结果"] == "通过":
+            self.data_changed = True
         return rec
+
+    # ------------------------------------------------------------ 继续构建：沿用上次通过的文件
+    def try_carry(self, layer, file, m, old, it):
+        """上次通过的文件：仍在磁盘、仍过检查就沿用（把上次记录原样放回、还原内存里的 sql / 流程 / 接口状态），返回 None；不能沿用返回原因。"""
+        p = self.root / file
+        fp = None
+        if layer == "查询":
+            fp = old.get("产出") or self.replay_plan(file, "sql")
+            if fp is None:
+                return "上次的 sql 计划还原不了"
+            names = [s["名"] for s in fp["sql"]]
+            miss = [n for n in names if not (self.root / "queries" / f"{n}.sql").is_file()]
+            if miss:
+                return f"sql 文件不在磁盘：{miss}"
+            if names:
+                blk = {"ok": "是", "files": [{"file": f"queries/{n}.sql", "content": (self.root / "queries" / f"{n}.sql").read_text(encoding="utf-8")} for n in names]}
+                c = self.v["预编译sql"](blk, self.ent_text())
+                if c["ok"] != "是":
+                    return "预编译不过：" + str(c["msg"])[:300]
+        elif not p.is_file():
+            return "文件不在磁盘"
+        elif layer == "数据":
+            from tools.entity import parse
+            try:
+                names = [x.name for x in parse(p.read_text(encoding="utf-8"))]
+            except Exception as ex:  # noqa: BLE001
+                return f"实体解析失败：{ex}"
+            if sorted(names) != sorted(self.mod(m)["数据"]):
+                return f"实体 {names} 与计划 {self.mod(m)['数据']} 不符"
+        elif layer == "流程":
+            fp = old.get("产出") or self.replay_plan(file, "入参")
+            if fp is None:
+                return "上次的流程计划还原不了"
+            name = it["流程"]
+            body = p.read_text(encoding="utf-8")
+            flows, sqls = self.accessible_flows(m), self.visible_sqls(m)
+            errs = check_zs(body, file, self.vpack, set(self.caps), False)
+            if not errs:
+                wrapped, decl = wrap_flow(body, name, [*fp["入参"], *fp["可选入参"]])
+                errs += P.check_text(wrapped, file, self.root / "queries", decl, P.identity_vars(self.root))[0]
+                errs += check_calls(body, file, self.flowinfo, set(flows), self.disk_scripts())
+                errs += check_sql_scope(body, file, set(sqls))
+            if errs:
+                return "；".join(errs)[:400]
+            self.flowinfo[name] = {"模块": m, "入参": fp["入参"], "可选入参": fp["可选入参"], "出参": fp["出参"], "用sql": fp["用sql"], "文件": file}
+            self.claim(fp["规则"], file)
+        elif layer == "接口":
+            fp = old.get("产出") or self.replay_plan(file, "接口")
+            if fp is None:
+                return "上次的接口计划还原不了"
+            items = fp["接口"]
+            text = p.read_text(encoding="utf-8")
+            have = {path for _m, path, _n, _l in P.blocks(text)}
+            miss = [a["路径"] for a in items if a["路径"] not in have]
+            if miss:
+                return f"文件里没有接口块 {miss}"
+            errs = check_zs(self.iface_body(text, items), file, self.vpack, set(self.caps), True)
+            errs += check_calls(text, file, self.flowinfo, set(self.accessible_flows(m)), self.disk_scripts())
+            if errs:
+                return "；".join(errs)[:400]
+            self.ifaces[file] = items
+            for a in items:
+                self.paths[a["路径"]] = {"动作": a["动作"], "入参": a["入参"], "文件": file, "实体": m, "说明": a["说明"]}
+                self.acts.add(a["动作"])
+            self.claim(_dedup([h for a in items for h in a["规则"]]), file)
+        elif layer == "界面":
+            if self.ui_check is None:
+                self.ui_check = self.v["检查项目"]({})
+            if self.ui_check["ok"] != "是" and file in str(self.ui_check["msg"]):
+                return "检查项目不过：" + str(self.ui_check["msg"])[:300]
+        if layer == "查询":
+            self.msql[m] = {s["名"]: list(s["参数"]) for s in fp["sql"]}
+            for s in fp["sql"]:
+                self.sql_owner[s["名"]] = file
+                self.claim(s["规则"], file)
+        rec = dict(old)
+        rec["沿用"] = True
+        if fp is not None:
+            rec["产出"] = fp
+        self.recs.append(rec)
+        self.state[file] = rec
+        return None
+
+    def discard_stale(self, layer, file, old):
+        """不能沿用的旧产物先清掉，免得重做时撞名（旧 sql 名被占 / 接口块追加后重复）。流程、数据、界面重做时整个文件覆盖，不用清。"""
+        if layer == "查询":
+            fp = old.get("产出") or self.replay_plan(file, "sql")
+            for sq in (fp or {}).get("sql", []):
+                (self.root / "queries" / f"{sq['名']}.sql").unlink(missing_ok=True)
+        elif layer == "接口":
+            fp = old.get("产出") or self.replay_plan(file, "接口")
+            p = self.root / file
+            if fp and p.is_file():
+                left = strip_blocks(p.read_text(encoding="utf-8"), {a["路径"] for a in fp["接口"]})
+                if left.strip():
+                    p.write_text(left, encoding="utf-8", newline="")
+                else:
+                    p.unlink()
+
+    def replay_plan(self, rel, key):
+        """从上次 calls.json + calls/ 里该文件的规划回复还原单文件计划（旧版没把计划落进 result.json）：取最后一个含 key 的 JSON 对象。"""
+        got = None
+        for c in (self.resume or {}).get("calls", []):
+            if c.get("file") != rel:
+                continue
+            txt = reply_text(self.out, c)
+            o, err = S._obj(txt) if txt else (None, "x")
+            if err or not isinstance(o, dict) or key not in o:
+                continue
+            got = o
+        if got is None:
+            return None
+        try:
+            return norm_fp(key, got)
+        except (TypeError, AttributeError, KeyError):
+            return None
 
     def fplan(self, rec, sysp, body, validate):
         """单文件规划 ≤2 次：校验不过带报错重写；两次不过抛 FileFail。"""
-        err = "无"
+        err = rec.get("上次失败") or "无"
         for k in (1, 2):
             rec["规划尝试"] = k
             try:
@@ -995,6 +1280,8 @@ class ModRun(LY.Run):
     def bump_budget(self):
         n = 0
         for f in self.expected:
+            if self.prev.get(f["文件"], {}).get("结果") == "通过":
+                continue                # 继续构建：上次通过的先不算预算，不能沿用时再补（run_file）
             n += 4 if f["层"] in ("数据", "查询", "界面") else 8
         self.bump(n)
 
@@ -1018,6 +1305,7 @@ class ModRun(LY.Run):
                 self.top = r["top"]
                 self.deps = top_deps(self.top)
                 (self.out / "PLAN.md").write_text(plan_md(self.top), encoding="utf-8")
+                (self.out / "top.json").write_text(json.dumps(self.top, ensure_ascii=False, indent=1), encoding="utf-8")
                 return
             err = "；".join(r["errors"])
         self.fatal = f"顶层规划两次都没过：{err}"[:800]
@@ -1043,6 +1331,7 @@ class ModRun(LY.Run):
                 self.layers = {"模板": self.split["模板"], "角色": self.split["角色"], "角色模板": self.split["角色模板"],
                                "层": self.split["层"], "规则表": self.split["规则表"]}
                 (self.out / "LAYERS.md").write_text(layers_md(self.top, self.split), encoding="utf-8")
+                (self.out / "split.json").write_text(json.dumps(self.split, ensure_ascii=False, indent=1), encoding="utf-8")
                 self.plan_files()
                 return
             err = "；".join(r["errors"])
@@ -1083,8 +1372,16 @@ class ModRun(LY.Run):
             if self.fatal:
                 return
             fns[layer]([f for f in self.expected if f["层"] == layer])
-            if layer == "数据":
+            if layer == "数据" and self.need_gen():
                 self.gen()
+
+    def need_gen(self):
+        """全新运行总要 gen；继续构建时只有数据层有文件重做过、或 gen 的产物不全才再 gen（gen 不覆盖已有文件）。"""
+        if not self.resume or self.data_changed:
+            return True
+        if self.layers["模板"] == "private" and not (self.root / "entities" / "user.entity").is_file():
+            return True
+        return any(not (self.root / "queries" / f"{e}_list.sql").is_file() for m in self.ok_ents() for e in self.mod(m)["数据"])
 
     # -- 数据
     def layer_data(self, items):
@@ -1128,7 +1425,7 @@ class ModRun(LY.Run):
     def f_query(self, rec, it):
         m, rel = it["模块"], it["文件"]
         nums = self.mod(m)["规则号"]
-        ents = self.ent_text(self.dscope(m))
+        ents = self.ents_with_gen(self.dscope(m))
         taken = self.disk_sqls()
         gen_names = L.gen_sqls([e for mm in self.split["模块"].values() for e in mm["数据"]])
         dep_sigs = self.sig_text({s: p for d in self.dscope(m) - {m} for s, p in self.msql.get(d, {}).items()}, ())
@@ -1139,7 +1436,7 @@ class ModRun(LY.Run):
         for s in fp["sql"]:
             self.claim(s["规则"], rel)
         if not want:
-            rec.update(结果="通过", 说明="无定制 sql")
+            rec.update(结果="通过", 说明="无定制 sql", 产出=fp)
             self.msql[m] = {}
             return
 
@@ -1166,6 +1463,7 @@ class ModRun(LY.Run):
                 self.write(f["file"], f["content"])
             return None
         self.gen_loop(rec, attempt)
+        rec["产出"] = fp
         self.msql[m] = {s["名"]: list(s["参数"]) for s in fp["sql"]}
         for n in want:
             self.sql_owner[n] = rel
@@ -1199,7 +1497,7 @@ class ModRun(LY.Run):
         packs = set(self.mod(m)["能力"])
         verbs = {v for p in packs for v in [x["名"] for x in self.caps.get(p, [])]}
         own = {s: p for s, p in self.msql.get(m, {}).items()}
-        ctx = (f"本流程：{json.dumps(fdef, ensure_ascii=False)}\n本模块：{self.mod_view(m)}\n本模块与依赖模块的实体全文：{self.ent_text(self.dscope(m)) or '（无）'}\n"
+        ctx = (f"本流程：{json.dumps(fdef, ensure_ascii=False)}\n本模块：{self.mod_view(m)}\n本模块与依赖模块的实体全文：{self.ents_with_gen(self.dscope(m)) or '（无）'}\n"
                f"本模块的 sql 全文：\n{self.sql_full(sorted(own))}\n依赖模块与 gen 自带 sql（名字参数）：{self.sig_text(sqls, own)}\n"
                f"已建好、可调的流程（签名）：{json.dumps({k: {x: v[x] for x in ('入参', '可选入参', '出参')} for k, v in flows.items()}, ensure_ascii=False)}\n"
                f"能力清单（本模块用到的包）：\n{self.cap_for(m)}\n分配的规则：{self.rule_view(nums)}")
@@ -1234,6 +1532,7 @@ class ModRun(LY.Run):
             return None
         unimpl = self.with_rules(rec, fp["规则"], attempt, state, lambda: (used_sql, state["body"]))
         rec["未实现规则"] = unimpl
+        rec["产出"] = fp
         self.flowinfo[name] = {"模块": m, "入参": fp["入参"], "可选入参": fp["可选入参"], "出参": fp["出参"], "用sql": fp["用sql"], "文件": rel}
 
     def flow_text(self, names):
@@ -1303,7 +1602,7 @@ class ModRun(LY.Run):
         taken_paths = set(self.paths) | {x["path"] for x in routes}
         taken_acts = set(self.acts) | {x["action"] for x in routes if x.get("action")}
         own = self.msql.get(m, {})
-        ents = self.ent_text(self.dscope(m))
+        ents = self.ents_with_gen(self.dscope(m))
         ctx = (f"本文件：{rel}\n本模块：{self.mod_view(m)}\n本模块与依赖模块的实体全文：{ents or '（无）'}\n本模块的 sql 全文：\n{self.sql_full(sorted(own))}\n"
                f"依赖模块与 gen 自带 sql（名字参数）：{self.sig_text(sqls, own)}\n"
                f"已建好、可调的流程（签名）：{json.dumps({k: {x: v[x] for x in ('入参', '可选入参', '出参')} for k, v in flows.items()}, ensure_ascii=False)}\n"
@@ -1350,6 +1649,7 @@ class ModRun(LY.Run):
             return None
         unimpl = self.with_rules(rec, rules, attempt, state, lambda: (self.sql_full(used_s), state["body"] + "\n" + self.flow_text(used_f)))
         rec["未实现规则"] = unimpl
+        rec["产出"] = fp
         self.ifaces[rel] = fp["接口"]
         for a in fp["接口"]:
             self.paths[a["路径"]] = {"动作": a["动作"], "入参": a["入参"], "文件": rel, "实体": m, "说明": a["说明"]}
@@ -1438,18 +1738,33 @@ class ModRun(LY.Run):
     def drive(self):
         self.unclaimed = []
         (self.out / "capabilities.md").write_text(cap_markdown(self.caps), encoding="utf-8")
-        self.make_top()
-        if self.fatal:
-            return
-        self.make_split()
-        if self.fatal:
-            return
+        if self.resume:
+            self.start_resume()
+        else:
+            self.make_top()
+            if self.fatal:
+                return
+            self.make_split()
+            if self.fatal:
+                return
         self.build_all()
 
+    def start_resume(self):
+        """继续构建：顶层规划和层次×模块从上次保存的结果读回，不调模型。"""
+        R = self.resume
+        self.top, self.split = R["top"], R["split"]
+        self.deps = top_deps(self.top)
+        self.layers = {"模板": self.split["模板"], "角色": self.split["角色"], "角色模板": self.split["角色模板"],
+                       "层": self.split["层"], "规则表": self.split["规则表"]}
+        (self.out / "PLAN.md").write_text(plan_md(self.top), encoding="utf-8")
+        (self.out / "LAYERS.md").write_text(layers_md(self.top, self.split), encoding="utf-8")
+        self.plan_files()
 
-def run_modular(M, task, project, stop_cls, cap=None, max_calls=None, out_dir=None, verbs_root=None):
-    """跑完整个流程，返回 {状态, 结论, 原因, 文件, 清单, 整体问题, 花费, codex调用, 顶层规划, 层次}。不抛业务错误（Stop 在这里接住）。"""
-    r = ModRun(M, task, project, stop_cls, cap, out_dir, verbs_root)
+
+def run_modular(M, task, project, stop_cls, cap=None, max_calls=None, out_dir=None, verbs_root=None, resume=None):
+    """跑完整个流程，返回 {状态, 结论, 原因, 文件, 清单, 整体问题, 花费, codex调用, 顶层规划, 层次, 本次}。不抛业务错误（Stop 在这里接住）。
+    resume：restore_state() 的结果，给了就是继续构建（不重做两步规划，沿用上次通过且仍过检查的文件，其余按原顺序重做；cap 只算本次新花的）。"""
+    r = ModRun(M, task, project, stop_cls, cap, out_dir, verbs_root, resume)
     r.user_max = max_calls
     halt = None
     try:
@@ -1462,11 +1777,17 @@ def run_modular(M, task, project, stop_cls, cap=None, max_calls=None, out_dir=No
             problems = r.final()
         except Exception as e:  # noqa: BLE001
             problems = [f"整体检查出错：{type(e).__name__}: {e}"]
-    if r.split and halt:       # 被熔断 / 预算停下时，层次×模块里还没建记录的文件记「未做」
+    if r.split and halt:       # 被熔断 / 预算停下时，层次×模块里还没建记录的文件记「未做」（继续构建时没轮到的文件保留上次的记录）
         have = {x["文件"] for x in r.recs}
         for f in r.expected:
             if f["文件"] not in have:
-                r.mrec(f["层"], f["文件"], f["模块"], f["依赖"])
+                if f["文件"] in r.prev:
+                    rec = dict(r.prev[f["文件"]])
+                    rec["本次未轮到"] = True
+                    r.recs.append(rec)
+                    r.state[f["文件"]] = rec
+                else:
+                    r.mrec(f["层"], f["文件"], f["模块"], f["依赖"])
     lay = None
     if r.split:
         lay = {"模板": r.split["模板"], "角色": r.split["角色"], "层": r.split["层"], "规则数": len(r.split["规则表"]), "文件数": len(r.expected),
@@ -1478,6 +1799,31 @@ def run_modular(M, task, project, stop_cls, cap=None, max_calls=None, out_dir=No
         out.update(状态="失败", 结论="部分成功", 原因="部分成功：规则没有落到任何文件：" + "；".join(r.unclaimed))
     elif r.unclaimed:
         out["原因"] += "；规则没有落到任何文件：" + "；".join(r.unclaimed)
+    mine = [x for x in r.recs if x.get("运行") == r.run_no and not x.get("沿用") and not x.get("本次未轮到")]
+    out["本次"] = {"序号": r.run_no, "沿用": sum(1 for x in r.recs if x.get("沿用")), "重做": len(mine),
+                 "文件": [{k: x.get(k) for k in ("文件", "层", "模块", "结果", "失败原因", "调用", "规划尝试", "生成尝试", "静默重试", "上次失败") if x.get(k) not in (None, "", 0)} | {"文件": x["文件"], "结果": x["结果"]}
+                        for x in mine]}
     out.update(顶层规划=r.top, 层次=None if not r.split else {k: r.split[k] for k in ("模板", "角色", "层", "层说明", "全局约束", "规则表")},
                规则未覆盖=list(r.unclaimed))
     return out
+
+
+def main(argv=None):
+    """python -m tools.dslagent.modbuild restore <out_dir> [需求文件]：把上次输出目录里的顶层规划 / 层次×模块还原成 top.json / split.json（继续构建会自动做这步，这里单独验证用）。"""
+    a = list(sys.argv[1:] if argv is None else argv)
+    if len(a) < 2 or a[0] != "restore":
+        print(main.__doc__)
+        return 2
+    task = Path(a[2]).read_text(encoding="utf-8") if len(a) > 2 else ""
+    try:
+        st = restore_state(a[1], task)
+    except ResumeError as e:
+        print("还原失败：" + str(e))
+        return 1
+    print(json.dumps({"模块": st["top"]["构建顺序"], "文件记录": len(st["files"]), "运行次数": st["run_no"] - 1, "已用调用": st["n0"], "累计花费": st["prior_cost"],
+                      "从哪还原": st["restored"] or ["top.json / split.json"]}, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

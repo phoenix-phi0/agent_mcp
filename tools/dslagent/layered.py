@@ -100,12 +100,13 @@ class Run:
         self.user_max = None
         self.base = 0
         self.bumped = 0
+        self.n0 = 0                               # 继续构建时：之前已用的调用数（总调用上限只算本次新增）
 
     # ------------------------------------------------------------ 调用预算
     def bump(self, n):
         """总调用上限随进度放宽：每确认一批文件按「规划 + 生成」最坏次数加；显式给的 max_calls 取较小值。"""
         self.base += n
-        self.M.max_calls = min(self.user_max, self.base) if self.user_max else self.base
+        self.M.max_calls = (min(self.user_max, self.base) if self.user_max else self.base) + self.n0
 
     @staticmethod
     def file_calls(item):
@@ -115,29 +116,37 @@ class Run:
     def system(self):
         return model_system()
 
+    RETRY_SILENT = ()                             # 这类失败（空闲超时 / 首字前静默）同一调用自动重试 1 次；layered 缺省不重试
+
     def ask(self, prompt, rec=None):
-        """一次模型调用 → 回复文本。花费熔断 / 总调用或墙钟用完 → Halt；没回应：超长 / 被杀 → FileFail，其它 → _Retry。"""
-        if self.cap and self.M.cost >= self.cap:
-            self.capped = True
-            raise Halt(f"花费达上限（${self.M.cost:.2f} ≥ ${self.cap:.2f}）", "花费")
-        self.k += 1
-        try:
-            r = self.M._call(self.system(), prompt, f"dsl{self.k:02d}")
-        except self.Stop as e:
-            raise Halt(str(e), "预算") from None
-        if rec is not None:
-            rec["调用"] = rec.get("调用", 0) + 1
-        try:
-            self.M.log[-1]["file"] = (rec or {}).get("文件", "")
-        except IndexError:
-            pass
-        try:
-            return self.M._text(r)
-        except RuntimeError as e:
-            why = getattr(e, "reason", "") or ""
-            if why in FAST_FAIL or str(why).startswith("rc=-9"):
-                raise FileFail(f"模型没有完成输出（{why}）") from None
-            raise _Retry(str(e)) from None
+        """一次模型调用 → 回复文本。花费熔断 / 总调用或墙钟用完 → Halt；没回应：超长 / 被杀 → FileFail，其它 → _Retry。
+        RETRY_SILENT 里的失败（空闲超时 / 首字前静默）原样重试 1 次再判；输出超长、被杀、熔断不重试。"""
+        for attempt in (1, 2):
+            if self.cap and self.M.cost >= self.cap:
+                self.capped = True
+                raise Halt(f"花费达上限（${self.M.cost:.2f} ≥ ${self.cap:.2f}）", "花费")
+            self.k += 1
+            try:
+                r = self.M._call(self.system(), prompt, f"dsl{self.k:02d}")
+            except self.Stop as e:
+                raise Halt(str(e), "预算") from None
+            if rec is not None:
+                rec["调用"] = rec.get("调用", 0) + 1
+            try:
+                self.M.log[-1]["file"] = (rec or {}).get("文件", "")
+            except IndexError:
+                pass
+            try:
+                return self.M._text(r)
+            except RuntimeError as e:
+                why = getattr(e, "reason", "") or ""
+                if why in self.RETRY_SILENT and attempt == 1:
+                    if rec is not None:
+                        rec["静默重试"] = rec.get("静默重试", 0) + 1
+                    continue
+                if why in FAST_FAIL or str(why).startswith("rc=-9"):
+                    raise FileFail(f"模型没有完成输出（{why}）" + ("，已重试 1 次" if attempt == 2 else "")) from None
+                raise _Retry(str(e)) from None
 
     # ------------------------------------------------------------ 记录 / 文件
     def step(self, name, **kw):
@@ -311,7 +320,7 @@ class Run:
 
     def gen_loop(self, rec, attempt):
         """生成最多 2 次；attempt(err) 返回 None 表示通过，返回文本表示这次不过的原因。"""
-        err = "无"
+        err = rec.get("上次失败") or "无"
         for k in (1, 2):
             rec["生成尝试"] = k
             rec["重写"] = k - 1
@@ -672,7 +681,7 @@ def conclude(r, M, halt, problems, cap, lay):
     for x in r.recs:        # 规则核对时被熔断：未核对规则也要报出来
         if x.get("未核对规则"):
             unimpl.setdefault(x["文件"], []).extend(f"（未核对）{t}" for t in x["未核对规则"])
-    out = {"文件": r.recs, "清单": lay, "步骤": r.steps, "整体问题": problems, "花费": round(M.cost, 4), "codex调用": sum(1 for c in M.log if c.get("engine") == "codex")}
+    out = {"文件": r.recs, "清单": lay, "步骤": r.steps, "整体问题": problems, "花费": round(M.cost, 4), "codex调用": sum(1 for c in M.log[getattr(M, "log_start", 0):] if c.get("engine") == "codex")}
     if r.fatal:
         out.update(状态="失败", 结论="失败", 原因=r.fatal)
     elif halt and halt.kind == "花费":
