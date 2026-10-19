@@ -35,7 +35,7 @@ ROUTES = """\
   如果 {session.count} 为空
     设 session.count = 1
   否则
-    设 session.count = 相加 {session.count} 1
+    设 session.count = 计算 {session.count} + 1
   结束
   返回 {"n":"{session.count}"}
 结束

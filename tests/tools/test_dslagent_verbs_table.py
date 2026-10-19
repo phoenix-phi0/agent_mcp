@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.dslagent import plan as P  # noqa: E402
 
 VERBS_MD = P.PKG / "agents" / "shared" / "verbs.md"
-NOT_LISTED = {"归一化", "算比例"}
+NOT_LISTED = {"归一化"}
 IN_PROSE = {"列表加项"}      # 只在 并行派任务 的说明文字里点名（「用 列表加项 拼」）
 
 PASS = FAIL = 0

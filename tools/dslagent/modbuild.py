@@ -103,6 +103,8 @@ def capabilities(verbs_root=None):
         else:
             lines = [l.lstrip("#").strip() for l in Path(impl).read_text(encoding="utf-8", errors="replace").splitlines() if l.strip().startswith("#")]
             desc = lines[:1]
+        if desc and desc[0].startswith("旧写法"):
+            continue    # 旧写法（相加 / 算比例 → 计算）不列给模型，免得继续写
         out[pack].append({"名": name, "参数": reg.params_of(name), "说明": desc[0] if desc else ""})
     return out
 

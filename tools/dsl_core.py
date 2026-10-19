@@ -70,6 +70,14 @@ CONDITION_OPS = [
     ("大于", "gt"), ("小于", "lt"),
     ("开头是", "startswith"), ("结尾是", "endswith"),
 ]
+# 符号写法是中文运算符的别名，语义完全一样。长的排前面（>= 先于 >），
+# 紧贴写法按子串找时才不会把 >= 切成 > 加 =。中文仍是规范写法。
+SYMBOL_OPS = [
+    (">=", "ge"), ("<=", "le"), ("==", "eq"), ("!=", "ne"),
+    ("＝＝", "eq"), ("≥", "ge"), ("≤", "le"), ("≠", "ne"),
+    (">", "gt"), ("<", "lt"), ("＞", "gt"), ("＜", "lt"),
+]
+CONDITION_OPS += SYMBOL_OPS
 UNARY_OPS = {"empty", "not_empty"}
 OP_BY_WORD = dict(CONDITION_OPS)
 
@@ -338,6 +346,17 @@ def msg_size(msg: dict) -> int:
 # ----------------------------------------------------------------------
 
 
+SINGLE_EQ_RE = re.compile(r"(?<![=!<>＝≥≤≠])[=＝](?![=＝])")
+
+
+def single_eq_hint(raw: str) -> str:
+    """条件拆不出来、而且原文（{…} 外）有单个「=」时的提示，否则空串。
+    单个 = 不当运算符——赋值和比较混用是常见笔误。"""
+    if SINGLE_EQ_RE.search(_mask_braces(raw)):
+        return "。单个「=」不是比较运算符，比较用 等于 或 =="
+    return ""
+
+
 def split_condition(cond: str):
     """拆成 (左值, 运算符, 右值)，拆不出返回 None。
 
@@ -424,7 +443,8 @@ def parse_condition(cond: str, lineno: int):
         raise DSLError(
             f"第 {lineno + 1} 行：看不懂的条件「{cond}」。可用："
             f"包含 / 不包含 / 等于 / 不等于 / 为空 / 不为空 / "
-            f"大于 / 小于 / 不小于 / 不大于 / 开头是 / 结尾是")
+            f"大于 / 小于 / 不小于 / 不大于 / 开头是 / 结尾是（符号 > < >= <= == != 也可以）"
+            + single_eq_hint(cond))
     return parsed
 
 
@@ -668,8 +688,9 @@ def eval_cond_expr(tree, expand, lineno: int, value=None) -> bool:
         raise DSLError(
             f"第 {lineno + 1} 行：看不懂的条件「{raw}」。可用："
             f"包含 / 不包含 / 等于 / 不等于 / 为空 / 不为空 / "
-            f"大于 / 小于 / 不小于 / 不大于 / 开头是 / 结尾是，"
-            f"组合用 且 / 或 / 非 / 括号")
+            f"大于 / 小于 / 不小于 / 不大于 / 开头是 / 结尾是"
+            f"（符号 > < >= <= == != 也可以），"
+            f"组合用 且 / 或 / 非 / 括号" + single_eq_hint(raw))
     left, op, right = parsed
     # 右值去首尾空白：早先整行展开后按空格切再拼，右值天然是去过空白的，
     # 「包含」这种不 strip 的比较要保持一样

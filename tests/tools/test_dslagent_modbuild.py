@@ -864,16 +864,14 @@ def t_resume():
 
 # ------------------------------------------------------------------ 十三、加载检查（服务启动同样的方式）
 
-BAD_COND_EQ = "接口 POST /quiz/answer 动作 quiz_answer\n  用包 db http common\n  如果 {given} == \"\"\n    返回 {\"error\":\"空\"} 400\n  结束\n  设 result = 执行 scripts/quiz_judge.zs question_id={question_id} given={given}\n  返回 {\"ok\":\"{result.ok}\"}\n结束\n"
+BAD_COND_EQ = "接口 POST /quiz/answer 动作 quiz_answer\n  用包 db http common\n  如果 {given} = \"\"\n    返回 {\"error\":\"空\"} 400\n  结束\n  设 result = 执行 scripts/quiz_judge.zs question_id={question_id} given={given}\n  返回 {\"ok\":\"{result.ok}\"}\n结束\n"
 
 
 def t_loadcheck():
     print("十三、加载检查（复用服务运行时解析：DSLEngine 的条件 / 变量名 / 遍历 / 循环解析点）")
     cases = {
-        "条件 ==": ("用包 common\n如果 {a} == 1\n打印 x\n结束\n", "看不懂的条件"),
-        "条件 !=": ("用包 common\n如果 {a} != {b}\n打印 x\n结束\n", "看不懂的条件"),
-        "条件 <": ("用包 common\n如果 {s.sort_order} < 0\n打印 x\n结束\n", "看不懂的条件"),
-        "否则如果 条件 >": ("用包 common\n如果 {a} 等于 1\n打印 x\n否则如果 {a} > 2\n打印 y\n结束\n", "看不懂的条件"),
+        "条件 单个 =": ("用包 common\n如果 {a} = 1\n打印 x\n结束\n", "比较用 等于 或 =="),
+        "条件 神秘运算": ("用包 common\n如果 {s.sort_order} 神秘运算 0\n打印 x\n结束\n", "看不懂的条件"),
         "变量名 learnable.{k.code}": ("用包 common\n设 learnable.{k.code} = 1\n", "非法变量名：learnable.{k.code}"),
         "{intent} 讲解 条件": ("用包 common\n如果 {intent} 讲解\n打印 x\n结束\n", "看不懂的条件「{intent} 讲解」"),
         "非法遍历": ("用包 common\n遍历 {a}.b 于 {x}\n打印 x\n结束\n", "非法变量名"),
@@ -887,6 +885,8 @@ def t_loadcheck():
         check(e is not None and want in e, f"流程文本：{name} → 报错原话带回", e)
     ok = "用包 common db\n如果 {a} 等于 1 且 {b} 不为空\n  打印 x\n否则如果 {a} 大于 2\n  打印 y\n否则\n  打印 z\n结束\n遍历 x 于 {l}\n  打印 {x}\n结束\n设 r = 查询 app.db q_list a={a}\n"
     check(LC.parse_script(ok) is None, "合法脚本（等于 / 大于 / 且 / 否则如果 / 遍历）不误报")
+    sym = "用包 common\n如果 {a} == 1 且 {b} != {c} 或 非 {s.n} < 0\n  打印 x\n否则如果 {a} >= 2 且 {a} <= 3\n  打印 y\n否则如果 {a} ＞ 2 或 {a} ≠ 5\n  打印 z\n结束\n"
+    check(LC.parse_script(sym) is None, "符号运算符（== != < >= <= ＞ ≠）不再判成看不懂的条件")
     check(LC.parse_script("") is None and LC.parse_script("# 只有注释\n") is None, "空脚本 / 只有注释不报")
     # 接口文件：切块（与服务 split_endpoints 同一个）后逐块解析，报错带接口路径
     probs = LC.check_text(BAD_COND_EQ, "routes/quiz.zs", True)
@@ -906,7 +906,7 @@ def t_loadcheck():
     (d / "routes" / "dup.zs").write_text(ZS_PROG, encoding="utf-8")
     check(any("接口重复" in x for x in LC.check_project(d)), "全项目加载：接口重复（scan_routes 抛的）也报")
     # 生成时：流程带 == → 报错原话带回重写
-    bad_flow = ZS_FLOW.replace("设 n = ", "如果 {given} == \"\"\n  返回 {\"ok\":\"0\",\"n\":\"0\"}\n结束\n设 n = ")
+    bad_flow = ZS_FLOW.replace("设 n = ", "如果 {given} = \"\"\n  返回 {\"ok\":\"0\",\"n\":\"0\"}\n结束\n设 n = ")
     fk = Fake(bad={("生成", "流程", "scripts/quiz_judge.zs"): [f"=== scripts/quiz_judge.zs ===\n{bad_flow}", f"=== scripts/quiz_judge.zs ===\n{ZS_FLOW}"]})
     r, p, _ = go("lc_flow", fk)
     f = files(r)["scripts/quiz_judge.zs"]
@@ -916,7 +916,7 @@ def t_loadcheck():
     fk = Fake(bad={("生成", "接口", "routes/quiz.zs"): [f"=== routes/quiz.zs ===\n{BAD_COND_EQ}", f"=== routes/quiz.zs ===\n{ZS_QUIZ}"]})
     r, p, _ = go("lc_iface", fk)
     f = files(r)["routes/quiz.zs"]
-    check(r["fixed"] and f["生成尝试"] == 2 and "[接口出错] routes/quiz.zs" in fk.of(".zs 接口助手")[1] and "== \"\"" not in (p / "routes/quiz.zs").read_text(encoding="utf-8"), "接口生成写 == → 重写，坏版本没落盘", f)
+    check(r["fixed"] and f["生成尝试"] == 2 and "[接口出错] routes/quiz.zs" in fk.of(".zs 接口助手")[1] and "= \"\"" not in (p / "routes/quiz.zs").read_text(encoding="utf-8"), "接口生成写 == → 重写，坏版本没落盘", f)
     fk = Fake(bad={("生成", "接口", "routes/quiz.zs"): [f"=== routes/quiz.zs ===\n{BAD_COND_EQ}"]})
     r, p, _ = go("lc_iface2", fk)
     f = files(r)["routes/quiz.zs"]
@@ -1291,7 +1291,7 @@ def t_redo():
     flow_p, iface_p = [(MB.PKG / "packs/newproj/prompts" / n).read_text(encoding="utf-8") for n in ("sys_mgen_flow.md", "sys_mgen_iface.md")]
     for name, txt in (("sys_mgen_flow", flow_p), ("sys_mgen_iface", iface_p)):
         check(all(k in txt for k in ("块不配对", "条件符号", "变量名里套变量", "遍历写法", "编造动词")) and "错 → 对" in txt, f"{name}.md 有五类常见错误的「错 → 对」示例")
-    wrongs = {"== 条件": "如果 {a} == 1\n  打印 x\n结束\n", "!= 条件": "如果 {a} != 1\n  打印 x\n结束\n", "< 条件": "如果 {n} < 3\n  打印 x\n结束\n",
+    wrongs = {"单个 = 条件": "如果 {a} = 1\n  打印 x\n结束\n", "紧贴 = 条件": "如果 {a}=1\n  打印 x\n结束\n",
               "变量名": "设 learnable.{k.code} = 1\n", "遍历": "遍历 {rows}\n  打印 x\n结束\n", "块不配对": "如果 {a} 为空\n  打印 x\n"}
     rights = {"等于": "如果 {a} 等于 1\n  打印 x\n结束\n", "不等于": "如果 {a} 不等于 1\n  打印 x\n结束\n", "小于": "如果 {n} 小于 3\n  打印 x\n结束\n",
               "变量名": "设 code = {k.code}\n", "遍历": "遍历 row 于 {rows}\n  打印 {row.id}\n结束\n"}

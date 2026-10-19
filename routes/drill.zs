@@ -55,12 +55,12 @@
     消息 系统 当前没有待答的题 no
   否则
     设 result = 判题 content/n2n3/题库 {session.题号} {answer}
-    设 session.总 = 相加 {session.总} 1
+    设 session.总 = 计算 {session.总} + 1
 
     # 判题结果以 ○ 开头表示答对。这个约定散在好几处，
     # 等输出结构化之后应该换成显式字段。
     如果 {result} 开头是 ○
-      设 session.对 = 相加 {session.对} 1
+      设 session.对 = 计算 {session.对} + 1
       消息 批改 {result} ok
     否则
       设 session.错题 = {session.错题},{session.题号}
@@ -68,7 +68,7 @@
     结束
 
     设 session.题号 =
-    设 ratio = 算比例 {session.对} {session.总}
+    设 ratio = 计算 四舍五入({session.对} * 100 / {session.总})
     设 progress_text = {session.课程}　{session.对}/{session.总}（{ratio}%）
     状态 stat {progress_text}
   结束
@@ -95,7 +95,11 @@
   如果 {session.总} 为空
     消息 系统 本来就没在练习
   否则
-    设 ratio = 算比例 {session.对} {session.总}
+    # 一道没答时总数是 0，除不了，正确率按 0 算
+    设 ratio = 0
+    如果 {session.总} 大于 0
+      设 ratio = 计算 四舍五入({session.对} * 100 / {session.总})
+    结束
     设 recap = 练习结束：{session.对}/{session.总}（{ratio}%）\n错题：{session.错题}
     消息 系统 {recap} ok
   结束

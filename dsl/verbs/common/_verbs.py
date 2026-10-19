@@ -21,7 +21,7 @@ def register(reg, workspace):
 
     # ---------- 算术 ----------
 
-    @reg.verb("两数相加。例如 相加 3 1 → 4")
+    @reg.verb("旧写法，请用 计算。两数相加，例如 相加 3 1 → 4")
     def 相加(甲: str, 乙: str) -> str:
         try:
             s = float(甲) + float(乙)
@@ -37,7 +37,7 @@ def register(reg, workspace):
             return "[参数不是数字]"
         return str(int(s)) if s == int(s) else str(s)
 
-    @reg.verb("计算百分比，返回整数。例如 算比例 8 10 → 80")
+    @reg.verb("旧写法，请用 计算。百分比取整，例如 算比例 8 10 → 80")
     def 算比例(分子: str, 分母: str) -> str:
         try:
             a, b = float(分子), float(分母)

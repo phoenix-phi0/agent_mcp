@@ -51,7 +51,7 @@
     设 session.次数 = 0
   结束
 
-  设 session.次数 = 相加 {session.次数} 1
+  设 session.次数 = 计算 {session.次数} + 1
   消息 服务器 这是第 {session.次数} 次
   状态 count {session.次数}
 结束

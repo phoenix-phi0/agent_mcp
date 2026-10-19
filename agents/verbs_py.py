@@ -4,7 +4,7 @@
 用 Python 写一行就完事。注册进 VerbRegistry 后，脚本里像内置语句一样调用：
 
     设 题目 = 挑题 {题库} 3 促音变
-    设 正确率 = 算比例 {对} {总}
+    设 正确率 = 计算 四舍五入({对} * 100 / {总})
 
 参数按位置绑定，顺序即函数签名顺序。返回值转成字符串。
 """
@@ -75,7 +75,7 @@ def register_python_verbs(reg: VerbRegistry, workspace: Path) -> VerbRegistry:
                 out.append(f"{q['id']}：{q.get('答案', '')}")
         return "\n".join(out) or f"[没找到] {编号}"
 
-    @reg.verb("计算百分比，返回整数。例如 算比例 8 10 → 80")
+    @reg.verb("旧写法，请用 计算。百分比取整，例如 算比例 8 10 → 80")
     def 算比例(分子: str, 分母: str) -> str:
         try:
             a, b = float(分子), float(分母)

@@ -15,7 +15,7 @@ import re
 
 from tools.dsl import DSLEngine
 from tools.dsl_core import (
-    CALL_PARAM_RE, DSLError, normalize, parse_cond_expr, split_head, split_raw_cmp,
+    CALL_PARAM_RE, DSLError, normalize, single_eq_hint, parse_cond_expr, split_head, split_raw_cmp,
 )
 from tools.dsl_http import scan_routes, split_endpoints
 from tools.dsl_service import Services, parse_call_text, split_target
@@ -43,7 +43,8 @@ def parse_cond(cond, lineno):
             raise DSLError(
                 f"第 {lineno + 1} 行：看不懂的条件「{raw}」。可用："
                 f"包含 / 不包含 / 等于 / 不等于 / 为空 / 不为空 / "
-                f"大于 / 小于 / 不小于 / 不大于 / 开头是 / 结尾是，组合用 且 / 或 / 非 / 括号")
+                f"大于 / 小于 / 不小于 / 不大于 / 开头是 / 结尾是（符号 > < >= <= == != 也可以），组合用 且 / 或 / 非 / 括号"
+                + single_eq_hint(raw))
 
 
 def parse_script(script):

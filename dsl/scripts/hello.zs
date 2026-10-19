@@ -25,14 +25,14 @@
 打印 第一个假名 {progress.假名.已学.0}，最后一个 {progress.假名.已学.-1}
 
 # 读写对称：能读就能写，中间层不存在会自动建
-设 progress.假名.天数 = 相加 {progress.假名.天数} 1
+设 progress.假名.天数 = 计算 {progress.假名.天数} + 1
 设 progress.新字段.深层 = 也能写
 打印 加一天后 {progress.假名.天数}，新字段 {progress.新字段.深层}
 
 打印
 打印 ===== 动词 =====
-设 total = 相加 3 4
-设 ratio = 算比例 7 10
+设 total = 计算 3 + 4
+设 ratio = 计算 四舍五入(7 * 100 / 10)
 打印 3+4={total}　7/10={ratio}%
 设 second_item = 取第 甲,乙,丙 2
 打印 取第二项：{second_item}
