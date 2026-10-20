@@ -169,6 +169,23 @@ def t_contract():
           "先 文件 的路径不能是绝对路径 → 约定检查报错")
     check(any("相对路径且不含 .." in x for x in C.check(C.parse('模块 x\n## 函数\n公开 函数 f a\n## 用例\n用例 u1\n  先 文件 a/../../b.md\n  调用 f a=1\n  得 有返回\n')[0], "x", {}, ["x"])),
           "先 文件 的路径含 .. → 约定检查报错")
+    # B2：接口「上传 <字段> [类型 …] [上限 …]」
+    up_text = ("模块 x\n## 函数\n公开 函数 f file_path\n## 接口\nPOST /x/f -> f 上传 file 类型 pdf,docx,md,txt 上限 20MB 角色 teacher\n"
+               "## 用例\n用例 u1\n  先 文件 uploads/a.md 内容=x\n  调用 f file_path=uploads/a.md\n  得 有返回\n")
+    uc, up_probs = C.parse(up_text)
+    i0 = uc["接口"][0]
+    check(not up_probs and i0["上传"] == {"字段": "file", "类型": "pdf,docx,md,txt", "上限": "20MB"} and i0["角色"] == "teacher",
+          "接口「上传 字段 类型 … 上限 …」解析（标记顺序不限）", (up_probs, i0))
+    nc, nprobs = C.parse("模块 x\n## 函数\n公开 函数 f a\n## 接口\nGET /x/f -> f\n## 用例\n用例 u1\n  调用 f a=1\n  得 有返回\n")
+    check(not nprobs and nc["接口"][0]["上传"] is None, "没写「上传」→ 上传是 None", nprobs)
+    _, bad_size_probs = C.parse(up_text.replace("上限 20MB", "上限 不知道"))
+    check(any("上限 不知道" in x and "写错了" in x for x in bad_size_probs), "上限格式不对 → 报错", bad_size_probs)
+    _, bad_tok_probs = C.parse(up_text.replace("角色 teacher", "乱写 teacher"))
+    check(any("不认识的接口标记" in x for x in bad_tok_probs), "不认识的接口标记 → 报错", bad_tok_probs)
+    mc, mprobs = C.parse("模块 x\n## 函数\n公开 函数 f a\n## 接口\nPOST /x/f -> f 上传 file\n## 用例\n用例 u1\n  调用 f a=1\n  得 有返回\n")
+    check(not mprobs, "基本解析通过（函数缺 <字段>_path 的检查放在 check() 里）", mprobs)
+    check_probs = C.check(mc, "x", {}, ["x"])
+    check(any("没有入参「file_path」" in x for x in check_probs), "上传声明了字段但函数没有 <字段>_path 入参 → 检查报错", check_probs)
     check(C.hash_of("a\r\nb  \n") == C.hash_of("a\nb\n"), "hash_of：换行 / 行尾空白不影响")
     heads = C.public_heads(g)
     check("公开 函数 取知识点 code" in heads and "报错 409 会形成环" in heads and "伪代码" not in heads, "public_heads：函数头 + 返回 / 报错，不含伪代码")

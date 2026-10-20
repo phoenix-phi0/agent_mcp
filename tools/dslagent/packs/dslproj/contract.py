@@ -17,7 +17,10 @@
       伪代码 调用 graph.取知识点 code=point_code，取不到 报错 404       # 一行一条；跨模块调用写 调用 模块.函数
 
     ## 接口
-    POST /progress/answer -> 记作答 角色 teacher   # 方法 路径 -> 本模块的公开函数（一个接口只调这一个函数） [公开|角色 <代号>]
+    POST /progress/answer -> 记作答 角色 teacher   # 方法 路径 -> 本模块的公开函数（一个接口只调这一个函数） [上传 <字段> [类型 <逗号隔开的扩展名>] [上限 <大小>]] [公开|角色 <代号>]
+    POST /textbook_import/task -> 新建导入 上传 file 类型 pdf,docx,md,txt 上限 20MB 角色 teacher   # 带「上传」的接口：
+                                  # 函数要有入参「<字段>_path」收存盘后的路径（骨架自动生成「先 存文件」「失败回 400」）；
+                                  # 入参里有 file_name/file_size/file_ext 才会额外取「上传信息」传给函数
 
     ## 用例                                  # 每个公开函数至少一条
     用例 记作答_全对
@@ -65,8 +68,9 @@ AUTH_OPTIONAL_RE = re.compile(r"^认证\s+可选\s*$")
 AUTH_CHECK_RE = re.compile(r"^认证\s+核对\s+(\S+)\s+(\S+)\s*$")
 AUTH_IDENTITY_RE = re.compile(r"^认证\s+身份\s+([A-Za-z_]\w*)\s+默认\s+(\S+)\s*$")
 AUTH_ROLE_RE = re.compile(r"^认证\s+角色\s+(\S+)\s+(\S+)(?:\s+拒绝\s+(.+?))?\s*$")
-# 接口行末尾可选的 公开 / 角色 <代号>（跟 dsl_http.py 接口行上的写法一致）
-IFACE_RE = re.compile(r"^(\w+)\s+(\S+)\s*(?:->|→)\s*(\S+?)(\s+公开)?(?:\s+角色\s+(\S+))?\s*$")
+# 接口行：<方法> <路径> -> <函数>，后面跟任意顺序的标记：上传 <字段> [类型 <扩展名,…>] [上限 <大小>]、公开、角色 <代号>
+IFACE_HEAD_RE = re.compile(r"^(\w+)\s+(\S+)\s*(?:->|→)\s*(\S+)(.*)$")
+UPLOAD_SIZE_RE = re.compile(r"^\d+(?:\.\d+)?(?:B|KB|MB|GB)?$", re.I)
 
 
 def auth_of(text):
@@ -132,6 +136,52 @@ def _kv(text):
         if k:
             out[k] = v
     return out
+
+
+def _iface_tail(tail):
+    """接口行 -> 函数 之后的标记（上传 / 类型 / 上限 / 公开 / 角色），顺序不限。
+    → (上传dict|None, 公开bool, 角色str, 问题列表)。"""
+    toks = tail.split()
+    probs = []
+    upload, public, role = None, False, ""
+    i = 0
+    while i < len(toks):
+        t = toks[i]
+        if t == "上传":
+            if i + 1 >= len(toks):
+                probs.append("「上传」后面要跟字段名")
+                break
+            upload = {"字段": toks[i + 1], "类型": "", "上限": ""}
+            i += 2
+        elif t == "类型":
+            if upload is None or i + 1 >= len(toks):
+                probs.append("「类型」要写在「上传 <字段>」后面，且后面要跟扩展名列表")
+                i += 1
+            else:
+                upload["类型"] = toks[i + 1]
+                i += 2
+        elif t == "上限":
+            if upload is None or i + 1 >= len(toks):
+                probs.append("「上限」要写在「上传 <字段>」后面，且后面要跟大小")
+                i += 1
+            else:
+                upload["上限"] = toks[i + 1]
+                i += 2
+        elif t == "公开":
+            public = True
+            i += 1
+        elif t == "角色":
+            if i + 1 >= len(toks):
+                probs.append("「角色」后面要跟代号")
+                break
+            role = toks[i + 1]
+            i += 2
+        else:
+            probs.append(f"不认识的接口标记「{t}」（只有 上传 <字段> [类型 …] [上限 …] / 公开 / 角色 <代号>）")
+            i += 1
+    if upload and upload["上限"] and not UPLOAD_SIZE_RE.match(upload["上限"]):
+        probs.append(f"「上限 {upload['上限']}」写错了，写成 20MB / 500KB / 字节数")
+    return upload, public, role, probs
 
 
 def parse(text):
@@ -208,14 +258,17 @@ def parse(text):
             else:
                 probs.append(f"第 {no} 行：函数下面只能写 返回 / 报错 / 伪代码，现在是「{h}」")
         elif sec == "接口":
-            m = IFACE_RE.match(s)
+            m = IFACE_HEAD_RE.match(s)
             if not m:
-                probs.append(f"第 {no} 行：接口写法是「<GET|POST|PUT|DELETE> <路径> -> <函数名> [公开|角色 <代号>]」，现在是「{s}」")
+                probs.append(f"第 {no} 行：接口写法是「<GET|POST|PUT|DELETE> <路径> -> <函数名> [上传 <字段> [类型 …] [上限 …]] [公开|角色 <代号>]」，现在是「{s}」")
             else:
-                method, path, fn, pub, role = m.groups()
+                method, path, fn, tail = m.groups()
+                upload, pub, role, tail_probs = _iface_tail(tail.strip())
+                probs += [f"第 {no} 行：{p}" for p in tail_probs]
                 if pub and role:
                     probs.append(f"第 {no} 行：接口「{path}」不能同时写「公开」和「角色」")
-                c["接口"].append({"方法": method.upper(), "路径": path, "函数": fn, "公开": bool(pub), "角色": role or "", "行": no})
+                c["接口"].append({"方法": method.upper(), "路径": path, "函数": fn, "公开": bool(pub), "角色": role or "",
+                                  "上传": upload, "行": no})
         elif sec == "用例":
             _case_line(c, s, parts, h, no, probs)
             cur = c["用例"][-1] if c["用例"] else None
@@ -408,6 +461,11 @@ def check(c, name, upstream, all_modules):
             probs.append(f"第 {i['行']} 行：接口 {i['路径']} 的「角色 {i['角色']}」没有在头部用「认证 角色 {i['角色']} <中文名>」声明")
         if (i["角色"] or i["公开"]) and not (auth["必须"] or auth["可选"]):
             probs.append(f"第 {i['行']} 行：接口 {i['路径']} 写了「{'公开' if i['公开'] else '角色 ' + i['角色']}」，但头部没有「认证 必须」或「认证 可选」，这行不会生效")
+        if i["上传"] and f is not None:
+            path_param = f"{i['上传']['字段']}_path"
+            names = [p.rstrip("?") for p in f["入参"]]
+            if path_param not in names:
+                probs.append(f"第 {i['行']} 行：接口 {i['路径']} 声明了「上传 {i['上传']['字段']}」，但函数「{i['函数']}」没有入参「{path_param}」接收存盘路径")
     probs += _auth_problems(c, fns)
     covered, names = set(), set()
     for u in c["用例"]:

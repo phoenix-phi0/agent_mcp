@@ -189,6 +189,15 @@ def compare(project, module, contract, modules):
             diffs.append(f"接口 {i['方法']} {i['路径']} 约定「公开」是 {i['公开']}，实际是 {bool(e.public)}")
         if (e.role or "") != (i["角色"] or ""):
             diffs.append(f"接口 {i['方法']} {i['路径']} 约定「角色」是 {i['角色'] or '（无）'}，实际是 {e.role or '（无）'}")
+        if i["上传"]:
+            up = i["上传"]
+            field = up["字段"]
+            if not re.search(rf"存文件\s+{re.escape(field)}(\s|$)", e.script):
+                diffs.append(f"接口 {i['方法']} {i['路径']} 声明了「上传 {field}」，但 routes 脚本里没有「存文件 {field}」")
+            if up["类型"] and f"类型={up['类型']}" not in e.script:
+                diffs.append(f"接口 {i['方法']} {i['路径']} 约定「类型 {up['类型']}」，routes 脚本里没有「存文件 … 类型={up['类型']}」")
+            if up["上限"] and f"上限={up['上限']}" not in e.script:
+                diffs.append(f"接口 {i['方法']} {i['路径']} 约定「上限 {up['上限']}」，routes 脚本里没有「存文件 … 上限={up['上限']}」")
     for (m, p) in by:
         diffs.append(f"多了约定里没有的接口 {m} {p}")
     diffs += _auth_diffs(project, module, contract, modules)

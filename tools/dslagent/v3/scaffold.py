@@ -34,7 +34,8 @@ def service_text(name, c):
     lines = [f"业务 {name}"]
     if c["依赖"]:
         lines.append("  依赖 " + " ".join(c["依赖"]))
-    lines += ["  用包 common db text", ""]
+    pkgs = "common db text" + (" doc" if any(i.get("上传") for i in c["接口"]) else "")
+    lines += [f"  用包 {pkgs}", ""]
     for f in c["函数"]:
         lines.append("  " + VC.C.head_text(f))
         if f["返回"]:
@@ -68,6 +69,35 @@ def auth_header(c):
     return "\n".join(lines) + "\n\n"
 
 
+# file_name/file_size/file_ext 入参 -> 「上传信息」返回里的字段名；只有函数声明了才取
+UPLOAD_INFO_FIELDS = {"file_name": "name", "file_size": "size", "file_ext": "ext"}
+
+
+def _upload_lines(i, req, opt):
+    """接口声明了「上传」时，先存文件（失败回 400），函数要 file_name/file_size/file_ext
+    入参才额外取「上传信息」。返回要插在「调用」之前的那几行（已带两格缩进）。"""
+    up = i["上传"]
+    field = up["字段"]
+    path_var = f"{field}_path"
+    call = f"存文件 {field}"
+    if up["类型"]:
+        call += f" 类型={up['类型']}"
+    if up["上限"]:
+        call += f" 上限={up['上限']}"
+    lines = [f"  设 {path_var} = {call}",
+             f"  如果 {{{path_var}}} 开头是 [",
+             f'    返回 {{"error":"{{{path_var}}}"}} 400',
+             "  结束"]
+    have = set(req) | set(opt)
+    if have & set(UPLOAD_INFO_FIELDS):
+        info_var = f"{field}_info"
+        lines.append(f"  设 {info_var} = 上传信息 {field}")
+        for pname, attr in UPLOAD_INFO_FIELDS.items():
+            if pname in have:
+                lines.append(f"  设 {pname} = {{{info_var}.{attr}}}")
+    return lines
+
+
 def route_text(name, c):
     fns = {f["名"]: f for f in c["函数"]}
     header = auth_header(c)
@@ -75,9 +105,11 @@ def route_text(name, c):
     for i in c["接口"]:
         f = fns[i["函数"]]
         req, opt, _ = VC.C.params(f)
+        pre = _upload_lines(i, req, opt) if i["上传"] else []
         args = [f"{p}={{{p}}}" for p in req] + [f"{p}={{{p} 或}}" for p in opt]
         tag = " 公开" if i["公开"] else (f" 角色 {i['角色']}" if i["角色"] else "")
-        out.append(f"接口 {i['方法']} {i['路径']}{tag}\n  设 r = 调用 {name}.{i['函数']}{(' ' + ' '.join(args)) if args else ''}\n  返回 {{r}}\n结束\n")
+        body = "".join(l + "\n" for l in pre)
+        out.append(f"接口 {i['方法']} {i['路径']}{tag}\n{body}  设 r = 调用 {name}.{i['函数']}{(' ' + ' '.join(args)) if args else ''}\n  返回 {{r}}\n结束\n")
     return "\n".join(out)
 
 

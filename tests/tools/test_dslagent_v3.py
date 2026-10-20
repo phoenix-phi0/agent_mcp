@@ -65,6 +65,21 @@ def contract_text(m):
 
 TOP3 = "项目 demo\n模块 graph        # 知识图谱\n模块 vocab 依赖 graph\n模块 progress 依赖 graph\n"
 
+# B2：接口「上传」——字段叫 doc，函数要收 doc_path，顺带要 file_name/file_size/file_ext（骨架会取「上传信息」）
+UP_CONTRACT = (
+    "模块 up\n\n"
+    "## 函数\n"
+    "公开 函数 新建 doc_path file_name? file_size? file_ext?\n"
+    "  返回 {path, name, size, ext}\n"
+    "  伪代码 返回 {\"path\": doc_path, \"name\": file_name, \"size\": file_size, \"ext\": file_ext}\n\n"
+    "## 接口\n"
+    "POST /up/new -> 新建 上传 doc 类型 md,txt 上限 1MB\n\n"
+    "## 用例\n"
+    "用例 新建_基本\n"
+    "  先 文件 uploads/seed.md 内容=占位\n"
+    "  调用 新建 doc_path=uploads/seed.md\n"
+    "  得 有返回\n")
+
 
 class Fake:
     """假模型：按 tag 回答；scripts：{tag: [第 1 次回复, 第 2 次回复, …]}（用完用最后一个）；缺省顶层 = TOP3，约定 = 参考实现。"""
@@ -326,7 +341,7 @@ def test_skeleton_build_state():
     # 可选入参用 {x 或}
     c, _ = VC.load(p, "progress")
     c["函数"][0]["入参"].append("pass_line?")
-    c["接口"].append({"方法": "GET", "路径": "/progress/x", "函数": "记作答", "公开": False, "角色": "", "行": 1})
+    c["接口"].append({"方法": "GET", "路径": "/progress/x", "函数": "记作答", "公开": False, "角色": "", "上传": None, "行": 1})
     check("pass_line={pass_line 或}" in SF.route_text("progress", c), "可选入参用 {x 或}")
     # 缺约定
     try:
@@ -377,6 +392,73 @@ def test_learner_record_scaffold():
     (p / "routes" / "_project.zs").write_text("迁移 只加\n# 手改过\n", encoding="utf-8")
     r3 = SF.gen_skeleton(p, top)
     check("routes/_project.zs" in r3["已有"] and "手改过" in (p / "routes" / "_project.zs").read_text(encoding="utf-8"), "已存在的 routes/_project.zs 不覆盖", r3)
+
+
+def test_upload_scaffold():
+    print("B2：接口「上传」→ 骨架先存文件（失败回 400）、按入参决定要不要取上传信息；业务骨架加 用包 doc；比对约定核对")
+    p = fresh("proj")
+    (p / "contracts").mkdir()
+    (p / "contracts" / "up.md").write_text(UP_CONTRACT, encoding="utf-8")
+    top = VT.load("项目 demo\n模块 up\n")
+    r = SF.gen_skeleton(p, top)
+    check(r["问题"] == [], "骨架生成无加载检查问题", r)
+    rt = (p / "routes" / "up.zs").read_text(encoding="utf-8")
+    check("设 doc_path = 存文件 doc 类型=md,txt 上限=1MB" in rt, "骨架先存文件，类型 / 上限原样带下来", rt)
+    check("如果 {doc_path} 开头是 [" in rt and '返回 {"error":"{doc_path}"} 400' in rt and "结束" in rt, "存文件失败回 400", rt)
+    check("设 doc_info = 上传信息 doc" in rt, "函数要 file_name/file_size/file_ext → 额外取 上传信息", rt)
+    check("设 file_name = {doc_info.name}" in rt and "设 file_size = {doc_info.size}" in rt and "设 file_ext = {doc_info.ext}" in rt,
+          "上传信息的三个字段分别取出", rt)
+    check("调用 up.新建 doc_path={doc_path} file_name={file_name 或} file_size={file_size 或} file_ext={file_ext 或}" in rt,
+          "调用业务函数时把存盘路径和上传信息都传进去", rt)
+    svc = (p / "services" / "up.zs").read_text(encoding="utf-8")
+    check("用包 common db text doc" in svc, "业务骨架：有上传接口的模块点名 用包 doc", svc)
+    c, _ = VC.load(p, "up")
+    check(PJ.compare(p, "up", c, ["up"])["一致"], "比对约定：骨架生成的和约定一致")
+    # 没有 file_name/file_size/file_ext 入参的函数：不该多取「上传信息」
+    c2, _ = DC.parse(UP_CONTRACT.replace(" file_name? file_size? file_ext?", ""))
+    rt2 = SF.route_text("up", c2)
+    check("上传信息" not in rt2 and "设 doc_path = 存文件 doc 类型=md,txt 上限=1MB" in rt2, "函数没有那几个入参 → 不取 上传信息", rt2)
+    # routes 脚本的「类型」被改掉 → 比对约定报差异
+    broken = rt.replace("类型=md,txt", "类型=md")
+    (p / "routes" / "up.zs").write_text(broken, encoding="utf-8")
+    d = PJ.compare(p, "up", c, ["up"])["差异"]
+    check(any("类型 md,txt" in x for x in d), "routes 脚本的「类型」和约定对不上 → 比对约定报差异", d)
+    (p / "routes" / "up.zs").write_text(rt.replace("doc 类型=md,txt 上限=1MB", "doc"), encoding="utf-8")
+    d2 = PJ.compare(p, "up", c, ["up"])["差异"]
+    check(any("声明了「上传" in x for x in d2) is False and any("类型 md,txt" in x for x in d2) and any("上限 1MB" in x for x in d2),
+          "routes 脚本干脆不写「类型」「上限」→ 两条都报差异", d2)
+
+
+def test_upload_multipart():
+    print("B2：单测用真实 multipart 验证骨架——存文件 / 上传信息 的产出真被业务函数收到、合格的存盘、不合格的 400 且不存盘")
+    import io
+    from tools.dsl_http import Router
+    p = fresh("proj")
+    c, probs = DC.parse(UP_CONTRACT)
+    check(not probs, "UP_CONTRACT 解析无问题", probs)
+    (p / "routes").mkdir()
+    (p / "routes" / "up.zs").write_text(SF.route_text("up", c), encoding="utf-8")
+    (p / "services").mkdir()
+    (p / "services" / "up.zs").write_text(
+        "业务 up\n  用包 common db text doc\n  公开 函数 新建 doc_path file_name? file_size? file_ext?\n"
+        "    设 out.path = {doc_path}\n    设 out.name = {file_name 或}\n"
+        "    设 out.size = {file_size 或}\n    设 out.ext = {file_ext 或}\n    返回 {out}\n  结束\n结束\n",
+        encoding="utf-8")
+    router = Router(p / "routes", p, p / "sessions", real=False, login=False)
+    client = router.app().test_client()
+    resp = client.post("/up/new", data={"doc": (io.BytesIO(b"hello world"), "a.md")}, content_type="multipart/form-data")
+    body = resp.get_json()
+    check(resp.status_code == 200 and body == {"path": body.get("path"), "name": "a.md", "size": 11, "ext": "md"}
+          and str(body.get("path", "")).startswith("uploads/"),
+          "真实 multipart：存文件 + 上传信息 的结果被业务函数原样收到、经路由原样返回", (resp.status_code, body))
+    saved = (p / body["path"])
+    check(saved.is_file() and saved.read_bytes() == b"hello world", "文件真的存到了磁盘，内容一致", saved)
+    before = {f.name for f in (p / "uploads").iterdir()}
+    resp2 = client.post("/up/new", data={"doc": (io.BytesIO(b"nope"), "a.exe")}, content_type="multipart/form-data")
+    body2 = resp2.get_json()
+    check(resp2.status_code == 400 and "文件类型不支持" in (body2 or {}).get("error", ""), "类型不在白名单 → 400", body2)
+    after = {f.name for f in (p / "uploads").iterdir()}
+    check(before == after, "不合格的文件没有被存下来", (before, after))
 
 
 def test_module_cleanup():
@@ -921,6 +1003,8 @@ if __name__ == "__main__":
         test_prompt_example()
         test_skeleton_build_state()
         test_learner_record_scaffold()
+        test_upload_scaffold()
+        test_upload_multipart()
         test_module_cleanup()
         test_sync_deps()
         test_engine_bits()
