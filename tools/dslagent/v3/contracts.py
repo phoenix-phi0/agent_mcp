@@ -1,10 +1,12 @@
 """约定规划 contracts/<模块>.md 的检查：dslproj 的约定检查（格式、跨模块调用必须是依赖且上游有该公开函数、接口指向公开函数、
-每个公开函数有用例……）+ v3 另加：约定里的 模块 / 依赖 与 plan/top.zs 一致、表名以「模块名」或「模块名_」开头（各模块的表不重名）。
+每个公开函数有用例、多余依赖……）+ v3 另加：约定的「依赖」必须是 plan/top.zs 里的模块且不成环（不要求与 top.zs 逐字一致，
+全部约定过后用「同步顶层依赖」动词同步）、表名以「模块名」或「模块名_」开头（各模块的表不重名）。
 确定性，不调模型。
 """
 from pathlib import Path
 
 from ..packs.dslproj import contract as C
+from . import top as T
 
 
 def path_of(project, module):
@@ -27,6 +29,21 @@ def upstream_of(project, name, deps):
     return ups, probs
 
 
+def cycle_with(project, name, deps, mods):
+    """用已通过的约定（没通过的模块退回 top 里缺省的依赖）搭一张依赖图，把 name 的依赖换成 deps → 有环返回环上的名字列表，没有返回 None。"""
+    graph = {}
+    for m, d in mods.items():
+        if m == name:
+            graph[m] = list(deps)
+            continue
+        try:
+            uc, _ = load(project, m)
+            graph[m] = uc["依赖"]
+        except FileNotFoundError:
+            graph[m] = d
+    return T.find_cycle(graph)
+
+
 def check(text, name, top, project):
     """→ 问题列表（空 = 通过）。top：top.load 的结果；project：读上游约定的项目目录。"""
     mods = {m["名"]: m["依赖"] for m in top["模块"]}
@@ -36,8 +53,11 @@ def check(text, name, top, project):
     ups, up_probs = upstream_of(project, name, c["依赖"] or mods[name])
     probs += up_probs
     probs += C.check(c, name, ups, list(mods))
-    if sorted(c["依赖"]) != sorted(mods[name]):
-        probs.append(f"约定的「依赖」是 {sorted(c['依赖']) or '无'}，plan/top.zs 里 {name} 的依赖是 {sorted(mods[name]) or '无'}，两边要一致")
+    # 依赖与 top.zs 不要求逐字一致：只要依赖的是 top.zs 里的模块（上面已查）且不成环就放行；
+    # 全部约定过后由「同步顶层依赖」把 top.zs 改成与约定一致。
+    cyc = cycle_with(project, name, c["依赖"], mods)
+    if cyc:
+        probs.append("约定的「依赖」会和已有约定一起成环：" + " → ".join(cyc))
     for t in c["表"]:
         if t["名"] != name and not t["名"].startswith(name + "_"):
             probs.append(f"第 {t['行']} 行：表名「{t['名']}」要以「{name}_」开头（各模块的表不重名）")

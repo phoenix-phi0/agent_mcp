@@ -28,7 +28,8 @@
       调用 记作答 learner=u1 point_code=NOPE correct=1
       报错 404                                  # 期望业务错误码（和「得」二选一）
 
-parse(text) -> (contract, 问题)；check(contract, name, upstream, all_modules) -> 问题；heads(contract) -> 函数头文本；hash_of(text)。
+parse(text) -> (contract, 问题)；check(contract, name, upstream, all_modules) -> 问题（含「多余依赖」：声明的依赖在伪代码「调用 X.f」
+和用例「先 调用 X.f」里都没出现）；heads(contract) -> 函数头文本；hash_of(text)。
 """
 import hashlib
 import re
@@ -230,6 +231,20 @@ def check(c, name, upstream, all_modules):
             probs.append(f"依赖的模块「{d}」在项目里没有约定文件（contracts/{d}.md）")
         elif d not in upstream:
             probs.append(f"依赖的模块「{d}」的约定解析不通过")
+    used_deps = set()
+    for f in c["函数"]:
+        for p in f["伪代码"]:
+            for m in QCALL_RE.finditer(p["文字"]):
+                used_deps.add(m.group(1))
+    for u in c["用例"]:
+        for st in u["先"]:
+            if st["种类"] == "调用":
+                mod, _, _ = st["目标"].rpartition(".")
+                if mod:
+                    used_deps.add(mod)
+    for d in c["依赖"]:
+        if d not in used_deps:
+            probs.append(f"依赖「{d}」声明了，但伪代码「调用 {d}.…」和用例「先 调用 {d}.…」里都没出现，是多余依赖（删掉，或者补上调用）")
     tnames = set()
     for t in c["表"]:
         if not NAME_RE.match(t["名"]):

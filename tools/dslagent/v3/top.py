@@ -5,7 +5,8 @@
     模块 vocab 依赖 graph      # 单词库
     模块 progress 依赖 graph vocab
 
-parse(text) -> (top, 问题)，top = {"项目", "模块": [{"名", "依赖", "行"}]}；check(text) -> 问题列表；layers(top) -> 依赖分层。
+parse(text) -> (top, 问题)，top = {"项目", "模块": [{"名", "依赖", "行"}]}；check(text) -> 问题列表；layers(top) -> 依赖分层；
+sync_deps(text, want) -> 按 {模块名: [依赖…]} 改写各「模块」行的依赖子句（保留注释、不改模块名），给「同步顶层依赖」动词用。
 """
 import re
 
@@ -106,6 +107,35 @@ def check(text):
     if cyc:
         probs.append("模块依赖成环：" + " → ".join(cyc))
     return probs
+
+
+def _comment_idx(s):
+    i = s.find("#")
+    while i >= 0:
+        if i == 0 or s[i - 1] in " \t":
+            return i
+        i = s.find("#", i + 1)
+    return -1
+
+
+def sync_deps(text, want):
+    """按 want={模块名: [依赖…]} 改写「模块 <名> [依赖 …]」行里的依赖子句；不认识的行、want 里没有的模块原样保留，
+    注释（# 之后的部分）保留，不改模块名。→ 新文本（以 \\n 结尾）。"""
+    out = []
+    for raw in clean(text).splitlines():
+        idx = _comment_idx(raw)
+        code = raw if idx < 0 else raw[:idx]
+        comment = "" if idx < 0 else raw[idx:]
+        m = MODULE_RE.match(code.strip())
+        if not m or m.group(1) not in want:
+            out.append(raw)
+            continue
+        new_code = f"模块 {m.group(1)}"
+        deps = want[m.group(1)]
+        if deps:
+            new_code += " 依赖 " + " ".join(deps)
+        out.append(new_code + ("  " + comment if comment else ""))
+    return "\n".join(out) + "\n"
 
 
 def load(text):

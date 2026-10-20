@@ -162,13 +162,23 @@ def test_contract_check():
     check(VC.check(contract_text("progress"), "progress", top, p) == [], "progress 约定（上游 graph 已通过）通过")
     probs = VC.check(contract_text("progress"), "progress", top, fresh("empty"))
     check(any("还没有约定文件" in x for x in probs), "上游约定还没通过时不放行", probs)
-    # 与 top 不一致：多依赖 / 少依赖
+    # 约定的依赖不要求和 top 逐字一致：只要是 top 里的模块、不成环就放行
     t2 = VT.load("项目 demo\n模块 graph\n模块 progress 依赖 graph vocab\n模块 vocab 依赖 graph\n")
-    probs = VC.check(contract_text("progress"), "progress", t2, p)
-    check(any("两边要一致" in x for x in probs), "约定的依赖与 top 不一致被查出", probs)
+    check(VC.check(contract_text("progress"), "progress", t2, p) == [], "top 比约定多写一个依赖（vocab）也放行")
     t3 = VT.load("项目 demo\n模块 graph\n模块 progress\n")
-    probs = VC.check(contract_text("progress"), "progress", t3, p)
-    check(any("两边要一致" in x for x in probs), "top 里没有依赖而约定写了依赖被查出", probs)
+    check(VC.check(contract_text("progress"), "progress", t3, p) == [], "top 没写依赖、约定自己声明了依赖也放行（靠不成环把关）")
+    # 但放行不包括会成环的依赖
+    p2 = project_with_contracts(("graph", "progress"))
+    top2 = VT.load("项目 demo\n模块 graph\n模块 progress 依赖 graph\n")
+    bad_graph = contract_text("graph").replace("依赖 无", "依赖 progress", 1).replace(
+        "伪代码 按 code 查 graph_point 表的一行，原样返回（查不到就返回空）",
+        "伪代码 按 code 查 graph_point 表的一行，原样返回（查不到就返回空）\n  伪代码 调用 progress.记作答 learner=x point_code=code correct=1", 1)
+    probs = VC.check(bad_graph, "graph", top2, p2)
+    check(any("成环" in x for x in probs), "约定的依赖会和已有约定一起成环被查出", probs)
+    # 多余依赖：声明了但伪代码 / 用例里都没调用过
+    unused = contract_text("vocab").replace("依赖 graph", "依赖 graph progress", 1)
+    probs = VC.check(unused, "vocab", VT.load("项目 demo\n模块 graph\n模块 progress\n模块 vocab 依赖 graph progress\n"), p2)
+    check(any("多余依赖" in x and "progress" in x for x in probs), "声明了依赖但没调用过被查出是多余依赖", probs)
     probs = VC.check(contract_text("graph"), "other", top, p)
     check(any("不在 plan/top.zs" in x for x in probs), "模块不在 top 里", probs)
     # 表名前缀
@@ -272,6 +282,35 @@ def test_skeleton_build_state():
     check(ctx.is_done("graph") is True, "只换行符不同 hash 不变")
 
 
+def test_sync_deps():
+    print("同步顶层依赖")
+    check(VT.sync_deps("项目 demo\n模块 graph        # 知识图谱\n模块 vocab 依赖 graph\n模块 progress 依赖 graph\n",
+                        {"progress": ["graph", "vocab"]})
+          == "项目 demo\n模块 graph        # 知识图谱\n模块 vocab 依赖 graph\n模块 progress 依赖 graph vocab\n",
+          "按 want 改依赖子句，保留注释、不碰没列出的模块")
+    check(VT.sync_deps("模块 a 依赖 b   # 说明\n", {"a": []}) == "模块 a  # 说明\n", "依赖清空时去掉「依赖」子句，注释保留")
+    check(VT.sync_deps("模块 a\n", {"a": ["b", "c"]}) == "模块 a 依赖 b c\n", "原来没依赖、want 要加依赖")
+    check(VT.sync_deps("模块 a 依赖 b\n", {}) == "模块 a 依赖 b\n", "want 里没有的模块原样不动")
+
+    p = project_with_contracts(("graph", "vocab", "progress"))
+    (p / "contracts" / "progress.md").write_text(
+        contract_text("progress").replace("依赖 graph", "依赖 graph vocab", 1), encoding="utf-8")
+    (p / "plan").mkdir(exist_ok=True)
+    (p / "plan" / "top.zs").write_text(TOP3, encoding="utf-8")
+    ctx = core.Ctx(p, fresh("out"), "x", None)
+    eng = core.V3Engine(MockClient(handler=lambda prompt, s=None: "嗯", offline=True), workdir=p, verbose=False, verbs_root=CM.VERBS)
+    eng.v3 = ctx
+    eng.run("用包 v3\n设 r = 同步顶层依赖\n返回 {r}\n")
+    r = eng.returned[0]
+    check(r["改了"] == ["progress"] and r["没变"] is False, "检测到 progress 的约定比 top.zs 多依赖一个 vocab", r)
+    new_top = (p / "plan" / "top.zs").read_text(encoding="utf-8")
+    check("模块 progress 依赖 graph vocab" in new_top and "模块 graph        # 知识图谱" in new_top, "top.zs 的 progress 依赖同步成约定的样子，别的行（含注释）不动", new_top)
+    eng2 = core.V3Engine(MockClient(handler=lambda prompt, s=None: "嗯", offline=True), workdir=p, verbose=False, verbs_root=CM.VERBS)
+    eng2.v3 = ctx
+    eng2.run("用包 v3\n设 r = 同步顶层依赖\n返回 {r}\n")
+    check(eng2.returned[0] == {"改了": [], "没变": True}, "再跑一次：已经同步过，没有变化", eng2.returned[0])
+
+
 # ------------------------------------------------------------------ 引擎：脚本动词里的终止、并行执行
 
 def engine(workdir):
@@ -359,7 +398,7 @@ def test_full_flow_clean():
           "重写时带上次的内容和问题", fk.calls[1]["user"][-400:])
     check(fk.calls[0]["system"].startswith("# 任务描述") and "【需求】" in fk.calls[0]["user"], "顶层提示词 = prompts/top.md，入参有需求")
     pg = [r for r in rec["规划"] if r["模块"] == "progress" and r["事件"] == "检查"]
-    check([r["通过"] for r in pg] == [False, True] and "两边要一致" in json.dumps(pg[0]["问题"], ensure_ascii=False), "约定：progress 第 1 次依赖对不上 top，重写后通过", pg)
+    check([r["通过"] for r in pg] == [False, True] and "不在本模块的「依赖」里" in json.dumps(pg[0]["问题"], ensure_ascii=False), "约定：progress 第 1 次把依赖去掉了但伪代码还调 graph，重写后通过", pg)
     cu = [c for c in fk.calls if c["tag"] == "v3_contract_progress"][0]["user"]
     check("【顶层规划 plan/top.zs】" in cu and "项目 demo" in cu and "### 上游模块 graph（直接依赖，可以调用）" in cu and "用例 加边_成功" not in cu and "公开 函数 取知识点" in cu,
           "约定输入 = 需求 + top.zs + 上游已通过的约定（去掉用例）", cu[-600:])
@@ -398,7 +437,7 @@ def test_full_flow_clean():
     res4 = run_v3(proj, out, fk4)
     check(res4["状态"] == "成功" and [c["tag"] for c in fk4.calls] == ["v3_contract_vocab", "v3_review_vocab"], "续跑：不过检查的约定重写，别的跳过", [c["tag"] for c in fk4.calls])
     u = fk4.calls[0]["user"]
-    check("【你上次写的内容】" in u and "两边要一致" in u and "依赖 无" in u, "续跑重写时输入带盘上那份约定和检查问题", u[-500:])
+    check("【你上次写的内容】" in u and "不在本模块的「依赖」里" in u and "依赖 无" in u, "续跑重写时输入带盘上那份约定和检查问题", u[-500:])
 
 
 def test_review():
@@ -546,7 +585,7 @@ def test_verb_decls():
     for n, k in want.items():
         check(reg.has(n) and reg.kind_of(n) == "script", f"{n} 是 .zs 动词")
     check(reg.has("复核约定") and reg.kind_of("复核约定") == "python", "复核约定 是 Python 动词")
-    for n in ("写规划", "检查规划", "存规划", "已有规划", "依赖分层", "生成骨架", "生成分配", "做模块", "已完成", "标记完成"):
+    for n in ("写规划", "检查规划", "存规划", "已有规划", "依赖分层", "生成骨架", "生成分配", "做模块", "已完成", "标记完成", "同步顶层依赖"):
         check(reg.has(n) and reg.kind_of(n) == "python", f"{n} 是 Python 动词")
     check(not reg.warnings, "加载没有警告", reg.warnings)
     sig = lambda n: " ".join(p.show() for p in reg.specs_of(n))        # noqa: E731
@@ -556,7 +595,7 @@ def test_verb_decls():
     check(sig("写规划").startswith("<种类> <需求?> <模块?> <上次问题?>"), "写规划 签名", sig("写规划"))
     check(sig("复核约定") == "<模块> <文本> <需求?> <模型=sonnet>", "复核约定 签名", sig("复核约定"))
     flow = (core.HERE / "v3.zs").read_text(encoding="utf-8")
-    check(all(s in flow for s in ("规划到通过 顶层", "规划到通过 约定", "生成骨架", "生成分配", "执行 plan/build.zs", "预算 调用 120 秒 36000")), "v3.zs 是流程脚本", flow)
+    check(all(s in flow for s in ("规划到通过 顶层", "规划到通过 约定", "同步顶层依赖", "生成骨架", "生成分配", "执行 plan/build.zs", "预算 调用 120 秒 36000")), "v3.zs 是流程脚本", flow)
 
 
 if __name__ == "__main__":
@@ -565,6 +604,7 @@ if __name__ == "__main__":
         test_contract_check()
         test_prompt_example()
         test_skeleton_build_state()
+        test_sync_deps()
         test_engine_bits()
         test_full_flow_clean()
         test_review()
