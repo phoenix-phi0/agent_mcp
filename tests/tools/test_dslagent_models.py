@@ -273,7 +273,7 @@ def recs():
 
 def t_engines():
     print("三、各引擎（假 codex / grok / opencode）")
-    old = (G.IDLE_SEC, G.IDLE_OC, G.MAX_OUT)
+    old = (G.IDLE_SEC, G.IDLE_OC)
     first_env = {"DSLAGENT_CODEX_FIRST_CAP": "1", "DSLAGENT_GROK_FIRST_CAP": "1", "DSLAGENT_OC_FIRST_CAP": "1"}
     os.environ.update(first_env)
     G.IDLE_SEC, G.IDLE_OC = 1, 1
@@ -315,9 +315,6 @@ def t_engines():
             setup_fake({name: [{"mode": "invoke"}]})
             r = E.call(sp, "s", "u", 30)
             check(r["reason"] == "输出工具调用格式" and r["text"] == "", "文本里的 <invoke → 杀", r)
-            setup_fake({name: [{"mode": "big"}]})
-            r = E.call(sp, "s", "u", 30)
-            check(r["reason"] == "输出超长" and r["text"] == "", "输出超长 → 杀", r)
             setup_fake({name: [{"mode": "rc"}]})
             r = E.call(sp, "s", "u", 30)
             check(r["rc"] == 3 and r["text"] == "" and "boom" in r["stderr"] and not r["reason"], "rc≠0 → 无文本、带 stderr", r)
@@ -353,7 +350,7 @@ def t_engines():
         finally:
             os.environ["DSLAGENT_CODEX_BIN"] = saved
     finally:
-        G.IDLE_SEC, G.IDLE_OC, G.MAX_OUT = old
+        G.IDLE_SEC, G.IDLE_OC = old
         for k in first_env:
             os.environ.pop(k, None)
 

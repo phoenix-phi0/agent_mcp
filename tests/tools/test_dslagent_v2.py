@@ -446,10 +446,6 @@ if mode == "invoke_ok" and n == 1:
     delta("先说两句<inv")
     delta("oke name=x>")
     time.sleep(30)
-if mode == "long_always":
-    for _ in range(25):
-        delta("字" * 1000)
-    time.sleep(30)
 if mode == "angle":
     delta("if a<b and c>d: <div>x</div> List<int> 1<2")
 if mode == "empty" or (mode == "idle_ok" and n == 1) or mode == "idle_always":
@@ -494,16 +490,11 @@ def t_idle_retry():
         check(text is None and M.n == 2 and "空闲超时" in (err or "") and "首次失败" in err, "重试仍失败 → 报原因（含首次失败）", err)
         M, text, err, out = go("empty", "c")
         check(text is None and M.n == 2 and "rc=3" in (err or ""), "rc≠0 也重试，仍失败报错", err)
-        # 止损：输出工具调用格式 / 输出超长 / 普通尖括号不误杀
+        # 止损：输出工具调用格式 / 普通尖括号不误杀
         M, text, err, out = go("invoke_ok", "e")
         check(text == "好的回复" and M.n == 2 and M.log[0].get("failed") == "输出工具调用格式"
               and M.log[1].get("retry") == 1 and M.log[1].get("first_fail") == "输出工具调用格式" and M.log[0]["sec"] < 20,
               "出现 <invoke（跨增量拼接）→ 立即被杀，重试 1 次成功，calls 记录 reason", (text, err, M.log))
-        M, text, err, out = go("long_always", "f")
-        check(text is None and M.n == 2 and M.log[0].get("failed") == "输出超长" and "输出超长" in (err or "")
-              and M.log[0]["sec"] < 20, "累计超过 20000 字符 → 被杀（reason=输出超长），重试仍超长则报错", (err, M.log))
-        r1 = (out / "calls" / "01_t.reply.txt").read_text(encoding="utf-8")
-        check(r1.startswith("字" * 20000) and "输出超长" in r1, "超长被杀时已收到的内容保留在 reply 文件", len(r1))
         old_first, G.FIRST_CAP = G.FIRST_CAP, 1
         try:
             M, text, err, out = go("silent", "h")

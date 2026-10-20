@@ -1183,7 +1183,7 @@ def load_plan(old_dir, task, caps=None):
 
 class ModRun(LY.Run):
     STEP_OF_KIND = {"plan": "mplan", "contract": "mplan", "gen": "mgen", "fallback": "mgen_fallback"}       # DSLAGENT_MODELS 的步骤键：规划类 / 生成类调用分开指定（没写走 sub）；mgen_fallback = mgen 两次都没过检查时再生成 1 次用的模型（没写 = 不回退）
-    RETRY_SILENT = (G.R_IDLE, G.R_FIRST)           # 空闲超时 / 首字前静默：同一调用重试 1 次再判失败（输出超长、被杀、熔断不重试）
+    RETRY_SILENT = (G.R_IDLE, G.R_FIRST)           # 空闲超时 / 首字前静默：同一调用重试 1 次再判失败（被杀、熔断不重试）
 
     in_fallback = False                  # gen_loop 的回退那一次：生成类调用改走 mgen_fallback，并在 calls.json 里标 fallback
 
@@ -1899,7 +1899,7 @@ class ModRun(LY.Run):
 
     def f_contract(self, rec, it, own=None):
         """一个模块的约定：模型写出骨架文件（≤2 次，程序解析 + 校验 + 加载检查，不过带报错重写）；通过就把规范骨架落到真实路径、冻结约定部分的快照。
-        整份写超时（空闲 / 首字前静默 / 被杀，约定步骤的超时已单独放宽）或输出超长 → 改拆两次调用：先 sql + 流程，校验过再带着它们的骨架写 接口 + 界面。"""
+        整份写超时（空闲 / 首字前静默 / 被杀，约定步骤的超时已单独放宽） → 改拆两次调用：先 sql + 流程，校验过再带着它们的骨架写 接口 + 界面。"""
         m = it["模块"]
         ctx = self.contract_ctx(m, own)      # own：重新约定时，上次冻结约定里本模块自己的 sql / 路径 / 动作（磁盘上已有实现，不算「被占用」）
         err = rec.get("上次失败") or "无"

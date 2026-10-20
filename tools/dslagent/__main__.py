@@ -24,7 +24,7 @@ def main(argv=None):
     r.add_argument("--max-plan", type=int, default=2)
     r.add_argument("--no-template", action="store_true")
     r.add_argument("--no-infer", action="store_true", help="模板预读不并入推理候选（同 DSLAGENT_INFER=0）")
-    r.add_argument("--wall", type=int, default=None, help="墙钟秒数；缺省：旧命令 500，--pack 的 v2 路径 900")
+    r.add_argument("--wall", type=int, default=None, help="墙钟秒数；缺省：旧命令 500，--pack 的 v2 路径 900（包声明了 WALL 就用包的，如 dslproj 1800）")
     r.add_argument("--scope", help="允许改动的路径，逗号分隔（目录前缀如 kg/,tests/kg/，精确文件，或带 * 的通配如 routes/graph*.zs）；只对 v2 规划路径有效，范围外的改动恢复并要求补改；缺省取资料包的 scope_for")
     r.add_argument("--pack", help="资料包名（code / dslproj，见 packs/）：写了就走 v2 规划路径（与 DSLAGENT_PLANNER 无关），场景差异全由包声明；不写 = 旧命令（code 行为不变）")
     r.add_argument("--inject", default="{}", help="测试用 JSON，如 {\"template\": \"fail\"}")
@@ -53,7 +53,7 @@ def main(argv=None):
     v.add_argument("--stop-after", choices=("top", "contract", "build"), default=None, help="跑到这一步的产物写出并通过检查就停")
     v.add_argument("--cost-cap", type=float, default=None, help="花费上限（美元），达到就以「超出预期」结束")
     v.add_argument("--wall", type=int, default=None, help="整个流程的墙钟秒数（缺省 36000）")
-    v.add_argument("--module-wall", type=int, default=1500, help="做一个模块时 v2 子进程的墙钟秒数")
+    v.add_argument("--module-wall", type=int, default=1800, help="做一个模块时 v2 子进程的墙钟秒数")
     a = ap.parse_args(argv)
     if a.cmd == "v3":
         from .v3 import core as V3

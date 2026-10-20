@@ -16,10 +16,14 @@ from . import packs
 
 
 def run_pack(project, task, pack, out_dir, scope=None, model=None, test_cmd=None, wall=None, **kw):
-    """v2.run 的薄封装：pack 是包名或包对象；其它参数同 v2.run。"""
+    """v2.run 的薄封装：pack 是包名或包对象；其它参数同 v2.run。
+    wall / call_max 没给时，用包声明的 WALL / CALL_MAX（没声明就用 v2.run / guard 的缺省），例如 dslproj 包的墙钟 1800、单次调用上限 720 秒。"""
     from . import v2
     pk = packs.pick(pack)
-    extra = {"wall": wall} if wall else {}
+    extra = {"wall": wall or getattr(pk, "WALL", None)}
+    if "call_max" not in kw:
+        extra["call_max"] = getattr(pk, "CALL_MAX", None)
+    extra = {k: v for k, v in extra.items() if v}
     return v2.run(project, task, out_dir, test_cmd=test_cmd, model=model, scope=scope, pack=pk, **extra, **kw)
 
 

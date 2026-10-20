@@ -673,18 +673,13 @@ def t_cap():
 
 
 def t_kill():
-    print("八、被杀 / 超长 = 该文件失败不终止")
+    print("八、被杀 = 该文件失败不终止")
     killed = {"text": "", "rc": -9, "cost": 0.1}
     fk = Fake(bad={("生成", "接口", "routes/quiz.zs"): [killed]})
     r, _, _ = go("killed", fk)
     fs = files(r)
     check(fs["routes/quiz.zs"]["结果"] == "失败" and "模型没有完成输出" in fs["routes/quiz.zs"]["失败原因"] and len(fk.of(".zs 接口助手")) == 2, "接口生成被杀 → 该文件失败不重试（其它接口照做）", fs["routes/quiz.zs"])
     check(fs["routes/progress.zs"]["结果"] == "通过" and fs["ui/quiz_page.ui"]["结果"] == "跳过" and fs["ui/progress_page.ui"]["结果"] == "通过", "无关文件照做，依赖它的界面跳过")
-    long_ = {"text": "x", "rc": 0, "reason": "输出超长", "cost": 0.1}
-    fk = Fake(bad={("计划", "界面", "progress_page"): [long_]})
-    r, _, _ = go("long", fk)
-    f = files(r)["ui/progress_page.ui"]
-    check(f["结果"] == "失败" and "输出超长" in f["失败原因"] and len(fk.of(".ui 界面助手")) == 1, "规划输出超长 → 该界面失败，不进生成", f)
 
 
 def resume(name, fake, req=REQ, **kw):
@@ -715,7 +710,7 @@ def t_gen_ents():
 
 
 def t_silent():
-    print("十一、空闲超时 / 首字前静默：同一调用重试 1 次；超长不重试")
+    print("十一、空闲超时 / 首字前静默：同一调用重试 1 次")
     idle = {"text": "", "rc": 0, "reason": "空闲超时", "cost": 0.1}
     first = {"text": "", "rc": 0, "reason": "首字前静默超时", "cost": 0.1}
     good = f"=== queries/quiz_log.sql ===\n{SQL_A}"
@@ -732,11 +727,6 @@ def t_silent():
     f = files(r)["routes/quiz.zs"]
     check(f["结果"] == "失败" and "空闲超时" in f["失败原因"] and "已重试 1 次" in f["失败原因"] and len([x for x in fk.of(".zs 接口助手") if "本文件：routes/quiz.zs" in x]) == 2 and f["静默重试"] == 1, "重试后仍空闲超时 → 该文件失败（只重试 1 次，不是无限）", f)
     check(files(r)["routes/progress.zs"]["结果"] == "通过" and files(r)["ui/quiz_page.ui"]["结果"] == "跳过", "失败隔离不变")
-    long_ = {"text": "x", "rc": 0, "reason": "输出超长", "cost": 0.1}
-    fk = Fake(bad={("生成", "接口", "routes/quiz.zs"): [long_]})
-    r, _, _ = go("long2", fk)
-    f = files(r)["routes/quiz.zs"]
-    check(f["结果"] == "失败" and "输出超长" in f["失败原因"] and len([x for x in fk.of(".zs 接口助手") if "本文件：routes/quiz.zs" in x]) == 1 and "静默重试" not in f, "输出超长不重试", f)
     fk = Fake(bad={("生成", "接口", "routes/quiz.zs"): [idle, idle]}, cost=0.0)
     r, _, _ = go("idle_cap", fk, cost_cap=0.35)
     check("花费达上限" in r["stop"] or r["v2"]["结论"] != "成功", "重试前仍检查花费熔断（不绕过 cap）", r["stop"][:200])

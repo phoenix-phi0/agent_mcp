@@ -162,10 +162,10 @@ def t_call():
     r, p, out = go("rd_invoke", f)
     check(f.tags() == ["plan", "plan", "bound"] and r["fixed"], "最终文本里写 <invoke → 当失败重试 1 次", f.tags())
 
-    f = RFake(plan="GUARD:输出超长")
+    f = RFake(plan="GUARD:空闲超时")
     r, p, out = go("rd_twice", f)
     check(f.tags() == ["plan", "plan"] and r["reply"]["状态"] == "失败" and "模型没有回应" in r["reply"]["原因"]
-          and "输出超长" in r["reply"]["原因"] and not r["changed_files"], "重试仍失败 → 状态失败、项目不动", r["reply"])
+          and "空闲超时" in r["reply"]["原因"] and not r["changed_files"], "重试仍失败 → 状态失败、项目不动", r["reply"])
 
     os.environ["DSLAGENT_PLAN_MODEL"] = "opus"
     try:

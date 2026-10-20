@@ -7,7 +7,7 @@
   grok[:<强度>]                                  grok CLI，强度 low|medium|high|xhigh，缺省 low
   opencode:<provider/model>[:budget=<N>]         opencode run；budget = 思考 token 预算（正整数，只影响这次子进程），缺省不限
 各引擎的调用函数返回同一种 dict（text / sec / ttft / cost / usage / rc / stderr / reason / partial / num_turns / tool_calls / engine / model），
-保险（guard.py，四个引擎共用 _Proc）：首事件前静默、空闲超时、文本里的 <invoke 拦截、输出超长、总超时（killpg）；失败重试在 v2.Model 里（统一 1 次）。
+保险（guard.py，四个引擎共用 _Proc）：首事件前静默、空闲超时、文本里的 <invoke 拦截、总超时（killpg）；失败重试在 v2.Model 里（统一 1 次）。
 """
 import json
 import os
@@ -187,11 +187,12 @@ def opencode_bin():
 
 class _Proc:
     """一次子进程调用的公共部分（claude / codex / grok / opencode 共用）：起进程（新进程组）、stdin 喂入、stderr 收集、
-    总超时 / 首事件前静默 / 空闲超时三道 killpg、文本保险（工具调用格式 / 超长）、事件落盘（events=False 不落）。"""
+    总超时 / 首事件前静默 / 空闲超时三道 killpg、文本保险（工具调用格式）、事件落盘（events=False 不落）。"""
 
     def __init__(self, cmd, stdin_text, timeout, idle, first_cap, cwd, env, reply_path, events=True):
         self.t0 = time.time()
         self.killed, self.err_buf = [], []
+        self.out_chars = 0                      # 已输出字数（只记不杀）
         self.last = self.first = None          # 最近一次「有效活动」/ 首个事件的墙钟
         self.act = False                       # 是否已收到过正文 / 推理 / 工具活动（之后才算空闲）
         self.idle, self.first_cap = idle, first_cap
@@ -267,13 +268,12 @@ class _Proc:
                 pass
 
     def text_guard(self, so_far, total=None):
-        """so_far 里出现 <invoke 等 → 杀；累计字数（缺省 len(so_far)，多轮调用传各轮累计 total）超过 MAX_OUT → 杀。"""
+        """so_far 里出现 <invoke 等 → 杀；只记已输出字数（缺省 len(so_far)，多轮调用传各轮累计 total），不再按输出长度杀进程。"""
+        self.out_chars = len(so_far) if total is None else total
         if self.killed:
             return
         if G.has_mark(so_far):
             self.kill(G.R_MARK)
-        elif (len(so_far) if total is None else total) > G.MAX_OUT:
-            self.kill(G.R_LONG)
 
     def close(self):
         """读完 stdout 后收尾：等进程、停计时、关文件。返回 (reason, stderr 文本)。"""
@@ -298,7 +298,7 @@ def _empty_cwd(name):
 
 # ------------------------------------------------------------------ claude
 
-# 被杀的 claude 调用（rc=-9：总超时 / 空闲 / 输出超长）CLI 来不及发 result 事件，total_cost_usd 没有，原来一律记 0.0（kg_v2plan：8 次被杀的子任务全记 0）。
+# 被杀的 claude 调用（rc=-9：总超时 / 空闲）CLI 来不及发 result 事件，total_cost_usd 没有，原来一律记 0.0（kg_v2plan：8 次被杀的子任务全记 0）。
 # 改按流里已有的 usage 估：message_start 的输入 / 缓存 token + 输出 token（message_delta 若已到用它，否则按已流出的字数估），价格 美元/百万 token：
 # (输入, 5 分钟缓存写, 1 小时缓存写, 缓存读, 输出)。估算值在返回里带 cost_est=True，calls.json 可看出来。
 PRICE = {"haiku": (1.0, 1.25, 2.0, 0.10, 5.0), "opus": (5.0, 6.25, 10.0, 0.50, 25.0), "": (3.0, 3.75, 6.0, 0.30, 15.0)}
@@ -326,11 +326,11 @@ def call_claude(system, user, timeout=300, model=None, reply_path=None, idle=Non
                 first_cap=None):
     """claude -p（model 缺省 DEFAULT），自定系统提示，无内置工具 / 技能，流式（记首 token）。返回 text / sec / ttft / cost / usage / rc / stderr / reason。
     进程保险同 codex / grok / opencode（_Proc）：总超时、首个 API 事件前静默（FIRST_CAP）、首 token 之后 idle 秒没有新流事件（空闲超时）、
-    文本里出现 <invoke / <function_calls（输出工具调用格式）、累计超过 MAX_OUT 字符（输出超长）。
+    文本里出现 <invoke / <function_calls（输出工具调用格式）。
     reply_path：边收流边把文本增量追加进该文件，被杀时已收到的内容也在；返回的 partial 是已收到的流文本。
     mcp_config（工具调用）：多挂一个 MCP（--mcp-config + --strict-mcp-config，内置工具仍 --tools ""，只许 allow_tool 那一个），
     --max-turns 用 max_turns；text 是最后一轮的最终回复（中途轮次里的文字、真实工具调用不算），「输出工具调用格式」只查当前这一轮的文字，
-    超长按各轮累计，返回里多 num_turns / tool_calls / subtype。"""
+    已输出字数按各轮累计（只记不杀），返回里多 num_turns / tool_calls / subtype。"""
     from tools.cbatch import CLAUDE_BIN
 
     from .common import child_env

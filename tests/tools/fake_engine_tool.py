@@ -4,7 +4,7 @@
 由测试里的包装脚本调用：`fake_engine_tool.py <引擎名> <真实 argv…>`。
 FAKE_ENGINES = json 文件 {"codex": [attempt, …], "grok": […], "opencode": […], "claude": […]}；每次被调用取该引擎的下一个 attempt（计数放在
 FAKE_ENGINES.<引擎>.n，超过就重复最后一个）。attempt：{"text": "回复", "mode": …, "call": "<dsl 代码>"}，mode：
-  ok（缺省）正常回复 / silent 一个事件都不出（挂着）/ idle 先出一点再挂着 / invoke 回复里写 <invoke / big 回复 25000 字
+  ok（缺省）正常回复 / silent 一个事件都不出（挂着）/ idle 先出一点再挂着 / invoke 回复里写 <invoke
   maxturns（只对 grok）读完 reads 后到轮数上限 / rc 退出码 3 + stderr / tool 出一个工具 / 命令事件。
   （只对 grok，read 规划用）reads 先发 at["reads"] = [[工具名, 参数, 返回字数], …] 这些工具调用（带返回内容）再回复 / write 发一个 write 工具调用后挂着。
 call（只对带 mcp_servers.dsl 的 codex）：真的拉起那个 MCP 调一次 dsl 工具，再回复。
@@ -34,8 +34,6 @@ at = atts[min(n, len(atts) - 1)]
 mode, text = at.get("mode", "ok"), at.get("text", "")
 if mode == "invoke":
     text = "先看看 <invoke name=x>" + text
-elif mode == "big":
-    text = "x" * 25000
 
 
 def out(o):

@@ -110,12 +110,12 @@ class Model:
     __call__ = 无工具的一次调用（失败 → 同输入重试 1 次，仍失败抛 RuntimeError）；tool_call = 带 MCP / 只读工具的一次调用（不重试不抛模型失败，
     失败原因放在返回的 failed 里，由 plan_read_call / toolsub 决定重试还是兜底）。"""
 
-    def __init__(self, out, backend=None, max_calls=MAX_CALLS, deadline=None, routes=None):
+    def __init__(self, out, backend=None, max_calls=MAX_CALLS, deadline=None, routes=None, call_max=None):
         self.out = Path(out)
         self.real = backend is None
         self.routes = routes or {}          # 步骤 → 模型串（engines.STEPS；没写的步骤走 claude MODEL）
         self.backend = backend or (lambda s, u, tag, timeout, model=None, **kw: call_claude(s, u, timeout, model, **kw))
-        self.max_calls, self.deadline = max_calls, deadline
+        self.max_calls, self.deadline, self.call_max = max_calls, deadline, call_max
         self.n, self.cost, self.log = 0, 0.0, []
         self.n0, self.log_start, self.run_no = 0, 0, None      # 继续构建（modular --resume）：之前已有的调用数 / calls.json 条数；本次运行序号
         self.lock = threading.Lock()
@@ -165,7 +165,7 @@ class Model:
             self.n += 1
             n = self.n
         t0 = time.time()
-        tmo = G.call_timeout((self.deadline - t0) if self.deadline else None)
+        tmo = G.call_timeout((self.deadline - t0) if self.deadline else None, self.call_max)
         if limits:          # 单个步骤放宽超时（modular 约定步骤）：总超时取 limits.timeout（仍不超过剩余墙钟），空闲超时传给引擎
             tmo = max(G.CALL_MIN, min(limits["timeout"], (self.deadline - t0) + 5)) if self.deadline else limits["timeout"]
         sp = self.spec(tag, model, step)
@@ -237,7 +237,7 @@ def _rec_model(sp):
 
 def plan_read_call(M, system, user, tag, project, model, out, tools, wrap=None):
     """plan_mode=read 的一次规划调用：挂只读 dslmcp（--readonly，workdir=待改项目）、--max-turns READ_MAX_TURNS，
-    保险同 call_claude（空闲超时 / 输出超长 / 输出工具调用格式）；失败（保险触发、rc≠0、空回复、轮数用尽）同输入重试 1 次，仍失败抛 RuntimeError。
+    保险同 call_claude（空闲超时 / 输出工具调用格式）；失败（保险触发、rc≠0、空回复、轮数用尽）同输入重试 1 次，仍失败抛 RuntimeError。
     每次尝试的工具调用（工具名、参数、返回字数）追加进 tools，并整份写到 out/plan_tools.json。返回最终回复文本。
     grok 读超限（杀掉之后）不原样重试，改走 _wrapup（收尾调用，不带工具）；wrap 是记收尾情况的 dict（触发 / 次 / 段数 / 字数）。"""
     d = out / "toollogs"
@@ -552,12 +552,14 @@ def check(project, work, script, task, pack=None):
 # ------------------------------------------------------------------ 主流程
 
 
-def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=MAX_CALLS, boundary=True, scope=None, plan_fix=None, pack=None):
+def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=MAX_CALLS, boundary=True, scope=None, plan_fix=None, pack=None,
+        call_max=None):
     """跑一次 v2。project 里直接改文件；记录写进 out_dir（calls/、calls.json、plan*.zs、outline.md、boundary/、result.json）。
     model：假模型 backend(system, user, tag, timeout) → str|dict（测试用），缺省走 claude CLI。
     scope：允许改动的路径（目录前缀 / 精确文件 / glob，"a/,b/" 或列表；缺省取包的 scope_for，再缺省看计划里的 #范围 块，都没有就不启用范围闸，见 scope.py）。
     pack：资料包名或包对象（缺省看环境变量 DSLAGENT_PACK，再缺省 code；接口见 packs/__init__.py）。
     test_cmd：交给验收 prepare 的「给定配置」（code 是测试命令，别的包不用）。
+    call_max：单次模型调用的总超时上限（缺省 guard.CALL_MAX；entry.run_pack 缺省按包声明的 CALL_MAX 覆盖，仍不超过剩余墙钟）。
     返回结果字典（runner.run 同款字段 + reply / v2）。"""
     from . import plan as DP
     from . import prompts as DPR
@@ -579,7 +581,7 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
     except ValueError as e:
         pack = ver = None
         pick_err = str(e)
-    M = Model(out, backend=model, max_calls=max_calls, deadline=t_start + wall, routes=routes)
+    M = Model(out, backend=model, max_calls=max_calls, deadline=t_start + wall, routes=routes, call_max=call_max)
     steps, info = {}, {"检查": [], "重写": False, "子任务模式": DC.env_mode(), "子任务": []}
     res = {"project": str(project), "test_cmd": test_cmd, "kind": "task", "planner": "v2", "fixed": False,
            "engine_used": "v2", "versions": 0, "calls": 0, "cost": 0.0, "seconds": 0, "stop": "", "dir": str(out),

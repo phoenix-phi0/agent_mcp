@@ -3,12 +3,12 @@
 三级规划（v2.run_newproj(layered=True) 调 run_with_cap()）：
   1 确认分层（模型 1 次，小）：{"模板","角色","规则","层"}；层从 实体/查询/接口/界面 里选（gen 增删改查由程序做，不算层）。校验不过带报错重写，共 ≤3 次。
   2 确认文件（模型 1 次，只列文件）：{"文件":[{层,路径,实体,作用,规则,依赖}]}；程序校验命名 / 路径唯一 / 每个实体都有实体文件 / 依赖方向 / 规则分配，共 ≤3 次；
-    没有文件数上限。文件很多（> NEWPROJ_LAYERED_BATCH，默认 30）或这次列清单被杀 / 超长时改分批：先只列实体＋查询层，建完再列接口层（此时能看到真实的 sql），再列界面层。
+    没有文件数上限。文件很多（> NEWPROJ_LAYERED_BATCH，默认 30）或这次列清单被杀时改分批：先只列实体＋查询层，建完再列接口层（此时能看到真实的 sql），再列界面层。
   3 逐层、逐文件：实体 → 建库＋生成增删改查＋检查项目 → 查询 → 接口 → 界面，层内按清单顺序（校验保证依赖在前）。每个文件两步：
     a 单文件规划（模型，≤2 次）：输入 = 该文件项 + 分到的规则 + 项目里已真实存在的相关文件全文；输出该层的细化计划 JSON，程序校验引用必须真实存在
       （接口的 用sql 只能选已有 sql，缺的列「新sql」随本文件生成；界面的 用接口 只能选已有接口）；
     b 按计划生成（模型，≤2 次，接口有规则时另加规则核对 / 重写）：校验实体 / 名字参数与计划一致＋预编译sql / 检查项目＋校验角色＋参数核对＋核对规则 / 检查项目含 ui 解析失败。
-  失败的文件撤回、记失败，依赖它的文件跳过（不调模型）；超长 / 被杀 = 该文件失败不终止；花费熔断（NEWPROJ_COST_CAP / --cost-cap）停在「部分成功：花费达上限」。
+  失败的文件撤回、记失败，依赖它的文件跳过（不调模型）；被杀 = 该文件失败不终止；花费熔断（NEWPROJ_COST_CAP / --cost-cap）停在「部分成功：花费达上限」。
 4 整体检查：检查项目 + 全部接口文件参数核对。
 模型调用走 v2.Model（计数 / 墙钟 / 费用 / calls.json），不经 DSL 引擎，程序性检查直接调 verbs/newproj/defs 里的动词函数。
 """
@@ -25,7 +25,7 @@ from . import guard as G
 PKG = Path(__file__).resolve().parent
 PACK = PKG / "packs" / "newproj"
 DEFS = PKG / "verbs" / "newproj" / "defs"
-FAST_FAIL = (G.R_LONG, G.R_IDLE, G.R_FIRST, G.R_TOTAL)       # 这类失败重试大概率重蹈覆辙还多花钱：直接判该文件失败
+FAST_FAIL = (G.R_IDLE, G.R_FIRST, G.R_TOTAL)       # 这类失败重试大概率重蹈覆辙还多花钱：直接判该文件失败
 LAYERS = ("实体", "查询", "接口", "界面")
 GROUPS = (("实体", "查询"), ("接口",), ("界面",))               # 分批时的批次
 BATCH_ENV = "NEWPROJ_LAYERED_BATCH"
@@ -138,8 +138,8 @@ class Run:
         return sum(1 for c in self.M.log[getattr(self.M, "log_start", 0):] if c.get("engine") == "codex")
 
     def ask(self, prompt, rec=None, kind=None):
-        """一次模型调用 → 回复文本。花费熔断 / 总调用或墙钟用完 → Halt；没回应：超长 / 被杀 → FileFail，其它 → _Retry。
-        RETRY_SILENT 里的失败（空闲超时 / 首字前静默）原样重试 1 次再判；输出超长、被杀、熔断不重试。"""
+        """一次模型调用 → 回复文本。花费熔断 / 总调用或墙钟用完 → Halt；没回应：被杀 → FileFail，其它 → _Retry。
+        RETRY_SILENT 里的失败（空闲超时 / 首字前静默）原样重试 1 次再判；被杀、熔断不重试。"""
         for attempt in (1, 2):
             if self.cap and self.spent() >= self.cap:
                 self.capped = True

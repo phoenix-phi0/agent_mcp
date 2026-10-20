@@ -633,7 +633,7 @@ def t_perfile():
     r, _, _ = go("rule_rw", Fake(bad={("核对",): [no, ok]}))
     check(r["fixed"] and files(r)["routes/attempt.zs"]["核对"] == 2, "规则核对：重写后通过 → 成功")
 
-    # 超长 / 被杀
+    # 被杀（layered 缺省不重试 RETRY_SILENT 以外的保险失败：空闲 / 首字前静默 / 被杀）
     killed = {"text": "", "rc": -9, "cost": 0.3}
     fk = Fake(bad={("生成", "routes/attempt.zs"): [killed]})
     r, p, _ = go("killed", fk)
@@ -641,14 +641,14 @@ def t_perfile():
     check(a["结果"] == "失败" and "模型没有完成输出" in a["失败原因"] and len(fk.of(".zs 接口助手")) == 1, "被杀（rc=-9）→ 该接口文件失败，不重试", a)
     check(files(r)["ui/quiz.ui"]["结果"] == "跳过" and files(r)["entities/attempt.entity"]["结果"] == "通过" and r["v2"]["结论"] == "部分成功" and abs(r["cost"] - 0.3) < 1e-9,
           "运行没终止：其余文件照做，依赖它的界面跳过；被杀调用的花费计入", (r["stop"], r["cost"]))
-    long_ = {"text": "x" * 10, "rc": 0, "reason": "输出超长", "cost": 0.2}
-    fk = Fake(bad={("计划", "ui/quiz.ui"): [long_]})
-    r, _, _ = go("overlong", fk)
+    idle_ = {"text": "x" * 10, "rc": 0, "reason": "空闲超时", "cost": 0.2}
+    fk = Fake(bad={("计划", "ui/quiz.ui"): [idle_]})
+    r, _, _ = go("idleplan", fk)
     f = files(r)["ui/quiz.ui"]
-    check(f["结果"] == "失败" and "输出超长" in f["失败原因"] and len(fk.of("单文件规划助手")) == 5 and not fk.of(".ui 界面助手"), "单文件规划输出超长 → 该文件失败，不重试，不进生成")
-    fk = Fake(bad={("生成", "ui/quiz.ui"): [long_]})
-    r, _, _ = go("overlong2", fk)
-    check(files(r)["ui/quiz.ui"]["结果"] == "失败" and len(fk.of(".ui 界面助手")) == 1, "生成输出超长 → 该界面文件失败，不重试")
+    check(f["结果"] == "失败" and "空闲超时" in f["失败原因"] and len(fk.of("单文件规划助手")) == 5 and not fk.of(".ui 界面助手"), "单文件规划空闲超时（layered 缺省不重试）→ 该文件失败，不进生成")
+    fk = Fake(bad={("生成", "ui/quiz.ui"): [idle_]})
+    r, _, _ = go("idlegen", fk)
+    check(files(r)["ui/quiz.ui"]["结果"] == "失败" and len(fk.of(".ui 界面助手")) == 1, "生成空闲超时（layered 缺省不重试）→ 该界面文件失败")
 
 
 def t_budget():

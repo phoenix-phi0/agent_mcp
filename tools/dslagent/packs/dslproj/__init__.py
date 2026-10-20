@@ -24,6 +24,8 @@ VERB_PACKS = ("code", "dslproj")
 VERBS = ("列文件", "搜索代码", "读片段", "改文件", "写文件", "删文件", "加载检查", "比对约定", "跑用例")
 WRITE_VERBS = ("改文件", "写文件", "删文件")
 STRICT_SCOPE = True
+WALL = 1800              # 整个任务（entry.run_pack 没传 wall 时的缺省）：一个模块常要好几次大调用
+CALL_MAX = 720           # 单次模型调用总超时上限（entry.run_pack 没传 call_max 时的缺省）：写一份模块骨架可能较长
 
 
 def _prompt(name):

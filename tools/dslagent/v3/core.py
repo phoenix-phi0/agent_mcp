@@ -29,7 +29,7 @@ def prompt_text(name):
 
 
 class Ctx:
-    def __init__(self, project, out, req, M, cost_cap=None, module_cmd=None, module_wall=1500):
+    def __init__(self, project, out, req, M, cost_cap=None, module_cmd=None, module_wall=1800):
         self.project, self.out, self.req, self.M = Path(project), Path(out), req, M
         self.cost_cap, self.module_cmd, self.module_wall = cost_cap, module_cmd, module_wall
         self.usage = None                      # 引擎的 Usage（run() 里挂上）：预算按它算
@@ -128,7 +128,7 @@ def ctx_of(engine=None):
     return c
 
 
-def run(req, project, out, stop_after=None, backend=None, cost_cap=None, wall=WALL, module_cmd=None, module_wall=1500):
+def run(req, project, out, stop_after=None, backend=None, cost_cap=None, wall=WALL, module_cmd=None, module_wall=1800):
     """跑 v3.zs。req：需求文本；backend：假模型（测试用）；module_cmd：替换「做模块」起的子进程命令（测试用）。
     → {状态, 原因, 停在, 花费, 用时, 记录…}，同时写 out/result.json。"""
     project, out = Path(project), Path(out)
