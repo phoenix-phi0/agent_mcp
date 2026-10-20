@@ -14,7 +14,7 @@ PACK_DIR = Path(".")
 def 同步顶层依赖() -> dict:
     sys.path.insert(0, str(Path(__file__).parent))
     import _v3ctx as X
-    from tools.dslagent.v3 import contracts as VC, top as VT
+    from tools.dslagent.v3 import catalog as CAT, contracts as VC, top as VT
     c = X.ctx()
     old_text = c.top_path().read_text(encoding="utf-8")
     top, probs = VT.parse(old_text)
@@ -31,6 +31,7 @@ def 同步顶层依赖() -> dict:
             want[name] = cc["依赖"]
             changed.append(name)
     if not changed:
+        CAT.refresh(c.project)
         return {"改了": [], "没变": True}
     new_text = VT.sync_deps(old_text, want)
     new_probs = VT.check(new_text)
@@ -38,4 +39,5 @@ def 同步顶层依赖() -> dict:
         X.fail("同步依赖后 plan/top.zs 没通过检查：" + "；".join(new_probs[:3]))
     c.top_path().write_text(new_text, encoding="utf-8", newline="\n")
     c.log("规划", 种类="顶层", 事件="同步依赖", 改了=changed)
+    CAT.refresh(c.project)
     return {"改了": changed, "没变": False}

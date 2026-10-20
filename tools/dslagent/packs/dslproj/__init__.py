@@ -80,6 +80,20 @@ def _numbered(text):
     return "\n".join(f"{i:4d}| {l}" for i, l in enumerate(text.splitlines(), 1))
 
 
+def catalog_text(project):
+    """plan/catalog.md（v3 的接口目录，程序生成）；没有就返回 None。做模块 / 补改带上它当只读参考，不是本模块的约定。"""
+    f = Path(project) / "plan" / "catalog.md"
+    return f.read_text(encoding="utf-8").strip() if f.is_file() else None
+
+
+def catalog_section(project):
+    cat = catalog_text(project)
+    if not cat:
+        return None
+    return ("## 项目接口目录（只读参考，程序生成；不是本模块的约定，不能依据它改动本模块的行为——"
+            "本模块该做什么只看上面「本模块约定」）\n" + cat)
+
+
 def entities_text(project, module):
     """本模块与全部上游（闭包）的 entities/<模块>.entity 原文，每个上限 8000 字；补改带上它，免得模型凭空编字段。"""
     root = Path(project)
@@ -125,6 +139,9 @@ def materials(task, project, scope):
     parts.append("## 本模块现有文件（行号前缀不是内容）\n" + ("\n\n".join(shown) if shown else "（还没有文件）"))
     parts.append(SYNTAX)
     parts.append(service_verbs(project, module))
+    cat = catalog_section(project)
+    if cat:
+        parts.append(cat)
     return {"text": "\n\n".join(parts), "记录": {"模块": module, "约定函数": [f["名"] for f in c["函数"]], "依赖": c["依赖"],
                                               "现有文件": [r for r, _ in cur]}}
 
@@ -158,11 +175,15 @@ def fix_input(project, ctx, probs):
     c, text = P.load_contract(project, module)
     ups = [f"### {d}\n{C.public_heads(C.parse(P.contract_path(project, d).read_text(encoding='utf-8'))[0])}" for d in c["依赖"]]
     cur = "\n\n".join(f"### {rel}\n```\n{_numbered(t)}\n```" for rel, t in current_files(project, module)) or "（还没有文件）"
-    return "\n\n".join([f"【任务原文】\n{ctx['task']}", f"【本模块约定（不能改）】\n{text.strip()}",
-                        "【上游模块公开函数】\n" + ("\n\n".join(ups) or "（无）"),
-                        "【本模块与全部上游的 entities 原文】\n" + entities_text(project, module),
-                        "【验收发现的问题】\n" + "\n".join(f"{i}. {p}" for i, p in enumerate(probs, 1)),
-                        f"【本模块现有文件的完整当前内容（行号前缀不是内容）】\n{cur}", SYNTAX, service_verbs(project, module)])
+    parts = [f"【任务原文】\n{ctx['task']}", f"【本模块约定（不能改）】\n{text.strip()}",
+             "【上游模块公开函数】\n" + ("\n\n".join(ups) or "（无）"),
+             "【本模块与全部上游的 entities 原文】\n" + entities_text(project, module),
+             "【验收发现的问题】\n" + "\n".join(f"{i}. {p}" for i, p in enumerate(probs, 1)),
+             f"【本模块现有文件的完整当前内容（行号前缀不是内容）】\n{cur}", SYNTAX, service_verbs(project, module)]
+    cat = catalog_section(project)
+    if cat:
+        parts.append(cat)
+    return "\n\n".join(parts)
 
 
 def plan_problems(main, body, cl, generic):

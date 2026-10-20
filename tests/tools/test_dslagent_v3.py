@@ -666,7 +666,8 @@ def test_review():
     check("【检查发现的问题" in rw and "复核（对照需求）：需求第九节要求讲解调模型回答" in rw, "复核问题当上次问题带回重写", rw[-300:])
     rq = [c for c in fk.calls if c["tag"] == "v3_review_graph"][0]
     check("【本轮需求全文】" in rq["user"] and "做一个学习系统" in rq["user"] and "【模块 graph 的约定】" in rq["user"] and "## 函数" in rq["user"]
-          and "【顶层规划" not in rq["user"], "复核入参 = 需求全文 + 该模块约定", rq["user"][:200])
+          and "【顶层规划 plan/top.zs】" in rq["user"] and "项目 demo" in rq["user"] and "【项目接口目录" not in rq["user"],
+          "复核入参 = 需求全文 + top.zs + 该模块约定（graph 是第一个模块，还没有别的约定，没有目录）", rq["user"][:200])
     check(rq["model"] in (None, "sonnet") or "sonnet" in str(rq["model"]), "复核默认 sonnet", rq["model"])
     check(fk.n("v3_review_") == 4 and fk.n("v3_contract_") == 4, "三个模块各复核一次（graph 两次）", [c["tag"] for c in fk.calls])
     # 一直打回：计入最多次数，三次后失败
@@ -690,6 +691,77 @@ def test_review():
     check(res4["状态"] == "成功" and fk4.n("v3_review_graph") == 2 and rv4 and rv4[-1]["状态"] == "未复核", "复核回复坏掉：问两次后记未复核并放行", rv4)
     check(PL.parse_review('{"通过": "否", "问题列表": []}') is None and PL.parse_review('x {"通过":"是"} y') == {"通过": True, "问题": []},
           "parse_review：否且没问题视为无效；容忍前后文字")
+
+
+def test_catalog():
+    print("接口目录 plan/catalog.md：生成 / 刷新 / 一行概要")
+    from tools.dslagent.v3 import catalog as CAT
+    p = fresh("cat")
+    (p / "plan").mkdir(parents=True)
+    (p / "plan" / "top.zs").write_text(TOP3, encoding="utf-8")
+    (p / "contracts").mkdir()
+    for m in ("graph", "vocab", "progress"):
+        (p / "contracts" / f"{m}.md").write_text(contract_text(m), encoding="utf-8")
+    text = CAT.refresh(p)
+    check((p / "plan" / "catalog.md").is_file() and (p / "plan" / "catalog.md").read_text(encoding="utf-8") == text,
+          "refresh 存盘的内容和返回一致")
+    check("## 模块 graph" in text and "## 模块 progress" in text and "## 模块 vocab" in text, "三个模块各一节（按名排序）", text[:50])
+    check("说明：知识图谱" in text, "top.zs 里模块行的注释进了说明", text)
+    check("公开 函数 取知识点 code" in text and "返回 {id, code, title}" in text and "伪代码" not in text,
+          "公开函数：函数头 + 返回，没有伪代码", text)
+    check("GET /graph/point -> 取知识点" in text and "POST /progress/answer -> 记作答" in text, "接口行进了目录", text)
+    check("表 progress_answer" in text and "用例" not in text, "表名进了目录，用例没有", text)
+    text2 = CAT.refresh(p)
+    check(text2 == text, "内容没变：refresh 两次结果一致（不重写）")
+    top_text = (p / "plan" / "top.zs").read_text(encoding="utf-8")
+    brief = CAT.brief_index(p, top_text, exclude={"progress", "graph"})
+    check("模块 vocab" in brief and "记作答" in brief and "模块 graph" not in brief and "模块 progress" not in brief,
+          "brief_index 排除给定模块，只给剩下模块一行", brief)
+    check("伪代码" not in brief and "用例" not in brief and "\n\n" not in brief.strip(), "一行概要不含伪代码 / 用例，一个模块一行", brief)
+    check(CAT.refresh(fresh("cat_empty")) is None, "没有 plan/top.zs 时 refresh 不生成")
+
+
+DUP_A = ("模块 a\n\n## 函数\n公开 函数 f x\n  返回 {ok}\n  伪代码 返回 {\"ok\": 1}\n\n"
+         "## 接口\nGET /dup/x -> f\n\n## 用例\n用例 f_ok\n  调用 f x=1\n  得 有返回\n")
+DUP_A_FIXED = DUP_A.replace("/dup/x", "/a/x")
+DUP_B = ("模块 b\n\n## 函数\n公开 函数 g y\n  返回 {ok}\n  伪代码 返回 {\"ok\": 1}\n\n"
+         "## 接口\nGET /dup/x -> g\n\n## 用例\n用例 g_ok\n  调用 g y=1\n  得 有返回\n")
+
+
+def test_global_check():
+    print("全局检查：跨模块方法+路径 / 表名重复")
+    from tools.dslagent.v3 import globalcheck as G
+    p = fresh("gchk")
+    (p / "contracts").mkdir(parents=True)
+    (p / "contracts" / "a.md").write_text(DUP_A, encoding="utf-8")
+    (p / "contracts" / "b.md").write_text(DUP_B, encoding="utf-8")
+    top = {"项目": "demo", "模块": [{"名": "a", "依赖": [], "行": 1}, {"名": "b", "依赖": [], "行": 2}]}
+    g = G.check(p, top)
+    check(g["条数"] == 2 and set(g["按模块"]) == {"a", "b"}, "冲突的两个模块各记一条问题", g)
+    check("GET /dup/x" in g["按模块"]["a"][0] and "a" in g["按模块"]["a"][0] and "b" in g["按模块"]["a"][0],
+          "问题指出冲突的方法+路径和涉及的两个模块", g["按模块"]["a"])
+    (p / "contracts" / "a.md").write_text(DUP_A_FIXED, encoding="utf-8")
+    g2 = G.check(p, top)
+    check(g2["条数"] == 0, "路径改掉之后没有冲突了", g2)
+
+
+def test_global_check_flow():
+    print("全局检查接入 v3 流程：同一路径两个模块都用，逼重写；解决后过，一直冲突就终止失败")
+    proj, out, state = fresh("p"), fresh("o"), fresh("st") / "state"
+    stub_env(state)
+    fk = Fake(top="项目 demo\n模块 a\n模块 b\n", scripts={"v3_contract_a": [DUP_A, DUP_A_FIXED], "v3_contract_b": [DUP_B]})
+    res = run_v3(proj, out, fk, stop_after="contract")
+    check(res["状态"] == "成功", "冲突被发现、强制重写后解决，流程成功", {k: res[k] for k in ("状态", "原因")})
+    check("/a/x" in (proj / "contracts" / "a.md").read_text(encoding="utf-8"), "冲突的模块 a 被强制重写成了不冲突的路径")
+    check(fk.n("v3_contract_a") == 2, "模块 a 因全局检查冲突多写了一次（原来 1 次 + 逼写 1 次）", [c["tag"] for c in fk.calls])
+    gev = [r for r in res["记录"]["规划"] if r["事件"] == "全局检查"]
+    check(len(gev) >= 2 and gev[0]["条数"] == 2 and gev[-1]["条数"] == 0, "记录里看得到全局检查：先有冲突，重写后没有了", gev)
+
+    proj2, out2 = fresh("p"), fresh("o")
+    fk2 = Fake(top="项目 demo\n模块 a\n模块 b\n", scripts={"v3_contract_a": [DUP_A], "v3_contract_b": [DUP_B]})
+    res2 = run_v3(proj2, out2, fk2, stop_after="contract")
+    check(res2["状态"] == "失败" and "全局检查" in res2["原因"] and "/dup/x" in res2["原因"],
+          "两边都不改：全局检查两轮后仍冲突，终止失败", res2["原因"])
 
 
 def test_stop_after():
@@ -982,7 +1054,8 @@ def test_verb_decls():
     for n, k in want.items():
         check(reg.has(n) and reg.kind_of(n) == "script", f"{n} 是 .zs 动词")
     check(reg.has("复核约定") and reg.kind_of("复核约定") == "python", "复核约定 是 Python 动词")
-    for n in ("写规划", "检查规划", "存规划", "已有规划", "依赖分层", "生成骨架", "生成分配", "做模块", "已完成", "标记完成", "同步顶层依赖"):
+    for n in ("写规划", "检查规划", "存规划", "已有规划", "依赖分层", "生成骨架", "生成分配", "做模块", "已完成", "标记完成", "同步顶层依赖",
+              "全局检查", "全局重写任务表"):
         check(reg.has(n) and reg.kind_of(n) == "python", f"{n} 是 Python 动词")
     check(not reg.warnings, "加载没有警告", reg.warnings)
     sig = lambda n: " ".join(p.show() for p in reg.specs_of(n))        # noqa: E731
@@ -991,8 +1064,11 @@ def test_verb_decls():
     check(sig("做模块") == "<模块> <上次失败?> <模型=sonnet>" or sig("做模块").startswith("<模块> <上次失败"), "做模块 签名", sig("做模块"))
     check(sig("写规划").startswith("<种类> <需求?> <模块?> <上次问题?>"), "写规划 签名", sig("写规划"))
     check(sig("复核约定") == "<模块> <文本> <需求?> <模型=sonnet>", "复核约定 签名", sig("复核约定"))
+    check("强制问题" in sig("规划一份"), "规划一份 带了 强制问题 可选参数", sig("规划一份"))
     flow = (core.HERE / "v3.zs").read_text(encoding="utf-8")
     check(all(s in flow for s in ("规划到通过 顶层", "规划到通过 约定", "同步顶层依赖", "生成骨架", "生成分配", "执行 plan/build.zs", "预算 调用 120 秒 36000")), "v3.zs 是流程脚本", flow)
+    plan_flow = (core.HERE.parent / "verbs" / "v3" / "defs" / "规划到通过.zs").read_text(encoding="utf-8")
+    check("全局检查" in plan_flow and "全局重写任务表" in plan_flow, "规划到通过.zs 接入了全局检查", plan_flow)
 
 
 if __name__ == "__main__":
@@ -1010,6 +1086,9 @@ if __name__ == "__main__":
         test_engine_bits()
         test_full_flow_clean()
         test_review()
+        test_catalog()
+        test_global_check()
+        test_global_check_flow()
         test_stop_after()
         test_top_fails()
         test_group_retry()

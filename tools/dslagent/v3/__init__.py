@@ -5,7 +5,11 @@
 流程（v3.zs）：规划到通过 顶层 → 规划到通过 约定 → 生成骨架 → 生成分配 → 执行 plan/build.zs（做模块组 … → 全量回归 → 接口冒烟）。
 流程在 .zs 里，套路封装成带默认值的动词，Python 只做确定性的事和调模型。
   顶层  plan/top.zs               项目 名 / 模块 名 [依赖 …]（top.py：解析、检查、依赖分层）
-  约定  contracts/<模块>.md        dslproj 的约定格式；按依赖分层，同层并行写；检查 = dslproj 约定检查 + 与 top 一致 + 表名前缀（contracts.py）
+  约定  contracts/<模块>.md        dslproj 的约定格式；按依赖分层，同层并行写；检查 = dslproj 约定检查 + 与 top 一致 + 表名前缀（contracts.py）；
+                                  全部约定过后 全局检查：同一「方法+路径」或同一张表在两个模块都定义，带问题逼相关模块重写，最多 2 轮（globalcheck.py）
+  目录  plan/catalog.md           程序生成的接口目录：每个已有约定的模块一节（说明 / 依赖 / 表 / 公开函数 / 接口）；约定通过 / 重写 /
+                                  删除模块 / 同步顶层依赖时自动刷新，内容没变不重写（catalog.py）；写约定时非直接依赖的模块只给目录里的一行概要，
+                                  复核约定、写顶层 / 做模块 / 补改把它当只读参考带上
   骨架  entities / services / routes   从冻结的约定生成，已有的不覆盖，生成后加载检查必须过（scaffold.py）
   分配  plan/build.zs             从 top 按依赖分层生成，一层一行 做模块组，末尾加 全量回归 + 接口冒烟（scaffold.py）
   做模块组                          组内模块并行；每个模块：已完成跳过 → 最多 N 次（做模块 → 验收），末次换模型；有模块 N 次不过，等组内其他模块结束后 终止 失败
@@ -17,6 +21,8 @@
   planning.py   写 / 检查 / 存 规划（提示词 prompts/top.md、contract.md；输入拼装；走 v2 的 Model）
   top.py        顶层规划的解析 / 检查 / 依赖分层
   contracts.py  约定检查（dslproj + v3 另加的）
+  catalog.py    plan/catalog.md 的生成 / 刷新（程序生成，不调模型）
+  globalcheck.py 全局程序检查：跨模块的「方法+路径」/ 表名重复
   scaffold.py   生成骨架 / 生成分配
   modrun.py     做模块：起子进程跑 v2（--pack dslproj），在项目拷贝里做，范围内文件拷回
   regress.py    全量回归 / 接口冒烟 的实现（两步共用按依赖分层重做的循环）

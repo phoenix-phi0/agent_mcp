@@ -22,7 +22,7 @@ def _owner(stem, names, sep=""):
 def 清理删掉的模块() -> dict:
     sys.path.insert(0, str(Path(__file__).parent))
     import _v3ctx as X
-    from tools.dslagent.v3 import top as VT
+    from tools.dslagent.v3 import catalog as CAT, top as VT
     c = X.ctx()
     project = c.project
     if not c.top_path().is_file():
@@ -72,4 +72,5 @@ def 清理删掉的模块() -> dict:
         c.state_path().parent.mkdir(parents=True, exist_ok=True)
         c.state_path().write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
         c.log("规划", 种类="约定", 事件="清理删掉的模块", 删了=removed)
+        CAT.refresh(project)
     return {"删了": deleted}

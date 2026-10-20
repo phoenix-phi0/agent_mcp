@@ -10,6 +10,7 @@ from tools.dsl_core import ScriptHalt
 
 from .. import v2 as V2
 from ..packs.dslproj import contract as DC
+from . import catalog as CAT
 from . import contracts as VC
 from . import top as VT
 from .core import prompt_text
@@ -67,22 +68,9 @@ def save(ctx, kind, text, module=""):
     f.parent.mkdir(parents=True, exist_ok=True)
     body = VT.clean(text) if kind == "顶层" else DC.normalize(VT.clean(text))
     f.write_text(body, encoding="utf-8", newline="\n")
+    if kind == "约定":
+        CAT.refresh(ctx.project)
     return rel_of(kind, module)
-
-
-def ancestors(top, module):
-    """module 的全部上游（依赖的依赖…），上游在前。"""
-    deps = {m["名"]: m["依赖"] for m in top["模块"]}
-    order, seen = [], set()
-
-    def visit(n):
-        for d in deps.get(n, []):
-            if d not in seen:
-                seen.add(d)
-                visit(d)
-                order.append(d)
-    visit(module)
-    return order
 
 
 def without_cases(text):
@@ -98,18 +86,26 @@ def without_cases(text):
 
 def user_text(ctx, kind, req, module="", problems="", prev=""):
     parts = [f"【需求】\n{(req or '').strip()}"]
+    if kind == "顶层":
+        cat = CAT.path_of(ctx.project)
+        if cat.is_file():
+            parts.append("【项目接口目录 plan/catalog.md（只读参考，程序生成：已有约定的各模块说明 / 依赖 / 表 / 公开函数 / 接口）】\n"
+                          + cat.read_text(encoding="utf-8").strip())
     if kind == "约定":
         top = current_top(ctx)
         mine = next(m for m in top["模块"] if m["名"] == module)
-        parts.append(f"【顶层规划 plan/top.zs】\n{ctx.top_path().read_text(encoding='utf-8').strip()}")
+        top_text = ctx.top_path().read_text(encoding="utf-8").strip()
+        parts.append(f"【顶层规划 plan/top.zs】\n{top_text}")
         parts.append(f"【本次要写的模块】\n模块 {module}\n依赖 {' '.join(mine['依赖']) or '无'}")
         ups = []
-        for u in ancestors(top, module):
-            f = VC.path_of(ctx.project, u)
+        for d in mine["依赖"]:
+            f = VC.path_of(ctx.project, d)
             if f.is_file():
-                ups.append(f"### 上游模块 {u}" + ("（直接依赖，可以调用）" if u in mine["依赖"] else "（间接上游，只能当数据来源，不能直接调用）")
-                           + f"\n```\n{without_cases(f.read_text(encoding='utf-8')).strip()}\n```")
-        parts.append("【上游模块的约定（已通过检查并冻结，不能改；只能调用其中的公开函数）】\n" + ("\n\n".join(ups) if ups else "（本模块没有依赖）"))
+                ups.append(f"### 上游模块 {d}（直接依赖，可以调用）\n```\n{without_cases(f.read_text(encoding='utf-8')).strip()}\n```")
+        parts.append("【上游模块的约定（已通过检查并冻结，不能改；只能调用其中写了「公开」的函数）】\n" + ("\n\n".join(ups) if ups else "（本模块没有依赖）"))
+        brief = CAT.brief_index(ctx.project, top_text, exclude={module, *mine["依赖"]})
+        parts.append("【项目接口目录：除上面直接依赖外，其它已有约定的模块一行概要（只读参考，不能直接调用；"
+                      "需要调用就把它加进「依赖」，之后会给到它的约定全文）】\n" + (brief or "（没有别的模块）"))
     if problems.strip():
         parts.append(f"【你上次写的内容】\n{prev.strip()}\n\n【检查发现的问题（逐条改掉，其余保持）】\n{problems.strip()}")
     return "\n\n".join(parts)
@@ -173,8 +169,18 @@ def parse_review(text):
     return {"通过": ok, "问题": items}
 
 
-def review_user(req, module, text):
-    return f"【本轮需求全文】\n{(req or '').strip()}\n\n【模块 {module} 的约定】\n{VT.clean(text).strip()}"
+def review_user(ctx, module, text, req):
+    """复核入参 = 需求全文 + top.zs（如果有）+ 项目接口目录（如果有，按它判断「分给别的模块的不算缺失」）+ 本约定。"""
+    parts = [f"【本轮需求全文】\n{(req or '').strip()}"]
+    if ctx.top_path().is_file():
+        parts.append(f"【顶层规划 plan/top.zs】\n{ctx.top_path().read_text(encoding='utf-8').strip()}")
+    cat = CAT.path_of(ctx.project)
+    if cat.is_file():
+        parts.append("【项目接口目录 plan/catalog.md（只读参考：按 top.zs 的分工判断——需求里的事如果已经在别的模块的"
+                      "公开函数 / 接口里找得到，不算本模块缺失；反过来同一件事被两个模块各做一份，在问题里指出）】\n"
+                      + cat.read_text(encoding="utf-8").strip())
+    parts.append(f"【模块 {module} 的约定】\n{VT.clean(text).strip()}")
+    return "\n\n".join(parts)
 
 
 def review(ctx, module, text, req="", model="sonnet"):
@@ -182,7 +188,7 @@ def review(ctx, module, text, req="", model="sonnet"):
     回复不是约定的 JSON 时再问一次；还不行就记「未复核」并放行（记录里看得到）。预算 / 花费 / 墙钟用完抛 ScriptHalt。"""
     if not str(module or "").strip():
         raise ValueError("复核约定要写模块名")
-    user = review_user(req or ctx.req, module, text)
+    user = review_user(ctx, module, text, req or ctx.req)
     tag = f"v3_review_{re.sub(r'[^A-Za-z0-9_]', '_', module)}"
     got = None
     for _ in range(2):
