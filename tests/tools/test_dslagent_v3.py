@@ -240,6 +240,7 @@ def test_skeleton_build_state():
     svc = (p / "services" / "progress.zs").read_text(encoding="utf-8")
     check("业务 progress" in svc and "依赖 graph" in svc and "公开 函数 记作答 learner point_code correct" in svc
           and "报错 未实现" in svc and "# 伪代码" not in svc and "# 调用 graph.取知识点" in svc, "业务骨架：函数头 + 伪代码注释 + 未实现", svc)
+    check("用包 common db text" in svc, "业务骨架点名 用包 common db text", svc)
     ent = (p / "entities" / "progress.entity").read_text(encoding="utf-8")
     check("实体 progress_answer" in ent and "字段 learner 文本 必填" in ent and "字段 id" not in ent, "实体骨架：表和字段（id 隐含）", ent)
     rt = (p / "routes" / "progress.zs").read_text(encoding="utf-8")

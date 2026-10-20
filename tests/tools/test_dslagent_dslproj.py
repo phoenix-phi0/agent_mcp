@@ -6,6 +6,7 @@
 参考实现（graph：知识点 + 加边带环检查；progress：作答 + 记作答，依赖 graph）在 tests/tools/fixtures/dslproj_solution/，约定和用例也在那里。
 """
 import json
+import inspect
 import os
 import shutil
 import sys
@@ -165,6 +166,8 @@ def t_contract():
         _, pr = C.parse(text)
         if want:
             check(any(want in x for x in pr), f"解析问题：{want}", pr)
+    _, pr_priv = C.parse("模块 x\n## 函数\n私有 函数 f a\n")
+    check(any("不用写「私有」前缀" in x for x in pr_priv), "「私有 函数」→ 清楚提示去掉前缀", pr_priv)
     c2, pr = C.parse("模块 x\n依赖 y\n## 表\n表 Bad\n  a 文本\n## 函数\n函数 f A\n  报错 500 坏\n公开 函数 g b\n  伪代码 调用 z.q\n  伪代码 调用 y.nope\n## 接口\nGET /a -> f\nGET a -> g\n"
                      "## 用例\n用例 u1\n  调用 g\n用例 u1\n  调用 g b=1 c=2\n  得 k=v\n  先 调用 y.nope\n")
     pr = pr + C.check(c2, "x", {"y": {"函数": [{"名": "ok", "公开": True}]}}, ["x", "y"])
@@ -312,6 +315,30 @@ def t_cases():
     check(CS.main(["--project", str(SOL), "--module", "graph"]) == 0, "命令行 main：退出码 0")
 
 
+def t_settle():
+    print("四之一：cases.settle 等「后台执行」的后台任务跑完")
+    import threading
+    import time as _time
+    from tools.dsl import _submit_background
+
+    done = threading.Event()
+    _submit_background(lambda: (_time.sleep(0.15), done.set()))
+    check(not done.is_set(), "后台任务刚提交，还没跑完（故意睡一下）")
+    CS.settle(timeout=3)
+    check(done.is_set(), "settle() 等到后台任务真的跑完才返回，不是掐时间猜")
+    held = threading.Event()
+    _submit_background(lambda: held.wait(2))
+    try:
+        CS.settle(timeout=0.05)
+        check(False, "跑不完该抛 TimeoutError")
+    except TimeoutError as e:
+        check("秒内没跑完" in str(e), "settle() 超时抛 TimeoutError（不是悄悄放过去对还没写完的库）", e)
+    finally:
+        held.set()
+    check(("settle()" in inspect.getsource(CS.run_case)) and inspect.getsource(CS.run_case).count("settle()") >= 2,
+          "run_case 里每次「调用」（先 的和正式的）后都 settle()，不止查最后一次")
+
+
 # ------------------------------------------------------------------ 五、验收 / 资料 / 动词
 
 
@@ -354,6 +381,8 @@ def t_accept_materials():
     check("加载检查" in s and "比对约定" in s and "跑用例" in s and "用包 common text code dslproj" in s and "#改法 段" in s and "## 示例" in s
           and "跑测试" not in s.split("## 这类任务的规划要点")[0].split("### code 包")[1].split("### dslproj 包")[0], "规划说明：角色 + 速查 + dslproj 动词 + 要点 + 示例", s[:100])
     check("自带的只读工具" in DP_PACK.PLAN_SYSTEM("grok") and "dsl 工具读" in DP_PACK.PLAN_SYSTEM("claude"), "规划说明：grok 变体")
+    check("### auth 包" in s and "要先 用包 auth http" in s and "### doc 包" in s and "要先 用包 doc" in s and "读文档" in s,
+          "动词表：auth / doc 包，注明要先 用包", s)
     check(V.plan_system(DP_PACK, "claude") == s, "v2.plan_system 用包的 PLAN_SYSTEM")
     # 示例 .zs 自己要过检查（白名单 + #改法 对着骨架 + 假模型空跑）
     ex = (ROOT / "tools" / "dslagent" / "packs" / "dslproj" / "prompts" / "example.zs").read_text(encoding="utf-8")
@@ -424,6 +453,8 @@ def t_flow():
     fu = f.log[1][2]
     check("用例 加边_成环：应该报错 409" in fu and "【本模块约定（不能改）】" in fu and "services/graph.zs" in fu and "## DSL 项目写法速查" in fu
           and "contracts/graph.md" not in fu.split("【本模块现有文件")[1], "补改入参：失败用例原因 + 约定 + 本模块现有文件 + 写法速查", fu[:300])
+    check("【本模块与全部上游的 entities 原文】" in fu and "entities/graph.entity" in fu and "实体 point" in fu
+          and fu.find("【本模块与全部上游的 entities 原文】") < fu.find("【验收发现的问题】"), "补改入参：带本模块（与上游）的 entities 原文", fu[:300])
     check(f.log[1][1] == DP_PACK.FIX_SYSTEM, "补改 system = 包的 FIX_SYSTEM")
     check("## 本模块可用的动词" in fu and "已加载的包：db" in fu and "【db】" in fu and "查一行 <库> <查询名>" in fu and "写库 <库> <语句名>" in fu,
           "补改入参：带本模块可用的动词表（含签名）", fu[fu.find("## 本模块可用的动词"):][:200])
@@ -436,6 +467,24 @@ def t_flow():
     check("已加载的包：db、text" in vt and "【text】" in vt and "【db】" in vt, "service_verbs：services 里 用包 的包 + db", vt[:200])
     check("【db】" in DP_PACK.materials("模块 graph", pv, None)["text"] and "## 本模块可用的动词" in DP_PACK.materials("模块 graph", pv, None)["text"], "做模块规划的资料里也带动词表")
     check(len(r["v2"]["验收"]["验收记录"]) == 2 and not r["v2"]["验收"]["验收记录"][0]["通过"] and r["v2"]["验收"]["验收记录"][1]["通过"], "验收记录：第一次不过、补改后通过")
+    # entities_text：本模块与全部上游（闭包），每个上限 8000 字；progress 依赖 graph，闭包是 graph + progress
+    pe = copy_sol("fl_ents")
+    et = DP_PACK.entities_text(pe, "progress")
+    check("entities/graph.entity" in et and "实体 point" in et and "entities/progress.entity" in et and "实体 answer" in et,
+          "entities_text：本模块与上游闭包", et[:300])
+    long_entity = "实体 progress_answer x\n" + "  字段 note 文本 " + "很长的说明" * 2000 + "\n结束\n"
+    (pe / "entities" / "progress.entity").write_text(long_entity, encoding="utf-8")
+    et2 = DP_PACK.entities_text(pe, "progress")
+    pblock = et2.split("### entities/progress.entity")[1]
+    check("（文件过长，后面略）" in pblock and len(pblock) < 8200, "entities_text：每个文件上限 8000 字", len(pblock))
+    # 读本模块文件上限 40000 字（之前是 12000）：规划 materials 和补改 fix_input 都用 current_files
+    pf = skeleton("fl_bigfile")
+    big = ("业务 graph\n  用包 db\n\n" + ("  # " + "占位" * 20 + "\n") * 700
+           + "  # 标记_文件末尾\n  公开 函数 取知识点 code\n    报错 501 未实现\n  结束\n结束\n")
+    check(12000 < len(big) < 40000, "测试用大文件长度在 12000 和 40000 之间", len(big))
+    (pf / "services" / "graph.zs").write_text(big, encoding="utf-8")
+    mt = DP_PACK.materials("模块 graph", pf, None)["text"]
+    check("后面略" not in mt and "标记_文件末尾" in mt, "materials：本模块现有文件读到 40000 字，不再在 12000 处截断", len(mt))
     # 4 计划想改约定 / 别的模块的文件：被拦（整体没写），失败、项目回滚
     p4 = skeleton("fl_oos", modules=("progress",))
     oos = {"contracts/progress.md": "模块 progress\n", "services/graph.zs": "业务 graph\n结束\n"}
@@ -468,6 +517,7 @@ def main():
         t_project()
         t_compare()
         t_cases()
+        t_settle()
         t_accept_materials()
         t_flow()
     finally:

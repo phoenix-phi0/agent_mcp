@@ -194,6 +194,53 @@ def check_verb_calls(lines, reg, label, base=0):
     return probs
 
 
+# 这两个包随处能用，不用「用包」点名：routes 的 DEFAULT_PACKS 就是它俩（见 dsl_http.py），
+# 这里把 services / scripts 也按同一惯例放行，省得模型照顾一个处处都要写的「用包 common http」
+RESIDENT_PACKS = {"common", "http"}
+_FULL_REG_CACHE = {}
+
+
+def full_registry(root):
+    """全部可用动词包（项目自己的 verbs/ 优先，缺的用全局）的动词表，用来查一个动词在哪个包里。按 root 路径缓存。"""
+    from tools import packs as _packs
+    key = str(Path(root).resolve())
+    reg = _FULL_REG_CACHE.get(key)
+    if reg is not None:
+        return reg
+    names = set(_packs.available())
+    proj_verbs = Path(root) / "verbs"
+    if proj_verbs.is_dir():
+        names |= {p.name for p in proj_verbs.iterdir() if p.is_dir()
+                  and (any(p.glob("*.zs")) or (p / "_verbs.py").is_file())}
+    reg = load_verbs(root, sorted(names))
+    _FULL_REG_CACHE[key] = reg
+    return reg
+
+
+def check_table_external_verbs(lines, reg, full, declared, label, base=0):
+    """用到了没点名的包里的动词：报「用到表外动词「X」，它在「Y」包里，开头要加 用包 Y」。
+    常驻包 common、http 不用点名。reg 是已点名的包建的表，full 是全部包建的表。"""
+    probs = []
+    allowed = set(declared) | RESIDENT_PACKS
+    for i, raw in enumerate(lines):
+        line = normalize(raw).strip()
+        if not line or line.startswith("#"):
+            continue
+        head, rest = split_head(line)
+        if head == "set":
+            _, sep, value = rest.partition("=")
+            if not sep:
+                continue
+            head, rest = split_head(value.strip())
+        if head in RESERVED or reg.has(head) or not full.has(head):
+            continue
+        pack = full.pack_of(head)
+        if pack in allowed:
+            continue
+        probs.append(f"[接口出错] {label}: 第 {base + i + 1} 行：用到表外动词「{head}」，它在「{pack}」包里，开头要加 用包 {pack}")
+    return probs
+
+
 def check_services(root):
     """services/*.zs：解析错误、依赖指向不存在的模块、依赖成环（Services 加载时报）；每个函数体走一遍引擎的
     解析点；函数里的调用（不存在 / 非公开 / 未声明依赖 / 缺必填 / 多出未知键）；「报错」的码要是 4xx。"""
@@ -280,10 +327,13 @@ def check_project(root):
     sdir = root / "scripts"
     for f in sorted(sdir.rglob("*.zs")) if sdir.is_dir() else []:
         probs += check_file(f, str(f.relative_to(root)))
-    # 动词调用：按每个文件「用包」点名的包查参数（缺必填 / 给两次 / 位置参数过多）
+    # 动词调用：按每个文件「用包」点名的包查参数（缺必填 / 给两次 / 位置参数过多）+ 用到表外动词（没点名但别的包里有）
+    svcdir = root / "services"
     for f in sorted(routes.rglob("*.zs")) if routes.is_dir() else []:
         probs += _check_file_verbs(root, f, True)
     for f in sorted(sdir.rglob("*.zs")) if sdir.is_dir() else []:
+        probs += _check_file_verbs(root, f, False)
+    for f in sorted(svcdir.rglob("*.zs")) if svcdir.is_dir() else []:
         probs += _check_file_verbs(root, f, False)
     # 业务层：services/*.zs，以及接口 / 脚本里对业务函数的调用
     probs += check_services(root)
@@ -300,20 +350,24 @@ def check_project(root):
 def _check_file_verbs(root, f, route):
     text = f.read_text(encoding="utf-8")
     packs = declared_packs(text)
-    if not packs:
-        return []
-    reg = load_verbs(root, packs)
     rel = str(f.relative_to(root))
+    reg = load_verbs(root, packs) if packs else VerbRegistry(reserved=RESERVED)
+    full = full_registry(root)
     if not route:
-        return check_verb_calls(text.splitlines(), reg, rel)
+        lines = text.splitlines()
+        probs = check_verb_calls(lines, reg, rel) if packs else []
+        probs += check_table_external_verbs(lines, reg, full, packs, rel)
+        return probs
     try:
         eps, _ports = split_endpoints(text, Path(rel))
     except DSLError:
         return []
     probs = []
     for ep in eps:
-        probs += check_verb_calls(ep.body, reg, f"{rel} 接口 {ep.method} {ep.path}（文件第 {ep.line} 行起）",
-                                  base=ep.line)
+        label = f"{rel} 接口 {ep.method} {ep.path}（文件第 {ep.line} 行起）"
+        if packs:
+            probs += check_verb_calls(ep.body, reg, label, base=ep.line)
+        probs += check_table_external_verbs(ep.body, reg, full, packs, label, base=ep.line)
     return probs
 
 

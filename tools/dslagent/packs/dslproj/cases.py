@@ -4,6 +4,7 @@
 
 做法：项目拷到临时目录 → 每个用例各自新建 app.db（按 模块 + 上游模块 的 entities/*.entity 建表）→ 先（造数据：直接插行 / 调公开函数）
 → 调用（用 DSL 引擎跑 `调用 模块.函数 k=v 出错时 e`，业务层 services/ 整个目录加载）→ 核对 得 / 报错 / 库。
+每次「调用」（先 的和正式的）后都 settle() 等「后台执行」触发的后台任务跑完，再往下走，不然「库」核对可能对上还没写完的数据。
 环境变量 DSL_NOW 固定为 --now（缺省 2026-01-01 09:00:00），所以 `当前时间` 的结果确定。
 输出 unittest 风格（"FAIL: 名: 原因" … "Ran N tests"），退出码 0 = 全过。
 """
@@ -34,6 +35,14 @@ def build_sql(ws, modules):
     if missing:
         raise ValueError("缺 " + "、".join(f"entities/{m}.entity" for m in missing))
     return render_sql("\n\n".join(texts), strict=True) if texts else ""
+
+
+def settle(timeout=60):
+    """等这次「调用」触发的后台任务（后台执行）跑完再往下核对返回值 / 库，不然可能对比到还没写完的库。
+    超时抛 TimeoutError（用例应判超时失败，不要悄悄比对还没写完的库）。"""
+    from tools.dsl import wait_background
+    if not wait_background(timeout=timeout):
+        raise TimeoutError(f"后台任务 {timeout} 秒内没跑完")
 
 
 def _val(v):
@@ -118,9 +127,13 @@ def run_case(ws, sql, module, u):
         for i, st in enumerate(u["先"]):
             if st["种类"] == "调用":
                 _, err = call(st["目标"], st["参数"], f"p{i}")
+                settle()
                 if err not in ("", None):
                     return f"前置 {st['目标']} 报错 {err}"
         r, err = call(u["调用"]["目标"], u["调用"]["参数"], "c")
+        settle()
+    except TimeoutError as e:
+        return str(e)
     except Exception as e:  # noqa: BLE001  脚本报错就是用例失败
         return f"{type(e).__name__}: {str(e)[:500]}"
     if u["报错"] is not None:

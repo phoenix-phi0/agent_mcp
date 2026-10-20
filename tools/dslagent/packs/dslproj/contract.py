@@ -110,6 +110,10 @@ def parse(text):
             else:
                 cur["字段"].append({"名": parts[0], "类型": parts[1], "说明": " ".join(parts[2:]), "行": no})
         elif sec == "函数":
+            if h == "私有" and parts[1:2] == ["函数"]:
+                probs.append(f"第 {no} 行：私有函数不用写「私有」前缀，直接写「函数 <名> …」就是私有的（只有公开函数才要写「公开 函数 …」），现在是「{s[:40]}」")
+                cur = None
+                continue
             pub = h == "公开"
             if pub or h == "函数":
                 fp = parts[1:] if pub else parts

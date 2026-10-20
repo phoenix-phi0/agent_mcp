@@ -29,3 +29,6 @@ web/
 # 历史遗留的工作副本，跟 tools/、gen/ 下的正本同名，容易改错地方
 data/tools/
 data/gen/
+
+# 批量任务的过程报告，不进版本库
+data/reports/

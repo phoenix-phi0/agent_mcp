@@ -170,6 +170,29 @@ def main():
     probs = LC.check_project(root)
     check(any("缺少必填参数" in p and "r.zs 接口 POST /a" in p and "第 3 行" in p for p in probs), f"接口块里也查：{probs}")
 
+    print("\n[十、用到表外动词]")
+    root2 = TMP / "proj2"
+    (root2 / "scripts").mkdir(parents=True)
+    (root2 / "routes").mkdir()
+    (root2 / "services").mkdir()
+    (root2 / "verbs" / "qk").mkdir(parents=True)
+    (root2 / "verbs" / "qk" / "切.zs").write_text("# 参数：x\n返回 {x}\n", encoding="utf-8")
+    (root2 / "scripts" / "b.zs").write_text("设 r = 切 x\n", encoding="utf-8")
+    probs = LC.check_project(root2)
+    check(any("用到表外动词「切」" in p and "它在「qk」包里" in p and "用包 qk" in p and "b.zs" in p for p in probs),
+          f"没点名的包里有这个动词 → 报清楚提示：{probs}")
+    (root2 / "scripts" / "b.zs").write_text("设 t = 当前时间\n", encoding="utf-8")
+    check(LC.check_project(root2) == [], "常驻包 common 的动词不用点名，不报")
+    (root2 / "routes" / "r2.zs").write_text("接口 GET /b\n  设 r = 切 x\n  返回 {r}\n结束\n", encoding="utf-8")
+    probs = LC.check_project(root2)
+    check(any("用到表外动词「切」" in p and "r2.zs 接口 GET /b" in p for p in probs), f"接口块里也查：{probs}")
+    (root2 / "routes" / "r2.zs").write_text("接口 GET /b\n  用包 qk\n  设 r = 切 x\n  返回 {r}\n结束\n", encoding="utf-8")
+    check(not any("用到表外动词" in p for p in LC.check_project(root2)), "点名了 qk 就不报")
+    (root2 / "services" / "x.zs").write_text(
+        "业务 x\n  用包 db\n  公开 函数 f a\n    设 r = 切 a\n    返回 {r}\n  结束\n结束\n", encoding="utf-8")
+    probs = LC.check_project(root2)
+    check(any("用到表外动词「切」" in p and "services/x.zs" in p for p in probs), f"services 文件也查：{probs}")
+
     print(f"\n{'=' * 50}\n通过 {passed}，失败 {failed}")
     return 1 if failed else 0
 

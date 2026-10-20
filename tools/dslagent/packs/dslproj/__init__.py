@@ -57,7 +57,7 @@ def scope_for(task, project, given=None):
     return P.scope_globs(m) if m else []
 
 
-def _read(project, rel, cap=12000):
+def _read(project, rel, cap=40000):
     f = Path(project) / rel
     if not f.is_file():
         return None
@@ -78,6 +78,17 @@ def current_files(project, module):
 
 def _numbered(text):
     return "\n".join(f"{i:4d}| {l}" for i, l in enumerate(text.splitlines(), 1))
+
+
+def entities_text(project, module):
+    """本模块与全部上游（闭包）的 entities/<模块>.entity 原文，每个上限 8000 字；补改带上它，免得模型凭空编字段。"""
+    root = Path(project)
+    parts = []
+    for m in P.closure(project, module):
+        t = _read(root, f"entities/{m}.entity", cap=8000)
+        if t is not None:
+            parts.append(f"### entities/{m}.entity\n```\n{t.strip()}\n```")
+    return "\n\n".join(parts) if parts else "（还没有 entities 文件）"
 
 
 def service_verbs(project, module):
@@ -142,13 +153,14 @@ def accept(project, ctx):
 
 
 def fix_input(project, ctx, probs):
-    """补改入参：任务 + 约定 + 上游公开函数头 + 验收问题 + 本模块现有文件 + 写法速查。"""
+    """补改入参：任务 + 约定 + 上游公开函数头 + 本模块与全部上游的 entities 原文 + 验收问题 + 本模块现有文件（全文，上限 40000 字）+ 写法速查。"""
     module = P.module_of(ctx["task"])
     c, text = P.load_contract(project, module)
     ups = [f"### {d}\n{C.public_heads(C.parse(P.contract_path(project, d).read_text(encoding='utf-8'))[0])}" for d in c["依赖"]]
     cur = "\n\n".join(f"### {rel}\n```\n{_numbered(t)}\n```" for rel, t in current_files(project, module)) or "（还没有文件）"
     return "\n\n".join([f"【任务原文】\n{ctx['task']}", f"【本模块约定（不能改）】\n{text.strip()}",
                         "【上游模块公开函数】\n" + ("\n\n".join(ups) or "（无）"),
+                        "【本模块与全部上游的 entities 原文】\n" + entities_text(project, module),
                         "【验收发现的问题】\n" + "\n".join(f"{i}. {p}" for i, p in enumerate(probs, 1)),
                         f"【本模块现有文件的完整当前内容（行号前缀不是内容）】\n{cur}", SYNTAX, service_verbs(project, module)])
 

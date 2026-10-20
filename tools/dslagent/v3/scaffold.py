@@ -34,7 +34,7 @@ def service_text(name, c):
     lines = [f"业务 {name}"]
     if c["依赖"]:
         lines.append("  依赖 " + " ".join(c["依赖"]))
-    lines += ["  用包 common db", ""]
+    lines += ["  用包 common db text", ""]
     for f in c["函数"]:
         lines.append("  " + VC.C.head_text(f))
         if f["返回"]:
