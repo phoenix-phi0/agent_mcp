@@ -29,9 +29,10 @@ def prompt_text(name):
 
 
 class Ctx:
-    def __init__(self, project, out, req, M, cost_cap=None, module_cmd=None, module_wall=1800):
+    def __init__(self, project, out, req, M, cost_cap=None, module_cmd=None, module_wall=1800, req_path=None):
         self.project, self.out, self.req, self.M = Path(project), Path(out), req, M
         self.cost_cap, self.module_cmd, self.module_wall = cost_cap, module_cmd, module_wall
+        self.req_path = Path(req_path) if req_path else None   # 需求文件路径（有才能执行「改需求」，写回这个文件）
         self.usage = None                      # 引擎的 Usage（run() 里挂上）：预算按它算
         self.lock = threading.RLock()
         self.module_cost = 0.0
@@ -176,4 +177,38 @@ def run(req, project, out, stop_after=None, backend=None, cost_cap=None, wall=WA
         res["堆栈"] = "".join(traceback.format_exception(err))[-3000:]
     (out / "calls.json").write_text(json.dumps(prev_calls + M.log, ensure_ascii=False, indent=1), encoding="utf-8")
     (out / "result.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+    return res
+
+
+def run_entry(script, project, out, req, extra_vars=None, backend=None, cost_cap=None, wall=WALL,
+              module_cmd=None, module_wall=1800, req_path=None):
+    """跑 v3/ 下的顶层脚本（核查.zs / 修改.zs，script 不带 .zs）：req 是需求全文；req_path（可选）是需求文件的
+    真实路径，「改需求」执行时写回这个文件（没给、计划里又有「改需求」就 终止 失败，见 应用修改计划 动词）。
+    → {状态, 原因, 停在, 花费, 用时, 模型调用[, 返回]}，同时写 out/<script>_result.json。"""
+    project, out = Path(project), Path(out)
+    project.mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
+    M = V2.Model(out, backend=backend, max_calls=MAX_CALLS, deadline=time.time() + wall)
+    prev_calls = _load_json(out / "calls.json", [])
+    ctx = Ctx(project, out, req, M, cost_cap=cost_cap, module_cmd=module_cmd, module_wall=module_wall,
+              req_path=req_path)
+    eng = V3Engine(client=V2.Client(M), workdir=project, verbose=False, verbs_root=C.VERBS)
+    eng.v3, ctx.usage = ctx, eng.usage
+    eng.vars.update({"req": req, **(extra_vars or {})})
+    res, err = {"状态": "成功", "原因": "", "停在": ""}, None
+    try:
+        eng.run((HERE / f"{script}.zs").read_text(encoding="utf-8"))
+        if eng.halted is not None:
+            res = dict(eng.halted)
+        elif eng.returned:
+            res["返回"] = eng.returned[0]
+    except Exception as e:  # noqa: BLE001  引擎 / 动词出错：记成失败，不往外抛
+        res = {"状态": "失败", "原因": f"{type(e).__name__}: {e}"[:600], "停在": ""}
+        err = e
+    res.update(花费=round(ctx.cost(), 4), 用时=round(time.time() - ctx.t0, 1), 模型调用=M.n, 记录=ctx.records)
+    if err is not None:
+        import traceback
+        res["堆栈"] = "".join(traceback.format_exception(err))[-3000:]
+    (out / "calls.json").write_text(json.dumps(prev_calls + M.log, ensure_ascii=False, indent=1), encoding="utf-8")
+    (out / f"{script}_result.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
     return res

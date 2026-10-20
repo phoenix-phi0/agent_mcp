@@ -32,6 +32,7 @@ from tools.dslagent import common as CM                           # noqa: E402
 from tools.dslagent.packs.dslproj import contract as DC           # noqa: E402
 from tools.dslagent.packs.dslproj import project as PJ            # noqa: E402
 from tools.dslagent.v3 import contracts as VC, core, planning as PL, scaffold as SF, top as VT   # noqa: E402
+from tools.dslagent import v2 as V2                                # noqa: E402
 
 SOL = ROOT / "tests" / "tools" / "fixtures" / "v3_solution"
 STUB = ROOT / "tests" / "tools" / "fixtures" / "v3_stub_module.py"
@@ -1071,6 +1072,134 @@ def test_verb_decls():
     check("全局检查" in plan_flow and "全局重写任务表" in plan_flow, "规划到通过.zs 接入了全局检查", plan_flow)
 
 
+DEFS = core.HERE.parent / "verbs" / "v3" / "defs"
+
+TUTOR_NEW = ("模块 tutor\n\n## 函数\n公开 函数 ping\n  返回 {ok}\n  伪代码 返回 {\"ok\": 1}\n\n"
+             "## 接口\nGET /tutor/ping -> ping\n\n## 用例\n用例 ping_ok\n  调用 ping\n  得 有返回\n")
+
+
+def test_apply_plan():
+    print("D2：修改计划四个动词的执行（应用修改计划）——改需求 / 新增模块 / 删除模块 / 改约定")
+    p = project_with_contracts(("graph", "vocab", "progress"))
+    (p / "plan").mkdir(exist_ok=True)
+    (p / "plan" / "top.zs").write_text(TOP3, encoding="utf-8")
+    SF.gen_skeleton(p, VT.load(TOP3))
+    req_dir = fresh("req")
+    req_file = req_dir / "req.md"
+    req_file.write_text("## 1 概述\nxxx\n\n## 2 词库\nyyy\n", encoding="utf-8")
+    out = fresh("out")
+    ctx = core.Ctx(p, out, "需求全文", None, req_path=req_file)
+    ctx.mark_done("vocab")
+    check(ctx.is_done("vocab"), "vocab 先标记完成（后面验证删除模块会把这条 state 记录也清掉）")
+    plan_dir = p / "plan" / "changes"
+    plan_dir.mkdir(parents=True)
+    plan_text = (
+        "改需求 2 词库支持按知识点练习  # 对应问题 1\n"
+        "新增模块 tutor 依赖=graph 说明=按知识点练习  # 对应问题 1\n"
+        "删除模块 vocab  # 对应问题 2\n"
+        "改约定 progress 加一个按知识点统计的接口  # 对应问题 3\n"
+    )
+    (plan_dir / "1.zs").write_text(plan_text, encoding="utf-8")
+    e = engine(p)
+    e.v3 = ctx
+    e.run("用包 v3\n设 r = 应用修改计划 plan/changes/1.zs\n返回 {r}\n")
+    r = e.returned[0]
+    check(r["改需求"] == ["2"], "返回里记了改的节号", r)
+    check(r["新增模块"] == ["tutor"] and r["删除模块"] == ["vocab"] and r["改约定"] == ["progress"], "四种指令都识别到了", r)
+    check(r["写约定目标"] == {"tutor": "", "progress": "- 加一个按知识点统计的接口"},
+          "写约定目标：新增模块强制问题是空串（走全流程），改约定带条目（走强制问题通道）", r["写约定目标"])
+    req_now = req_file.read_text(encoding="utf-8")
+    check("## 1 概述" in req_now and "xxx" in req_now and "## 2 词库\nyyy" in req_now, "改需求没有改节内容本身", req_now)
+    check("## 变更记录" in req_now and "改第 2 节" in req_now and "词库支持按知识点练习" in req_now, "文末追加了变更记录", req_now)
+    top_now = (p / "plan" / "top.zs").read_text(encoding="utf-8")
+    check("模块 tutor 依赖 graph" in top_now, "新增模块的行加进了 top.zs", top_now)
+    check("模块 vocab" not in top_now and "模块 graph        # 知识图谱" in top_now,
+          "删除模块的行从 top.zs 去掉了，别的行（含注释）不受影响", top_now)
+    check(not (p / "contracts" / "vocab.md").exists(), "删除模块复用了「清理删掉的模块」，vocab 的约定文件被删了")
+    check("vocab" not in ctx.load_state().get("模块", {}), "删除模块后 state.json 里 vocab 的记录也清掉了")
+    check((p / "contracts" / "graph.md").is_file() and (p / "contracts" / "progress.md").is_file(), "别的模块没受影响")
+    # 没有「改需求」时不要求 req_path
+    ctx2 = core.Ctx(p, fresh("out"), "x", None)
+    (plan_dir / "2.zs").write_text("删除模块 tutor  # 对应问题 1\n", encoding="utf-8")
+    e2 = engine(p)
+    e2.v3 = ctx2
+    e2.run("用包 v3\n设 r = 应用修改计划 plan/changes/2.zs\n返回 {r}\n")
+    check(e2.returned[0]["删除模块"] == ["tutor"], "没有改需求时不需要 req_path")
+    # 改需求但没设 req_path：终止失败
+    ctx3 = core.Ctx(p, fresh("out"), "x", None)
+    (plan_dir / "3.zs").write_text("改需求 1 随便改点什么  # 对应问题 1\n", encoding="utf-8")
+    e3 = engine(p)
+    e3.v3 = ctx3
+    e3.run("用包 v3\n设 r = 应用修改计划 plan/changes/3.zs\n返回 {r}\n")
+    check(e3.halted is not None and e3.halted["状态"] == "失败" and "req_path" in e3.halted["原因"],
+          "有「改需求」但没设需求文件路径：终止失败，不是悄悄跳过", e3.halted)
+
+
+def test_execute_plan_flow():
+    print("D2：执行修改计划——新增模块（强制问题空，走写约定+复核全流程）与改约定（强制问题带条目，只跑程序检查不复核）")
+    p = project_with_contracts(("graph", "vocab", "progress"))
+    (p / "plan").mkdir(exist_ok=True)
+    (p / "plan" / "top.zs").write_text(TOP3, encoding="utf-8")
+    SF.gen_skeleton(p, VT.load(TOP3))
+    out = fresh("out")
+    for m in ("graph", "vocab", "progress"):
+        core.Ctx(p, out, "x", None).mark_done(m)
+    plan_dir = p / "plan" / "changes"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "1.zs").write_text(
+        "新增模块 tutor 依赖=无 说明=独立小模块（供测试）  # 对应问题 1\n"
+        "改约定 progress 加一句无意义的小改动（供测试）  # 对应问题 2\n",
+        encoding="utf-8")
+    fk = Fake(scripts={
+        "v3_contract_tutor": [TUTOR_NEW],
+        "v3_review_tutor": ['{"通过": "是", "问题列表": []}'],
+        "v3_contract_progress": [contract_text("progress")],
+    })
+    M = V2.Model(out, backend=fk)
+    ctx = core.Ctx(p, out, "需求全文", M)
+    eng = core.V3Engine(V2.Client(M), workdir=p, verbose=False, verbs_root=CM.VERBS)
+    eng.v3, ctx.usage = ctx, eng.usage
+    eng.vars.update({"计划": "plan/changes/1.zs", "需求": "需求全文", "模型": "sonnet"})
+    eng.run((DEFS / "执行修改计划.zs").read_text(encoding="utf-8"))
+    check(eng.halted is None, "执行修改计划没有终止失败", eng.halted)
+    r = eng.returned[0] if eng.returned else None
+    check(r == {"改需求": [], "新增模块": ["tutor"], "删除模块": [], "改约定": ["progress"]}, "返回汇总了四种指令的执行结果", r)
+    check((p / "contracts" / "tutor.md").is_file(), "新增模块：约定写出来了")
+    check(fk.n("v3_contract_tutor") == 1 and fk.n("v3_review_tutor") == 1, "新增模块走的是正常全流程：写一次、复核一次", [c["tag"] for c in fk.calls])
+    check(fk.n("v3_contract_progress") == 1, "改约定：重写了一次", [c["tag"] for c in fk.calls])
+    check(fk.n("v3_review_progress") == 0, "改约定走强制问题通道：没有调复核", [c["tag"] for c in fk.calls])
+    cu = [c for c in fk.calls if c["tag"] == "v3_contract_progress"][0]["user"]
+    check("加一句无意义的小改动（供测试）" in cu and "【你上次写的内容】" in cu, "改约定重写时带了上一版约定和改动条目", cu[-400:])
+    top_now = (p / "plan" / "top.zs").read_text(encoding="utf-8")
+    check("模块 tutor" in top_now, "新增模块留在 top.zs 里（同步顶层依赖没有误删）", top_now)
+
+
+def test_audit_entry():
+    print("D2：核查.zs（假模型）出问题清单；tools.dslagent v3 的 audit 入口（core.run_entry）")
+    p = fresh("audit_p")
+    (p / "plan").mkdir(parents=True)
+    (p / "plan" / "top.zs").write_text("项目 demo\n模块 a\n模块 b\n", encoding="utf-8")
+    (p / "contracts").mkdir()
+    (p / "contracts" / "a.md").write_text(DUP_A, encoding="utf-8")
+    (p / "contracts" / "b.md").write_text(DUP_B, encoding="utf-8")
+    out = fresh("audit_out")
+    fk = Fake(scripts={"v3_audit": ['[{"问题": "需求第 3 节要求的导出功能两个模块都没做", "涉及模块": ["a", "b"], "依据": "需求第 3 节"}]']})
+    res = core.run_entry("核查", p, out, "需求全文", extra_vars={"task": "", "llm": "sonnet"}, backend=fk)
+    check(res["状态"] == "成功", "核查.zs 跑成功", res)
+    ret = res.get("返回") or {}
+    check(ret.get("count") == 3, "问题清单：程序检查（a/b 路径重复）2 条 + 模型 1 条", ret)
+    path = Path(p) / ret["path"]
+    check(path.is_file() and path.name == "1.md", "问题清单存盘到 plan/issues/1.md", ret)
+    text = path.read_text(encoding="utf-8")
+    check("需求第 3 节要求的导出功能两个模块都没做" in text and "GET /dup/x" in text, "程序检查和模型发现的问题都在清单里", text)
+    check(fk.n("v3_audit") == 1, "调了一次模型", [c["tag"] for c in fk.calls])
+    # 没有 plan/top.zs 时也能跑（纯模型找问题，程序检查部分是空）
+    p2, out2 = fresh("audit_p2"), fresh("audit_out2")
+    fk2 = Fake(scripts={"v3_audit": ["[]"]})
+    res2 = core.run_entry("核查", p2, out2, "需求全文", extra_vars={"task": "", "llm": "sonnet"}, backend=fk2)
+    check(res2["状态"] == "成功" and (res2.get("返回") or {}).get("count") == 0, "还没有 plan/top.zs 时核查照样能跑，程序检查部分是空", res2)
+
+
 if __name__ == "__main__":
     try:
         test_top()
@@ -1098,6 +1227,9 @@ if __name__ == "__main__":
         test_interface_smoke()
         test_interface_smoke_auth()
         test_verb_decls()
+        test_apply_plan()
+        test_execute_plan_flow()
+        test_audit_entry()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n通过 {PASS}，失败 {FAIL}")

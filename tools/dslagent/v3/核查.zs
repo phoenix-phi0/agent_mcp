@@ -5,5 +5,5 @@
 # 参数：req task? llm=sonnet
 用包 v3
 设 g = 核查 需求={req} 任务={task} 模型={llm}
-设 path = 存问题清单 {g}
+设 path = 存问题清单 g={g}
 返回 {"count": {g.count}, "path": "{path}"}
