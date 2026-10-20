@@ -98,6 +98,39 @@ def route_files(project, module, modules):
 CALL_IN_ROUTE = re.compile(r"调用\s+(?:([A-Za-z0-9_一-鿿]+)\.)?([A-Za-z0-9_一-鿿]+)")
 
 
+def _auth_diffs(project, module, contract, modules):
+    """约定头部「认证 …」与本模块 routes 文件顶层实际写的认证声明是否一致（dsl_http.auth_config 的同一套解析）。
+    没声明认证的模块两边都该是空的；两边都没写就不比，省得给不相关的模块报一堆「约定是（无）」。"""
+    from tools.dsl_http import auth_config
+    want = contract["认证"]
+    if not (want["必须"] or want["可选"] or want["角色"]):
+        return []                 # 这个模块的约定没打算要登录 / 角色，不比对实际文件（可能项目里别的模块开了登录）
+    files = route_files(Path(project), module, modules)
+    if not files:
+        return [f"约定写了「认证 …」，但 routes/{module}*.zs 还没有文件"]
+    import tempfile
+    diffs = []
+    # auth_config 按整个目录扫 .zs：只把属于本模块的几个文件拷到一个干净的临时目录里扫，不跟别的模块的声明混
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        for f in files:
+            (tdp / f.name).write_text(f.read_text(encoding="utf-8"), encoding="utf-8")
+        got = auth_config(tdp)
+    if bool(got["mandatory"]) != bool(want["必须"]):
+        diffs.append(f"约定「认证 必须」是 {bool(want['必须'])}，routes/{module}*.zs 实际是 {bool(got['mandatory'])}")
+    if bool(got["optional"]) != bool(want["可选"]):
+        diffs.append(f"约定「认证 可选」是 {bool(want['可选'])}，routes/{module}*.zs 实际是 {bool(got['optional'])}")
+    want_check = tuple(want["核对"]) if want["核对"] else None
+    if got["check"] != want_check:
+        diffs.append(f"约定「认证 核对」是 {want_check or '（无）'}，routes/{module}*.zs 实际是 {got['check'] or '（无）'}")
+    want_identity = tuple(want["身份"]) if want["身份"] else None
+    if got["identity"] != want_identity:
+        diffs.append(f"约定「认证 身份」是 {want_identity or '（无）'}，routes/{module}*.zs 实际是 {got['identity'] or '（无）'}")
+    if got["roles"] != want["角色"]:
+        diffs.append(f"约定「认证 角色」是 {want['角色'] or '（无）'}，routes/{module}*.zs 实际是 {got['roles'] or '（无）'}")
+    return diffs
+
+
 def compare(project, module, contract, modules):
     """实际文件与约定是否一致：业务文件（模块名 / 依赖 / 每个函数的名字、公开与否、入参顺序与可选）、接口（方法 + 路径存在、只调约定里那个函数）、
     约定里的表在 entities/<模块>.entity 里都有。返回 {"一致": bool, "差异": [文字]}。"""
@@ -152,8 +185,13 @@ def compare(project, module, contract, modules):
         called = {f"{m or module}.{fn}" for m, fn in CALL_IN_ROUTE.findall(e.script)}
         if called != {f"{module}.{i['函数']}"}:
             diffs.append(f"接口 {i['方法']} {i['路径']} 应只调 {module}.{i['函数']}，实际调了 {sorted(called) or '没有调用'}")
+        if bool(e.public) != bool(i["公开"]):
+            diffs.append(f"接口 {i['方法']} {i['路径']} 约定「公开」是 {i['公开']}，实际是 {bool(e.public)}")
+        if (e.role or "") != (i["角色"] or ""):
+            diffs.append(f"接口 {i['方法']} {i['路径']} 约定「角色」是 {i['角色'] or '（无）'}，实际是 {e.role or '（无）'}")
     for (m, p) in by:
         diffs.append(f"多了约定里没有的接口 {m} {p}")
+    diffs += _auth_diffs(project, module, contract, modules)
     ef = project / "entities" / f"{module}.entity"
     ents = set(re.findall(r"^\s*实体\s+(\S+)", ef.read_text(encoding="utf-8"), re.M)) if ef.is_file() else set()
     for t in contract["表"]:

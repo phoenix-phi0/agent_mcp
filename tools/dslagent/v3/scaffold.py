@@ -48,14 +48,36 @@ def service_text(name, c):
     return "\n".join(lines) + "\n"
 
 
+def auth_header(c):
+    """约定头部的「认证 …」声明原样搬到 routes 文件顶层（写法与 tools/dsl_http.py 的路由顶层认证声明一致，
+    那边才是真正解析生效的地方）。没有「认证」声明的模块返回空串。"""
+    a = c["认证"]
+    if not (a["必须"] or a["可选"]):
+        return ""
+    lines = ["认证 必须" if a["必须"] else "认证 可选"]
+    if a["核对"]:
+        lines.append("认证 核对 " + " ".join(a["核对"]))
+    if a["身份"]:
+        var, default = a["身份"]
+        lines.append(f"认证 身份 {var} 默认 {default}")
+    for code, label in a["角色"].items():
+        line = f"认证 角色 {code} {label}"
+        if code in a["拒绝"]:
+            line += f" 拒绝 {a['拒绝'][code]}"
+        lines.append(line)
+    return "\n".join(lines) + "\n\n"
+
+
 def route_text(name, c):
     fns = {f["名"]: f for f in c["函数"]}
-    out = []
+    header = auth_header(c)
+    out = [header] if header else []
     for i in c["接口"]:
         f = fns[i["函数"]]
         req, opt, _ = VC.C.params(f)
         args = [f"{p}={{{p}}}" for p in req] + [f"{p}={{{p} 或}}" for p in opt]
-        out.append(f"接口 {i['方法']} {i['路径']}\n  设 r = 调用 {name}.{i['函数']}{(' ' + ' '.join(args)) if args else ''}\n  返回 {{r}}\n结束\n")
+        tag = " 公开" if i["公开"] else (f" 角色 {i['角色']}" if i["角色"] else "")
+        out.append(f"接口 {i['方法']} {i['路径']}{tag}\n  设 r = 调用 {name}.{i['函数']}{(' ' + ' '.join(args)) if args else ''}\n  返回 {{r}}\n结束\n")
     return "\n".join(out)
 
 

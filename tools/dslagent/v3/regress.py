@@ -6,11 +6,15 @@
             加载全部 routes / services；约定里每个接口取所调函数第一条正常用例，用 cases.seed_case 造的
             「同一份数据」各跑一次「直接调用」与「走 HTTP」，核对状态码与返回是否一致（结构不同算失败，
             值不同但结构一样只记备注——大概率是随机 / 时间字段）。不过的模块同全量回归的规则重做。
-            多人模式（角色 / 登录）留给 A3；这里先留 login 参数占位，默认不开。
+
+            多人模式（任一模块约定头部写了「认证 必须」或「认证 可选」）：起 Router 时 login=True；非公开接口
+            先核对「不登录 401」，再按接口要求的角色补一个有这个角色的调用人账号登录，带着登录态再跑一次 HTTP
+            （见 _make_actor / _login_cookie）。调用人账号只用来发请求，不是用例里本来就有的数据行。
 
 两步共用 _redo_rounds：检查一遍所有模块 → 全过就通过；不过的标未完成、按 plan/top.zs 的依赖分层分组，
 每层一次 并行执行「做一个模块」（带上这次查出的原因）→ 下一轮重新检查；2 轮都有模块不过就 终止 失败。
 """
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -110,8 +114,85 @@ def _first_case(c, fn):
     return None
 
 
-def _smoke_one(ws, sql, module, iface, case, notes):
-    """同一份种子数据上各跑一次「直接调用」与「走 HTTP」→ "" 或失败原因；notes 收集只记备注的软差异。"""
+# ------------------------------------------------------------------ 多人模式：造调用人账号、拿登录态
+
+ACTOR_PREFIX = "_smoke_actor"       # 造的调用人账号用户名前缀，一看就知道是冒烟造的，不跟用例数据撞
+
+
+def _auth_table(ws, auth_check):
+    """「认证 核对 库 查询名」的查询文本里 FROM 的表名；查不到返回 None。"""
+    db, name = auth_check
+    f = Path(ws) / "queries" / f"{name}.sql"
+    if not f.is_file():
+        return None
+    m = re.search(r"\bFROM\s+(\w+)", f.read_text(encoding="utf-8"), re.I)
+    return m.group(1) if m else None
+
+
+def _login_endpoint(mods_contracts):
+    """项目里找一个公开接口，调的函数名正好是「登录」（verbs/auth 包的约定写法：
+    接口 POST /auth/login -> 登录 公开，函数收 username/password）。找不到返回 None。
+    → (方法, 路径) 或 None。"""
+    for c in mods_contracts.values():
+        for i in c["接口"]:
+            if i["公开"] and i["函数"] == "登录":
+                return i["方法"], i["路径"]
+    return None
+
+
+def _make_actor(ws, db_path, auth, role):
+    """造一个调用人账号（表在 认证 核对 指的库里，列至少有 username / password_hash，有角色要求再加 role 列）。
+    → (username, password) 或 None（没法造：要角色但没有「认证 核对」可查角色、或建不出这张表的列）。
+    没有「认证 核对」时登录只认签名令牌，不查库——只要不需要角色，随便一个用户名都能登录（跟真实路由行为一致）。"""
+    import random
+
+    username = f"{ACTOR_PREFIX}_{role or 'any'}_{random.randrange(10 ** 9)}"
+    password = "smoke_pw_1"
+    if not auth["check"]:
+        return (None if role else (username, password))
+    table = _auth_table(ws, auth["check"])
+    if not table:
+        return None
+    con = sqlite3.connect(db_path)
+    try:
+        cols = [r[1] for r in con.execute(f"PRAGMA table_info({table})").fetchall()]
+        if not cols or "username" not in cols:
+            return None
+        from tools.auth import hash_password
+
+        values = {"username": username}
+        if "password_hash" in cols:
+            values["password_hash"] = hash_password(password)
+        if role:
+            if "role" not in cols:
+                return None
+            values["role"] = role
+        con.execute(f"INSERT INTO {table}({', '.join(values)}) VALUES({', '.join('?' * len(values))})",
+                    list(values.values()))
+        con.commit()
+    except sqlite3.Error:
+        return None
+    finally:
+        con.close()
+    return username, password
+
+
+def _login_cookie(client, ws, username, password, login_ep):
+    """拿这个账号的登录 cookie：优先走项目自己的公开登录接口（登录成功时它已经设好了 Set-Cookie，
+    测试客户端自动收下）；接口不存在或登不上就直接签发（调路由层认证模块的签发函数，不走业务层）。"""
+    from tools.auth import COOKIE, make_token, secret_for
+
+    if login_ep:
+        method, path = login_ep
+        resp = client.open(path, method=method, json={"username": username, "password": password})
+        if resp.status_code < 400 and client.get_cookie(COOKIE) is not None:
+            return
+    client.set_cookie(COOKIE, make_token(username, secret_for(Path(ws))))
+
+
+def _smoke_one(ws, sql, module, iface, case, notes, auth, login, login_ep):
+    """同一份种子数据上各跑一次「直接调用」与「走 HTTP」→ "" 或失败原因；notes 收集只记备注的软差异。
+    多人模式（login=真）：非公开接口先核对「不登录 401」，再补一个有所需角色的调用人账号登录，带登录态再跑一次。"""
     from ..packs.dslproj import cases as K
     why = K.seed_case(ws, sql, module, case)
     tag = f"{module} {iface['方法']} {iface['路径']}"
@@ -130,22 +211,40 @@ def _smoke_one(ws, sql, module, iface, case, notes):
     direct_status = 200 if err in ("", None) else err.get("code")
     direct_body = r if err in ("", None) else {"error": err.get("error")}
 
-    db.write_bytes(seed)
-    for suf in ("-wal", "-shm", "-journal"):
-        try:
-            Path(str(db) + suf).unlink()
-        except OSError:
-            pass
+    def restore_seed():
+        db.write_bytes(seed)
+        for suf in ("-wal", "-shm", "-journal"):
+            try:
+                Path(str(db) + suf).unlink()
+            except OSError:
+                pass
+
+    protected = login and not iface["公开"]
+    restore_seed()
     try:
         from tools.dsl_http import Router
-        # login=False：多人模式（认证 / 角色）的接入留给 A3，这里先占位不开
-        router = Router(Path(ws) / "routes", Path(ws), Path(ws) / "sessions", real=False, login=False)
+        router = Router(Path(ws) / "routes", Path(ws), Path(ws) / "sessions", real=False, login=login)
         client = router.app().test_client()
         args = {k: _val(v) for k, v in case["调用"]["参数"].items()}
-        if iface["方法"] == "GET":
-            resp = client.get(iface["路径"], query_string=args)
+
+        def call():
+            if iface["方法"] == "GET":
+                return client.get(iface["路径"], query_string=args)
+            return client.open(iface["路径"], method=iface["方法"], json=args)
+
+        if protected:
+            resp0 = call()
+            if resp0.status_code != 401:
+                return f"{tag}：不登录应该 401，实际 {resp0.status_code}"
+            actor = _make_actor(ws, db, auth, iface["角色"])
+            if actor is None:
+                notes.append(f"{tag}：需要角色「{iface['角色'] or '（任意已登录）'}」但造不出调用人账号"
+                             f"（没有「认证 核对」指的表，或表里缺 username / role 列），这条接口的登录态核对跳过")
+                return ""
+            _login_cookie(client, ws, actor[0], actor[1], login_ep)
+            resp = call()
         else:
-            resp = client.open(iface["路径"], method=iface["方法"], json=args)
+            resp = call()
         K.settle()
     except TimeoutError as e:
         return f"{tag}：HTTP 调用超时：{e}"
@@ -178,12 +277,17 @@ def run_smoke(project, mods):
             why = f"建库失败：{type(e).__name__}: {e}"
             return {m: (False, why) for m in mods}, notes
         reasons = {}
+        contracts = {}
         for m in mods:
             try:
-                c, _ = P.load_contract(project, m)
+                contracts[m], _ = P.load_contract(project, m)
             except P.ProjError as e:
                 reasons.setdefault(m, []).append(f"约定加载失败：{e}")
-                continue
+        from tools.dsl_http import auth_config
+        auth = auth_config(ws / "routes")
+        login = bool(auth["mandatory"] or auth["optional"])
+        login_ep = _login_endpoint(contracts) if login else None
+        for m, c in contracts.items():
             for iface in c["接口"]:
                 if iface.get("上传"):          # B2 之前约定里不会有这个字段，先占位
                     notes.append(f"{m} {iface['方法']} {iface['路径']}：上传接口暂跳过（留给 B2）")
@@ -192,7 +296,7 @@ def run_smoke(project, mods):
                 if case is None:
                     notes.append(f"{m} {iface['方法']} {iface['路径']}：没有 {iface['函数']} 的正常用例，跳过")
                     continue
-                why = _smoke_one(ws, sql, m, iface, case, notes)
+                why = _smoke_one(ws, sql, m, iface, case, notes, auth, login, login_ep)
                 if why:
                     reasons.setdefault(m, []).append(why)
         return {m: (m not in reasons, "；".join(reasons.get(m, []))) for m in mods}, notes

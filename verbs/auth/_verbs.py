@@ -43,6 +43,8 @@ import re
 import sqlite3
 from pathlib import Path
 
+from tools.verbs import scan_verbs
+
 # 加载时注入
 WORKSPACE = Path(".")
 PACK_DIR = Path(".")
@@ -253,3 +255,7 @@ def register(reg, workspace):
 
         request_auth({"logout": True})
         return "ok"
+
+    # 业务层原语（哈希密码 / 核对密码 / 登录被锁 / 记登录失败 / 清登录失败 / 签发登录）：
+    # 单个动词一个文件，见 defs/，复用 tools/auth.py 的哈希算法和登录限流器，不重新发明一套
+    scan_verbs(reg, PACK_DIR / "defs", workspace, pack_dir=PACK_DIR)

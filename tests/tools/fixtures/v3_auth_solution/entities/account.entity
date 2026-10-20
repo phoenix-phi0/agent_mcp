@@ -1,0 +1,5 @@
+实体 account_user 账号
+  字段 username 文本 必填 唯一 用户名
+  字段 password_hash 文本 必填 密码哈希
+  字段 role 文本 必填 角色
+结束

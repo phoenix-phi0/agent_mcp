@@ -30,6 +30,7 @@ from tools import DSLEngine                                       # noqa: E402
 from tools.mock import MockClient                                 # noqa: E402
 from tools.dslagent import common as CM                           # noqa: E402
 from tools.dslagent.packs.dslproj import contract as DC           # noqa: E402
+from tools.dslagent.packs.dslproj import project as PJ            # noqa: E402
 from tools.dslagent.v3 import contracts as VC, core, planning as PL, scaffold as SF, top as VT   # noqa: E402
 
 SOL = ROOT / "tests" / "tools" / "fixtures" / "v3_solution"
@@ -211,6 +212,76 @@ def test_contract_check():
     check(PL.check(type("C", (), {"top_path": lambda s: p / "plan" / "top.zs", "project": p})(), "顶层", "```\n项目 d\n模块 a\n```") == [], "顶层检查忽略围栏")
 
 
+def test_auth_contract():
+    print("约定里的「认证」/ 角色 / 公开：解析、检查、生成骨架、比对约定")
+    SOL = ROOT / "tests" / "tools" / "fixtures" / "v3_auth_solution"
+    text = (SOL / "contracts" / "account.md").read_text(encoding="utf-8")
+    c, probs = DC.parse(text)
+    check(probs == [], "参考实现 account 约定解析没有问题", probs)
+    check(c["认证"] == {"必须": False, "可选": True, "核对": ("app.db", "account_by_name"), "身份": ("who", "me"),
+                        "角色": {"teacher": "教师", "student": "学生"}, "拒绝": {}}, "头部认证声明解析成结构化字典", c["认证"])
+    ifaces = {i["路径"]: i for i in c["接口"]}
+    check(ifaces["/account/login"]["公开"] is True and ifaces["/account/login"]["角色"] == "", "登录接口：公开", ifaces["/account/login"])
+    check(ifaces["/account/whoami"]["公开"] is False and ifaces["/account/whoami"]["角色"] == "teacher", "whoami 接口：角色 teacher", ifaces["/account/whoami"])
+    top = {"模块": [{"名": "account", "依赖": []}]}
+    check(DC.check(c, "account", {}, ["account"]) == [], "account 约定整体检查通过", DC.check(c, "account", {}, ["account"]))
+
+    # 接口角色没有被「认证 角色」声明 → 拒
+    bad = text.replace("GET /account/whoami -> 我的角色 角色 teacher", "GET /account/whoami -> 我的角色 角色 principal", 1)
+    bc, _ = DC.parse(bad)
+    probs = DC.check(bc, "account", {}, ["account"])
+    check(any("没有在头部用「认证 角色 principal" in x for x in probs), "接口的角色没有被「认证 角色」声明 → 拒", probs)
+    # 公开和角色同时写 → 拒（解析阶段就报）
+    _, pprobs = DC.parse(text.replace("GET /account/whoami -> 我的角色 角色 teacher", "GET /account/whoami -> 我的角色 公开 角色 teacher", 1))
+    check(any("不能同时写「公开」和「角色」" in x for x in pprobs), "接口同时写 公开 和 角色 → 解析报问题", pprobs)
+    # 写了角色 / 公开但头部没有「认证」→ 提示不会生效
+    no_auth = "\n".join(l for l in text.splitlines() if not l.startswith("认证")) + "\n"
+    nc, _ = DC.parse(no_auth)
+    nprobs = DC.check(nc, "account", {}, ["account"])
+    check(any("没有「认证 必须」或「认证 可选」，这行不会生效" in x for x in nprobs), "去掉头部认证声明，接口的 角色/公开 不会生效 → 提示", nprobs)
+    # 「认证 身份」声明的变量没有被任何公开函数收为入参 → 拒
+    bad2 = text.replace("公开 函数 我的角色 who", "公开 函数 我的角色 somebody", 1).replace("who=1", "x=1")
+    bad2 = bad2.replace("按 username=who 查", "按 username=somebody 查", 1)
+    b2c, b2probs = DC.parse(bad2)
+    check(not b2probs, "改参数名之后格式仍然合法（先确认这步没引入别的解析问题）", b2probs)
+    check(any("没有一个公开函数把「who」写成入参" in x for x in DC.check(b2c, "account", {}, ["account"])),
+          "「认证 身份 who …」声明了，但没有公开函数收 who 这个入参 → 拒")
+    # 「认证 必须」和「认证 可选」不能同时写
+    _, both_probs = DC.parse("模块 x\n认证 必须\n认证 可选\n## 函数\n公开 函数 f a\n")
+    check(any("不能同时写" in x for x in both_probs), "认证 必须 和 认证 可选 同时写 → 拒", both_probs)
+
+    # 生成骨架：routes 文件顶层带认证声明，每条接口带 公开 / 角色
+    p = fresh("auth_skel")
+    (p / "contracts").mkdir()
+    shutil.copy(SOL / "contracts" / "account.md", p / "contracts" / "account.md")
+    top_auth = VT.load("项目 demo\n模块 account\n")
+    r = SF.gen_skeleton(p, top_auth)
+    check(r["问题"] == [], "account 骨架生成加载检查过", r)
+    routes_text = (p / "routes" / "account.zs").read_text(encoding="utf-8")
+    check(routes_text.splitlines()[:5] == ["认证 可选", "认证 核对 app.db account_by_name", "认证 身份 who 默认 me",
+                                           "认证 角色 teacher 教师", "认证 角色 student 学生"], "routes 文件顶层按约定写出认证声明", routes_text)
+    check("接口 POST /account/login 公开" in routes_text and "接口 GET /account/whoami 角色 teacher" in routes_text, "接口行带 公开 / 角色", routes_text)
+    check(SF.auth_header(DC.parse("模块 x\n## 函数\n公开 函数 f a\n")[0]) == "", "没有「认证」声明的约定：auth_header 是空串")
+
+    # 比对约定：实际 routes 文件和约定头部的认证声明不一致 → 差异
+    for m, content in (("services", (SOL / "services" / "account.zs").read_text(encoding="utf-8")),
+                       ("entities", (SOL / "entities" / "account.entity").read_text(encoding="utf-8"))):
+        (p / m / "account.zs" if m == "services" else p / m / "account.entity").write_text(content, encoding="utf-8")
+    (p / "queries").mkdir(exist_ok=True)
+    for f in (SOL / "queries").glob("*.sql"):
+        shutil.copy(f, p / "queries" / f.name)
+    c2, _ = PJ.load_contract(p, "account")
+    cmp = PJ.compare(p, "account", c2, ["account"])
+    check(cmp["一致"] and not cmp["差异"], "骨架 + 参考实现的 services/entities/queries：比对约定一致", cmp)
+    bad_routes = routes_text.replace("认证 可选", "认证 必须", 1)
+    (p / "routes" / "account.zs").write_text(bad_routes, encoding="utf-8")
+    cmp2 = PJ.compare(p, "account", c2, ["account"])
+    check(any("「认证 必须」是 False" in x and "实际是 True" in x for x in cmp2["差异"]), "routes 实际写的认证声明和约定不一致 → 比对约定报差异", cmp2["差异"])
+    (p / "routes" / "account.zs").write_text(routes_text.replace("接口 GET /account/whoami 角色 teacher", "接口 GET /account/whoami 公开", 1), encoding="utf-8")
+    cmp3 = PJ.compare(p, "account", c2, ["account"])
+    check(any("约定「公开」是 False，实际是 True" in x for x in cmp3["差异"]), "接口的 公开/角色 和约定不一致 → 比对约定报差异", cmp3["差异"])
+
+
 def test_prompt_example():
     print("提示词")
     for name in ("top.md", "contract.md"):
@@ -255,7 +326,7 @@ def test_skeleton_build_state():
     # 可选入参用 {x 或}
     c, _ = VC.load(p, "progress")
     c["函数"][0]["入参"].append("pass_line?")
-    c["接口"].append({"方法": "GET", "路径": "/progress/x", "函数": "记作答", "行": 1})
+    c["接口"].append({"方法": "GET", "路径": "/progress/x", "函数": "记作答", "公开": False, "角色": "", "行": 1})
     check("pass_line={pass_line 或}" in SF.route_text("progress", c), "可选入参用 {x 或}")
     # 缺约定
     try:
@@ -684,6 +755,68 @@ def test_interface_smoke():
     check(results2["vocab"][0] and results2["progress"][0], "别的模块不受影响", results2)
 
 
+AUTH_SOL = ROOT / "tests" / "tools" / "fixtures" / "v3_auth_solution"
+
+
+def auth_project(name):
+    """v3_auth_solution（account 模块：认证 可选 + 认证 核对 + 角色 teacher/student，一个公开登录接口 + 一个
+    角色 teacher 的接口）拷一份到临时目录，可以改了再跑。"""
+    p = fresh(name)
+    for sub in ("contracts", "entities", "services", "routes", "queries"):
+        for f in (AUTH_SOL / sub).glob("*"):
+            dst = p / sub / f.name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(f, dst)
+    return p
+
+
+def test_interface_smoke_auth():
+    print("接口冒烟：多人模式（认证 可选/必须）——非公开接口先核对 401，再补调用人账号登录、带登录态核对一致")
+    from tools.dslagent.v3 import regress as RG
+    p = auth_project("smoke_auth")
+    results, notes = RG.run_smoke(p, ["account"])
+    check(results == {"account": (True, "")} and notes == [], "参考实现：公开的登录接口 + 角色 teacher 的接口都过，没有备注", (results, notes))
+    check(not (p / "app.db").exists() and not (p / "sessions").exists(), "接口冒烟不改动传入的项目")
+
+    # 把角色接口错改成公开：不登录也该被拦（401），实际会直接命中业务逻辑 → 404，状态码不一致，冒烟查出来
+    p2 = auth_project("smoke_auth_pub")
+    bad = (p2 / "routes" / "account.zs").read_text(encoding="utf-8").replace("接口 GET /account/whoami 角色 teacher", "接口 GET /account/whoami 公开", 1)
+    (p2 / "routes" / "account.zs").write_text(bad, encoding="utf-8")
+    results2, _ = RG.run_smoke(p2, ["account"])
+    ok2, why2 = results2["account"]
+    check(not ok2 and "不登录应该 401" in why2, "角色接口被错改成公开：不登录也该 401，冒烟查出来", why2)
+
+    # 角色接口改错成要求 student（约定和路由一起改，保持一致）：造的调用人账号角色随接口要求换，业务结果仍然一致
+    # （业务函数只看 who 这个参数，不看调用人是谁的角色——调用人账号只用来过登录这一关）
+    p3 = auth_project("smoke_auth_role")
+    bad_route = (p3 / "routes" / "account.zs").read_text(encoding="utf-8").replace(
+        "接口 GET /account/whoami 角色 teacher", "接口 GET /account/whoami 角色 student", 1)
+    (p3 / "routes" / "account.zs").write_text(bad_route, encoding="utf-8")
+    bad_contract = (p3 / "contracts" / "account.md").read_text(encoding="utf-8").replace(
+        "GET /account/whoami -> 我的角色 角色 teacher", "GET /account/whoami -> 我的角色 角色 student", 1)
+    (p3 / "contracts" / "account.md").write_text(bad_contract, encoding="utf-8")
+    results3, _ = RG.run_smoke(p3, ["account"])
+    check(results3["account"][0], "角色接口换成 student：造 student 调用人账号登录，一样核对通过", results3)
+
+    # 没有登录公开接口时退回直接签发 cookie：删掉 登录 相关的函数 / 接口 / 用例，whoami 一样能核对
+    p4 = auth_project("smoke_auth_nologin")
+    (p4 / "routes" / "account.zs").write_text(
+        "认证 可选\n认证 核对 app.db account_by_name\n认证 身份 who 默认 me\n认证 角色 teacher 教师\n认证 角色 student 学生\n\n"
+        "接口 GET /account/whoami 角色 teacher\n  设 r = 调用 account.我的角色 who={who}\n  返回 {r}\n结束\n", encoding="utf-8")
+    (p4 / "contracts" / "account.md").write_text(
+        "模块 account\n依赖 无\n认证 可选\n认证 核对 app.db account_by_name\n认证 身份 who 默认 me\n"
+        "认证 角色 teacher 教师\n认证 角色 student 学生\n\n## 表\n表 account_user\n  id 整数 主键\n  username 文本 唯一 用户名\n"
+        "  password_hash 文本 密码哈希\n  role 文本 角色\n\n## 函数\n公开 函数 我的角色 who\n  返回 {role}\n  报错 404 没有这个用户\n"
+        "  伪代码 按 username=who 查 account_user，查不到 报错 404；查到返回 {\"role\": role}\n\n## 接口\n"
+        "GET /account/whoami -> 我的角色 角色 teacher\n\n## 用例\n用例 我的角色_有\n  先 数据 account_user username=t1 role=teacher password_hash=x\n"
+        "  调用 我的角色 who=t1\n  得 role=teacher\n用例 我的角色_没有\n  调用 我的角色 who=nope\n  报错 404\n", encoding="utf-8")
+    (p4 / "services" / "account.zs").write_text(
+        "业务 account\n  用包 db auth\n\n  公开 函数 我的角色 who\n    设 row = 查一行 app.db account_user_by_username username={who}\n"
+        "    如果 {row} 为空\n      报错 404 没有这个用户\n    结束\n    返回 {\"role\": \"{row.role}\"}\n  结束\n结束\n", encoding="utf-8")
+    results4, _ = RG.run_smoke(p4, ["account"])
+    check(results4["account"][0], "没有公开登录接口：直接签发 cookie 的退路一样核对通过", results4)
+
+
 def test_verb_decls():
     print("动词包")
     from tools.verbs import VerbRegistry
@@ -711,6 +844,7 @@ if __name__ == "__main__":
     try:
         test_top()
         test_contract_check()
+        test_auth_contract()
         test_prompt_example()
         test_skeleton_build_state()
         test_sync_deps()
@@ -723,6 +857,7 @@ if __name__ == "__main__":
         test_cost_cap()
         test_full_regression()
         test_interface_smoke()
+        test_interface_smoke_auth()
         test_verb_decls()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
