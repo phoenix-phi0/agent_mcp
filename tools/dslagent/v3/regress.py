@@ -194,6 +194,14 @@ def _smoke_one(ws, sql, module, iface, case, notes, auth, login, login_ep):
     """同一份种子数据上各跑一次「直接调用」与「走 HTTP」→ "" 或失败原因；notes 收集只记备注的软差异。
     多人模式（login=真）：非公开接口先核对「不登录 401」，再补一个有所需角色的调用人账号登录，带登录态再跑一次。"""
     from ..packs.dslproj import cases as K
+    try:
+        return _smoke_one_inner(ws, sql, module, iface, case, notes, auth, login, login_ep)
+    finally:
+        K.clear_case_files(ws, case)
+
+
+def _smoke_one_inner(ws, sql, module, iface, case, notes, auth, login, login_ep):
+    from ..packs.dslproj import cases as K
     why = K.seed_case(ws, sql, module, case)
     tag = f"{module} {iface['方法']} {iface['路径']}"
     if why:
@@ -261,6 +269,44 @@ def _smoke_one(ws, sql, module, iface, case, notes, auth, login, login_ep):
     return ""
 
 
+def _check_migrate(ws, sql, contracts, reasons):
+    """「学习记录」表的老库迁移：拿掉这些表模拟老库 → 跑迁移该补齐 → 再跑一次该是空操作。查出的问题记进 reasons
+    （归到拥有这张表的模块）。没有「学习记录」表，或 routes/ 没开「迁移 只加」就什么都不做。"""
+    owners = {}
+    for m, c in contracts.items():
+        for t in c["表"]:
+            if t.get("学习记录"):
+                owners[t["名"]] = m
+    if not owners:
+        return
+    import tools.migrate as MG
+    if not MG.switch_on(ws / "routes"):
+        for m in set(owners.values()):
+            reasons.setdefault(m, []).append("模块有「学习记录」标注的表，但 routes/ 下没有「迁移 只加」声明")
+        return
+    tables, indexes = MG._statements(sql)
+    old_tables = {k: v for k, v in tables.items() if k not in owners}
+    old_indexes = []
+    for ix in indexes:
+        m = re.search(r"\bON\s+(\w+)", ix, re.I)
+        if not (m and m.group(1) in owners):
+            old_indexes.append(ix)
+    old_sql = (";\n".join(list(old_tables.values()) + old_indexes) + ";\n") if (old_tables or old_indexes) else ""
+    from ..packs.dslproj import cases as K
+    K.reset_db(ws, old_sql)
+    db = ws / "app.db"
+    r1 = MG.migrate_additive(db, ws / "entities")
+    missing = set(owners) - set(r1.get("tables") or [])
+    if missing:
+        for name in missing:
+            reasons.setdefault(owners[name], []).append(f"老库补迁移没有把「学习记录」表「{name}」补齐")
+        return
+    r2 = MG.migrate_additive(db, ws / "entities")
+    if r2.get("tables") or r2.get("columns") or r2.get("indexes"):
+        for m in set(owners.values()):
+            reasons.setdefault(m, []).append(f"迁移补齐老库后再跑一次应是空操作，实际又有变化：{r2}")
+
+
 def run_smoke(project, mods):
     """→ ({模块: (ok, 原因)}, 备注列表)。project 不被改动（在临时拷贝里跑）。"""
     from ..packs.dslproj import cases as K
@@ -287,6 +333,7 @@ def run_smoke(project, mods):
         auth = auth_config(ws / "routes")
         login = bool(auth["mandatory"] or auth["optional"])
         login_ep = _login_endpoint(contracts) if login else None
+        _check_migrate(ws, sql, contracts, reasons)
         for m, c in contracts.items():
             for iface in c["接口"]:
                 if iface.get("上传"):          # B2 之前约定里不会有这个字段，先占位

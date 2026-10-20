@@ -154,6 +154,21 @@ def t_contract():
     p, probs = C.parse((SOL / "contracts" / "progress.md").read_text(encoding="utf-8"))
     check(not probs and p["依赖"] == ["graph"] and next(x for x in p["用例"] if x["名"] == "记作答_累计正确率")["先"][1]["种类"] == "调用", "progress 约定：依赖 graph、先 调用")
     check(C.check(g, "graph", {}, ["graph", "progress"]) == [] and C.check(p, "progress", {"graph": g}, ["graph", "progress"]) == [], "两份约定检查通过")
+    # B1：表 <名> 学习记录 标注
+    lr, lr_probs = C.parse("模块 x\n## 表\n表 x_log 学习记录\n  id 整数 主键\n## 函数\n公开 函数 f a\n## 用例\n用例 u1\n  调用 f a=1\n  得 有返回\n")
+    check(not lr_probs and lr["表"][0]["学习记录"] is True, "表 后面加「学习记录」→ 标记为真", lr_probs)
+    plain, plain_probs = C.parse("模块 x\n## 表\n表 x_t\n  id 整数 主键\n## 函数\n公开 函数 f a\n## 用例\n用例 u1\n  调用 f a=1\n  得 有返回\n")
+    check(not plain_probs and plain["表"][0]["学习记录"] is False, "表 不加标注 → 学习记录是 False", plain_probs)
+    _, bad_flag_probs = C.parse("模块 x\n## 表\n表 x_t 乱写\n")
+    check(any("表 <表名> [学习记录]" in x for x in bad_flag_probs), "表名后面不是「学习记录」的乱写标注 → 报错", bad_flag_probs)
+    # B1：用例「先 文件 <路径> [内容=…]」
+    uf, uf_probs = C.parse("模块 x\n## 函数\n公开 函数 f a\n## 用例\n用例 u1\n  先 文件 uploads/a.md 内容=第一行\\n第二行\n  调用 f a=1\n  得 有返回\n")
+    st = uf["用例"][0]["先"][0]
+    check(not uf_probs and st == {"种类": "文件", "路径": "uploads/a.md", "内容": "第一行\\n第二行", "行": st["行"]}, "先 文件 解析：路径 + 内容（字面 \\n，写文件时再还原）", (uf_probs, st))
+    check(any("相对路径且不含 .." in x for x in C.check(C.parse('模块 x\n## 函数\n公开 函数 f a\n## 用例\n用例 u1\n  先 文件 /etc/passwd\n  调用 f a=1\n  得 有返回\n')[0], "x", {}, ["x"])),
+          "先 文件 的路径不能是绝对路径 → 约定检查报错")
+    check(any("相对路径且不含 .." in x for x in C.check(C.parse('模块 x\n## 函数\n公开 函数 f a\n## 用例\n用例 u1\n  先 文件 a/../../b.md\n  调用 f a=1\n  得 有返回\n')[0], "x", {}, ["x"])),
+          "先 文件 的路径含 .. → 约定检查报错")
     check(C.hash_of("a\r\nb  \n") == C.hash_of("a\nb\n"), "hash_of：换行 / 行尾空白不影响")
     heads = C.public_heads(g)
     check("公开 函数 取知识点 code" in heads and "报错 409 会形成环" in heads and "伪代码" not in heads, "public_heads：函数头 + 返回 / 报错，不含伪代码")
@@ -263,6 +278,15 @@ def t_compare():
     check(any("缺 services/graph.zs" in x for x in d), "缺业务文件 → 差异", d)
     d = variant("cmp9", "graph", lambda p: (p / "services" / "graph.zs").write_text("业务 graph\n  公开 函数 取知识点 code\n", encoding="utf-8"))
     check(any("解析失败" in x for x in d), "业务文件解析失败 → 差异", d)
+    # B1：表带「学习记录」标注 → 比对约定要求 routes/ 下有「迁移 只加」声明（骨架生成 routes/_project.zs）
+    lr_proj = TMP / "cmp_lr"
+    (lr_proj / "routes").mkdir(parents=True, exist_ok=True)
+    lr_contract = C.parse("模块 lrmod\n## 表\n表 lrmod_log 学习记录\n  id 整数 主键\n## 函数\n公开 函数 f a\n## 用例\n用例 u\n  调用 f a=1\n  得 有返回\n")[0]
+    d = P.compare(lr_proj, "lrmod", lr_contract, ["lrmod"])["差异"]
+    check(any("学习记录" in x and "迁移 只加" in x for x in d), "表带「学习记录」但 routes/ 没开「迁移 只加」→ 比对约定报差异", d)
+    (lr_proj / "routes" / "_project.zs").write_text("迁移 只加\n", encoding="utf-8")
+    d2 = P.compare(lr_proj, "lrmod", lr_contract, ["lrmod"])["差异"]
+    check(not any("学习记录" in x for x in d2), "加上 routes/_project.zs「迁移 只加」后这条差异消失", d2)
 
 
 # ------------------------------------------------------------------ 四、跑用例
@@ -313,6 +337,32 @@ def t_cases():
     r = CS.run(p, "graph")
     check(not r["全过"], "业务文件有语法问题 → 用例不过", r["原因"][:200])
     check(CS.main(["--project", str(SOL), "--module", "graph"]) == 0, "命令行 main：退出码 0")
+
+
+def t_case_files():
+    print("四之零：用例「先 文件 <路径> [内容=…]」——跑的时候在临时项目里造出文件，调用时直接传 file_path，跑完删除；没有表的模块不要求 entities 文件")
+    p = TMP / "cs_files"
+    shutil.rmtree(p, ignore_errors=True)
+    (p / "services").mkdir(parents=True)
+    (p / "contracts").mkdir(parents=True)
+    check(not (p / "entities" / "upl.entity").exists(), "没有表的模块：entities/upl.entity 不存在")
+    (p / "services" / "upl.zs").write_text(
+        "业务 upl\n  用包 common\n  公开 函数 读内容 file_path\n    读取 content = {file_path}\n    返回 {\"content\": content}\n  结束\n结束\n",
+        encoding="utf-8")
+    (p / "contracts" / "upl.md").write_text(
+        "模块 upl\n## 函数\n公开 函数 读内容 file_path\n  返回 {content}\n"
+        "## 用例\n用例 读内容_有文件\n  先 文件 uploads/a.md 内容=第一行\\n第二行\n  调用 读内容 file_path=uploads/a.md\n  得 有返回\n"
+        "用例 读内容_没文件\n  调用 读内容 file_path=uploads/a.md\n  得 有返回\n", encoding="utf-8")
+    r = CS.run(p, "upl")
+    check(r["总数"] == 2, "没有表的模块（没有 entities/upl.entity）也能正常跑用例，不报缺实体", r)
+    fails = {f["名"]: f["原因"] for f in r["失败"]}
+    check("读内容_有文件" not in fails, "先 文件 造出的文件，业务函数当场能读到", fails.get("读内容_有文件"))
+    check("读内容_没文件" in fails and "文件不存在" in fails.get("读内容_没文件", ""), "上一个用例的文件跑完就删了，不留给下一个用例", fails.get("读内容_没文件"))
+    # 路径限相对、不含 ..：直接调用写文件的动词也要拦一道（约定检查已经拦过，这里是跑的时候再保险一次）
+    why = CS.write_case_files(p, {"先": [{"种类": "文件", "路径": "/etc/passwd", "内容": "x"}]})
+    check("相对路径且不含 .." in why, "write_case_files 对绝对路径再保险拦一次", why)
+    why = CS.write_case_files(p, {"先": [{"种类": "文件", "路径": "a/../../b.md", "内容": "x"}]})
+    check("相对路径且不含 .." in why, "write_case_files 对含 .. 的路径再保险拦一次", why)
 
 
 def t_settle():
@@ -517,6 +567,7 @@ def main():
         t_project()
         t_compare()
         t_cases()
+        t_case_files()
         t_settle()
         t_accept_materials()
         t_flow()

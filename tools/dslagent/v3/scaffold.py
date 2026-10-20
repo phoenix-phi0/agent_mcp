@@ -81,10 +81,16 @@ def route_text(name, c):
     return "\n".join(out)
 
 
+PROJECT_ROUTES = "routes/_project.zs"           # 项目级（不属于任何模块）的 routes 文件：目前只放「迁移 只加」
+
+
 def gen_skeleton(project, top):
-    """→ {"新建": [相对路径], "已有": [相对路径], "问题": [加载检查问题]}。约定缺 / 解析不过抛 ValueError。"""
+    """→ {"新建": [相对路径], "已有": [相对路径], "问题": [加载检查问题]}。约定缺 / 解析不过抛 ValueError。
+    任一模块的表带了「学习记录」标注 → 额外生成 routes/_project.zs（顶层「迁移 只加」，模型不写、top.zs 也不写，
+    见 tools/migrate.py）。"""
     project = Path(project)
     made, kept = [], []
+    learner_record = False
     for m in top["模块"]:
         name = m["名"]
         try:
@@ -94,6 +100,8 @@ def gen_skeleton(project, top):
         probs = VC.C.parse(VC.path_of(project, name).read_text(encoding="utf-8"))[1]
         if probs:
             raise ValueError(f"contracts/{name}.md 解析不过：{probs[0]}")
+        if any(t.get("学习记录") for t in c["表"]):
+            learner_record = True
         for rel, text in ((f"entities/{name}.entity", entity_text(c)), (f"services/{name}.zs", service_text(name, c)),
                           (f"routes/{name}.zs", route_text(name, c))):
             if not text.strip():
@@ -105,6 +113,14 @@ def gen_skeleton(project, top):
             f.parent.mkdir(parents=True, exist_ok=True)
             f.write_text(text, encoding="utf-8", newline="\n")
             made.append(rel)
+    if learner_record:
+        f = project / PROJECT_ROUTES
+        if f.exists():
+            kept.append(PROJECT_ROUTES)
+        else:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("迁移 只加\n", encoding="utf-8", newline="\n")
+            made.append(PROJECT_ROUTES)
     probs = []
     if made:
         probs = [p for p in loadcheck.check_project(project) if any(r in p for r in made)]

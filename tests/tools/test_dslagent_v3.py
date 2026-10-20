@@ -354,6 +354,62 @@ def test_skeleton_build_state():
     check(ctx.is_done("graph") is True, "只换行符不同 hash 不变")
 
 
+def test_learner_record_scaffold():
+    print("B1：表带「学习记录」标注 → 骨架额外生成 routes/_project.zs（迁移 只加）；比对约定认它")
+    p = project_with_contracts(("graph", "vocab", "progress"))
+    top = VT.load(TOP3)
+    f = p / "contracts" / "progress.md"
+    text = f.read_text(encoding="utf-8")
+    assert "表 progress_answer\n" in text
+    f.write_text(text.replace("表 progress_answer\n", "表 progress_answer 学习记录\n", 1), encoding="utf-8")
+    r = SF.gen_skeleton(p, top)
+    check("routes/_project.zs" in r["新建"] and r["问题"] == [], "表带「学习记录」→ 额外生成 routes/_project.zs", r)
+    check((p / "routes" / "_project.zs").read_text(encoding="utf-8") == "迁移 只加\n", "routes/_project.zs 内容只有「迁移 只加」")
+    c, _ = VC.load(p, "progress")
+    check(c["表"][0]["学习记录"] is True, "约定解析出「学习记录」标注")
+    check(PJ.compare(p, "progress", c, ["graph", "vocab", "progress"])["一致"], "比对约定：有 routes/_project.zs 后一致")
+    (p / "routes" / "_project.zs").unlink()
+    d = PJ.compare(p, "progress", c, ["graph", "vocab", "progress"])["差异"]
+    check(any("学习记录" in x and "迁移 只加" in x for x in d), "去掉 routes/_project.zs → 比对约定报差异", d)
+    r2 = SF.gen_skeleton(p, top)
+    check("routes/_project.zs" in r2["新建"], "再生成骨架：发现文件被删了 → 补回来", r2)
+    # 已有的不重写
+    (p / "routes" / "_project.zs").write_text("迁移 只加\n# 手改过\n", encoding="utf-8")
+    r3 = SF.gen_skeleton(p, top)
+    check("routes/_project.zs" in r3["已有"] and "手改过" in (p / "routes" / "_project.zs").read_text(encoding="utf-8"), "已存在的 routes/_project.zs 不覆盖", r3)
+
+
+def test_module_cleanup():
+    print("B1：清理删掉的模块——contracts / state 里有、top.zs 里没有的模块 → 删它的文件与 state 记录")
+    p = project_with_contracts(("graph", "vocab", "progress"))
+    top = VT.load(TOP3)
+    SF.gen_skeleton(p, top)
+    out = fresh("out")
+    ctx = core.Ctx(p, out, "x", None)
+    ctx.mark_done("vocab")
+    check(ctx.is_done("vocab"), "vocab 先标记完成（后面验证 state 记录也会被清掉）")
+    new_top = "项目 demo\n模块 graph        # 知识图谱\n模块 progress 依赖 graph\n"
+    (p / "plan" / "top.zs").write_text(new_top, encoding="utf-8")
+    e = engine(p)
+    e.v3 = ctx
+    e.run("用包 v3\n设 r = 清理删掉的模块\n返回 {r}\n")
+    r = e.returned[0] if e.returned else None
+    check(r == {"删了": ["vocab"]}, "top.zs 里没有 vocab 了 → 报告删了它", r)
+    check(not any((p / sub / f"vocab.{ext}").exists() for sub, ext in
+                  (("contracts", "md"), ("entities", "entity"), ("services", "zs"), ("routes", "zs"))), "vocab 的 contracts/entities/services/routes 文件都删了")
+    check("vocab" not in ctx.load_state().get("模块", {}), "state.json 里 vocab 的记录也删了")
+    check((p / "contracts" / "graph.md").is_file() and (p / "contracts" / "progress.md").is_file()
+          and (p / "services" / "progress.zs").is_file(), "别的模块的文件没受影响（没有因为前缀相近被误删）")
+    # 再跑一次：没有可清理的模块 → 空操作
+    e2 = engine(p)
+    e2.v3 = ctx
+    e2.run("用包 v3\n设 r = 清理删掉的模块\n返回 {r}\n")
+    check(e2.returned[0] == {"删了": []}, "没有可清理的模块 → 空操作")
+    # 别的约定仍依赖被删的模块：约定检查报「还没有约定文件」
+    probs = VC.upstream_of(p, "x", ["vocab"])[1]
+    check(any("还没有约定文件" in x for x in probs), "删掉的模块被别的约定依赖 → 约定检查报错（contracts/vocab.md 已经没有了）", probs)
+
+
 def test_sync_deps():
     print("同步顶层依赖")
     check(VT.sync_deps("项目 demo\n模块 graph        # 知识图谱\n模块 vocab 依赖 graph\n模块 progress 依赖 graph\n",
@@ -736,6 +792,23 @@ def test_full_regression():
     check(not ctx3.is_done("graph"), "修不好：graph 不再标记完成")
 
 
+def test_interface_smoke_migrate():
+    print("B1：接口冒烟认「学习记录」表——老库缺表自动补齐，第二次是空操作；没开「迁移 只加」则报给拥有表的模块")
+    from tools.dslagent.v3 import regress as RG
+    p = full_project()
+    f = p / "contracts" / "progress.md"
+    text = f.read_text(encoding="utf-8")
+    f.write_text(text.replace("表 progress_answer\n", "表 progress_answer 学习记录\n", 1), encoding="utf-8")
+    (p / "routes" / "_project.zs").write_text("迁移 只加\n", encoding="utf-8")
+    mods = ["graph", "vocab", "progress"]
+    results, notes = RG.run_smoke(p, mods)
+    check(all(ok for ok, _ in results.values()), "有「迁移 只加」声明：老库自动补表、第二次空操作，接口冒烟仍然全过", results)
+    (p / "routes" / "_project.zs").unlink()
+    results2, _ = RG.run_smoke(p, mods)
+    ok, why = results2["progress"]
+    check(not ok and "迁移 只加" in why, "没有「迁移 只加」声明 → 归到拥有这张表的 progress 模块", results2)
+
+
 def test_interface_smoke():
     print("接口冒烟：真起 Router（Flask 测试客户端），同一份种子数据上核对「直接调用」与「走 HTTP」一致")
     from tools.dslagent.v3 import regress as RG
@@ -847,6 +920,8 @@ if __name__ == "__main__":
         test_auth_contract()
         test_prompt_example()
         test_skeleton_build_state()
+        test_learner_record_scaffold()
+        test_module_cleanup()
         test_sync_deps()
         test_engine_bits()
         test_full_flow_clean()
@@ -856,6 +931,7 @@ if __name__ == "__main__":
         test_group_retry()
         test_cost_cap()
         test_full_regression()
+        test_interface_smoke_migrate()
         test_interface_smoke()
         test_interface_smoke_auth()
         test_verb_decls()

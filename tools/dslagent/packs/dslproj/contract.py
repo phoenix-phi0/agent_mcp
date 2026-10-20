@@ -8,6 +8,7 @@
     表 answer
       id 整数 主键
       learner 文本 学习者
+    表 answer_log 学习记录                   # 拥有学习者真实记录的表要标「学习记录」（只加不重建，见 tools/migrate.py）
 
     ## 函数
     公开 函数 记作答 learner point_code correct pass_line?    # 「公开」可省（私有）；入参末尾 ? = 可选
@@ -167,10 +168,10 @@ def parse(text):
                 probs.append(f"第 {no} 行：小节之前只能写「模块 <名>」「依赖 …」「认证 …」，现在是「{s[:40]}」")
         elif sec == "表":
             if h == "表":
-                if len(parts) != 2:
-                    probs.append(f"第 {no} 行：表写法是「表 <表名>」")
+                if len(parts) not in (2, 3) or (len(parts) == 3 and parts[2] != "学习记录"):
+                    probs.append(f"第 {no} 行：表写法是「表 <表名> [学习记录]」，现在是「{s}」")
                     continue
-                cur = {"名": parts[1], "字段": [], "行": no}
+                cur = {"名": parts[1], "字段": [], "学习记录": len(parts) == 3, "行": no}
                 c["表"].append(cur)
             elif cur is None:
                 probs.append(f"第 {no} 行：字段要写在「表 <表名>」下面")
@@ -244,7 +245,19 @@ def _case_line(c, s, parts, h, no, probs):
         if m:
             u["先"].append({"种类": "调用", "目标": m.group(1), "参数": _kv(m.group(2)), "行": no})
             return
-        probs.append(f"第 {no} 行：先 写法是「先 数据 表 k=v …」或「先 调用 [模块.]函数 k=v …」，现在是「{s}」")
+        m = re.match(r"^先\s+文件\s+(\S+)((?:\s+\S+=.*)?)$", s)
+        if m:
+            path, rest = m.group(1), m.group(2).strip()
+            content = ""
+            if rest:
+                k, sep, v = rest.partition("=")
+                if sep and k == "内容":
+                    content = v
+                else:
+                    probs.append(f"第 {no} 行：先 文件 只认「内容=…」，现在是「{rest}」")
+            u["先"].append({"种类": "文件", "路径": path, "内容": content, "行": no})
+            return
+        probs.append(f"第 {no} 行：先 写法是「先 数据 表 k=v …」「先 调用 [模块.]函数 k=v …」或「先 文件 <相对路径> [内容=…]」，现在是「{s}」")
     elif h == "调用":
         m = re.match(rf"^调用\s+({IDENT})((?:\s+\S+=\S*)*)$", s)
         if not m:
@@ -412,6 +425,10 @@ def check(c, name, upstream, all_modules):
             if st["种类"] == "调用":
                 mod, _, fn = st["目标"].rpartition(".")
                 target(mod or name, fn, f"第 {st['行']} 行（用例 {u['名']} 的 先）", False)
+            elif st["种类"] == "文件":
+                path = st["路径"].replace("\\", "/")
+                if path.startswith("/") or any(part == ".." for part in path.split("/")):
+                    probs.append(f"第 {st['行']} 行：用例 {u['名']} 的「先 文件」路径「{st['路径']}」必须是相对路径且不含 ..")
         fn = u["调用"]["目标"]
         f = fns.get(fn)
         if f is None or not f["公开"]:

@@ -16,21 +16,33 @@ import sys
 import tempfile
 from pathlib import Path
 
+from . import contract as C
 from . import project as P
 
 DEFAULT_NOW = "2026-01-01 09:00:00"
 COPY_IGNORE = shutil.ignore_patterns(".*", "__pycache__", "node_modules", "venv", "env", "*.pyc", "*.db", "*.db-*", "sessions")
 
 
+def _table_free(ws, module):
+    """module 的约定里一张表都没写 → 没有 entities/<module>.entity 是合法的（没有表的模块合法，不要求实体文件）。
+    约定读不出来就当「不是」，交给原来的缺文件报错去说明。"""
+    f = Path(ws) / "contracts" / f"{module}.md"
+    if not f.is_file():
+        return False
+    c, probs = C.parse(f.read_text(encoding="utf-8"))
+    return not probs and not c["表"]
+
+
 def build_sql(ws, modules):
-    """modules 的 entities/<模块>.entity 拼起来 → 建表 SQL；缺实体文件的模块报 ValueError。"""
+    """modules 的 entities/<模块>.entity 拼起来 → 建表 SQL；缺实体文件的模块报 ValueError
+    （约定里本来就没有表的模块例外：这类模块不要求有 entities 文件）。"""
     from tools.entity import render_sql
     texts, missing = [], []
     for m in modules:
         f = Path(ws) / "entities" / f"{m}.entity"
         if f.is_file():
             texts.append(f.read_text(encoding="utf-8"))
-        else:
+        elif not _table_free(ws, m):
             missing.append(m)
     if missing:
         raise ValueError("缺 " + "、".join(f"entities/{m}.entity" for m in missing))
@@ -91,10 +103,41 @@ def reset_db(ws, sql):
     return db
 
 
+def write_case_files(ws, u):
+    """「先 文件 <路径> [内容=…]」步骤：在 ws 下按相对路径造出文件（内容里的字面 \\n 还原成真换行）。
+    → "" 或失败原因。路径限相对、不含 ..（约定检查已经拦过，这里是跑的时候再保险一次）。"""
+    for st in u["先"]:
+        if st["种类"] != "文件":
+            continue
+        path = st["路径"].replace("\\", "/")
+        if path.startswith("/") or any(part == ".." for part in path.split("/")):
+            return f"先 文件：路径「{st['路径']}」必须是相对路径且不含 .."
+        fp = Path(ws) / path
+        try:
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            fp.write_text(st["内容"].replace("\\n", "\n"), encoding="utf-8")
+        except OSError as e:
+            return f"先 文件：写 {st['路径']} 失败：{e}"
+    return ""
+
+
+def clear_case_files(ws, u):
+    """跑完一个用例后删掉它「先 文件」造出的文件（不留给下一个用例）。"""
+    for st in u["先"]:
+        if st["种类"] == "文件":
+            try:
+                (Path(ws) / st["路径"].replace("\\", "/")).unlink()
+            except OSError:
+                pass
+
+
 def seed_case(ws, sql, module, u):
-    """按 sql 建空库（ws/app.db）+ 用例 u 的「先」步骤造数据（插行 / 调公开函数）→ "" 或失败原因。
+    """按 sql 建空库（ws/app.db）+ 用例 u 的「先」步骤造数据（插行 / 调公开函数 / 造文件）→ "" 或失败原因。
     跑用例、接口冒烟都靠它造「同一份数据」的起点，接口冒烟额外把造好的库文件另存一份，在同一份数据上
     分别跑「直接调用」和「走 HTTP」。"""
+    why = write_case_files(ws, u)
+    if why:
+        return why
     try:
         con = sqlite3.connect(reset_db(ws, sql))
         try:
@@ -160,55 +203,58 @@ def call(eng, module, target, args, tag="c"):
 
 
 def run_case(ws, sql, module, u):
-    """在空库上跑一个用例 → "" 或失败原因。"""
-    why = seed_case(ws, sql, module, u)
-    if why:
-        return why
-    db = Path(ws) / "app.db"
+    """在空库上跑一个用例 → "" 或失败原因；跑完（不管过没过）删掉「先 文件」造出的文件，不留给下一个用例。"""
     try:
-        eng = make_engine(ws)
-        r, err = call(eng, module, u["调用"]["目标"], u["调用"]["参数"], "c")
-        settle()
-    except TimeoutError as e:
-        return str(e)
-    except Exception as e:  # noqa: BLE001  脚本报错就是用例失败
-        return f"{type(e).__name__}: {str(e)[:500]}"
-    if u["报错"] is not None:
-        if err in ("", None):
-            return f"应该报错 {u['报错']}，实际没报错（返回 {r!r}）"
-        code = err.get("code") if isinstance(err, dict) else None
-        if str(code) != str(u["报错"]):
-            return f"应该报错 {u['报错']}，实际是 {err}"
-    else:
-        if err not in ("", None):
-            return f"不该报错，实际报错 {err}"
-        if u["为空"] and r not in ("", None, {}, []):
-            return f"应该返回空，实际 {r!r}"
-        if u["有返回"] and r in ("", None, {}, []):
-            return "应该有返回值，实际为空"
-        for k, v in (u["得"] or {}).items():
-            got = r.get(k) if isinstance(r, dict) else None
-            if not _same(got, v):
-                return f"{k} 应为 {_val(v)!r}，实际 {got!r}（返回 {r!r}）"
-    con = sqlite3.connect(db)
-    try:
-        for chk in u["库"]:
-            if chk["种类"] == "共":
-                n = con.execute(f"SELECT count(*) FROM {chk['表']}").fetchone()[0]
-                if n != chk["行数"]:
-                    return f"库 {chk['表']} 应有 {chk['行数']} 行，实际 {n} 行"
-            else:
-                w, vals = _where(con, chk["表"], chk["值"])
-                n = con.execute(f"SELECT count(*) FROM {chk['表']} WHERE {w}", vals).fetchone()[0]
-                if chk["种类"] == "含" and n == 0:
-                    return f"库 {chk['表']} 里没有 {chk['值']} 这一行"
-                if chk["种类"] == "无" and n > 0:
-                    return f"库 {chk['表']} 里不该有 {chk['值']} 这一行"
-    except (sqlite3.Error, ValueError) as e:
-        return f"库核对失败：{e}"
+        why = seed_case(ws, sql, module, u)
+        if why:
+            return why
+        db = Path(ws) / "app.db"
+        try:
+            eng = make_engine(ws)
+            r, err = call(eng, module, u["调用"]["目标"], u["调用"]["参数"], "c")
+            settle()
+        except TimeoutError as e:
+            return str(e)
+        except Exception as e:  # noqa: BLE001  脚本报错就是用例失败
+            return f"{type(e).__name__}: {str(e)[:500]}"
+        if u["报错"] is not None:
+            if err in ("", None):
+                return f"应该报错 {u['报错']}，实际没报错（返回 {r!r}）"
+            code = err.get("code") if isinstance(err, dict) else None
+            if str(code) != str(u["报错"]):
+                return f"应该报错 {u['报错']}，实际是 {err}"
+        else:
+            if err not in ("", None):
+                return f"不该报错，实际报错 {err}"
+            if u["为空"] and r not in ("", None, {}, []):
+                return f"应该返回空，实际 {r!r}"
+            if u["有返回"] and r in ("", None, {}, []):
+                return "应该有返回值，实际为空"
+            for k, v in (u["得"] or {}).items():
+                got = r.get(k) if isinstance(r, dict) else None
+                if not _same(got, v):
+                    return f"{k} 应为 {_val(v)!r}，实际 {got!r}（返回 {r!r}）"
+        con = sqlite3.connect(db)
+        try:
+            for chk in u["库"]:
+                if chk["种类"] == "共":
+                    n = con.execute(f"SELECT count(*) FROM {chk['表']}").fetchone()[0]
+                    if n != chk["行数"]:
+                        return f"库 {chk['表']} 应有 {chk['行数']} 行，实际 {n} 行"
+                else:
+                    w, vals = _where(con, chk["表"], chk["值"])
+                    n = con.execute(f"SELECT count(*) FROM {chk['表']} WHERE {w}", vals).fetchone()[0]
+                    if chk["种类"] == "含" and n == 0:
+                        return f"库 {chk['表']} 里没有 {chk['值']} 这一行"
+                    if chk["种类"] == "无" and n > 0:
+                        return f"库 {chk['表']} 里不该有 {chk['值']} 这一行"
+        except (sqlite3.Error, ValueError) as e:
+            return f"库核对失败：{e}"
+        finally:
+            con.close()
+        return ""
     finally:
-        con.close()
-    return ""
+        clear_case_files(ws, u)
 
 
 def run(project, module, now=None):

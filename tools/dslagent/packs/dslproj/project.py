@@ -197,6 +197,10 @@ def compare(project, module, contract, modules):
     for t in contract["表"]:
         if t["名"] not in ents:
             diffs.append(f"约定里的表「{t['名']}」在 entities/{module}.entity 里没有对应的「实体 {t['名']}」")
+    if any(t.get("学习记录") for t in contract["表"]):
+        from tools.migrate import switch_on
+        if not switch_on(project / "routes"):
+            diffs.append("模块有「学习记录」标注的表，但 routes/ 下没有「迁移 只加」声明（应由生成骨架写出 routes/_project.zs）")
     return {"一致": not diffs, "差异": diffs}
 
 
