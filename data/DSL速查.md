@@ -274,6 +274,37 @@ SQLite 有列亲和性，所以 `WHERE views > :下限` 能工作。但左边一
 会连带动 `tools/dslagent` 内 30+ 处消费点和若干 jsonl 数据文件，这条任务
 的预算（$8）打不住，原样留着，等专门的后续任务按这张表继续改。
 
+**C2（dslagent，范围已查清，预算打不住，没动代码）**：核实下来
+`tools/dslagent/verbs/` 下用 `"是"/"否"` 字符串当返回字段的有 **29 个
+Python 动词文件**（`verbs/code/defs/`：写文件、删文件、推理、撤回、改文件、
+改模块名、核对范围、跑测试、运行代码；`verbs/dslproj/defs/`：加载检查、
+比对约定、跑用例；`verbs/newproj/defs/`：`_gen`、`_gencore`、参数核对、
+拆分隔块、校验分层清单、校验实体、校验清单、校验角色、核对规则、检查项目、
+生成增删改查、读原文、项目摘要、预编译sql；`verbs/v3/defs/`：复核约定、
+已完成、标记完成、检查规划、记验收），且不少字段被 `tools/dslagent` 里的
+Python 代码直接用 `=="是"` 字符串比较消费（例如 `verify/code.py`、`v2.py`、
+`legacy/reason_rules.py` 对 `passed` 字段），和 C1 遇到的情况一样，要跟着
+全量核对调用点、改了不能只过 `.zs` 脚本的 `等于 是/否` 还要改这些 Python
+侧比较，量级比 C1 更大，这条任务的预算（$8）更打不住，没有动这部分代码。
+另外发现 spec 要求「C1 加 `tests/dsl/test_naming.py` 检查 `返回 {...}`/
+Python 动词返回字典字面量的键必须英文」这一步 C1 本身也没做（见上面
+C1 的「没做完的」第 5 条）——`tests/dsl/test_naming.py` 现在只查变量名/
+脚本参数/SQL 参数（含 `tools/dslagent/verbs` 下的 `.zs`），不查返回键，
+所以 C2 要求的「把这个检查扩展到 `tools/dslagent/verbs`」缺前提，要等
+C1 那条先补上这个检查器（哪怕先只对 `verbs/` 生效）才能扩展，否则现在
+扩了会在 29 个文件上整批报错。`DSLAGENT_FUNC_NAMES=any` 开关与约定检查
+对业务函数名要求英文（新写报错、盘上已有只警告）同理没做：约定检查目前
+按纯文本解析约定，不知道某个函数名是不是「新写的」（没有「该函数是否已有
+对应 services 文件」这个上下文传进来），要先理清这条信息流才能分新写/
+已有两档，风险和工作量都不小，这次没碰。`记作答`（`verbs/dslproj/`、
+`v3/prompts/contract.md`、`packs/README.md` 等处的业务函数名示例）同时是
+`tests/dsl/fixtures/service_layer/`、`tests/tools/fixtures/dslproj_solution/`、
+`tests/tools/fixtures/v3_solution/` 等多处测试夹具里真实用到的函数名，不是
+单纯的文档文字，改示例要连带改这些夹具，一并留给后续任务。
+已验证（没改代码，只是确认基线）：`tests/tools/test_dslagent_v3.py` 的
+「v3 假模型整条流程跑通」268 项全过，当前 `tools/dslagent` 基线是绿的，
+后续任务可以放心在这个基线上继续改。
+
 ---
 
 ## 五、动词包
