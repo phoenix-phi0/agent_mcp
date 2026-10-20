@@ -88,7 +88,7 @@ def main():
     check(v("替换", "憎む", "[\\u3040-\\u309f]+$") == "憎", "替换：\\u 写法的字符范围")
     check(v("替换", "a1b2", r"\d", "#") == "a#b#", "替换：给了替换为")
     check(raises(lambda: v("替换", "x", "(")), "替换：正则写错了报错")
-    check(v("相等", "a b", "a b") == "是" and v("相等", "a", "a ") == "否" and v("相等", "", "") == "是",
+    check(v("相等", "a b", "a b") is True and v("相等", "a", "a ") is False and v("相等", "", "") is True,
           "相等：原样比，空白也算")
     check(v("截取", "ABCDEFGH", "3", "1") == "C" and v("截取", "ABCDEFGH", "9", "1") == "",
           "截取：从 1 数，越界给空")
@@ -107,14 +107,14 @@ def main():
     print("二、在脚本里用")
     e = run("用包 text\n设 a = 归一化 {x}\n设 same = 相等 {a} {y}\n设 blank = 相等 {z} {}\n",
             x="あ い　う", y="あいう", z="{}")
-    check(e.vars["a"] == "あいう" and e.vars["same"] == "是", "值里有空格：一个参数，不错位")
-    check(e.vars["blank"] == "是", "相等 {z} {}：认得出空结构（「如果 {结构} 为空」会把 {…} 当成没展开的变量）")
+    check(e.vars["a"] == "あいう" and e.vars["same"] is True, "值里有空格：一个参数，不错位")
+    check(e.vars["blank"] is True, "相等 {z} {}：认得出空结构（「如果 {结构} 为空」会把 {…} 当成没展开的变量）")
     e = run("用包 text\n设 opt.key = A\n设 opt.text = {t}\n设 opts = 列表加项 [] {opt}\n"
             "设 opt.key = B\n设 opts = 列表加项 {opts} {opt}\n设 n = 截取 XYZ 2 1\n", t="甲 乙")
     check(e.vars["opts"] == [{"key": "A", "text": "甲 乙"}, {"key": "B", "text": "甲 乙"}] and e.vars["n"] == "Y",
           f"结构经 JSON 文本进动词再拿回结构，后改的不影响先加的：{e.vars['opts']}")
     e = run("用包 text\n设 w = 为空\n设 s = 相等 {w} 为空\n设 m = {missing 或}\n设 e = 相等 {m} {w}\n")
-    check(e.vars["s"] == "是" and e.vars["e"] == "否", "相等：值是「为空」这种词、或者是空的，都照常比")
+    check(e.vars["s"] is True and e.vars["e"] is False, "相等：值是「为空」这种词、或者是空的，都照常比")
     try:
         run("用包 common\n报错 走不下去了\n打印 不该到这")
         check(False, "脚本里报错：没抛")

@@ -96,11 +96,11 @@ def register(reg, workspace):
         return out
 
     @reg.verb("判断文件或目录存不存在，返回「是」或「否」。")
-    def 存在(路径: str) -> str:
+    def 存在(路径: str) -> bool:
         try:
-            return "是" if safe(路径).exists() else "否"
+            return safe(路径).exists()
         except ValueError:
-            return "否"
+            return False
 
     # ------------------------------------------------------------------
     # 读
@@ -164,14 +164,14 @@ def register(reg, workspace):
 
     @reg.verb("删掉工作目录里的一个文件（不删目录）。不在也不报错，返回「是」（删了）或「否」。"
               "例如 删文件 uploads/a.pdf")
-    def 删文件(文件: str) -> str:
+    def 删文件(文件: str) -> bool:
         f = safe(文件)
         if f.is_dir():
             raise ValueError(f"删文件：{文件} 是目录，只删文件")
         if not f.is_file():
-            return "否"
+            return False
         f.unlink()
-        return "是"
+        return True
 
     # ------------------------------------------------------------------
     # 结构操作

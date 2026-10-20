@@ -25,7 +25,7 @@ def _keys(用户名: str) -> list:
     return keys
 
 
-def 登录被锁(用户名: str) -> str:
+def 登录被锁(用户名: str) -> bool:
     from tools.auth import LIMITER
 
-    return "是" if LIMITER.locked(_keys(用户名)) else "否"
+    return LIMITER.locked(_keys(用户名))
