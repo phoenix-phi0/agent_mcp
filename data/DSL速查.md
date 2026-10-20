@@ -9,10 +9,21 @@
 
 ```
 py -m tools.dsl 脚本.zs            命令行
+py -m tools.dsl 脚本.zs 键=值 …    传参数（见下）
 dsl_run(script=...)                MCP 工具，默认假客户端不花钱
 dsl_run(script=..., real=True)     走真模型
 cd dsl && py run.py scripts/x.zs   干净环境，数据隔离在 dsl/work/
 ```
+
+### 顶层脚本传参
+
+`python -m tools.dsl 脚本.zs 键=值 键2=值2 …`：注入成脚本变量。脚本头有
+`# 参数：` 声明（写法同下面「动词的参数」）时按同一套规则绑定——必填缺了报错、
+`名?` 不传为空串、`名=值` 不传用默认值、给了声明里没有的键报错、同一键给两次
+报错；没有声明就把给的键原样注入，不校验。`--trace` 放哪个位置都行。
+
+Python 接口 `DSLEngine.run(script, params={...})`、`run_file(path, params={...})`、
+模块级 `run_script(path, params={...})` 走同一绑定函数（`tools.verbs.bind_top_params`）。
 
 ---
 

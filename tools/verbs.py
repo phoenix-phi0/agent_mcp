@@ -202,6 +202,36 @@ def parse_param_decl(script: str) -> list[str]:
     return [p.name for p in parse_param_specs(script)[0]]
 
 
+def bind_top_params(script: str, pairs: "list[tuple[str, str]]") -> dict:
+    """顶层脚本（`python -m tools.dsl 脚本.zs 键=值 …`、`run_file`/`run` 的 params 字典）的参数绑定。
+
+    脚本头有 `# 参数：` 声明时，按与 .zs 动词相同的规则：必填缺了报错（旧声明——没有
+    任何 `?` 或 `=` 的——少传不报错，不注入该键）、`名?` 不传为空串、`名=值` 不传用默认值、
+    给了声明里没有的键报错、同一键给了两次报错。没有声明就把给的键原样注入，不做校验。
+    """
+    specs, strict, where = parse_param_specs(script)
+    if not specs:
+        return dict(pairs)
+    names = {sp.name for sp in specs}
+    got: dict = {}
+    for k, v in pairs:
+        if k not in names:
+            raise VerbError(f"脚本没有参数「{k}」，有：{'、'.join(sorted(names)) or '无'}"
+                            f"（声明：第 {where} 行）")
+        if k in got:
+            raise VerbError(f"参数「{k}」给了两次（声明：第 {where} 行）")
+        got[k] = v
+    for sp in specs:
+        if sp.name in got:
+            continue
+        if sp.required:
+            if strict:
+                raise VerbError(f"缺少必填参数「{sp.name}」（声明：第 {where} 行）")
+        else:
+            got[sp.name] = sp.default
+    return got
+
+
 def _python_specs(fn: Callable, names: list[str]) -> list[ParamSpec]:
     """Python 动词的参数：没有默认值的必填，有默认值的不传时让函数自己用默认。"""
     try:

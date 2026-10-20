@@ -244,7 +244,7 @@ from pathlib import Path
 from .config import resolve_model
 from .zhipu import ZhipuClient
 from .llm_router import wrap as wrap_client
-from .verbs import VerbRegistry, VerbError
+from .verbs import VerbRegistry, VerbError, bind_top_params, KW_TOKEN_RE
 from . import db_tx
 from .dsl_history import HistoryMixin
 from .dsl_budget import CountingClient, Usage
@@ -587,7 +587,9 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
     # 解析与执行
     # ------------------------------------------------------------------
 
-    def run(self, script: str) -> str:
+    def run(self, script: str, params: dict | None = None) -> str:
+        if params is not None:
+            self.vars.update(bind_top_params(script, list(params.items())))
         script = self._take_sections(script)
         lines = [normalize(ln).rstrip() for ln in script.splitlines()]
         self._check_loops(lines)
@@ -720,11 +722,11 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
             return True
         return False
 
-    def run_file(self, path) -> str:
+    def run_file(self, path, params: dict | None = None) -> str:
         p = Path(path)
         if not p.is_absolute():
             p = self.workdir / p
-        return self.run(p.read_text(encoding="utf-8"))
+        return self.run(p.read_text(encoding="utf-8"), params=params)
 
     @staticmethod
     def _branch_of(line: str):
@@ -1497,22 +1499,30 @@ def invoke_verb(verbs: VerbRegistry, name: str, *args, workdir=None,
     return eng.returned[0] if eng.returned else text
 
 
-def run_script(path, verbs: VerbRegistry | None = None, **kwargs) -> str:
+def run_script(path, verbs: VerbRegistry | None = None, params: dict | None = None, **kwargs) -> str:
     p = Path(path)
-    return DSLEngine(workdir=p.parent, verbs=verbs, **kwargs).run_file(p)
+    return DSLEngine(workdir=p.parent, verbs=verbs, **kwargs).run_file(p, params=params)
 
 
 if __name__ == "__main__":
     import sys
 
-    args = [a for a in sys.argv[1:] if a != "--trace"]
-    if not args:
-        print("用法: python -m tools.dsl 脚本.zs [--trace]")
+    raw = [a for a in sys.argv[1:] if a != "--trace"]
+    if not raw:
+        print("用法: python -m tools.dsl 脚本.zs [键=值 …] [--trace]")
         sys.exit(1)
-    p = Path(args[0])
+    p = Path(raw[0])
+    pairs = []
+    for tok in raw[1:]:
+        m = KW_TOKEN_RE.match(tok)
+        if not m:
+            print(f"参数「{tok}」不是 键=值 的形式", file=sys.stderr)
+            sys.exit(1)
+        pairs.append((m.group(1), m.group(2)))
     eng = DSLEngine(workdir=p.parent)
     try:
-        eng.run_file(p)
+        script = p.read_text(encoding="utf-8")
+        eng.run(script, params=dict(pairs))
     finally:
         if "--trace" in sys.argv[1:]:
             for t in eng.trace:
