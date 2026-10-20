@@ -265,7 +265,7 @@ def test_skeleton_build_state():
         check("缺约定" in str(e), "缺约定抛 ValueError", e)
     # 分配
     text = SF.build_text(top)
-    check(text.splitlines()[1:] == ["用包 v3", "做模块组 graph", "做模块组 vocab,progress", "终止 成功 全部模块完成"], "build.zs 按依赖分层", text)
+    check(text.splitlines()[1:] == ["用包 v3", "做模块组 graph", "做模块组 vocab,progress", "全量回归", "接口冒烟", "终止 成功 全部模块完成"], "build.zs 按依赖分层 + 全量回归 + 接口冒烟", text)
     check((p / SF.gen_build(p, top)).read_text(encoding="utf-8") == text, "生成分配写 plan/build.zs")
     # state：约定 hash 变了视为未完成
     ctx = core.Ctx(p, fresh("out"), "x", None)
@@ -576,6 +576,114 @@ def test_cost_cap():
     check(len(stub_calls(state)) < 3 or res["花费"] >= 0.3, "到上限后不再做新的模块", len(stub_calls(state)))
 
 
+def full_project(mods=("graph", "vocab", "progress")):
+    """v3_solution 的几个模块，按真实项目布局摆好（contracts / entities / services / routes / queries）。"""
+    p = fresh("regp")
+    for sub in ("contracts", "entities", "services", "routes", "queries"):
+        d = SOL / sub
+        if not d.is_dir():
+            continue
+        for f in d.iterdir():
+            if f.is_file() and any(f.stem.startswith(m) for m in mods):
+                dst = p / sub / f.name
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(f, dst)
+    return p
+
+
+def stub_cmd(out, fixes=None):
+    """假「做模块」子进程：fixes = {模块: 要写回的 services/<模块>.zs 内容}（没列的模块什么也不改，直接报「没做」）。"""
+    srcs = {}
+    for m, text in (fixes or {}).items():
+        f = out / f"fix_{m}.zs"
+        f.write_text(text, encoding="utf-8")
+        srcs[m] = str(f)
+    script = out / "stub_cmd.py"
+    script.write_text(
+        "import json, re, sys\nfrom pathlib import Path\n"
+        "argv = sys.argv[1:]\n"
+        "a = dict(zip(argv[1::2], argv[2::2])) if argv and argv[0] == 'run' else {}\n"
+        "task = Path(a['--task-file']).read_text(encoding='utf-8')\n"
+        "m = re.search(r'^模块\\s+(\\S+)', task, re.M).group(1)\n"
+        f"srcs = {srcs!r}\n"
+        "proj = Path(a['--project'])\n"
+        "fixed = m in srcs\n"
+        "if fixed:\n"
+        "    (proj / 'services' / f'{m}.zs').write_text(Path(srcs[m]).read_text(encoding='utf-8'), encoding='utf-8')\n"
+        "print(json.dumps({'kind': 'task', 'fixed': fixed, 'calls': 1, 'cost': 0.01, 'seconds': 0, 'stop': ''}))\n",
+        encoding="utf-8")
+    return [sys.executable, str(script)]
+
+
+def test_full_regression():
+    print("全量回归：所有模块重新验收；不过的标未完成，按依赖分层交 做一个模块 重做；2 轮仍不过 终止 失败")
+    from tools.dsl_core import ScriptHalt
+    from tools.dslagent.v3 import regress as RG
+    top = VT.load(TOP3)
+    p = full_project()
+    ctx = core.Ctx(p, fresh("o"), "x", None)
+    for m in ("graph", "vocab", "progress"):
+        ctx.mark_done(m)
+    eng = core.V3Engine(MockClient(handler=lambda s, u=None: "嗯", offline=True), workdir=p, verbose=False, verbs_root=CM.VERBS)
+    eng.v3 = ctx
+    r = RG.full_regression(ctx, eng, top)
+    check(r["状态"] == "通过" and r["轮数"] == 1, "参考实现全部通过：第 1 轮就过，不碰任何模块", r)
+    check(all(ctx.is_done(m) for m in ("graph", "vocab", "progress")), "全部仍标记完成")
+
+    # 破坏 graph 的业务实现（报错码改错 → 跑用例不过），假装它之前标记完成（约定 hash 没变）
+    broken = (p / "services" / "graph.zs").read_text(encoding="utf-8").replace("报错 404 没有这个知识点", "报错 400 没有这个知识点", 1)
+    (p / "services" / "graph.zs").write_text(broken, encoding="utf-8")
+    ctx.mark_done("graph")
+
+    out2 = fresh("o")
+    fixed_graph = (SOL / "services" / "graph.zs").read_text(encoding="utf-8")
+    ctx2 = core.Ctx(p, out2, "x", None, module_cmd=stub_cmd(out2, {"graph": fixed_graph}))
+    for m in ("graph", "vocab", "progress"):
+        ctx2.mark_done(m)
+    eng2 = core.V3Engine(MockClient(handler=lambda s, u=None: "嗯", offline=True), workdir=p, verbose=False, verbs_root=CM.VERBS)
+    eng2.v3 = ctx2
+    r2 = RG.full_regression(ctx2, eng2, top)
+    check(r2["状态"] == "通过" and r2["轮数"] == 2, "第 1 轮查出 graph 不过、重做；第 2 轮全部重新验收通过", r2)
+    check(ctx2.is_done("graph") and ctx2.is_done("vocab") and ctx2.is_done("progress"), "重做后 graph 重新标记完成，别的模块没被碰")
+    acc = [row for row in ctx2.records["验收"] if row.get("模块") == "graph"]
+    check(any(not row["通过"] and "全量回归" in row["说明"] and "跑用例" in row["说明"] for row in acc), "验收记录里有全量回归查出的失败原因", acc)
+
+    # 一直修不好：做一个模块 3 次都没过 → 立刻 终止 失败（不等第 2 轮）
+    (p / "services" / "graph.zs").write_text(broken, encoding="utf-8")
+    out3 = fresh("o")
+    ctx3 = core.Ctx(p, out3, "x", None, module_cmd=stub_cmd(out3))        # 不给 fixes：谁都修不好
+    ctx3.mark_done("graph")
+    ctx3.mark_done("vocab")
+    ctx3.mark_done("progress")
+    eng3 = core.V3Engine(MockClient(handler=lambda s, u=None: "嗯", offline=True), workdir=p, verbose=False, verbs_root=CM.VERBS)
+    eng3.v3 = ctx3
+    try:
+        RG.full_regression(ctx3, eng3, top)
+        check(False, "修不好要抛 ScriptHalt 失败")
+    except ScriptHalt as e:
+        check(e.value["状态"] == "失败" and "graph" in e.value["原因"], "重做还是不过：终止 失败，原因点名 graph", e.value)
+    check(not ctx3.is_done("graph"), "修不好：graph 不再标记完成")
+
+
+def test_interface_smoke():
+    print("接口冒烟：真起 Router（Flask 测试客户端），同一份种子数据上核对「直接调用」与「走 HTTP」一致")
+    from tools.dslagent.v3 import regress as RG
+    p = full_project()
+    mods = ["graph", "vocab", "progress"]
+    results, notes = RG.run_smoke(p, mods)
+    check(set(results) == set(mods) and all(ok for ok, _ in results.values()), "参考实现：三个模块的接口冒烟都过", results)
+    check(notes == [], "参考实现没有需要备注的差异（at 字段用固定 DSL_NOW，直接调用和 HTTP 应该完全一致）", notes)
+    check(not (p / "app.db").exists() and not (p / "sessions").exists(), "接口冒烟不改动传入的项目（在临时拷贝里跑）")
+
+    # 路由和约定对不上（接口声明的方法和 routes 实际注册的方法不一致）→ HTTP 侧 404，状态码不一致，判失败
+    bad = (p / "routes" / "graph.zs").read_text(encoding="utf-8").replace("接口 GET /graph/point", "接口 POST /graph/point", 1)
+    (p / "routes" / "graph.zs").write_text(bad, encoding="utf-8")
+    results2, _ = RG.run_smoke(p, mods)
+    ok, why = results2["graph"]
+    check(not ok and "状态码不一致" in why, "路由方法改错：直接调用 200，HTTP 404 → 冒烟不过，原因说状态码不一致", why)
+    check(results2["vocab"][0] and results2["progress"][0], "别的模块不受影响", results2)
+
+
 def test_verb_decls():
     print("动词包")
     from tools.verbs import VerbRegistry
@@ -613,6 +721,8 @@ if __name__ == "__main__":
         test_top_fails()
         test_group_retry()
         test_cost_cap()
+        test_full_regression()
+        test_interface_smoke()
         test_verb_decls()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)

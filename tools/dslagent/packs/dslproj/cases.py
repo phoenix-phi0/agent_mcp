@@ -73,13 +73,8 @@ def _where(con, table, kv):
     return " AND ".join(f"{k} = ?" for k in kv), [_val(v) for v in kv.values()]
 
 
-def run_case(ws, sql, module, u):
-    """在空库上跑一个用例 → "" 或失败原因。"""
-    from tools import packs
-    from tools.dsl import DSLEngine
-    from tools.dsl_http import DEFAULT_PACKS
-    from tools.dsl_service import get_services
-    from tools.mock import MockClient
+def reset_db(ws, sql):
+    """清掉 ws/app.db（含 -wal/-shm/-journal），按 sql 重新建表。→ db 路径。"""
     db = Path(ws) / "app.db"
     for suf in ("", "-wal", "-shm", "-journal"):
         try:
@@ -91,46 +86,88 @@ def run_case(ws, sql, module, u):
         if sql:
             con.executescript(sql)
         con.commit()
-        for st in u["先"]:
-            if st["种类"] == "数据":
-                cols = _table_cols(con, st["表"])
-                bad = [k for k in st["值"] if k not in cols]
-                if not cols or bad:
-                    return "先 数据：" + (f"库里没有表 {st['表']}" if not cols else f"表 {st['表']} 没有列 {bad}")
-                con.execute(f"INSERT INTO {st['表']}({', '.join(st['值'])}) VALUES({', '.join('?' * len(st['值']))})",
-                            [_val(v) for v in st["值"].values()])
-        con.commit()
-    except sqlite3.Error as e:
-        return f"造数据失败：{e}"
     finally:
         con.close()
+    return db
+
+
+def seed_case(ws, sql, module, u):
+    """按 sql 建空库（ws/app.db）+ 用例 u 的「先」步骤造数据（插行 / 调公开函数）→ "" 或失败原因。
+    跑用例、接口冒烟都靠它造「同一份数据」的起点，接口冒烟额外把造好的库文件另存一份，在同一份数据上
+    分别跑「直接调用」和「走 HTTP」。"""
+    try:
+        con = sqlite3.connect(reset_db(ws, sql))
+        try:
+            for st in u["先"]:
+                if st["种类"] == "数据":
+                    cols = _table_cols(con, st["表"])
+                    bad = [k for k in st["值"] if k not in cols]
+                    if not cols or bad:
+                        return "先 数据：" + (f"库里没有表 {st['表']}" if not cols else f"表 {st['表']} 没有列 {bad}")
+                    con.execute(f"INSERT INTO {st['表']}({', '.join(st['值'])}) VALUES({', '.join('?' * len(st['值']))})",
+                                [_val(v) for v in st["值"].values()])
+            con.commit()
+        finally:
+            con.close()
+    except sqlite3.Error as e:
+        return f"造数据失败：{e}"
+    try:
+        eng = make_engine(ws)
+    except RuntimeError as e:
+        return str(e)
+    try:
+        for i, st in enumerate(u["先"]):
+            if st["种类"] == "调用":
+                _, err = call(eng, module, st["目标"], st["参数"], f"p{i}")
+                settle()
+                if err not in ("", None):
+                    return f"前置 {st['目标']} 报错 {err}"
+    except TimeoutError as e:
+        return str(e)
+    except Exception as e:  # noqa: BLE001  脚本报错就是造数据失败
+        return f"{type(e).__name__}: {str(e)[:500]}"
+    return ""
+
+
+def make_engine(ws):
+    """一个装好业务层（services 刷新过）的引擎，在 ws 上调「调用 模块.函数」用。业务层加载失败抛 RuntimeError。"""
+    from tools import packs
+    from tools.dsl import DSLEngine
+    from tools.dsl_http import DEFAULT_PACKS
+    from tools.dsl_service import get_services
+    from tools.mock import MockClient
     eng = DSLEngine(MockClient(offline=True), workdir=Path(ws), verbose=False,
                     verbs=packs.registry(DEFAULT_PACKS, Path(ws)), verbs_root=packs.verbs_root())
     svc = get_services(Path(ws) / "services")
     svc.refresh()
     if svc.errors:
-        return "业务层加载失败：" + "；".join(svc.errors)[:600]
+        raise RuntimeError("业务层加载失败：" + "；".join(svc.errors)[:600])
     eng.services = svc
     eng.svc_module = None
+    return eng
 
-    def call(target, args, tag):
-        tgt = target if "." in target else f"{module}.{target}"
-        for i, v in enumerate(args.values()):
-            eng.vars[f"x{tag}a{i}"] = _val(v)
-        txt = " ".join(f"{k}={{x{tag}a{i}}}" for i, k in enumerate(args))
-        eng.vars.pop(f"x{tag}r", None)
-        eng.vars.pop(f"x{tag}e", None)
-        eng.run(f"设 x{tag}r = 调用 {tgt}{(' ' + txt) if txt else ''} 出错时 x{tag}e")
-        return eng.vars.get(f"x{tag}r"), eng.vars.get(f"x{tag}e")
 
+def call(eng, module, target, args, tag="c"):
+    """在 eng 上跑一次「调用 目标 k=v…」→ (结果, 报错)；tag 用来给变量名加后缀，避免同一个引擎里多次调用撞名。"""
+    tgt = target if "." in target else f"{module}.{target}"
+    for i, v in enumerate(args.values()):
+        eng.vars[f"x{tag}a{i}"] = _val(v)
+    txt = " ".join(f"{k}={{x{tag}a{i}}}" for i, k in enumerate(args))
+    eng.vars.pop(f"x{tag}r", None)
+    eng.vars.pop(f"x{tag}e", None)
+    eng.run(f"设 x{tag}r = 调用 {tgt}{(' ' + txt) if txt else ''} 出错时 x{tag}e")
+    return eng.vars.get(f"x{tag}r"), eng.vars.get(f"x{tag}e")
+
+
+def run_case(ws, sql, module, u):
+    """在空库上跑一个用例 → "" 或失败原因。"""
+    why = seed_case(ws, sql, module, u)
+    if why:
+        return why
+    db = Path(ws) / "app.db"
     try:
-        for i, st in enumerate(u["先"]):
-            if st["种类"] == "调用":
-                _, err = call(st["目标"], st["参数"], f"p{i}")
-                settle()
-                if err not in ("", None):
-                    return f"前置 {st['目标']} 报错 {err}"
-        r, err = call(u["调用"]["目标"], u["调用"]["参数"], "c")
+        eng = make_engine(ws)
+        r, err = call(eng, module, u["调用"]["目标"], u["调用"]["参数"], "c")
         settle()
     except TimeoutError as e:
         return str(e)

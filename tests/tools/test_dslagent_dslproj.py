@@ -335,8 +335,8 @@ def t_settle():
         check("秒内没跑完" in str(e), "settle() 超时抛 TimeoutError（不是悄悄放过去对还没写完的库）", e)
     finally:
         held.set()
-    check(("settle()" in inspect.getsource(CS.run_case)) and inspect.getsource(CS.run_case).count("settle()") >= 2,
-          "run_case 里每次「调用」（先 的和正式的）后都 settle()，不止查最后一次")
+    src = inspect.getsource(CS.seed_case) + inspect.getsource(CS.run_case)
+    check(src.count("settle()") >= 2, "run_case（靠 seed_case 造「先」数据）里每次「调用」（先 的和正式的）后都 settle()，不止查最后一次", src)
 
 
 # ------------------------------------------------------------------ 五、验收 / 资料 / 动词

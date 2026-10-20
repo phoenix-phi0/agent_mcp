@@ -2,13 +2,15 @@
 
     python -m tools.dslagent v3 --req F --project DIR --out DIR [--stop-after top|contract|build] [--cost-cap USD]
 
-流程（v3.zs）：规划到通过 顶层 → 规划到通过 约定 → 生成骨架 → 生成分配 → 执行 plan/build.zs（做模块组 …）。流程在 .zs 里，
-套路封装成带默认值的动词，Python 只做确定性的事和调模型。
+流程（v3.zs）：规划到通过 顶层 → 规划到通过 约定 → 生成骨架 → 生成分配 → 执行 plan/build.zs（做模块组 … → 全量回归 → 接口冒烟）。
+流程在 .zs 里，套路封装成带默认值的动词，Python 只做确定性的事和调模型。
   顶层  plan/top.zs               项目 名 / 模块 名 [依赖 …]（top.py：解析、检查、依赖分层）
   约定  contracts/<模块>.md        dslproj 的约定格式；按依赖分层，同层并行写；检查 = dslproj 约定检查 + 与 top 一致 + 表名前缀（contracts.py）
   骨架  entities / services / routes   从冻结的约定生成，已有的不覆盖，生成后加载检查必须过（scaffold.py）
-  分配  plan/build.zs             从 top 按依赖分层生成，一层一行 做模块组（scaffold.py）
+  分配  plan/build.zs             从 top 按依赖分层生成，一层一行 做模块组，末尾加 全量回归 + 接口冒烟（scaffold.py）
   做模块组                          组内模块并行；每个模块：已完成跳过 → 最多 N 次（做模块 → 验收），末次换模型；有模块 N 次不过，等组内其他模块结束后 终止 失败
+  全量回归                          所有模块（含已完成的）重新跑一次验收；不过的标未完成、按依赖分层交 做一个模块 重做（带上回归原因），最多 2 轮，仍不过 终止 失败
+  接口冒烟                          真起 tools.dsl_http 的 Router（Flask 测试客户端），每个接口取第一条正常用例，同一份数据上核对「直接调用」和「走 HTTP」是否一致；不过的模块同回归规则重做
 
 文件职责（tools/dslagent/v3/）：
   core.py       Ctx（运行上下文：项目、记录、Model、花费上限、plan/state.json）、V3Engine、run()（__main__ 的 v3 子命令）
@@ -17,6 +19,7 @@
   contracts.py  约定检查（dslproj + v3 另加的）
   scaffold.py   生成骨架 / 生成分配
   modrun.py     做模块：起子进程跑 v2（--pack dslproj），在项目拷贝里做，范围内文件拷回
+  regress.py    全量回归 / 接口冒烟 的实现（两步共用按依赖分层重做的循环）
   v3.zs         流程脚本
 
 续跑规则：断了重跑同一命令。已存在且检查通过的规划（top / 约定）不重写；骨架已有的文件不覆盖；build.zs 每次按 top 重新生成；

@@ -93,6 +93,9 @@ def build_text(top):
     lines = ["# 由「生成分配」按 plan/top.zs 的依赖分层生成（程序生成，不调模型）：一层一行，同一层的模块并行做；上一层全部通过才做下一层",
              "用包 v3"]
     lines += ["做模块组 " + ",".join(layer) for layer in VT.layers(top)]
+    # 各模块组都做完之后：全量回归（所有模块重新验收一遍）→ 接口冒烟（真起 Router 核对直接调用和走 HTTP 一致）
+    lines.append("全量回归")
+    lines.append("接口冒烟")
     lines.append("终止 成功 全部模块完成")
     return "\n".join(lines) + "\n"
 
