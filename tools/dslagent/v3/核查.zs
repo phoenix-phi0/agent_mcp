@@ -2,8 +2,10 @@
 # 逐个约定检查里做过，这里不重复）+ 调一次模型找全局问题（职责重复、模块间缺口、跨模块调用对不上、偏离需求、伪代码留白），
 # 两边并成一份问题清单存盘。有「任务」时清单里会列出完成任务要改的地方。按各输入 hash 缓存，hash 没变不重调模型。
 # 顶层脚本参数用英文（同 v3.zs，test_naming 对 verbs/ 以外的 .zs 要求变量名/脚本参数 ASCII）。
-# 参数：req task? llm=sonnet
+# logic_check=是 时额外对全部已有约定的模块并行跑角色 logic_check（tools/dslagent/roles.zs），疑点标
+# 「logic_check(疑点)」并入问题清单；缺省否，跟原来行为一致。
+# 参数：req task? llm=sonnet logic_check=否
 用包 v3
-设 g = 核查 需求={req} 任务={task} 模型={llm}
+设 g = 核查 需求={req} 任务={task} 模型={llm} 逻辑核查={logic_check}
 设 path = 存问题清单 g={g}
 返回 {"count": {g.count}, "path": "{path}"}

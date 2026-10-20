@@ -185,6 +185,22 @@ def opencode_bin():
     return os.environ.get("DSLAGENT_OC_BIN") or OB.OPENCODE_BIN
 
 
+_ACTIVE_PGIDS = set()     # 正在跑的子进程组（start_new_session=True 下 pgid == pid）；父流程终止时 kill_all() 逐个收掉
+_ACTIVE_LOCK = threading.Lock()
+
+
+def kill_all(why="被父流程收掉"):
+    """收掉全部还活着的子进程组（SIGTERM / SIGINT 处理里调用）；找不到的进程组忽略。"""
+    with _ACTIVE_LOCK:
+        pgids = list(_ACTIVE_PGIDS)
+    for pgid in pgids:
+        try:
+            os.killpg(pgid, 9)
+        except OSError:
+            pass
+    return len(pgids)
+
+
 class _Proc:
     """一次子进程调用的公共部分（claude / codex / grok / opencode 共用）：起进程（新进程组）、stdin 喂入、stderr 收集、
     总超时 / 首事件前静默 / 空闲超时三道 killpg、文本保险（工具调用格式）、事件落盘（events=False 不落）。"""
@@ -198,6 +214,8 @@ class _Proc:
         self.idle, self.first_cap = idle, first_cap
         self.p = subprocess.Popen(cmd, stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, text=True, cwd=cwd, env=env, start_new_session=True)
+        with _ACTIVE_LOCK:
+            _ACTIVE_PGIDS.add(self.p.pid)
         self.fh = self.efh = None
         if reply_path:
             try:
@@ -278,6 +296,8 @@ class _Proc:
     def close(self):
         """读完 stdout 后收尾：等进程、停计时、关文件。返回 (reason, stderr 文本)。"""
         self.p.wait()
+        with _ACTIVE_LOCK:
+            _ACTIVE_PGIDS.discard(self.p.pid)
         self.timer.cancel()
         self.done.set()
         self.th.join(timeout=5)

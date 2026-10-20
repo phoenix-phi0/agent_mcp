@@ -151,7 +151,70 @@ def user_text(req_text, task, top_text, catalog_text, program, prev_plan):
     return "\n\n".join(parts)
 
 
-def run_audit(ctx, task="", model="sonnet"):
+def logic_cache_path(ctx):
+    return ctx.out / "logic_cache.json"
+
+
+def run_logic_checks(ctx, top, backend=None):
+    """对 top 里全部已有约定的模块并行跑角色 logic_check（找伪代码逻辑漏洞），按约定内容 hash 缓存——内容没变
+    不重调模型。疑点转成问题清单条目（依据写「logic_check(疑点)」，由修改规划决定采不采纳），不单独存盘，
+    并入 run_audit 的最终问题清单。"""
+    from .. import roles as R
+    from . import contracts as VC
+    cache_f = logic_cache_path(ctx)
+    try:
+        cache = json.loads(cache_f.read_text(encoding="utf-8")) if cache_f.is_file() else {}
+    except ValueError:
+        cache = {}
+    mods = [m["名"] for m in top.get("模块", [])]
+    texts, todo = {}, {}
+    for m in mods:
+        p = VC.path_of(ctx.project, m)
+        if not p.is_file():
+            continue
+        text = p.read_text(encoding="utf-8")
+        texts[m] = text
+        h = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if cache.get(m, {}).get("hash") != h:
+            todo[m] = h
+    items_out, total_cost = [], 0.0
+    if todo:
+        def backend_(spec, system, user, timeout):
+            if backend is not None:
+                return backend(spec, system, user, timeout)
+            if ctx.M.real:
+                from .. import engines as EG
+                return EG.call(spec, system, user, timeout)
+            return ctx.M.backend(system, user, "v3_logic_check", timeout, model=spec["spec"])
+
+        import concurrent.futures as CF
+        with CF.ThreadPoolExecutor(max_workers=4) as ex:
+            futs = {ex.submit(R.dispatch_agent, "logic_check", "", {"约定": texts[m]}, "json",
+                               out_dir=ctx.out, backend=backend_, parent_id=str(ctx.out)): m for m in todo}
+            for fut in CF.as_completed(futs):
+                m = futs[fut]
+                r = fut.result()
+                total_cost += r.get("cost") or 0.0
+                found = []
+                if r["status"] == "ok":
+                    try:
+                        found = json.loads(r["result"])
+                    except ValueError:
+                        found = []
+                cache[m] = {"hash": todo[m], "items": [
+                    {"问题": it.get("问题", ""), "涉及模块": m, "依据": f"logic_check(疑点)：{it.get('依据', '')}"}
+                    for it in found if isinstance(it, dict) and it.get("问题")]}
+        cache_f.write_text(json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8")
+    for m in mods:
+        if m in cache:
+            items_out.extend(cache[m].get("items", []))
+    if total_cost:
+        with ctx.lock:
+            ctx.module_cost += total_cost
+    return items_out
+
+
+def run_audit(ctx, task="", model="sonnet", logic_check=False):
     """核查：程序检查 + 调模型找问题 → (items, count)。按输入 hash 缓存——hash 没变直接用缓存，不重调模型。"""
     project = ctx.project
     top_text = ctx.top_path().read_text(encoding="utf-8") if ctx.top_path().is_file() else ""
@@ -196,8 +259,9 @@ def run_audit(ctx, task="", model="sonnet"):
         model_items = parse_model_issues(raw)
         cf.write_text(json.dumps({"key": key, "model_items": model_items}, ensure_ascii=False, indent=1), encoding="utf-8")
         ctx.log("核查", 事件="调模型", key=key[:12], 模型条数=len(model_items))
-    items = prog_items + model_items
-    ctx.log("核查", 事件="汇总", 程序条数=len(prog_items), 模型条数=len(model_items), 总数=len(items))
+    logic_items = run_logic_checks(ctx, top) if logic_check and top_text else []
+    items = prog_items + model_items + logic_items
+    ctx.log("核查", 事件="汇总", 程序条数=len(prog_items), 模型条数=len(model_items), 疑点条数=len(logic_items), 总数=len(items))
     return items
 
 
