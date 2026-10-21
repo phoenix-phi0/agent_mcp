@@ -1,26 +1,23 @@
-"""build.zs 末尾的两步（verbs/v3 的 全量回归 / 接口冒烟 是它们的壳）：
+"""build.zs 末尾两步的检查实现（verbs/v3 的 全量回归 / 接口冒烟 是它们的壳）：
 
-  全量回归   所有模块（含已完成、约定 hash 没变的）重新跑一次「加载检查 + 比对约定 + 跑用例」；
-            不过的标未完成、记回归原因，按依赖分层重做（第一轮任务就带着这个原因），最多 2 轮，仍不过 终止 失败。
+  全量回归   对有代码的模块跑「加载检查 + 比对约定 + 跑用例」，只报告。
   接口冒烟   项目拷到临时目录、按全部 entities 建库，用 tools.dsl_http 的真实 Router（进程内 Flask 测试客户端）
             加载全部 routes / services；约定里每个接口取所调函数第一条正常用例，用 cases.seed_case 造的
             「同一份数据」各跑一次「直接调用」与「走 HTTP」，核对状态码与返回是否一致（结构不同算失败，
-            值不同但结构一样只记备注——大概率是随机 / 时间字段）。不过的模块同全量回归的规则重做。
+            值不同但结构一样只记备注——大概率是随机 / 时间字段）。只报告。
 
             多人模式（任一模块约定头部写了「认证 必须」或「认证 可选」）：起 Router 时 login=True；非公开接口
             先核对「不登录 401」，再按接口要求的角色补一个有这个角色的调用人账号登录，带着登录态再跑一次 HTTP
             （见 _make_actor / _login_cookie）。调用人账号只用来发请求，不是用例里本来就有的数据行。
 
-两步共用 _redo_rounds：检查一遍所有模块 → 全过就通过；不过的标未完成、按 plan/top.zs 的依赖分层分组，
-每层一次 并行执行「做一个模块」（带上这次查出的原因）→ 下一轮重新检查；2 轮都有模块不过就 终止 失败。
+两个检查都不重做模块、不改 state：不过的模块怎么重做由 plan/build.zs 里的 .zs 流程写出来
+（检查 → 按依赖分层重做不过的模块 → 再检查，最多 2 轮，仍不过 终止 失败）。
 """
 import re
 import shutil
 import sqlite3
 import tempfile
 from pathlib import Path
-
-from . import top as VT
 
 
 def _accept_module(project, module, mods):
@@ -42,48 +39,6 @@ def _accept_module(project, module, mods):
     if not kr["全过"]:
         parts.append("跑用例：" + kr["原因"])
     return not parts, "\n".join(parts)
-
-
-def _redo_rounds(ctx, eng, top, kind, check_all):
-    """check_all() → {模块: (ok, 原因)}（每轮都重新算）。不过的 标记未完成 + 记验收，按依赖分层重做；
-    最多 2 轮，第 2 轮仍有不过的就 抛 ScriptHalt 失败。全过返回 {"状态": "通过"}。"""
-    from tools.dsl_core import ScriptHalt
-    layers = VT.layers(top)
-    for rnd in (1, 2):
-        results = check_all()
-        fails = {m: r for m, (ok, r) in results.items() if not ok}
-        for m, r in fails.items():
-            ctx.log("验收", 模块=m, 通过=False, 说明=f"{kind}：{r}"[:1500])
-        if not fails:
-            return {"状态": "通过", "轮数": rnd}
-        for m in fails:
-            ctx.unmark_done(m)
-        if rnd == 2:
-            lines = "\n".join(f"{m}：{r}" for m, r in fails.items())
-            raise ScriptHalt("失败", f"{kind}两轮仍未通过：\n{lines}"[:2000], "")
-        for layer in layers:
-            group = [m for m in layer if m in fails]
-            if not group:
-                continue
-            jobs = [{"脚本": "做一个模块", "参数": {"模块": m, "最多": "3", "末次模型": "opus", "起始原因": f"{kind}发现问题：{fails[m]}"}}
-                    for m in group]
-            sub = eng._sub_engine()
-            sub.vars["_regress_jobs"] = jobs
-            sub.run("用包 common v3\n设 rs = 并行执行 {_regress_jobs} 并发=" + str(min(3, len(jobs))) + "\n返回 {rs}\n")
-            rs = sub.returned[0] if sub.returned else []
-            bad = [r for r in rs if isinstance(r, dict) and r.get("status") != "成功"]
-            if bad:
-                lines = "\n".join(f"{(r.get('params') or {}).get('模块') or '?'}：{r.get('reason') or r.get('status')}" for r in bad)
-                raise ScriptHalt("失败", f"{kind}重做未通过：\n{lines}"[:2000], "")
-    return {"状态": "通过"}        # 理论上到不了这里（第 2 轮不过已经抛了）
-
-
-def full_regression(ctx, eng, top):
-    mods = [m["名"] for m in top["模块"]]
-
-    def check_all():
-        return {m: _accept_module(ctx.project, m, mods) for m in mods}
-    return _redo_rounds(ctx, eng, top, "全量回归", check_all)
 
 
 # ------------------------------------------------------------------ 接口冒烟
@@ -391,21 +346,7 @@ def smoke_detail(project, mods):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def interface_smoke(ctx, eng, top):
-    mods = [m["名"] for m in top["模块"]]
-    all_notes = []
-
-    def check_all():
-        results, notes = run_smoke(ctx.project, mods)
-        all_notes.extend(notes)
-        return results
-    r = _redo_rounds(ctx, eng, top, "接口冒烟", check_all)
-    if all_notes:
-        ctx.log("验收", 模块="_接口冒烟", 通过=True, 说明="备注：\n" + "\n".join(all_notes)[:1500])
-    return r
-
-
-# ------------------------------------------------------------------ 方式=核查：只报告，不重做、不改 state
+# ------------------------------------------------------------------ 检查：只报告，不重做、不改 state
 
 def code_files(project, module, mods):
     """模块现有的代码文件（项目相对路径，按 entities / services / routes / queries 排）。"""
@@ -435,21 +376,28 @@ def _merge_items(rows):
     return merged
 
 
+def _failed_text(failed):
+    return "\n".join(f"{f['module']}：{f['reason']}" for f in failed)[:2000]
+
+
 def audit_regression(ctx, top):
     """核查用：对所有有代码的模块跑 加载检查 + 比对约定 + 跑用例，只报告（不 unmark、不重做、不记验收）。
-    → {count, items: [{issue, modules, basis}], summary}。"""
+    → {count, items: [{issue, modules, basis}], failed: [{module, reason}], failed_text, summary}；
+    failed 每个不过的模块一条（reason 是该模块的失败原文），failed_text 是「模块：原因」一行一个，供 .zs 决定重做谁。"""
     mods = [m["名"] for m in top["模块"]]
     code_mods = _code_modules(ctx.project, mods)
     if not code_mods:
-        return {"count": 0, "items": [], "summary": "还没有代码，跳过"}
+        return {"count": 0, "items": [], "failed": [], "failed_text": "", "summary": "还没有代码，跳过"}
     items = []
+    failed = []
     for m in code_mods:
         ok, why = _accept_module(ctx.project, m, mods)
         if not ok:
             items.append({"issue": f"模块 {m} 全量回归不过：{why[:1500]}", "modules": m, "basis": "全量回归"})
+            failed.append({"module": m, "reason": why})
     summary = (f"{len(code_mods)} 个有代码的模块，{len(items)} 个不过：" + "；".join(i["modules"] for i in items)) if items \
         else f"{len(code_mods)} 个有代码的模块全部通过"
-    return {"count": len(items), "items": items, "summary": summary}
+    return {"count": len(items), "items": items, "failed": failed, "failed_text": _failed_text(failed), "summary": summary}
 
 
 def _next_smoke_no(out):
@@ -460,13 +408,14 @@ def _next_smoke_no(out):
 
 
 def audit_smoke(ctx, top):
-    """核查用：同接口冒烟，只报告；每个不过的接口（或每项检查）一条。完整结果存 out/smoke_<n>.json / .txt。
-    → {count, items, summary[, files]}；没有代码时跳过。"""
+    """只报告；每个不过的接口（或每项检查）一条 item。完整结果存 out/smoke_<n>.json / .txt。
+    → {count, items, failed: [{module, reason}], failed_text, notes, notes_text, summary, files}；没有代码时跳过。
+    failed 每个不过的模块一条（reason 是该模块所有问题用「；」连起来的原文）；notes 是只记备注的软差异。"""
     import json
     mods = [m["名"] for m in top["模块"]]
     code_mods = _code_modules(ctx.project, mods)
     if not code_mods:
-        return {"count": 0, "items": [], "summary": "还没有代码，跳过"}
+        return {"count": 0, "items": [], "failed": [], "failed_text": "", "notes": [], "notes_text": "", "summary": "还没有代码，跳过"}
     reasons, notes = smoke_detail(ctx.project, code_mods)
     merged = _merge_items((why, m) for m, lst in reasons.items() for why in lst)
     items = [{"issue": why, "modules": ",".join(ms), "basis": "接口冒烟"} for why, ms in merged.items()]
@@ -475,7 +424,9 @@ def audit_smoke(ctx, top):
     f.write_text(json.dumps({"模块": {m: {"通过": m not in reasons, "原因": reasons.get(m, [])} for m in code_mods},
                              "备注": notes}, ensure_ascii=False, indent=2), encoding="utf-8")
     t = ctx.out / f"smoke_{n}.txt"
-    t.write_text(f"接口冒烟（核查）：{len(code_mods)} 个有代码的模块，{len(reasons)} 个不过；{len(items)} 条问题；备注 {len(notes)} 条\n"
+    t.write_text(f"接口冒烟：{len(code_mods)} 个有代码的模块，{len(reasons)} 个不过；{len(items)} 条问题；备注 {len(notes)} 条\n"
                  + "\n".join([i["issue"] for i in items] + notes) + "\n", encoding="utf-8")
     summary = f"{len(code_mods)} 个有代码的模块，{len(reasons)} 个不过，{len(items)} 条问题" if items else f"{len(code_mods)} 个有代码的模块冒烟全部通过"
-    return {"count": len(items), "items": items, "summary": summary, "files": [str(f), str(t)]}
+    failed = [{"module": m, "reason": "；".join(reasons[m])} for m in code_mods if m in reasons]
+    return {"count": len(items), "items": items, "failed": failed, "failed_text": _failed_text(failed), "notes": notes,
+            "notes_text": "\n".join(notes)[:1500], "summary": summary, "files": [str(f), str(t)]}

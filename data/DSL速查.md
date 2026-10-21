@@ -278,8 +278,9 @@ SQLite 有列亲和性，所以 `WHERE views > :下限` 能工作。但左边一
 
 ```
 设 a = 全局检查                   # {count, by_module, summary, items}
-设 b = 全量回归 方式=核查         # 有代码才跑；只报告，不重做、不改 state
-设 c = 接口冒烟 方式=核查         # 同上；完整结果存 out/smoke_<n>.json/.txt
+设 b = 全量回归                   # 有代码才跑；只检查，不重做、不改 state；多返回 failed:[{module,reason}]、failed_text
+设 c = 接口冒烟                   # 同上；完整结果存 out/smoke_<n>.json/.txt；多返回 failed、failed_text、notes、notes_text
+                                  # （旧参数 方式=核查 仍接受，等同默认；其他值报错）
 设 files = 列表加项 …             # plan/catalog.md、plan/top.zs、contracts/<模块>.md（有 top 才加）、需求全文
 设 p = 派任务 {desc} {files} {logic} found:是否,items:列表   # 规划层一个子任务（不读代码）
 设 s = 存问题清单 程序={a} 回归={b} 冒烟={c} 规划={p}

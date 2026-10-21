@@ -1,8 +1,9 @@
-"""全量回归：所有模块（含已完成、约定 hash 没变的）重新跑一次「加载检查 + 比对约定 + 跑用例」；
-不过的标未完成、记回归原因，按依赖分层交 做一个模块 重做（第一轮任务就带这个原因），最多 2 轮，仍不过 终止 失败。
-build.zs 末尾按依赖分层做完各模块组之后调。
-例如 全量回归
-方式=核查（核查.zs 用）：只对有代码的模块报告，不重做、不改 state；返回 {count, items:[{issue,modules,basis}], summary}，没有代码时 count=0、summary 写「还没有代码，跳过」。
+"""全量回归：对有代码的模块重新跑一次「加载检查 + 比对约定 + 跑用例」（含已完成、约定 hash 没变的），只检查、只返回结果：
+不重做模块、不改 plan/state.json、不记验收。不过的模块怎么重做由调用方的 .zs 写（plan/build.zs 末尾就是：检查 → 按依赖分层重做 → 再检查，最多 2 轮）。
+返回 {count, items:[{issue,modules,basis}], failed:[{module,reason}], failed_text, summary}；failed 每个不过的模块一条（reason 是失败原文），
+failed_text 是「模块：原因」一行一个；没有代码时 count=0、summary 写「还没有代码，跳过」。
+方式：旧参数，只认 核查（等同默认），其他值报错。
+例如 设 r = 全量回归
 """
 import sys
 from pathlib import Path
@@ -14,16 +15,12 @@ PACK_DIR = Path(".")
 def 全量回归(方式: str = "") -> dict:
     sys.path.insert(0, str(Path(__file__).parent))
     import _v3ctx as X
-    from tools.dsl import current_engine
     from tools.dslagent.v3 import planning as PL, regress as RG
+    if 方式 not in ("", "核查"):
+        X.fail(f"全量回归：方式只认 核查（现在默认就是只检查），不认「{方式}」")
     c = X.ctx()
     try:
         top = PL.current_top(c)
-    except ValueError as e:
-        if 方式 == "核查":
-            return {"count": 0, "items": [], "summary": "还没有 plan/top.zs，跳过"}
-        X.fail(e)
-    if 方式 == "核查":
-        return RG.audit_regression(c, top)
-    r = RG.full_regression(c, current_engine(), top)
-    return {"status": r["状态"], **({"rounds": r["轮数"]} if "轮数" in r else {})}
+    except ValueError:
+        return {"count": 0, "items": [], "failed": [], "failed_text": "", "summary": "还没有 plan/top.zs，跳过"}
+    return RG.audit_regression(c, top)

@@ -162,13 +162,86 @@ def gen_skeleton(project, top, never_built=None):
     return {"新建": made, "已有": kept, "问题": probs}
 
 
+REDO_FILE = "plan/redo_module.zs"
+
+REDO_TEXT = """# 重做一个模块（由「生成分配」生成，程序生成不调模型）：build.zs 里 全量回归 / 接口冒烟 查出不过的模块用它重做。
+# 跟 做一个模块 的区别：不看「已完成」（state 里它可能还记着通过，但检查已经说它不过）；起始原因 = 检查查出的原因，第一轮就带上。
+# 当未完成最多 N 次：做模块（末次换模型）→ 验收（加载检查 + 比对约定 + 跑用例）→ 过了标记完成，没过带失败原因进下一次；N 次都没过 终止 失败
+# 参数：模块 最多=3 末次模型=opus 起始原因
+用包 dslproj v3
+设 n = 0
+设 done = 否
+设 fail_text = {起始原因}
+当 {done} 不等于 是 最多 {最多} 次
+  设 n = 计算 {n} + 1
+  设 use_model = sonnet
+  如果 {n} 等于 {最多}
+    设 use_model = {末次模型}
+  结束
+  设 r = 做模块 {模块} {fail_text} 模型={use_model}
+  设 a = 加载检查 {模块}
+  设 b = 比对约定 {模块}
+  设 t = 跑用例 {模块}
+  如果 {a.ok} 等于 是 且 {b.consistent} 等于 是 且 {t.all_passed} 等于 是
+    设 m = 标记完成 {模块}
+    设 done = 是
+  否则
+    设 fail_text = 做模块的结果：{r.status} {r.reason} ／ 验收：加载检查：{a.problems} ／ 比对约定：{b.diffs} ／ 跑用例：{t.failures}
+    设 m = 记验收 {模块} 否 {fail_text}
+  结束
+结束
+如果 {done} 不等于 是
+  终止 失败 模块 {模块} 重做了 {最多} 次仍未通过：{fail_text}
+结束
+返回 {"status":"通过","rounds":{n}}
+"""
+
+# 检查 → 有不过的模块 → 按依赖分层重做（同一层并行，第一轮就带检查查出的原因）→ 再检查；第 2 次检查仍不过 终止 失败
+CHECK_BLOCK = """设 rs = {verb}
+如果 {rs.count} 大于 0
+  遍历 f 于 {rs.failed}
+    设 m = 记验收 {f.module} 否 {verb}：{f.reason}
+  结束
+  遍历 组 于 {layers}
+    设 mods = 按正则切分 {组} [,，、\\s]+
+    设 jobs = 解析JSON []
+    遍历 m 于 {mods}
+      遍历 f 于 {rs.failed}
+        如果 {f.module} 等于 {m}
+          设 job.脚本 = plan/redo_module
+          设 job.参数.模块 = {m}
+          设 job.参数.最多 = 3
+          设 job.参数.末次模型 = opus
+          设 job.参数.起始原因 = {verb}发现问题：{f.reason}
+          设 jobs = 列表加项 {jobs} {job}
+        结束
+      结束
+    结束
+    设 res = 并行执行 {jobs} 并发=3
+    设 s = 汇总失败 {res}
+    如果 {s.count} 大于 0
+      终止 {s.status} {verb}重做未通过：{s.reason}
+    结束
+  结束
+  设 rs = {verb}
+  如果 {rs.count} 大于 0
+    终止 失败 {verb}两轮仍未通过：{rs.failed_text}
+  结束
+结束
+"""
+
+
 def build_text(top):
     lines = ["# 由「生成分配」按 plan/top.zs 的依赖分层生成（程序生成，不调模型）：一层一行，同一层的模块并行做；上一层全部通过才做下一层",
-             "用包 v3"]
+             "# 各模块组做完后：全量回归 → 接口冒烟，都是只检查的动词；不过的模块在这里按依赖分层重做（plan/redo_module.zs），最多 2 轮，仍不过 终止 失败",
+             "用包 common v3 text"]
     lines += ["做模块组 " + ",".join(layer) for layer in VT.layers(top)]
-    # 各模块组都做完之后：全量回归（所有模块重新验收一遍）→ 接口冒烟（真起 Router 核对直接调用和走 HTTP 一致）
-    lines.append("全量回归")
-    lines.append("接口冒烟")
+    lines.append("设 layers = 依赖分层")
+    lines.append(CHECK_BLOCK.replace("{verb}", "全量回归").rstrip("\n"))
+    lines.append(CHECK_BLOCK.replace("{verb}", "接口冒烟").rstrip("\n"))
+    lines.append("如果 {rs.notes_text} 不为空")
+    lines.append("  设 m = 记验收 _接口冒烟 是 备注：{rs.notes_text}")
+    lines.append("结束")
     lines.append("终止 成功 全部模块完成")
     return "\n".join(lines) + "\n"
 
@@ -177,4 +250,5 @@ def gen_build(project, top):
     f = Path(project) / "plan" / "build.zs"
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(build_text(top), encoding="utf-8", newline="\n")
+    (Path(project) / REDO_FILE).write_text(REDO_TEXT, encoding="utf-8", newline="\n")
     return "plan/build.zs"

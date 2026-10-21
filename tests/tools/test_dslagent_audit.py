@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""核查.zs——程序检查是动词（全局检查 items / 全量回归·接口冒烟 方式=核查 / 存问题清单 多份结果），需要判断的地方派子任务（派任务）。
+"""核查.zs——程序检查是动词（全局检查 items / 全量回归·接口冒烟 / 存问题清单 多份结果），需要判断的地方派子任务（派任务）。
 另有 R 的小修复：检查修改计划 按传入的问题清单检查、next_no/latest_path 容忍非数字文件名、--issues 路径限项目目录内。不调真模型。
 
     cd /workspace/agent_mcp && .venv/bin/python tests/tools/test_dslagent_audit.py
@@ -65,7 +65,7 @@ def broken_graph(p):
 
 
 def test_regression_report():
-    print("全量回归 方式=核查：只报告，不重做、不改 state；失败项带原文；没有代码跳过")
+    print("全量回归：只报告，不重做、不改 state；失败项带原文；没有代码跳过")
     p = T.full_project()
     (p / "plan").mkdir(exist_ok=True)
     (p / "plan" / "top.zs").write_text(T.TOP3, encoding="utf-8")
@@ -73,12 +73,12 @@ def test_regression_report():
     e, ctx = verb_engine(p, out)
     for m in ("graph", "vocab", "progress"):
         ctx.mark_done(m)
-    r = run(e, "设 r = 全量回归 方式=核查\n返回 {r}\n")
+    r = run(e, "设 r = 全量回归\n返回 {r}\n")
     check(r["count"] == 0 and r["items"] == [], "参考实现全部通过：0 条", r)
     broken_graph(p)
     state_before = (p / "plan" / "state.json").read_bytes() if (p / "plan" / "state.json").is_file() else None
     ctx.module_cmd = [sys.executable, "-c", "raise SystemExit('不该被调用')"]      # 要是被当成「重做」调起来就炸
-    r2 = run(e, "设 r = 全量回归 方式=核查\n返回 {r}\n")
+    r2 = run(e, "设 r = 全量回归\n返回 {r}\n")
     check(r2["count"] == 1 and r2["items"][0]["modules"] == "graph" and r2["items"][0]["basis"] == "全量回归",
           "graph 一条：basis=全量回归", r2)
     check("跑用例" in r2["items"][0]["issue"] and "graph" in r2["items"][0]["issue"], "issue 带模块名、哪项检查和失败原文", r2["items"][0]["issue"])
@@ -91,22 +91,22 @@ def test_regression_report():
     (q / "plan" / "top.zs").write_text(T.TOP3, encoding="utf-8")
     shutil.copytree(T.SOL / "contracts", q / "contracts")
     e2, _ = verb_engine(q, fresh("o"))
-    r3 = run(e2, "设 r = 全量回归 方式=核查\n返回 {r}\n")
+    r3 = run(e2, "设 r = 全量回归\n返回 {r}\n")
     check(r3["count"] == 0 and "还没有代码，跳过" in r3["summary"], "没有任何模块有代码文件：count=0、summary 写「还没有代码，跳过」", r3)
 
 
 def test_smoke_report():
-    print("接口冒烟 方式=核查：只报告；每个不过的接口一条；完整结果存 out/smoke_<n>；没有代码跳过")
+    print("接口冒烟：只报告；每个不过的接口一条；完整结果存 out/smoke_<n>；没有代码跳过")
     p = T.full_project()
     (p / "plan").mkdir(exist_ok=True)
     (p / "plan" / "top.zs").write_text(T.TOP3, encoding="utf-8")
     out = fresh("o")
     e, ctx = verb_engine(p, out)
-    r = run(e, "设 r = 接口冒烟 方式=核查\n返回 {r}\n")
+    r = run(e, "设 r = 接口冒烟\n返回 {r}\n")
     check(r["count"] == 0 and len(r["files"]) == 2 and Path(r["files"][0]).name == "smoke_1.json", "参考实现冒烟全过：0 条，结果存 smoke_1.json / .txt", r)
     (p / "routes" / "progress.zs").unlink()                          # HTTP 一侧 404、直接调用 200
     ctx.module_cmd = [sys.executable, "-c", "raise SystemExit('不该被调用')"]
-    r2 = run(e, "设 r = 接口冒烟 方式=核查\n返回 {r}\n")
+    r2 = run(e, "设 r = 接口冒烟\n返回 {r}\n")
     check(r2["count"] >= 1 and all(i["basis"] == "接口冒烟" for i in r2["items"]), "删掉路由后冒烟报出问题：basis=接口冒烟", r2)
     check(any("progress" in i["modules"] and ("状态码不一致" in i["issue"] or "404" in i["issue"]) for i in r2["items"]), "issue 带方法路径和直接调用与 HTTP 的差异原文", r2["items"])
     check(Path(r2["files"][0]).name == "smoke_2.json" and Path(r2["files"][0]).is_file() and Path(r2["files"][1]).is_file(), "第二次接着编号 smoke_2", r2["files"])
@@ -116,7 +116,7 @@ def test_smoke_report():
     (q / "plan" / "top.zs").write_text(T.TOP3, encoding="utf-8")
     shutil.copytree(T.SOL / "contracts", q / "contracts")
     e2, _ = verb_engine(q, fresh("o"))
-    r3 = run(e2, "设 r = 接口冒烟 方式=核查\n返回 {r}\n")
+    r3 = run(e2, "设 r = 接口冒烟\n返回 {r}\n")
     check(r3["count"] == 0 and "还没有代码，跳过" in r3["summary"] and "files" not in r3, "没有代码：跳过", r3)
 
 

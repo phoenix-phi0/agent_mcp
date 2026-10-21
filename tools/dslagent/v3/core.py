@@ -102,15 +102,6 @@ class Ctx:
             self.state_path().parent.mkdir(parents=True, exist_ok=True)
             self.state_path().write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    def unmark_done(self, module):
-        """去掉模块在 plan/state.json 里的「通过」记录（全量回归 / 接口冒烟发现问题后，逼它按未完成重做）。"""
-        with self.lock:
-            st = self.load_state()
-            if module in st.get("模块", {}):
-                del st["模块"][module]
-                self.state_path().parent.mkdir(parents=True, exist_ok=True)
-                self.state_path().write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
-
 
 class V3Engine(DSLEngine):
     """跑 v3.zs / build.zs 的引擎：DSLEngine + 一个 Ctx（子引擎沿用）。"""
