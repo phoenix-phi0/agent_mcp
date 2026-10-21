@@ -3,11 +3,11 @@
 # 两边并成一份问题清单存盘。有「任务」时清单里会列出完成任务要改的地方。按各输入 hash 缓存，hash 没变不重调模型。
 # 没有 plan/top.zs 时也能跑（程序检查部分是空，不单独调 全局检查 动词——它要求 top.zs 已经通过检查，核查却要能在
 # 顶层规划之前就用来找全局问题）。
-# 顶层脚本参数用中文（语法层，跟动词参数名一样，tests/dsl/test_naming.py 对声明过的顶层参数名放行）。
-# 逻辑核查=是 时额外对全部已有约定的模块并行跑角色 logic_check（tools/dslagent/roles.zs），疑点标
+# 顶层脚本的入参名用英文（动词的入参名仍是中文；取值 是/否 等仍是中文）。model 是引擎关键字别名，不能当变量名，所以叫 llm。
+# logic_check=是 时额外对全部已有约定的模块并行跑角色 logic_check（tools/dslagent/roles.zs），疑点标
 # 「logic_check(疑点)」并入问题清单；缺省否，跟原来行为一致。
-# 参数：需求 任务? 模型=sonnet 逻辑核查=否
+# 参数：req task? llm=sonnet logic_check=否
 用包 v3
-设 g = 核查 需求={需求} 任务={任务} 模型={模型} 逻辑核查={逻辑核查}
+设 g = 核查 需求={req} 任务={task} 模型={llm} 逻辑核查={logic_check}
 设 path = 存问题清单 g={g}
 返回 {"count": {g.count}, "path": "{path}"}

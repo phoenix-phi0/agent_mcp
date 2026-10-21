@@ -1226,7 +1226,7 @@ def test_audit_entry():
     (p / "contracts" / "b.md").write_text(DUP_B, encoding="utf-8")
     out = fresh("audit_out")
     fk = Fake(scripts={"v3_audit": ['[{"问题": "需求第 3 节要求的导出功能两个模块都没做", "涉及模块": ["a", "b"], "依据": "需求第 3 节"}]']})
-    res = core.run_entry("核查", p, out, "需求全文", extra_vars={"任务": "", "模型": "sonnet"}, backend=fk)
+    res = core.run_entry("核查", p, out, "需求全文", extra_vars={"task": "", "llm": "sonnet"}, backend=fk)
     check(res["status"] == "成功", "核查.zs 跑成功", res)
     ret = res.get("returned") or {}
     check(ret.get("count") == 3, "问题清单：程序检查（a/b 路径重复）2 条 + 模型 1 条", ret)
@@ -1240,14 +1240,14 @@ def test_audit_entry():
     (p1b / "plan").mkdir(parents=True)
     (p1b / "plan" / "top.zs").write_text("项目 demo\n模块 a\n", encoding="utf-8")
     fk1b = Fake(scripts={"v3_audit": ['[{"issue": "新键回复也要能用", "modules": "a", "basis": "需求第 1 节"}]']})
-    res1b = core.run_entry("核查", p1b, out1b, "需求全文", extra_vars={"任务": "", "模型": "sonnet"}, backend=fk1b)
+    res1b = core.run_entry("核查", p1b, out1b, "需求全文", extra_vars={"task": "", "llm": "sonnet"}, backend=fk1b)
     ret1b = res1b.get("returned") or {}
     check(ret1b.get("count") == 1, "模型回新键 issue/modules/basis 一样能被核查.zs 消费", ret1b)
     check("新键回复也要能用" in (Path(p1b) / ret1b["path"]).read_text(encoding="utf-8"), "新键问题进了清单", ret1b)
     # 没有 plan/top.zs 时也能跑（纯模型找问题，程序检查部分是空）
     p2, out2 = fresh("audit_p2"), fresh("audit_out2")
     fk2 = Fake(scripts={"v3_audit": ["[]"]})
-    res2 = core.run_entry("核查", p2, out2, "需求全文", extra_vars={"任务": "", "模型": "sonnet"}, backend=fk2)
+    res2 = core.run_entry("核查", p2, out2, "需求全文", extra_vars={"task": "", "llm": "sonnet"}, backend=fk2)
     check(res2["status"] == "成功" and (res2.get("returned") or {}).get("count") == 0, "还没有 plan/top.zs 时核查照样能跑，程序检查部分是空", res2)
 
 
@@ -1275,7 +1275,7 @@ def test_modify_entry():
         "v3_contract_progress": [contract_text("progress")],
     })
     res = core.run_entry("修改", p, out, req_file.read_text(encoding="utf-8"),
-                          extra_vars={"问题": "最新", "任务": "", "模型": "sonnet", "次数": "3"},
+                          extra_vars={"issues": "latest", "task": "", "llm": "sonnet", "retries": "3"},
                           backend=fk, req_path=req_file, module_cmd=CMD)
     check(res["status"] == "成功", "修改.zs 跑成功（第一次写的计划格式不对，重写一次才过）", res)
     check(fk.n("v3_change_plan") == 2, "写修改计划调了两次（不过带问题重写）", [c["tag"] for c in fk.calls])
@@ -1297,7 +1297,7 @@ def test_modify_retries_exhausted():
     (p / "plan" / "issues" / "1.md").write_text("# 问题清单 1\n\n1. 随便一个问题\n", encoding="utf-8")
     fk = Fake(scripts={"v3_change_plan": ["这不是合法的计划格式\n"]})
     res = core.run_entry("修改", p, out, "需求全文",
-                          extra_vars={"问题": "最新", "任务": "", "模型": "sonnet", "次数": "2"}, backend=fk)
+                          extra_vars={"issues": "latest", "task": "", "llm": "sonnet", "retries": "2"}, backend=fk)
     check(res["status"] == "失败" and "没通过检查" in res["reason"], "两次都没通过检查：终止失败", res)
     check(fk.n("v3_change_plan") == 2, "正好调了 次数 次模型，不多不少", [c["tag"] for c in fk.calls])
 

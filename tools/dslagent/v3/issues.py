@@ -44,9 +44,9 @@ def latest_path(project):
 
 
 def resolve(project, ref):
-    """「问题」入参（路径 或 "最新"）→ Path；找不到抛 ValueError。"""
+    """「问题」入参（路径 或 "最新"/"latest"）→ Path；找不到抛 ValueError。"""
     ref = (ref or "").strip()
-    if not ref or ref == "最新":
+    if not ref or ref in ("最新", "latest"):
         p = latest_path(project)
         if p is None:
             raise ValueError("plan/issues/ 下还没有问题清单")
