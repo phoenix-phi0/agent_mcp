@@ -6,7 +6,7 @@
 如果 {old} 不为空
   设 c = 检查规划 {种类} {old} {模块}
   如果 {c.ok} 等于 是 且 {强制问题} 为空
-    返回 {"状态":"跳过","次数":0}
+    返回 {"status":"跳过","attempts":0}
   结束
 结束
 设 n = 0
@@ -14,8 +14,8 @@
 设 problems =
 设 brief =
 如果 {old} 不为空
-  设 problems = {c.问题}
-  设 brief = {c.摘要}
+  设 problems = {c.problems}
+  设 brief = {c.summary}
 结束
 如果 {强制问题} 不为空
   设 problems = {强制问题}
@@ -32,11 +32,11 @@
     设 w = 存规划 {种类} {text} {模块}
     设 passed = 是
   否则
-    设 problems = {c.问题}
-    设 brief = {c.摘要}
+    设 problems = {c.problems}
+    设 brief = {c.summary}
   结束
 结束
 如果 {passed} 不等于 是
   终止 失败 {种类}规划 {模块} 写了 {n} 次都没通过检查：{brief}
 结束
-返回 {"状态":"通过","次数":{n}}
+返回 {"status":"通过","attempts":{n}}

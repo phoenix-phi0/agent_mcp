@@ -1,6 +1,6 @@
 """复核约定：约定通过程序检查后，调一次模型对照本轮需求复核（默认 sonnet）。
 入参只给本轮需求全文 + 该模块约定；模型逐条找约定与需求不一致的地方（需求要的行为被删改或替换、编造了需求没有的功能、超出本轮范围、
-本轮范围内该有却没有的函数 / 接口）。返回 {ok: 是|否, 问题: 文本（一行一条，带序号）, 摘要: 前 3 条一行, 条数, 状态: 已复核|未复核}。
+本轮范围内该有却没有的函数 / 接口）。返回 {ok: 是|否, problems: 文本（一行一条，带序号）, summary: 前 3 条一行, count, status: 已复核|未复核}。
 例如 设 v = 复核约定 graph {文本} 需求={req}
 """
 import sys
@@ -19,5 +19,5 @@ def 复核约定(模块: str, 文本: str, 需求: str = "", 模型: str = "sonn
         r = PL.review(c, 模块, 文本, 需求, 模型 or "sonnet")
     except ValueError as e:
         X.fail(e)
-    return {"ok": "是" if r["通过"] else "否", "问题": X.numbered(r["问题"]), "摘要": "；".join(r["问题"][:3]),
-            "条数": len(r["问题"]), "状态": r["状态"]}
+    return {"ok": "是" if r["通过"] else "否", "problems": X.numbered(r["问题"]), "summary": "；".join(r["问题"][:3]),
+            "count": len(r["问题"]), "status": r["状态"]}

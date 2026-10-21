@@ -46,15 +46,15 @@
 如果 {ok} 不等于 是
   终止 失败 功能清单两次都没过：{err}
 结束
-预算 调用 {cl.调用上限} 秒 3600
-打印 功能清单：{cl.数量} 个功能，模板 {cl.模板}，角色 {cl.角色}
+预算 调用 {cl.call_limit} 秒 3600
+打印 功能清单：{cl.count} 个功能，模板 {cl.template}，角色 {cl.roles}
 
 # 二、实体：同旧模板，输入多一份功能清单
 设 err = 无
 设 ok = 否
 当 {ok} 不等于 是 最多 2 次
-  问JSON ent = {pEnt.text} 需求：{task} 功能清单：{cl.功能} 角色：{cl.角色} 上次的报错：{err} 格式 模板:default|full|private 实体文本:文本
-  设 v = 校验实体 {ent.实体文本} {ent.模板} {task} {cl.角色模板}
+  问JSON ent = {pEnt.text} 需求：{task} 功能清单：{cl.features} 角色：{cl.roles} 上次的报错：{err} 格式 模板:default|full|private 实体文本:文本
+  设 v = 校验实体 {ent.实体文本} {ent.模板} {task} {cl.role_template}
   如果 {v.ok} 等于 是
     设 ok = 是
   否则
@@ -74,7 +74,7 @@
 # 三、生成增删改查 → 检查项目
 设 gp.项目目录 = .
 设 gp.模板 = {ent.模板}
-设 gp.角色 = {cl.角色}
+设 gp.角色 = {cl.roles}
 设 g = 生成增删改查 {gp}
 如果 {g.ok} 不等于 是
   终止 失败 生成增删改查不过：{g.msg}
@@ -88,7 +88,7 @@
 设 fails =
 设 partial =
 设 sp.含参数 = 是
-遍历 f 于 {cl.功能} 序号 i
+遍历 f 于 {cl.features} 序号 i
   设 fn = {f.名}
   设 bkF = 留底
 
@@ -148,7 +148,7 @@
       当 {ok} 不等于 是 最多 2 次
         设 k = 计算 {k} + 1
         设 sum = 项目摘要 {sp}
-        问 zsTxt = {pZs.text} 需求：{task} 实体：{ent.实体文本} 本功能：{f} 本功能规则：{f.规则} 项目角色：{cl.角色} 本功能sql：{sqlTxt} 全项目名字摘要：{sum.text} 上次的报错：{err}
+        问 zsTxt = {pZs.text} 需求：{task} 实体：{ent.实体文本} 本功能：{f} 本功能规则：{f.规则} 项目角色：{cl.roles} 本功能sql：{sqlTxt} 全项目名字摘要：{sum.text} 上次的报错：{err}
         设 zsf = 拆分隔块 {zsTxt} routes/{fn}.zs|routes/{fn}_*.zs 是
         如果 {zsf.ok} 不等于 是
           设 err = {zsf.msg}
@@ -202,11 +202,11 @@
             如果 {rr} 小于 2
               设 zsq1 = {zsq}
               设 zsf1 = {zsf}
-              设 unimpl1 = {cr.未实现列表}
-              设 rerr = 以下业务规则没有实现，请补全（其余规则别丢）：{cr.未实现}
+              设 unimpl1 = {cr.unimplemented_list}
+              设 rerr = 以下业务规则没有实现，请补全（其余规则别丢）：{cr.unimplemented}
               设 u = 撤回 {bk.id}
             否则
-              设 unimpl = {cr.未实现列表}
+              设 unimpl = {cr.unimplemented_list}
               设 zsDone = 是
             结束
           结束
@@ -283,4 +283,4 @@
   终止 失败 部分成功：规则没全部实现的功能：{partial}
 结束
 打印 结论：修好 项目已生成
-终止 成功 完成：{cl.数量} 个功能全部生成
+终止 成功 完成：{cl.count} 个功能全部生成

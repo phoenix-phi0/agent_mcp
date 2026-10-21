@@ -36,4 +36,4 @@ def 新增模块(名: str, 依赖: str = "", 说明: str = "") -> dict:
     c.top_path().write_text(new_text, encoding="utf-8", newline="\n")
     c.pending_contracts[name] = ""
     c.log("修改计划", 事件="新增模块", 模块=name, 依赖=deps)
-    return {"名": name}
+    return {"name": name}

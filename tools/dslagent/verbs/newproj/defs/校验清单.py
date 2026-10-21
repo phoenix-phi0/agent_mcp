@@ -1,5 +1,5 @@
 """校验「功能清单」（split 模板第一步模型的输出）。参数：清单文本（可带围栏）或已解析的对象；返回
-{ok, errors, 模板, 功能, 数量, 调用上限}。errors 用「；」连接，可直接嵌进重写提示词。
+{ok, errors, template, features, count, call_limit, roles, role_template}。errors 用「；」连接，可直接嵌进重写提示词。
 规则：功能名唯一且为英文 snake；sql 名以「<功能名>_」为前缀（或就等于功能名）且全局唯一；接口路径以 / 开头、全局唯一；
 动作名全局唯一（英文 snake）；模板只能 default / full / private；功能数 ≤ NEWPROJ_SPLIT_MAX_FEATURES（默认 12）。
 每个功能的「规则」（需求里必须实现的业务规则）要是文本列表（缺省补 []，可为空）。
@@ -70,10 +70,10 @@ def 校验清单(清单: str = "", 需求: str = "") -> dict:
     if G.is_dry():       # 空跑：给一个占位功能，让循环体整个走一遍
         feats = [{"名": "demo", "说明": "占位", "实体": [], "sql": [{"名": "demo_list", "参数": [], "说明": ""}],
                   "接口": [{"路径": "/demo/list2", "动作": "demo_list2", "说明": ""}], "界面": ["demo页"], "规则": []}]
-        return {"ok": "是", "errors": "", "模板": "full", "功能": feats, "数量": 1, "调用上限": calls_cap(1), "角色": []}
+        return {"ok": "是", "errors": "", "template": "full", "features": feats, "count": 1, "call_limit": calls_cap(1), "roles": []}
     obj, err = _parse(清单)
     if err:
-        return {"ok": "否", "errors": err, "模板": "", "功能": [], "数量": 0, "调用上限": calls_cap(0), "角色": []}
+        return {"ok": "否", "errors": err, "template": "", "features": [], "count": 0, "call_limit": calls_cap(0), "roles": []}
     errs = []
     tpl = str(obj.get("模板") or "").strip()
     if tpl not in TEMPLATES:
@@ -82,7 +82,7 @@ def 校验清单(清单: str = "", 需求: str = "") -> dict:
     if feats is None:
         feats = []
     if not isinstance(feats, list) or not all(isinstance(f, dict) for f in feats):
-        return {"ok": "否", "errors": "「功能」要是对象列表", "模板": tpl, "功能": [], "数量": 0, "调用上限": calls_cap(0), "角色": []}
+        return {"ok": "否", "errors": "「功能」要是对象列表", "template": tpl, "features": [], "count": 0, "call_limit": calls_cap(0), "roles": []}
     roles = _strs(obj.get("角色"), "顶层「角色」", errs)
     for r in roles:
         if not SNAKE.match(r):
@@ -144,6 +144,6 @@ def 校验清单(清单: str = "", 需求: str = "") -> dict:
                 errs.append(f"动作名「{an}」重复")
             else:
                 acts.add(an)
-    return {"ok": "否" if errs else "是", "errors": "；".join(errs), "模板": tpl, "功能": feats if not errs else [],
-            "数量": len(feats), "调用上限": calls_cap(len(feats)), "角色": roles if not errs else [],
-            "角色模板": "private" if roles and not errs else ""}
+    return {"ok": "否" if errs else "是", "errors": "；".join(errs), "template": tpl, "features": feats if not errs else [],
+            "count": len(feats), "call_limit": calls_cap(len(feats)), "roles": roles if not errs else [],
+            "role_template": "private" if roles and not errs else ""}

@@ -9,15 +9,15 @@
 设 c = 加载检查 {m}
 设 d = 比对约定 {m}
 设 t = 跑用例 {m}
-如果 {c.ok} 等于 是 且 {d.一致} 等于 是 且 {t.全过} 等于 是
+如果 {c.ok} 等于 是 且 {d.consistent} 等于 是 且 {t.all_passed} 等于 是
   终止 成功 {m} 的加载检查、比对约定、跑用例都通过
 结束
 # 有问题：三份报告 + 现有文件交给子任务补改一轮
 设 files = 读片段 services/graph.zs,entities/graph.entity
 设 inp.files = {files}
-设 inp.加载检查 = {c.问题}
-设 inp.比对约定 = {d.差异}
-设 inp.跑用例 = {t.失败}
+设 inp.加载检查 = {c.problems}
+设 inp.比对约定 = {d.diffs}
+设 inp.跑用例 = {t.failures}
 设 logic = 要求：只改 services/graph.zs、entities/graph.entity、queries/graph_*.sql、routes/graph*.zs 里有问题的地方，函数头不改；edits 每项字段名固定为 file、old、new，old 从入参原文一字不差抄、不带行号前缀；新文件 old 写空串
 设 r = 派任务 补改 {inp} {logic} edits:列表,note:文本
 如果 {r.status} 不等于 成功
@@ -30,10 +30,10 @@
 设 c2 = 加载检查 {m}
 设 d2 = 比对约定 {m}
 设 t2 = 跑用例 {m}
-如果 {c2.ok} 等于 是 且 {d2.一致} 等于 是 且 {t2.全过} 等于 是
+如果 {c2.ok} 等于 是 且 {d2.consistent} 等于 是 且 {t2.all_passed} 等于 是
   终止 成功 补改一轮后通过
 结束
-终止 失败 补改后仍不过：加载检查 {c2.问题}；比对约定 {d2.差异}；跑用例 {t2.失败}
+终止 失败 补改后仍不过：加载检查 {c2.problems}；比对约定 {d2.diffs}；跑用例 {t2.failures}
 
 #改法 e1
 @@ 改 services/graph.zs

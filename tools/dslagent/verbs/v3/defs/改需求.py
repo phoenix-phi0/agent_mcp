@@ -60,4 +60,4 @@ def 改需求(节号: str, 内容: str) -> dict:
     new_text += f"\n- {date} 计划 {plan_no}：改第 {sec} 节 — {summary}\n"
     rp.write_text(new_text, encoding="utf-8", newline="\n")
     c.log("修改计划", 事件="改需求", 节=sec, 路径=str(rp))
-    return {"节": sec}
+    return {"section": sec}

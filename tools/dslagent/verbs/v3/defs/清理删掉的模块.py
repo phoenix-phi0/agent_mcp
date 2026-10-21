@@ -3,7 +3,7 @@ contracts/entities/services/routes/queries/tests 文件（routes/queries/tests �
 归属时把 top.zs 里还在的模块也算进去，不会误删还活着的模块的文件）与 state.json 里的记录。
 别的模块的约定要是还依赖着被删的模块，约定检查（contracts.check 的「还没有约定文件」）会报错，不在这里管。
 顶层存盘后、约定阶段开头调（规划到通过.zs）。
-返回 {"删了": [模块名…]}。
+返回 {"removed": [模块名…]}。
 例如 清理删掉的模块
 """
 import json
@@ -26,10 +26,10 @@ def 清理删掉的模块() -> dict:
     c = X.ctx()
     project = c.project
     if not c.top_path().is_file():
-        return {"删了": []}          # 没有 plan/top.zs（不该发生：顶层阶段先于这里跑）不动，不拿空模块表当「全删」
+        return {"removed": []}          # 没有 plan/top.zs（不该发生：顶层阶段先于这里跑）不动，不拿空模块表当「全删」
     top, probs = VT.parse(c.top_path().read_text(encoding="utf-8"))
     if probs:
-        return {"删了": []}          # top.zs 还没通过检查，不动（规划到通过 的 顶层 阶段会先拦）
+        return {"removed": []}          # top.zs 还没通过检查，不动（规划到通过 的 顶层 阶段会先拦）
     live = {m["名"] for m in top["模块"]}
     cdir = project / "contracts"
     contract_mods = {f.stem for f in cdir.glob("*.md")} if cdir.is_dir() else set()
@@ -37,7 +37,7 @@ def 清理删掉的模块() -> dict:
     state_mods = set(state.get("模块", {}).keys())
     candidates = sorted((contract_mods | state_mods) - live)
     if not candidates:
-        return {"删了": []}
+        return {"removed": []}
     all_names = live | contract_mods | state_mods
     removed, deleted = [], []
     for name in candidates:
@@ -73,4 +73,4 @@ def 清理删掉的模块() -> dict:
         c.state_path().write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
         c.log("规划", 种类="约定", 事件="清理删掉的模块", 删了=removed)
         CAT.refresh(project)
-    return {"删了": deleted}
+    return {"removed": deleted}

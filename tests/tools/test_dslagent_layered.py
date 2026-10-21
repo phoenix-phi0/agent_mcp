@@ -742,7 +742,7 @@ def t_params():
     fix1 = zs.replace("  设 pass_line = 80\n  设 fall_line = 60\n", "  设 request.pass_line = 80\n  设 request.fall_line = 60\n")
     (d / "routes/practice.zs").write_text(fix1, encoding="utf-8")
     r = f("routes/practice.zs", {"/practice/answer": ["answer"]})
-    check(r["ok"] == "是" and r["检查数"] == 2, "改成 设 request.pass_line = 80 → 通过", r)
+    check(r["ok"] == "是" and r["checked"] == 2, "改成 设 request.pass_line = 80 → 通过", r)
     fix2 = zs.replace("  设 pass_line = 80\n  设 fall_line = 60\n", "  设 p.pass_line = 80\n  设 p.fall_line = 60\n  设 p.answer = {answer}\n  设 p.current_user = {current_user}\n").replace(
         "a5 = 写库表 app.db practice_mastery_flag {request}", "a5 = 写库表 app.db practice_mastery_flag {p}")
     (d / "routes/practice.zs").write_text(fix2, encoding="utf-8")

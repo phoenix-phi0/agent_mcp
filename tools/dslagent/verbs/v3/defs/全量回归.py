@@ -20,4 +20,5 @@ def 全量回归() -> dict:
         top = PL.current_top(c)
     except ValueError as e:
         X.fail(e)
-    return RG.full_regression(c, current_engine(), top)
+    r = RG.full_regression(c, current_engine(), top)
+    return {"status": r["状态"], **({"rounds": r["轮数"]} if "轮数" in r else {})}

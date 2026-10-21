@@ -2,7 +2,7 @@
 登记的空串＝走 规划一份 的正常写约定全流程含复核；改约定 登记的条目＝走强制问题通道，带「上一版+条目」只跑程序
 检查不复核）并行写/重写约定，消费完清空登记表 → 同步顶层依赖（含刷新目录）。
 没有登记过任何模块（计划里只有 改需求/删除模块）也要跑，只做 同步顶层依赖。
-返回 {"写了": [模块名…]}
+返回 {"written": [模块名…]}
 例如 落实修改
 """
 import importlib.util
@@ -57,4 +57,4 @@ def 落实修改() -> dict:
             written.extend(names)
     sync = _load(Path(__file__).parent / "同步顶层依赖.py")
     sync.同步顶层依赖()
-    return {"写了": written}
+    return {"written": written}

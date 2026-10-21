@@ -477,7 +477,7 @@ def test_module_cleanup():
     e.v3 = ctx
     e.run("用包 v3\n设 r = 清理删掉的模块\n返回 {r}\n")
     r = e.returned[0] if e.returned else None
-    check(r == {"删了": ["vocab"]}, "top.zs 里没有 vocab 了 → 报告删了它", r)
+    check(r == {"removed": ["vocab"]}, "top.zs 里没有 vocab 了 → 报告删了它", r)
     check(not any((p / sub / f"vocab.{ext}").exists() for sub, ext in
                   (("contracts", "md"), ("entities", "entity"), ("services", "zs"), ("routes", "zs"))), "vocab 的 contracts/entities/services/routes 文件都删了")
     check("vocab" not in ctx.load_state().get("模块", {}), "state.json 里 vocab 的记录也删了")
@@ -487,7 +487,7 @@ def test_module_cleanup():
     e2 = engine(p)
     e2.v3 = ctx
     e2.run("用包 v3\n设 r = 清理删掉的模块\n返回 {r}\n")
-    check(e2.returned[0] == {"删了": []}, "没有可清理的模块 → 空操作")
+    check(e2.returned[0] == {"removed": []}, "没有可清理的模块 → 空操作")
     # 别的约定仍依赖被删的模块：约定检查报「还没有约定文件」
     probs = VC.upstream_of(p, "x", ["vocab"])[1]
     check(any("还没有约定文件" in x for x in probs), "删掉的模块被别的约定依赖 → 约定检查报错（contracts/vocab.md 已经没有了）", probs)
@@ -513,13 +513,13 @@ def test_sync_deps():
     eng.v3 = ctx
     eng.run("用包 v3\n设 r = 同步顶层依赖\n返回 {r}\n")
     r = eng.returned[0]
-    check(r["改了"] == ["progress"] and r["没变"] is False, "检测到 progress 的约定比 top.zs 多依赖一个 vocab", r)
+    check(r["changed"] == ["progress"] and r["unchanged"] is False, "检测到 progress 的约定比 top.zs 多依赖一个 vocab", r)
     new_top = (p / "plan" / "top.zs").read_text(encoding="utf-8")
     check("模块 progress 依赖 graph vocab" in new_top and "模块 graph        # 知识图谱" in new_top, "top.zs 的 progress 依赖同步成约定的样子，别的行（含注释）不动", new_top)
     eng2 = core.V3Engine(MockClient(handler=lambda prompt, s=None: "嗯", offline=True), workdir=p, verbose=False, verbs_root=CM.VERBS)
     eng2.v3 = ctx
     eng2.run("用包 v3\n设 r = 同步顶层依赖\n返回 {r}\n")
-    check(eng2.returned[0] == {"改了": [], "没变": True}, "再跑一次：已经同步过，没有变化", eng2.returned[0])
+    check(eng2.returned[0] == {"changed": [], "unchanged": True}, "再跑一次：已经同步过，没有变化", eng2.returned[0])
 
 
 # ------------------------------------------------------------------ 引擎：脚本动词里的终止、并行执行
@@ -1092,7 +1092,7 @@ def test_plan_verbs():
     e = engine(p)
     e.v3 = ctx
     e.run("用包 v3\n设 r = 改需求 2 词库支持按知识点练习\n返回 {r}\n")
-    check(e.halted is None and e.returned[0] == {"节": "2"}, "改需求返回改的节号", (e.halted, e.returned))
+    check(e.halted is None and e.returned[0] == {"section": "2"}, "改需求返回改的节号", (e.halted, e.returned))
     req_now = req_file.read_text(encoding="utf-8")
     check("## 1 概述\nxxx" in req_now and "## 3 进度\nzzz" in req_now, "别的节不受影响", req_now)
     check("## 2 词库\n词库支持按知识点练习" in req_now, "改需求真的改了节的正文（不是只追加变更记录）", req_now)
@@ -1107,7 +1107,7 @@ def test_plan_verbs():
     e2 = engine(p)
     e2.v3 = ctx
     e2.run("用包 v3\n设 r = 新增模块 tutor 依赖=graph 说明=按知识点练习\n返回 {r}\n")
-    check(e2.halted is None and e2.returned[0] == {"名": "tutor"}, "新增模块返回模块名", (e2.halted, e2.returned))
+    check(e2.halted is None and e2.returned[0] == {"name": "tutor"}, "新增模块返回模块名", (e2.halted, e2.returned))
     top_now = (p / "plan" / "top.zs").read_text(encoding="utf-8")
     check("模块 tutor 依赖 graph" in top_now and "# 按知识点练习" in top_now, "新增模块的行加进了 top.zs（带说明注释）", top_now)
     check(ctx.pending_contracts.get("tutor") == "", "新增模块登记了空目标（还没约定过，走全流程）", ctx.pending_contracts)
@@ -1115,14 +1115,14 @@ def test_plan_verbs():
     e3 = engine(p)
     e3.v3 = ctx
     e3.run("用包 v3\n设 r = 改约定 progress 加一个按知识点统计的接口\n返回 {r}\n")
-    check(e3.halted is None and e3.returned[0] == {"模块": "progress"}, "改约定返回模块名", (e3.halted, e3.returned))
+    check(e3.halted is None and e3.returned[0] == {"module": "progress"}, "改约定返回模块名", (e3.halted, e3.returned))
     check(ctx.pending_contracts.get("progress") == "- 加一个按知识点统计的接口", "改约定登记了条目（走强制问题通道）", ctx.pending_contracts)
     check("模块 progress" in top_now, "改约定没有碰 top.zs")
     # 删除模块：改 top.zs + 清理文件/state + 从 pending_contracts 里撤销登记
     e4 = engine(p)
     e4.v3 = ctx
     e4.run("用包 v3\n设 r = 删除模块 vocab\n返回 {r}\n")
-    check(e4.halted is None and e4.returned[0] == {"名": "vocab"}, "删除模块返回模块名", (e4.halted, e4.returned))
+    check(e4.halted is None and e4.returned[0] == {"name": "vocab"}, "删除模块返回模块名", (e4.halted, e4.returned))
     top_now = (p / "plan" / "top.zs").read_text(encoding="utf-8")
     check("模块 vocab" not in top_now and "模块 graph        # 知识图谱" in top_now,
           "删除模块的行从 top.zs 去掉了，别的行（含注释）不受影响", top_now)

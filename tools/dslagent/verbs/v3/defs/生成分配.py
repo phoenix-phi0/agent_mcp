@@ -1,4 +1,4 @@
-"""生成分配：从 plan/top.zs 按依赖分层生成 plan/build.zs（一层一行 做模块组 甲,乙；程序生成，不调模型）。返回 {路径, 内容}。
+"""生成分配：从 plan/top.zs 按依赖分层生成 plan/build.zs（一层一行 做模块组 甲,乙；程序生成，不调模型）。返回 {path, content}。
 例如 生成分配
 """
 import sys
@@ -19,4 +19,4 @@ def 生成分配() -> dict:
         X.fail(e)
     rel = SF.gen_build(c.project, top)
     c.log("分配", 路径=rel)
-    return {"路径": rel, "内容": SF.build_text(top)}
+    return {"path": rel, "content": SF.build_text(top)}

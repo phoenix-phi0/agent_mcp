@@ -305,6 +305,49 @@ C1 那条先补上这个检查器（哪怕先只对 `verbs/` 生效）才能扩�
 「v3 假模型整条流程跑通」268 项全过，当前 `tools/dslagent` 基线是绿的，
 后续任务可以放心在这个基线上继续改。
 
+**R3（tools/dslagent/verbs 的返回键，已做）**：只改**返回键**（字段名），
+「是/否」值不动（C1/C2 遇到的那批 29 个文件的布尔值问题留给专门任务，
+没有在 R3 里碰）。改了 `verbs/dslproj/defs/`（加载检查、比对约定、跑用例）、
+`verbs/newproj/defs/`（参数核对、校验实体、校验清单、核对规则；`校验分层清单`
+是文档标注的旧动词、layered.py 已不用、只剩一条「ok=否」的兼容测试，没改）、
+`verbs/v3/defs/` 下近 20 个 Python 动词与 4 个 .zs 动词（做一个模块、做模块组、
+规划一份、规划到通过）的返回键；`做模块`/`全量回归`/`接口冒烟` 三个直接转发
+`tools/dslagent/v3/modrun.py`/`regress.py` 结果的动词，在动词外壳这层加了
+翻译（没有改 `v3/*.py` 内部实现的键，那些不算「verbs 的返回键」）。同步改了
+全部消费点：`packs/dslproj/prompts/example.zs`、`packs/newproj/newproj_split.zs`、
+`tools/dslagent/layered.py`/`modbuild.py`（这两个文件按动词名直接查表调用
+`校验实体`/`核对规则`，之前没注意到，第一轮测试跑挂才发现）、以及
+`tests/tools/test_dslagent_{dslproj,newproj,v3,layered}.py` 里直接走引擎或
+直接 import 动词模块验证返回值的断言。本条新增的对照项（补进下面这张表、
+风格与已有一致）：
+
+| 旧（中文） | 新（英文） | 旧（中文） | 新（英文） |
+|---|---|---|---|
+| 一致/差异 | consistent/diffs | 全过/失败/总数 | all_passed/failures/total |
+| 按模块 | by_module | 检查数 | checked |
+| 实体数 | entity_count | 模板 | template |
+| 功能 | features | 调用上限 | call_limit |
+| 角色 | roles | 角色模板 | role_template |
+| 解析 | parsed | 未实现/未实现列表 | unimplemented/unimplemented_list |
+| 名（模块名返回） | name | 模块（改约定返回） | module |
+| 节 | section | 改了/没变 | changed/unchanged |
+| 删了 | removed | 写了 | written |
+| 新建/已有/新建数 | created/existing/created_count | 花费/调用/轮/记录目录/秒 | cost/calls/round/log_dir/secs |
+| 次数（规划一份的重试计数，区别于「轮数」=rounds） | attempts | | |
+
+没碰、按规则排除的：`功能`/`角色` 等顶层键下面**嵌套**的字段（如每个功能项
+的 `名`/`sql`/`接口`/`规则`/`界面`、接口项的 `角色`/`路径`/`动作`）——那是
+模型 JSON 回复本身的 schema（`newproj` 的 split 模板提示词定的），留给
+R4（提示词/模型回复键）；`tools/dslagent` 内部 `c.log(...)` 记的账本/日志
+字段（如 `全局检查.py`、`检查规划.py` 里 `c.log("规划", ..., 条数=.., 问题=..)`）
+不算「verbs 返回给脚本的结构」，原样留着，测试里读 `ctx.records` 的断言
+不用改。
+
+测试：`tests/dsl/*`、`tests/http/*`、`tests/gen/*` 全绿；
+`tests/tools/test_dslagent_*.py`（28 个）+ `test_obatch.py` + `test_cbatch.py`
+全绿（含 `test_dslagent_v3.py` 317 项、`test_dslagent_modbuild.py` 268 项、
+`test_dslagent_layered.py` 168 项）。
+
 ---
 
 ## 五、动词包

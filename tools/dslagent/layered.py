@@ -552,11 +552,11 @@ class Run:
                 if cr["ok"] == "是":
                     done = True
                 elif rr < 2:
-                    state["first"] = ([(f, (self.root / f).read_text(encoding="utf-8")) for f, _b in state["saved"]], cr["未实现列表"])
-                    rerr = f"以下业务规则没有实现，请补全（其余规则别丢）：{cr['未实现']}"
+                    state["first"] = ([(f, (self.root / f).read_text(encoding="utf-8")) for f, _b in state["saved"]], cr["unimplemented_list"])
+                    rerr = f"以下业务规则没有实现，请补全（其余规则别丢）：{cr['unimplemented']}"
                     self.undo(state["saved"])
                 else:
-                    state["unimpl"], done = cr["未实现列表"], True
+                    state["unimpl"], done = cr["unimplemented_list"], True
         except FileFail:
             if state["saved"]:
                 self.undo(state["saved"])

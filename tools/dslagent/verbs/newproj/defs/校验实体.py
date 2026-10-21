@@ -17,22 +17,22 @@ def 校验实体(文本: str = "", 模板: str = "", 需求: str = "", 清单模
     import _tplset
     import _gen as G
     if G.is_dry():
-        return {"ok": "是", "errors": "", "实体数": 1}
+        return {"ok": "是", "errors": "", "entity_count": 1}
     text = str(文本 or "")
     if not text.strip():
-        return {"ok": "否", "errors": "实体文本为空", "实体数": 0}
+        return {"ok": "否", "errors": "实体文本为空", "entity_count": 0}
     if str(模板 or "").strip() and str(模板).strip() not in _tplset.names():
-        return {"ok": "否", "errors": f"模板「{模板}」不对，只能是 {_tplset.menu()}", "实体数": 0}
+        return {"ok": "否", "errors": f"模板「{模板}」不对，只能是 {_tplset.menu()}", "entity_count": 0}
     try:
         from tools.entity import parse, validate
         ents = parse(text)
         errs = list(validate(ents))
     except Exception as e:  # noqa: BLE001  解析错误转成 errors
-        return {"ok": "否", "errors": str(e) or type(e).__name__, "实体数": 0}
+        return {"ok": "否", "errors": str(e) or type(e).__name__, "entity_count": 0}
     if not ents:
         errs.append("没有解析出任何实体")
     if str(模板).strip() == "private" and str(需求 or "").strip() and not PRIVATE_HINT.search(需求):
         errs.append("需求里没有出现登录、账号、只看自己的数据这类说法，不许选 private 模板，改选 full 或 default")
     if str(清单模板 or "").strip() == "private" and str(模板).strip() != "private":
         errs.append("功能清单定了 private 模板（有登录 / 角色），模板这一行要写 private，且要登录隔离的实体带 owner 字段")
-    return {"ok": "否" if errs else "是", "errors": "；".join(errs), "实体数": len(ents)}
+    return {"ok": "否" if errs else "是", "errors": "；".join(errs), "entity_count": len(ents)}

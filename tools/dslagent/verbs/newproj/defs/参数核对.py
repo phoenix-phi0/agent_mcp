@@ -16,20 +16,20 @@ def 参数核对(文件: str = "", 接口声明=None) -> dict:
     import _gen as G
     import _params as P
     if G.is_dry():
-        return {"ok": "是", "msg": "（空跑）未真的核对", "检查数": 0}
+        return {"ok": "是", "msg": "（空跑）未真的核对", "checked": 0}
     root = Path(WORKSPACE).resolve()
     decl, err = P.declared(接口声明)
     if err:
-        return {"ok": "否", "msg": err, "检查数": 0}
+        return {"ok": "否", "msg": err, "checked": 0}
     errs, n = [], 0
     for rel in [x.strip() for x in str(文件 or "").split("|") if x.strip()]:
         p, e = G.sandbox_resolve(root, rel)
         if e:
-            return {"ok": "否", "msg": e, "检查数": n}
+            return {"ok": "否", "msg": e, "checked": n}
         if not p.is_file():
             errs.append(f"{rel} 不存在")
             continue
         e2, k = P.check_text(p.read_text(encoding="utf-8", errors="replace"), rel, root / "queries", decl, P.identity_vars(root))
         errs += e2
         n += k
-    return {"ok": "否" if errs else "是", "msg": "；".join(errs) if errs else f"{n} 处调用的参数都有来源", "检查数": n}
+    return {"ok": "否" if errs else "是", "msg": "；".join(errs) if errs else f"{n} 处调用的参数都有来源", "checked": n}

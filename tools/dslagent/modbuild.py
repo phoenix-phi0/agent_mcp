@@ -2369,11 +2369,11 @@ class ModRun(LY.Run):
             if cr["ok"] == "是":
                 return []
             if rr == 2:
-                return cr["未实现列表"]
+                return cr["unimplemented_list"]
             first = [(rel, (self.root / rel).read_text(encoding="utf-8")) for rel, _b in state["saved"]]
             self.undo(state["saved"])             # 先撤回第一版（接口文件是追加写，不撤会重复）
             try:
-                why = attempt(f"以下业务规则没有实现，请补全（其余规则别丢）：{cr['未实现']}")
+                why = attempt(f"以下业务规则没有实现，请补全（其余规则别丢）：{cr['unimplemented']}")
             except _Retry:
                 why = "重写没有可用回复"
             except FileFail:
@@ -2382,7 +2382,7 @@ class ModRun(LY.Run):
                 for rel, text in first:           # 重写没过检查：放回第一版（它过了检查），记未实现
                     self.write(rel, text)
                 state["saved"] = [(rel, None) for rel, _t in first]
-                return cr["未实现列表"]
+                return cr["unimplemented_list"]
         return []
 
     def after_halt(self, rec):

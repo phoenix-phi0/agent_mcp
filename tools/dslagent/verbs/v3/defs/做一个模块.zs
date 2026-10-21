@@ -4,7 +4,7 @@
 用包 dslproj v3
 设 done = 已完成 {模块}
 如果 {done} 等于 是
-  返回 {"状态":"跳过","轮数":0}
+  返回 {"status":"跳过","rounds":0}
 结束
 设 n = 0
 设 fail_text = {起始原因}
@@ -18,15 +18,15 @@
   设 a = 加载检查 {模块}
   设 b = 比对约定 {模块}
   设 t = 跑用例 {模块}
-  如果 {a.ok} 等于 是 且 {b.一致} 等于 是 且 {t.全过} 等于 是
+  如果 {a.ok} 等于 是 且 {b.consistent} 等于 是 且 {t.all_passed} 等于 是
     设 m = 标记完成 {模块}
     设 done = 是
   否则
-    设 fail_text = 做模块的结果：{r.状态} {r.原因} ／ 验收：加载检查：{a.问题} ／ 比对约定：{b.差异} ／ 跑用例：{t.失败}
+    设 fail_text = 做模块的结果：{r.status} {r.reason} ／ 验收：加载检查：{a.problems} ／ 比对约定：{b.diffs} ／ 跑用例：{t.failures}
     设 m = 记验收 {模块} 否 {fail_text}
   结束
 结束
 如果 {done} 不等于 是
   终止 失败 模块 {模块} 做了 {最多} 次仍未通过：{fail_text}
 结束
-返回 {"状态":"通过","轮数":{n}}
+返回 {"status":"通过","rounds":{n}}

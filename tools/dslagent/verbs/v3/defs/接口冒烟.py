@@ -22,4 +22,5 @@ def 接口冒烟() -> dict:
         top = PL.current_top(c)
     except ValueError as e:
         X.fail(e)
-    return RG.interface_smoke(c, current_engine(), top)
+    r = RG.interface_smoke(c, current_engine(), top)
+    return {"status": r["状态"], **({"rounds": r["轮数"]} if "轮数" in r else {})}

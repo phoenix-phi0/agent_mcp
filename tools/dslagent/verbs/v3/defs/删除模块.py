@@ -60,4 +60,4 @@ def 删除模块(名: str) -> dict:
     c.pending_contracts.pop(name, None)
     _clean_removed_modules()
     c.log("修改计划", 事件="删除模块", 模块=name)
-    return {"名": name}
+    return {"name": name}

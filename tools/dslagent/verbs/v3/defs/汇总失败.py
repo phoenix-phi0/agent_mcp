@@ -1,4 +1,4 @@
-"""汇总失败：看 并行执行 返回的结果列表，把没成功的汇总。返回 {status: 失败|超出预期, reason: 一行一个「模块：原因」, 条数}，全成功条数为 0。
+"""汇总失败：看 并行执行 返回的结果列表，把没成功的汇总。返回 {status: 失败|超出预期, reason: 一行一个「模块：原因」, count}，全成功 count 为 0。
 有任何一项是 超出预期（预算 / 花费用完）状态就是 超出预期，否则 失败。
 例如 设 s = 汇总失败 {rs}
 """
@@ -15,4 +15,4 @@ def 汇总失败(结果列表: str = "") -> dict:
         who = (r.get("params") or {}).get("模块") or r.get("script") or "?"
         lines.append(f"{who}：{str(r.get('reason') or r.get('status')).strip()}")
     state = "超出预期" if any(r.get("status") == "超出预期" for r in bad) else "失败"
-    return {"status": state, "reason": "\n".join(lines), "条数": len(bad)}
+    return {"status": state, "reason": "\n".join(lines), "count": len(bad)}

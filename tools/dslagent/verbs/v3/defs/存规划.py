@@ -1,4 +1,4 @@
-"""存规划：把通过检查的规划文本写进项目（顶层 → plan/top.zs，约定 → contracts/<模块>.md）。返回 {路径}。
+"""存规划：把通过检查的规划文本写进项目（顶层 → plan/top.zs，约定 → contracts/<模块>.md）。返回 {path}。
 例如 设 w = 存规划 约定 {文本} graph
 """
 import sys
@@ -18,4 +18,4 @@ def 存规划(种类: str, 文本: str, 模块: str = "") -> dict:
     except ValueError as e:
         X.fail(e)
     c.log("规划", 种类=种类, 模块=模块, 次=c.attempts.get((种类, 模块), 0), 事件="存", 路径=rel)
-    return {"路径": rel}
+    return {"path": rel}

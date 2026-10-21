@@ -1,7 +1,7 @@
 """同步顶层依赖：全部约定过了之后调，把 plan/top.zs 每个模块的「依赖」改成与它的约定一致（约定的依赖可能比 top.zs 多或少，
 约定检查只要求「是 top.zs 里的模块、不成环」，不要求逐字一致）；保留注释、不改模块名、不碰没有约定的模块。
 同步后的 plan/top.zs 要过 top 检查，不过 终止 失败（不应该发生：约定检查时已经保证不成环）。
-返回 {改了: [模块名…], 没变: 布尔}。
+返回 {changed: [模块名…], unchanged: 布尔}。
 例如 同步顶层依赖
 """
 import sys
@@ -32,7 +32,7 @@ def 同步顶层依赖() -> dict:
             changed.append(name)
     if not changed:
         CAT.refresh(c.project)
-        return {"改了": [], "没变": True}
+        return {"changed": [], "unchanged": True}
     new_text = VT.sync_deps(old_text, want)
     new_probs = VT.check(new_text)
     if new_probs:
@@ -40,4 +40,4 @@ def 同步顶层依赖() -> dict:
     c.top_path().write_text(new_text, encoding="utf-8", newline="\n")
     c.log("规划", 种类="顶层", 事件="同步依赖", 改了=changed)
     CAT.refresh(c.project)
-    return {"改了": changed, "没变": False}
+    return {"changed": changed, "unchanged": False}

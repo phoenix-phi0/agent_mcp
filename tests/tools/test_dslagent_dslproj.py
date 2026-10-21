@@ -115,7 +115,7 @@ def solution_files(module):
 def plan_for(module, project, files=None, tail="终止 成功 做完了"):
     head = (f"用包 common text code dslproj\n预算 调用 4 秒 600\n设 m = {module}\n设 res = 改文件 {{e1}}\n如果 {{res.ok}} 不等于 是\n  终止 失败 改法没套上：{{res.msg}}\n结束\n"
             "设 c = 加载检查 {m}\n设 d = 比对约定 {m}\n设 t = 跑用例 {m}\n"
-            "如果 {c.ok} 等于 是 且 {d.一致} 等于 是 且 {t.全过} 等于 是\n  终止 成功 三项检查都过\n结束\n" + tail + "\n\n")
+            "如果 {c.ok} 等于 是 且 {d.consistent} 等于 是 且 {t.all_passed} 等于 是\n  终止 成功 三项检查都过\n结束\n" + tail + "\n\n")
     return head + edits_block(project, files if files is not None else solution_files(module))
 
 
@@ -457,19 +457,19 @@ def t_accept_materials():
     err, *_ = V.check(p, TMP / "ex_work", ex, "模块 graph", pack=DP_PACK)
     check(err == "", "示例 example.zs：白名单 / 改法 / 空跑都通过", err)
     # 计划检查：没有 跑用例
-    bad = ex.replace("设 t = 跑用例 {m}", "设 t = 加载检查 {m}").replace("{t.全过}", "{t.ok}").replace("设 t2 = 跑用例 {m}", "设 t2 = 加载检查 {m}").replace("{t2.全过}", "{t2.ok}").replace("{t.失败}", "{t.问题}").replace("{t2.失败}", "{t2.问题}")
+    bad = ex.replace("设 t = 跑用例 {m}", "设 t = 加载检查 {m}").replace("{t.all_passed}", "{t.ok}").replace("设 t2 = 跑用例 {m}", "设 t2 = 加载检查 {m}").replace("{t2.all_passed}", "{t2.ok}").replace("{t.failures}", "{t.problems}").replace("{t2.failures}", "{t2.problems}")
     err, *_ = V.check(p, TMP / "ex_work2", bad, "模块 graph", pack=DP_PACK)
     check("跑用例" in err, "计划检查（包专属）：计划里没有 跑用例 → 报", err)
     # 动词：引擎里直接跑
     eng = AgentEngine(client=None, workdir=SOL, verbose=False, verbs_root=ROOT / "tools" / "dslagent" / "verbs")
     eng.run("用包 common text code dslproj\n设 c = 加载检查 graph\n设 d = 比对约定 graph\n设 t = 跑用例 graph\n设 u = 跑用例 progress")
     v = eng.vars
-    check(v["c"]["ok"] == "是" and v["d"]["一致"] == "是" and v["t"]["全过"] == "是" and v["t"]["总数"] == 7 and v["u"]["总数"] == 5, "动词 加载检查 / 比对约定 / 跑用例", {k: v[k] for k in "cdtu"})
+    check(v["c"]["ok"] == "是" and v["d"]["consistent"] == "是" and v["t"]["all_passed"] == "是" and v["t"]["total"] == 7 and v["u"]["total"] == 5, "动词 加载检查 / 比对约定 / 跑用例", {k: v[k] for k in "cdtu"})
     p = copy_sol("vb_bad")
     (p / "services" / "graph.zs").write_text((p / "services" / "graph.zs").read_text(encoding="utf-8").replace("公开 函数 加边 src dst", "公开 函数 加边 dst src"), encoding="utf-8")
     eng = AgentEngine(client=None, workdir=p, verbose=False, verbs_root=ROOT / "tools" / "dslagent" / "verbs")
     eng.run("用包 common text code dslproj\n设 d = 比对约定 graph\n设 t = 跑用例 graph")
-    check(eng.vars["d"]["一致"] == "否" and "入参约定" in eng.vars["d"]["差异"] and eng.vars["d"]["条数"] >= 1, "动词 比对约定：不一致时给差异文本", eng.vars["d"])
+    check(eng.vars["d"]["consistent"] == "否" and "入参约定" in eng.vars["d"]["diffs"] and eng.vars["d"]["count"] >= 1, "动词 比对约定：不一致时给差异文本", eng.vars["d"])
     eng = AgentEngine(client=None, workdir=SOL, verbose=False, verbs_root=ROOT / "tools" / "dslagent" / "verbs")
     try:
         eng.run("用包 common text code dslproj\n设 t = 跑用例 nope")
@@ -479,7 +479,7 @@ def t_accept_materials():
     eng = AgentEngine(client=None, workdir=SOL, verbose=False, verbs_root=ROOT / "tools" / "dslagent" / "verbs")
     eng.dry_run = True
     eng.run("用包 common text code dslproj\n设 t = 跑用例 nope\n设 d = 比对约定 nope")
-    check(eng.vars["t"]["全过"] == "是" and eng.vars["d"]["一致"] == "是", "空跑（计划检查）时不碰项目，给占位结果")
+    check(eng.vars["t"]["all_passed"] == "是" and eng.vars["d"]["consistent"] == "是", "空跑（计划检查）时不碰项目，给占位结果")
 
 
 # ------------------------------------------------------------------ 六、整条流程（假模型）

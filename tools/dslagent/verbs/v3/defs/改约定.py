@@ -27,4 +27,4 @@ def 改约定(模块: str, 改动条目: str) -> dict:
     old = c.pending_contracts.get(name) or ""
     c.pending_contracts[name] = (old + ("\n" if old else "") + f"- {note}") if note else old
     c.log("修改计划", 事件="改约定", 模块=name, 条目=note)
-    return {"模块": name}
+    return {"module": name}

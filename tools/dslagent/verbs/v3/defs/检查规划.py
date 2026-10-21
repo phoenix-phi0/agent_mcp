@@ -1,4 +1,4 @@
-"""检查规划：确定性检查一份规划文本，不调模型。返回 {ok: 是|否, 问题: 文本（一行一条，带序号）, 摘要: 前 3 条一行, 条数}。
+"""检查规划：确定性检查一份规划文本，不调模型。返回 {ok: 是|否, problems: 文本（一行一条，带序号）, summary: 前 3 条一行, count}。
 种类=顶层：只有 项目 / 模块 [依赖]，名英文 snake、依赖存在、无环。
 种类=约定：dslproj 的约定检查（格式、跨模块调用是依赖且上游有该公开函数、接口指向公开函数、每个公开函数有用例）
 + 约定里的 模块 / 依赖 与 top.zs 一致、表名以 模块名_ 开头。
@@ -22,4 +22,4 @@ def 检查规划(种类: str, 文本: str, 模块: str = "") -> dict:
         X.fail(e)
     key = (种类, 模块)
     c.log("规划", 种类=种类, 模块=模块, 次=c.attempts.get(key, 0), 事件="检查", 通过=not probs, 条数=len(probs), 问题=probs[:6])
-    return {"ok": "否" if probs else "是", "问题": X.numbered(probs), "摘要": "；".join(probs[:3]), "条数": len(probs)}
+    return {"ok": "否" if probs else "是", "problems": X.numbered(probs), "summary": "；".join(probs[:3]), "count": len(probs)}
