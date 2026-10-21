@@ -1331,6 +1331,8 @@ def test_modify_entry():
     res = core.run_entry("修改", p, out, req_file.read_text(encoding="utf-8"),
                           extra_vars={"issues": "latest", "task": "", "llm": "sonnet", "retries": "3"},
                           backend=fk, req_path=req_file, module_cmd=CMD)
+    cpu = [c for c in fk.calls if c["tag"] == "v3_change_plan"][0]["user"]
+    check("【涉及模块的约定（去掉用例）】" in cpu and "### progress" in cpu, "写修改计划的 user 里真的带了涉及模块的约定", cpu[-300:])
     check(res["status"] == "成功", "修改.zs 跑成功（第一次写的计划格式不对，重写一次才过）", res)
     check(fk.n("v3_change_plan") == 2, "写修改计划调了两次（不过带问题重写）", [c["tag"] for c in fk.calls])
     check(fk.n("v3_contract_progress") == 1, "改约定：重写了一次约定，走强制问题通道", [c["tag"] for c in fk.calls])
@@ -1354,6 +1356,26 @@ def test_modify_retries_exhausted():
                           extra_vars={"issues": "latest", "task": "", "llm": "sonnet", "retries": "2"}, backend=fk)
     check(res["status"] == "失败" and "没通过检查" in res["reason"], "两次都没通过检查：终止失败", res)
     check(fk.n("v3_change_plan") == 2, "正好调了 次数 次模型，不多不少", [c["tag"] for c in fk.calls])
+
+
+def test_change_plan_contracts():
+    print("I1：写修改计划把涉及模块的现有约定（去掉用例）附进 user_text")
+    from tools.dslagent.v3 import change_plan as CP
+    p = project_with_contracts(("graph", "vocab", "progress"))
+    top = VT.load(TOP3)
+    (p / "contracts" / "progress.md").unlink()
+    iss = "1. a\n   涉及模块：graph、vocab\n2. b\n   涉及模块：不存在,graph\n"
+    t = CP.involved_contracts_text(p, top, iss)
+    check("### graph" in t and "### vocab" in t and "### progress" not in t, "(a) 只含 modules 里的模块", t[:200])
+    full = (p / "contracts" / "graph.md").read_text(encoding="utf-8")
+    check("## 用例" in full and "## 用例" not in t, "(a) 不含用例", t)
+    check(t.index("### graph") < t.index("### vocab"), "按模块名排序")
+    t2 = CP.involved_contracts_text(p, top, "1. a\n")
+    check("### graph" in t2 and "### vocab" in t2 and "### progress" not in t2, "(b)(c) modules 为空取全部模块，没有约定文件的跳过", t2[:200])
+    f = p / "contracts" / "graph.md"
+    f.write_text(full.replace("## 用例", "长" * 13000 + "\n\n## 用例", 1), encoding="utf-8")
+    t3 = CP.involved_contracts_text(p, top, "1. a\n   涉及模块：graph\n")
+    check("（后面略）" in t3 and len(t3) < 12100, "(d) 超长截断", len(t3))
 
 
 def test_check_plan_arg_count():
@@ -1407,6 +1429,7 @@ if __name__ == "__main__":
         test_modify_entry()
         test_modify_retries_exhausted()
         test_check_plan_arg_count()
+        test_change_plan_contracts()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n通过 {PASS}，失败 {FAIL}")

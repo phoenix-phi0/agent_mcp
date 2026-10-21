@@ -131,6 +131,30 @@ def normalize_plan(text):
     return "\n".join(out)
 
 
+CONTRACT_CAP = 12000
+
+
+def involved_contracts_text(project, top, issues_text):
+    """涉及模块（问题清单各条 modules 的并集，只取 top.zs 里有的；并集为空就取 top.zs 全部模块）的现有约定，
+    去掉用例，按模块名排序，每份前面标「### <模块>」，单份超 12000 字截断；没有约定文件的模块跳过。"""
+    from . import contracts as CT, issues as IS, planning as PL
+    names = {m["名"] for m in top.get("模块", [])}
+    want = set()
+    for it in IS.parse_issues(issues_text):
+        want.update(x.strip() for x in re.split(r"[、,，]", it.get("modules") or "") if x.strip())
+    want &= names
+    parts = []
+    for name in sorted(want or names):
+        f = CT.path_of(project, name)
+        if not f.is_file():
+            continue
+        body = PL.without_cases(f.read_text(encoding="utf-8")).strip()
+        if len(body) > CONTRACT_CAP:
+            body = body[:CONTRACT_CAP] + "\n（后面略）"
+        parts.append(f"### {name}\n{body}")
+    return "\n\n".join(parts)
+
+
 def write(ctx, issues_text, task="", model="sonnet"):
     """调一次模型写修改计划文本（未必通过 parse_plan；检查留给 检查修改计划）。"""
     ctx.guard()
@@ -139,7 +163,9 @@ def write(ctx, issues_text, task="", model="sonnet"):
     from . import catalog as CAT
     cat_f = CAT.path_of(ctx.project)
     catalog_text = cat_f.read_text(encoding="utf-8") if cat_f.is_file() else ""
-    user = user_text(issues_text, ctx.req, task, top_text, catalog_text, "")
+    from . import top as VT
+    contracts_text = involved_contracts_text(ctx.project, VT.parse(top_text)[0], issues_text)
+    user = user_text(issues_text, ctx.req, task, top_text, catalog_text, contracts_text)
     try:
         text = ctx.M(prompt_text("change_plan.md"), user, "v3_change_plan", model or "sonnet")
     except V2.Stop as e:
