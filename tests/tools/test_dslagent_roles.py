@@ -174,6 +174,102 @@ def test_dispatch_unknown_role():
     check(r["status"] == "fail" and "没有登记" in r["reason"], "角色不存在 status=fail", r)
 
 
+def test_dispatch_v2():
+    print("A1：执行方式 v2——假 backend：返回形状、记账、可读范围、回退、任务文本、--scope 展开")
+    rm = R.load_roles()
+    check(rm["modify_module"]["执行方式"] == "v2" and R.check_roles(rm) == [], "modify_module 登记为 v2，登记表检查通过", R.check_roles(rm))
+    check(all("执行方式" not in v for k, v in rm.items() if k != "modify_module"), "其他角色没写执行方式（缺省 模型）")
+    bad = R.parse_roles("角色 a\n  执行方式: 乱写\n  默认模型: sonnet\n  工具: 无\n  单次超时: 10\n  回复格式: json\n  提示词文件: x\n结束\n")
+    check(any("执行方式" in x for x in R.check_roles(bad)), "执行方式取值不对报问题")
+
+    out = fresh()
+    seen = []
+
+    def v2b(spec, req):
+        seen.append((spec, req))
+        return {"fixed": True, "stop": "", "cost": 0.5, "sec": 3.0, "calls": 4, "started": True, "files": ["services/report.zs"]}
+    r = R.dispatch_agent("modify_module", "补 pass_line", {"模块": "report"}, out_dir=out, v2_backend=v2b)
+    check(set(r) >= {"result", "status", "reason", "role", "model", "cost", "calls", "secs", "call_id"}, "返回形状同模型角色", r)
+    check(r["status"] == "ok" and r["result"] == "services/report.zs" and r["cost"] == 0.5 and r["calls"] == 4, "ok，result 是改动文件清单", r)
+    check(seen[0][0] == "sonnet" and seen[0][1]["task"] == "模块 report\n补 pass_line\n", "模型 = 角色默认模型；任务文本 = 模块行 + 任务", seen[0])
+    check(seen[0][1]["scope"] == ["entities/report.entity", "services/report.zs", "routes/report*.zs", "queries/report_*.sql", "tests/report_*"],
+          "scope = 本模块路径展开", seen[0][1]["scope"])
+    rows = LG.read_rows(out)
+    check(len(rows) == 1 and rows[0]["cost"] == 0.5 and rows[0]["secs"] == 3.0 and rows[0]["status"] == "ok", "花费、耗时记了账本", rows)
+
+    os.environ["DSLAGENT_MODELS"] = json.dumps({"modify_module": "opus"})
+    try:
+        seen.clear()
+        R.dispatch_agent("modify_module", "x", {"模块": "report"}, out_dir=fresh(), v2_backend=v2b)
+        check(seen[0][0] == "opus", "DSLAGENT_MODELS 按角色名覆盖默认模型", seen[0][0])
+    finally:
+        os.environ.pop("DSLAGENT_MODELS", None)
+
+    r = R.dispatch_agent("modify_module", "x", {"模块": "report", "需求": "y"}, out_dir=fresh(), v2_backend=v2b)
+    check(r["status"] == "fail" and "范围外" in r["reason"], "入参越出可读范围照旧挡", r)
+    r = R.dispatch_agent("modify_module", "x", {}, out_dir=fresh(), v2_backend=v2b)
+    check(r["status"] == "fail" and "模块" in r["reason"], "没有入参.模块 报错", r)
+
+    seen.clear()
+    calls = []
+
+    def v2_fb(spec, req):
+        calls.append(spec)
+        return {"fixed": False, "stop": "引擎错误", "started": False, "calls": 0} if len(calls) == 1 else \
+            {"fixed": True, "cost": 0.1, "calls": 2, "started": True, "files": ["a"]}
+    o3 = fresh()
+    r = R.dispatch_agent("modify_module", "x", {"模块": "report"}, out_dir=o3, v2_backend=v2_fb)
+    check(r["status"] == "ok" and len(calls) == 2 and LG.read_rows(o3)[0]["fallback"] is True, "没跑起来：换回退模型再起一次，账本 fallback=true", (r, calls))
+
+    calls.clear()
+
+    def v2_fail(spec, req):
+        calls.append(spec)
+        return {"fixed": False, "stop": "验收没过：services/report.zs 少 pass_line", "cost": 0.3, "calls": 5, "started": True}
+    r = R.dispatch_agent("modify_module", "x", {"模块": "report"}, out_dir=fresh(), v2_backend=v2_fail)
+    check(r["status"] == "fail" and "pass_line" in r["reason"] and len(calls) == 1 and r["result"] == "", "验收失败不回退，reason 带原文", (r, calls))
+
+
+def test_dispatch_v2_subprocess():
+    print("A1：执行方式 v2——真起子进程（桩命令）：拷贝里做、验收通过才拷回范围内文件、--scope / DSLAGENT_MODELS 传对")
+    stub = TMP / "v2stub.py"
+    stub.write_text("""import sys, os, json
+a = sys.argv
+proj = a[a.index('--project') + 1]
+rec = a[a.index('--out') + 1]
+os.makedirs(rec, exist_ok=True)
+open(os.path.join(rec, 'argv.json'), 'w').write(json.dumps({'argv': a, 'models': os.environ.get('DSLAGENT_MODELS'), 'task': open(a[a.index('--task-file') + 1]).read()}))
+open(os.path.join(proj, 'services', 'm.zs'), 'a').write('改')
+open(os.path.join(proj, 'services', 'other.zs'), 'a').write('越界')
+print(json.dumps({'fixed': os.environ.get('STUB_FIX') == '1', 'calls': 2, 'cost': 0.25, 'stop': '' if os.environ.get('STUB_FIX') == '1' else '没过'}))
+""", encoding="utf-8")
+    proj = fresh()
+    (proj / "services").mkdir()
+    (proj / "services" / "m.zs").write_text("原", encoding="utf-8")
+    (proj / "services" / "other.zs").write_text("原", encoding="utf-8")
+    cmd = [sys.executable, str(stub)]
+    os.environ["STUB_FIX"] = "0"
+    try:
+        o = fresh()
+        r = R.dispatch_agent("modify_module", "t", {"模块": "m"}, out_dir=o, project=proj, module_cmd=cmd)
+        check(r["status"] == "fail" and r["reason"] == "没过" and r["cost"] == 0.25, "验收没过：fail，reason 是 v2 的 stop", r)
+        check((proj / "services" / "m.zs").read_text(encoding="utf-8") == "原", "没过时项目原样不动")
+        os.environ["STUB_FIX"] = "1"
+        o = fresh()
+        r = R.dispatch_agent("modify_module", "t", {"模块": "m"}, out_dir=o, project=proj, module_cmd=cmd)
+        check(r["status"] == "ok" and r["result"] == "services/m.zs", "通过：result 是范围内改动文件", r)
+        check((proj / "services" / "m.zs").read_text(encoding="utf-8") == "原改", "范围内文件拷回项目")
+        check((proj / "services" / "other.zs").read_text(encoding="utf-8") == "原", "范围外文件不拷回")
+        info = json.loads(next(Path(o).glob("agents/modify_module/m_1/v2/argv.json")).read_text(encoding="utf-8"))
+        a = info["argv"]
+        check(a[a.index("--scope") + 1] == "entities/m.entity,services/m.zs,routes/m*.zs,queries/m_*.sql,tests/m_*", "--scope 传了展开后的可写范围")
+        check(json.loads(info["models"]) == {s: "sonnet" for s in EG.STEPS}, "DSLAGENT_MODELS 把默认模型设给全部 STEPS", info["models"])
+        check(info["task"] == "模块 m\nt\n", "任务文件内容", info["task"])
+        check(a[a.index("--pack") + 1] == "dslproj" and a[a.index("--wall") + 1] == "1800", "--pack dslproj、--wall = 单次超时")
+    finally:
+        os.environ.pop("STUB_FIX", None)
+
+
 def test_dispatch_scope():
     print("派代理：入参越出可读范围")
     out = fresh()
@@ -357,6 +453,8 @@ if __name__ == "__main__":
         test_dispatch_both_fail()
         test_dispatch_unknown_role()
         test_dispatch_scope()
+        test_dispatch_v2()
+        test_dispatch_v2_subprocess()
         test_dispatch_budget()
         test_parallel_dispatch()
         test_ledger_stats()

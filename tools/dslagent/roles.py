@@ -26,6 +26,7 @@ DEFAULT_PATH = HERE / "roles.zs"
 REQUIRED = ("默认模型", "工具", "单次超时", "回复格式", "提示词文件")
 TOOLS_OK = ("无", "只读", "读写")
 FORMAT_OK = ("json", "zs", "text", "code")
+EXEC_OK = ("模型", "v2")                 # 执行方式：缺省 模型（一次模型调用）；v2 = 起一次完整 v2 运行（dslproj 包）
 ROLE_MODELS_ENV = "DSLAGENT_MODELS"      # 复用 v2 的环境变量；JSON 的键除了步骤名还认角色名
 
 _BLOCK_RE = re.compile(r"^角色\s+(\S+)\s*$")
@@ -98,6 +99,9 @@ def check_roles(roles_map):
                     EG.parse(v)
                 except ValueError as e:
                     problems.append(f"角色「{name}」{field}不合法：{e}")
+        ex = f.get("执行方式")
+        if ex and ex not in EXEC_OK:
+            problems.append(f"角色「{name}」执行方式要是 {'|'.join(EXEC_OK)}，收到 {ex!r}")
         tool = f.get("工具")
         if tool and tool not in TOOLS_OK:
             problems.append(f"角色「{name}」工具要是 {'|'.join(TOOLS_OK)}，收到 {tool!r}")
@@ -204,9 +208,11 @@ def _reply_ok(fmt, text):
 
 
 def dispatch_agent(role_name, task="", inputs=None, fmt=None, *, out_dir, backend=None, parent_id=None,
-                    ledger=None, roles_map=None, budget=None):
+                    ledger=None, roles_map=None, budget=None, project=None, module_cmd=None, v2_backend=None):
     """`派代理 角色 任务 入参? 格式?` 的 Python 实现。返回 {result, status, reason, role, model, cost, calls, secs}。
-    status：ok（成功）/ fail（角色不存在、入参越范围、两次都没拿到合格回复）/ over（预算超了，没调模型）。"""
+    status：ok（成功）/ fail（角色不存在、入参越范围、两次都没拿到合格回复）/ over（预算超了，没调模型）。
+    角色「执行方式: v2」时不调一次模型，而是在 project 的拷贝里起一次完整 v2 运行（_dispatch_v2；project / module_cmd /
+    v2_backend 只给这种角色用，v2_backend 测试注入，缺省起子进程）。"""
     rm = roles_map if roles_map is not None else roles()
     led = ledger or LG.Ledger(Path(out_dir) / LG.LEDGER_NAME)
     if role_name not in rm:
@@ -230,9 +236,11 @@ def dispatch_agent(role_name, task="", inputs=None, fmt=None, *, out_dir, backen
         return {"result": "", "status": "over", "reason": str(e), "role": role_name, "model": None,
                 "cost": 0.0, "calls": 0, "secs": 0.0}
 
+    timeout = float(role.get("单次超时") or 300)
+    if role.get("执行方式") == "v2":
+        return _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, module_cmd, v2_backend, timeout, out_dir)
     system = _prompt_text(role.get("提示词文件"))
     user = _user_text(task, inputs)
-    timeout = float(role.get("单次超时") or 300)
     call = backend or (lambda spec, s, u, tmo: EG.call(spec, s, u, tmo))
 
     def _attempt(field):
@@ -262,6 +270,103 @@ def dispatch_agent(role_name, task="", inputs=None, fmt=None, *, out_dir, backen
     return {"result": r.get("text") or "", "status": status, "reason": reason, "role": role_name,
             "model": spec["spec"], "cost": r.get("cost") or 0.0, "calls": 1, "secs": r.get("sec") or 0.0,
             "call_id": row["call_id"]}
+
+
+# ------------------------------------------------------------------ 执行方式 v2
+
+
+V2_STOP_MAX = 4000
+
+
+def _v2_scope(role):
+    """角色可写范围 → --scope 的逗号串；「本模块路径」展开成该模块的 glob（与 dslproj 的 STRICT_SCOPE 一致，要带 模块 时才用）。"""
+    return [x for x in _list_field(role, "可写范围") if x not in ("无", "本模块路径")]
+
+
+def _run_v2_subprocess(spec, req):
+    """起 `python -m tools.dslagent run --pack dslproj …`：在 project 的拷贝里做（同 v3/modrun：范围闸会把范围外的改动恢复，
+    不能在原目录里做），验收通过才把本模块范围内的变化拷回 project（没过不动 project）。
+    → {started, fixed, stop, cost, calls, sec, files（改动 / 删除的范围内文件）, rec}。"""
+    import shutil
+    import subprocess
+    import sys
+    from . import common as C
+    from .v3 import modrun as MR
+    root, module = Path(req["project"]), req["module"]
+    base = Path(req["out_dir"]) / "agents" / req["role"]
+    n = len([d for d in base.glob(f"{module}_*") if d.is_dir()]) + 1
+    rec = base / f"{module}_{n}"
+    work = rec / "proj"
+    rec.mkdir(parents=True)
+    shutil.copytree(root, work, ignore=MR.COPY_IGNORE)
+    (rec / "task.txt").write_text(req["task"], encoding="utf-8")
+    cmd = list(req.get("module_cmd") or [sys.executable, "-m", "tools.dslagent"]) + [
+        "run", "--pack", "dslproj", "--project", str(work), "--task-file", str(rec / "task.txt"),
+        "--out", str(rec / "v2"), "--wall", str(int(req["timeout"])), "--scope", ",".join(req["scope"])]
+    env = dict(os.environ)
+    env["DSLAGENT_MODELS"] = json.dumps({s: spec for s in EG.STEPS})
+    t0 = time.time()
+    try:
+        p = subprocess.run(cmd, cwd=str(C.ROOT), env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=req["timeout"] + 300)
+        stdout, stderr, rc = p.stdout, p.stderr, p.returncode
+    except subprocess.TimeoutExpired as e:
+        stdout, stderr, rc = e.stdout or "", e.stderr or "", -9
+        stdout = stdout.decode("utf-8", "replace") if isinstance(stdout, bytes) else stdout
+        stderr = stderr.decode("utf-8", "replace") if isinstance(stderr, bytes) else stderr
+    (rec / "stdout.txt").write_text(stdout or "", encoding="utf-8")
+    (rec / "stderr.txt").write_text(stderr or "", encoding="utf-8")
+    sec = round(time.time() - t0, 1)
+    j = MR.last_json(stdout)
+    out = {"sec": sec, "rec": str(rec), "files": []}
+    if j is None:
+        why = "子进程超时被杀" if rc == -9 else f"子进程没有给出结果（退出码 {rc}）：{(stderr or '').strip()[-300:]}"
+        return {**out, "started": False, "fixed": False, "stop": why, "cost": 0.0, "calls": 0}
+    out.update(started=int(j.get("calls") or 0) > 0, fixed=bool(j.get("fixed")), stop=str(j.get("stop") or ""),
+               cost=float(j.get("cost") or 0.0), calls=int(j.get("calls") or 0))
+    if out["fixed"]:
+        have = set(MR.scope_files(work, module))
+        before = set(MR.scope_files(root, module))
+        out["files"] = sorted([r for r in have if not (root / r).is_file() or (root / r).read_bytes() != (work / r).read_bytes()]
+                              + [r + "（删除）" for r in before - have])
+        MR.sync_back(work, root, module)
+    return out
+
+
+def _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, module_cmd, v2_backend, timeout, out_dir):
+    def _fail(reason, spec=None):
+        led.record(role=role_name, status="fail", reason=reason, parent_id=parent_id, model=spec)
+        return {"result": "", "status": "fail", "reason": reason, "role": role_name, "model": spec,
+                "cost": 0.0, "calls": 0, "secs": 0.0}
+    module = str((inputs or {}).get("模块") or "").strip()
+    if not module:
+        return _fail("执行方式 v2 的角色，入参里要有「模块」")
+    if v2_backend is None and project is None:
+        return _fail("执行方式 v2 的角色需要项目目录（project）")
+    from .packs.dslproj import project as P
+    scope = _v2_scope(role) + (P.scope_globs(module) if "本模块路径" in _list_field(role, "可写范围") else [])
+    req = {"role": role_name, "module": module, "task": f"模块 {module}\n{(task or '').strip()}\n", "scope": scope,
+           "project": project, "module_cmd": module_cmd, "timeout": timeout, "out_dir": str(out_dir)}
+    run = v2_backend or _run_v2_subprocess
+    cost = secs = 0.0
+    calls = 0
+    used_fallback = False
+    spec = resolve_model(role_name, "默认模型", rm)
+    r = run(spec["spec"], req)
+    cost, secs, calls = cost + (r.get("cost") or 0.0), secs + (r.get("sec") or 0.0), calls + (r.get("calls") or 0)
+    if not r.get("started", True) and role.get("回退模型"):       # 没跑起来 / 引擎错误（不是验收失败）：回退模型再起一次
+        used_fallback = True
+        spec = resolve_model(role_name, "回退模型", rm)
+        r = run(spec["spec"], req)
+        cost, secs, calls = cost + (r.get("cost") or 0.0), secs + (r.get("sec") or 0.0), calls + (r.get("calls") or 0)
+    ok = bool(r.get("fixed"))
+    reason = "" if ok else (str(r.get("stop") or "v2 验收没过").strip()[:V2_STOP_MAX])
+    status = "ok" if ok else "fail"
+    row = led.record(role=role_name, model=spec["spec"], effort=spec.get("effort"), parent_id=parent_id, cost=cost, secs=secs,
+                      status=status, reason=reason, num_turns=calls, fallback=used_fallback)
+    files = r.get("files") or []
+    return {"result": ", ".join(files) if ok else "", "status": status, "reason": reason, "role": role_name,
+            "model": spec["spec"], "cost": cost, "calls": calls, "secs": round(secs, 2), "call_id": row["call_id"]}
 
 
 def parallel_dispatch_agents(items, *, out_dir, backend=None, parent_id=None, roles_map=None, max_workers=None):

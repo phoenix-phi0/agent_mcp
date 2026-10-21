@@ -1305,56 +1305,42 @@ def test_audit_entry():
 
 
 def test_modify_entry():
-    print("D3：修改.zs（假模型）全流程——读问题清单 → 写修改计划（自己存盘）→ 检查修改计划（不过带问题重写）→ "
-          "执行 这份计划 → 生成骨架/生成分配 → build")
+    print("A1：修改.zs（假模型）——每条问题对每个点名模块各派一次 modify_module（v2），不派没点名的模块，汇总 changed/failed/smoke")
     p = project_with_contracts(("graph", "vocab", "progress"))
     (p / "plan").mkdir(exist_ok=True)
     (p / "plan" / "top.zs").write_text(TOP3, encoding="utf-8")
     SF.gen_skeleton(p, VT.load(TOP3))
-    req_dir = fresh("req")
-    req_file = req_dir / "req.md"
-    req_file.write_text("## 1 概述\nx\n", encoding="utf-8")
     out, state = fresh("modify_out"), fresh("modify_st") / "state"
     stub_env(state)
-    for m in ("graph", "vocab", "progress"):
-        core.Ctx(p, out, "x", None).mark_done(m)
     (p / "plan" / "issues").mkdir(parents=True)
     (p / "plan" / "issues" / "1.md").write_text(
-        "# 问题清单 1\n\n1. progress 缺一个按知识点统计的接口\n   涉及模块：progress\n", encoding="utf-8")
-    BAD_PLAN = "这不是合法的计划格式\n"
-    GOOD_PLAN = "# 对应问题 1\n改约定 progress 加一个按知识点统计的接口\n落实修改\n"
-    fk = Fake(scripts={
-        "v3_change_plan": [BAD_PLAN, GOOD_PLAN],
-        "v3_contract_progress": [contract_text("progress")],
-    })
-    res = core.run_entry("修改", p, out, req_file.read_text(encoding="utf-8"),
-                          extra_vars={"issues": "latest", "task": "", "llm": "sonnet", "retries": "3"},
-                          backend=fk, req_path=req_file, module_cmd=CMD)
-    cpu = [c for c in fk.calls if c["tag"] == "v3_change_plan"][0]["user"]
-    check("【涉及模块的约定（去掉用例）】" in cpu and "### progress" in cpu, "写修改计划的 user 里真的带了涉及模块的约定", cpu[-300:])
-    check(res["status"] == "成功", "修改.zs 跑成功（第一次写的计划格式不对，重写一次才过）", res)
-    check(fk.n("v3_change_plan") == 2, "写修改计划调了两次（不过带问题重写）", [c["tag"] for c in fk.calls])
-    check(fk.n("v3_contract_progress") == 1, "改约定：重写了一次约定，走强制问题通道", [c["tag"] for c in fk.calls])
-    check(fk.n("v3_review_progress") == 0, "改约定没有调复核", [c["tag"] for c in fk.calls])
-    plans = sorted((p / "plan" / "changes").glob("*.zs"), key=lambda f: int(f.stem))
-    check(len(plans) == 2, "两次写修改计划都存盘了（没通过检查的那份也留着痕迹）", [f.name for f in plans])
-    check(plans[-1].read_text(encoding="utf-8").strip() == GOOD_PLAN.strip(), "最后一份是通过检查、真正执行的那份", plans[-1].read_text(encoding="utf-8"))
-    check(res["reason"] == "全部模块完成", "一路跑到 build、build 自己也成功（终止 {b.状态} {b.原因} 带出来的）", res)
-
-
-def test_modify_retries_exhausted():
-    print("D3：修改.zs——写了 次数 次都没通过检查就终止失败，不往下跑 执行/build")
-    p = project_with_contracts(("graph",))
-    (p / "plan").mkdir(exist_ok=True)
-    (p / "plan" / "top.zs").write_text("项目 demo\n模块 graph\n", encoding="utf-8")
-    out = fresh("modify_out")
-    (p / "plan" / "issues").mkdir(parents=True)
-    (p / "plan" / "issues" / "1.md").write_text("# 问题清单 1\n\n1. 随便一个问题\n", encoding="utf-8")
-    fk = Fake(scripts={"v3_change_plan": ["这不是合法的计划格式\n"]})
-    res = core.run_entry("修改", p, out, "需求全文",
-                          extra_vars={"issues": "latest", "task": "", "llm": "sonnet", "retries": "2"}, backend=fk)
-    check(res["status"] == "失败" and "没通过检查" in res["reason"], "两次都没通过检查：终止失败", res)
-    check(fk.n("v3_change_plan") == 2, "正好调了 次数 次模型，不多不少", [c["tag"] for c in fk.calls])
+        "# 问题清单 1\n\n1. graph 少一个接口\n   涉及模块：graph、progress\n   依据：contracts/graph.md\n"
+        "2. vocab 有问题\n   涉及模块：vocab\n", encoding="utf-8")
+    fk = Fake(scripts={"v3_agent_modify_module": ["改好了", "改好了", ""]})
+    res = core.run_entry("修改", p, out, "需求全文", extra_vars={"issues": "latest"}, backend=fk, module_cmd=CMD)
+    ag = [c for c in fk.calls if c["tag"] == "v3_agent_modify_module"]
+    check(res["status"] == "成功", "修改.zs 跑成功", res)
+    check(len(ag) == 3, "三次派代理：问题 1 的 graph、progress 各一次 + 问题 2 的 vocab 一次", [c["user"][:30] for c in fk.calls])
+    check([c["user"].split("\n")[0] for c in ag] == ["模块 graph", "模块 progress", "模块 vocab"], "任务文本第一行是「模块 <名>」，只派点名模块",
+          [c["user"][:40] for c in ag])
+    check("graph 少一个接口" in ag[0]["user"] and "contracts/graph.md" in ag[0]["user"] and "约定不能改" in ag[0]["user"],
+          "任务带问题原文 + 依据 + 约束", ag[0]["user"])
+    check(fk.n("v3_change_plan") == 0 and fk.n("v3_contract") == 0, "没写修改计划、没动约定", [c["tag"] for c in fk.calls])
+    r = res.get("returned") or {}
+    check(len(r.get("changed") or []) == 2 and len(r.get("failed") or []) == 1 and "vocab" in str(r.get("failed")),
+          "汇总 changed 两个、failed 一个（vocab 假回复为空 = v2 没过）", r)
+    check("smoke" in r and isinstance(r.get("failed"), list), "汇总里有 smoke，changed / failed 是列表", r)
+    (p / "plan" / "issues" / "2.md").write_text("# 问题清单 2\n\n1. graph 又一个问题\n   涉及模块：graph\n", encoding="utf-8")
+    out2 = fresh("modify_out")
+    fk2 = Fake(scripts={"v3_agent_modify_module": ["改好了"]})
+    res2 = core.run_entry("修改", p, out2, "需求全文", extra_vars={"issues": "latest"}, backend=fk2, module_cmd=CMD)
+    r2 = res2.get("returned") or {}
+    check(fk2.n("v3_agent_modify_module") == 1 and len(r2.get("changed") or []) == 1 and r2.get("failed") == [],
+          "全成功时 failed 是空列表（不是字符串）", r2)
+    zs = (ROOT / "tools" / "dslagent" / "v3" / "修改.zs").read_text(encoding="utf-8")
+    bad = [w for w in ("写修改计划", "检查修改计划", "执行", "落实修改", "规划一份", "生成骨架", "生成分配", "build.zs", "做模块",
+                       "做一个模块", "标记完成", "记验收", "全量回归") if w in zs]
+    check(not bad, "修改.zs 里没有旧流程的动词 / 文件", bad)
 
 
 def test_change_plan_contracts():
@@ -1426,7 +1412,6 @@ if __name__ == "__main__":
         test_plan_script_flow()
         test_audit_entry()
         test_modify_entry()
-        test_modify_retries_exhausted()
         test_check_plan_arg_count()
         test_change_plan_contracts()
     finally:
