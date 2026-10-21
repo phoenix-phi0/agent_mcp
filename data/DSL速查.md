@@ -254,17 +254,91 @@ SQLite 有列亲和性，所以 `WHERE views > :下限` 能工作。但左边一
 语法层（关键字、内置动词名、动词参数名、约定格式关键字）保持中文；
 数据和标识层（动词返回字段名、状态/枚举值、模型回复 JSON 键、业务函数名）
 一律英文 snake_case；显示文字（打印、报错文案、docstring 里给人看的话）
-保持中文。布尔值仍返回 `"是"`/`"否"` 字符串，不在本次改名范围内。
+保持中文。
 
-**旧写法（还没改，留给后续任务）**：`派任务`/`并行派任务`/`并行执行` 的
-回复字段（`结果`/`状态`/`原因`/`停在`/`脚本`/`参数`）、`终止` 的落地结果
-（`{状态,原因,停在}`）、`verbs/quiz/_verbs.py`（题库 jsonl 字段
-`课程`/`考点`/`难度`/`题型`/`题干`/`答案`/`解析`/`作答`/`可接受`/`选择`，
-数据文件本身也是中文键，牵动面广）、`verbs/http/_verbs.py`（上传信息
-`哈希`/`时间`/`原名`，B2 已经接了多处业务代码和测试）、`verbs/db/_verbs.py`
-的 `错误`、`verbs/common/defs/当前时间.py` 的 `日期`/`时间戳`——这些改名
-会连带动 `tools/dslagent` 内 30+ 处消费点和若干 jsonl 数据文件，这条任务
-的预算（$8）打不住，原样留着，等专门的后续任务按这张表继续改。
+**不在改名范围内（R6 收尾时再次确认，以后也不要去改）**：
+- **状态/枚举值**：`成功`/`失败`/`超出预期`、`通过`/`跳过`、`是`/`否` 等照旧，
+  只有装它们的**字段名**改英文（如 `{status: "成功"}`）。
+- **布尔的表示方式**：返回 `"是"`/`"否"` 字符串的动词不改成 Python 的
+  `True`/`False`。C1（commit 327e821）曾经把其中 5 个动词改成真布尔，
+  R5 已经逐行退回原样（见下）；以后也不要再改这一类。
+- **业务函数名**：`services/*.zs` 里 `公开 函数 记作答 ...` 这类名字不改。
+- **语法层**：关键字、内置动词名、动词参数名、约定格式关键字不改。
+
+### 最终对照表（字段名，R1/R3/R4 的改动汇总，权威版本）
+
+「全仓一张对照表」（R1–R4 各条按它改，新字段按同风格补上）：
+
+| 旧（中文） | 新（英文） | 旧（中文） | 新（英文） |
+|---|---|---|---|
+| 状态/原因/停在/返回 | status/reason/at/returned | 结果/思路 | result/thought |
+| 脚本/参数 | script/params | 花费/调用/轮/模型/记录目录/秒 | cost/calls/round/model/log_dir/secs |
+| 轮数 | rounds | 一致/差异 | consistent/diffs |
+| 全过/失败/总数 | all_passed/failures/total | 问题/摘要/条数/状态 | problems/summary/count/status |
+| 去掉/加上 | removed/added | 新建/已有 | created/existing |
+| 路径/内容 | path/content | 按模块 | by_module |
+| 检查数 | checked | 实体数 | entity_count |
+| 模板 | template | 功能 | features |
+| 调用上限 | call_limit | 角色 | roles |
+| 角色模板 | role_template | 解析 | parsed |
+| 未实现/未实现列表 | unimplemented/unimplemented_list | 名（模块名返回） | name |
+| 模块（改约定返回） | module | 节 | section |
+| 改了/没变 | changed/unchanged | 删了/写了 | removed/written |
+| 新建/已有/新建数 | created/existing/created_count | 次数（规划一份的重试计数） | attempts |
+| 问题/涉及模块/依据（模型回复） | issue/modules/basis | 通过/问题列表（模型回复） | passed/issues |
+| 标签（模型回复） | label | 理由（模型回复） | reason |
+| 条目序号/判定/依据（模型回复） | item/verdict/basis | | |
+
+没碰、按规则排除的：`功能`/`角色` 等顶层键下面**嵌套**的字段（如每个功能项
+的 `名`/`sql`/`接口`/`规则`/`界面`、接口项的 `角色`/`路径`/`动作`）——那是
+`packs/newproj` 的模型 JSON 回复 schema，还没做（见下「还没覆盖」）；
+`tools/dslagent` 内部 `c.log(...)` 记的账本/日志字段（如 `全局检查.py`、
+`检查规划.py` 里 `条数=`/`问题=` 这类关键字参数名）不算「返回给脚本/模型的
+结构」，原样留着。
+
+### 回复格式键（终止 / 派任务 / 并行执行）
+
+- `engine.halted`、`设 r = 执行 子.zs` 的结果键：`{status, reason, at}`
+  （`status` 的值仍是中文 成功/失败/超出预期；`终止 {r.status}` 认英文也认中文）。
+- `派任务` / `并行派任务` / 补改 / 工具模式子任务 的结果键：
+  `{result, status, reason[, thought]}`；解析模型回复兼容旧中文键
+  （`tools/json_repair.py` 的 `normalize_keys`），产出英文键。
+- `并行执行` 每项结果键：`{script, params, status, reason, at, returned}`；
+  输入端 `脚本`/`script`、`参数`/`params` 两种写法都认（原来就是双语，不是
+  本次新加的兼容）。
+
+### kg 别名 / 为 kg 保留的中文清单
+
+`kg/` 代码本身一行没改。核实下来（R1–R5 全部完成后），**到目前为止没有任何
+一个 kg 实际在用的字段被改名**，所以没有、也不需要 `test_naming.py` 里原计划
+的 `ALIAS_KEYS` 双键白名单机制——不是「忘了做」，是改的范围和 kg 用到的范围
+正好没交叉。专门为 kg 保留、以后也不要改的中文键：
+- `verbs/quiz/_verbs.py` 的 `判对错`/`拆选项` **入参**结构：
+  `题型`/`答案`/`可接受`/`作答`、`题干`/`选项`/`选了`/`种子`——
+  `kg/routes/quiz.zs`、`kg/scripts/quiz_pick.zs` 直接拿这些中文键构造调用，
+  kg 自己的 SQL 列名也是这几个词（这两个动词的**返回值**已经是英文键
+  `{correct, mine}`/`{stem, options, picked, answer_key}`，入参和返回不是
+  一回事，只有入参留中文）。
+- 题库 jsonl 外部数据文件字段（`课程`/`考点`/`难度`/`题型`/`题干`/`答案`/
+  `解析`）：读入照旧，不迁移数据文件，也不是「动词返回键」。
+
+### 还没覆盖的范围（真实剩余项，R2 已核实纠正过一次）
+
+- R2 曾经列的 `verbs/db`/`common`/`http`/`quiz` 四处「没做完」，逐文件通读
+  后证明是**误判**（基于早期粗略 grep 的印象）：`db` 的「错误」现在直接
+  `raise` 不返回字典；`common`「日期」「时间戳」是参数取值不是返回键；
+  `http`「上传信息」已经是英文键，「哈希/时间/原名」是 `存文件` 的 `命名`
+  参数取值；`quiz` 全部动词返回纯文本或已是英文键。这四处**不需要再改**，
+  已从「待办」里去掉。
+- `packs/newproj/prompts/` 下十余份模型 JSON 提示词（`sys_plan.md`、
+  `sys_llayer.md`、`sys_mplan_{ent,flow,iface,sql,ui}.md` 等）和消费它们的
+  `verbs/newproj/defs/` 校验动词：字段名还是中文，没有动——牵动整条生成
+  管线的内部协议，量级比本次已做的大，留给专门的后续任务。
+- `agents/bound_table_fill.md` + `verify/bound_table.py`/`verify/asserts.py`
+  的「期望表」协议（字段「规则/函数/参数/断言/期望/期望包含/…」）：没有动，
+  同上留给后续任务。
+- `verify/code.py`/`fix.md`/`bfix.md` 里嵌套在 `结果`/`result` 内的 `说明`
+  字段：R1 定性为「补改自己的记账字段」，不算数据层返回键，故意不改。
 
 **C2（dslagent，范围已查清，预算打不住，没动代码）**：核实下来
 `tools/dslagent/verbs/` 下用 `"是"/"否"` 字符串当返回字段的有 **29 个
@@ -393,12 +467,14 @@ R4（提示词/模型回复键）；`tools/dslagent` 内部 `c.log(...)` 记的�
 3. `verify/code.py`/`fix.md`/`bfix.md`/`fix_system.md` 里嵌套在 `结果`/`result` 内的 `说明`
    字段——R1 已经定性为「补改自己的记账字段」不在范围内，本条延续同一判断，没有改。
 
-## 命名约定收尾（R6 待办）
-数据键改英文目前覆盖：引擎终止/派任务/并行执行（R1）、`tools/dslagent/verbs` 返回键
-（R3）、本条列出的 v3 提示词与 agents 通用回复格式（R4 部分）。布尔值不在改名范围内，
-C1 当初改真布尔的那几个动词已由 R5 退回「是/否」字符串，C2 查到的 29 个文件本来就
-没动过。还没覆盖：R2（`verbs/db` `common` `http` `quiz`）、`packs/newproj` 整条提示词协议、
-`code` 资料包的期望表协议。R6 收尾前这张表还不是最终版。
+## 命名约定收尾（R6，已完成）
+数据键改英文覆盖：引擎终止/派任务/并行执行（R1）、`tools/dslagent/verbs` 返回键
+（R3）、v3 提示词与 agents 通用回复格式（R4 部分）。`verbs/db`/`common`/`http`/`quiz`
+核实后不需要改（R2，见上「还没覆盖的范围」已更正说明）。布尔值、状态/枚举值、
+业务函数名、语法层关键字不在改名范围内——C1 当初把 5 个动词改成真布尔已由 R5
+退回「是/否」字符串。上面「最终对照表」「回复格式键」「kg 别名 / 为 kg 保留的中文
+清单」是这轮改名的权威总结；「还没覆盖的范围」列的是真实剩余项（`packs/newproj`
+提示词协议、`code` 资料包期望表协议），留给专门的后续任务，不在本次范围内。
 
 ---
 
