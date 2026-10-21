@@ -168,7 +168,7 @@ class ByContent(Fake):
             for key, reply in self.rules:
                 if key in user:
                     return {"text": reply if isinstance(reply, str) else json.dumps(reply, ensure_ascii=False), "cost": 0.01}
-            return {"text": json.dumps(ok(False, []), ensure_ascii=False), "cost": 0.01}
+            return {"text": json.dumps(code_reply([], []), ensure_ascii=False), "cost": 0.01}
         return super().__call__(system, user, tag, timeout, **kw)
 
 
@@ -187,31 +187,72 @@ def run_audit(p, fk, **vars_):
     return core.run_entry("核查", p, out, "## 1 概述\n需求全文\n", extra_vars=v, backend=fk, req_path=None), out
 
 
+def code_reply(items, contract_items=None):
+    res = {"found": bool(items), "items": items}
+    if contract_items is not None:
+        res["contract_items"] = contract_items
+    return {"result": res, "status": "成功", "reason": ""}
+
+
 def test_audit_flow():
-    print("核查.zs 整条（假模型）：有代码且回归失败 / 没有 top / 子任务失败")
+    print("核查.zs 整条（假模型）：只查代码——不派规划层任务；每个有代码的模块派代码核查；代码问题进清单、约定层问题单独存；没有 top / 子任务失败")
     p = audit_project(broken=True)
-    fk = ByContent([("规划层核查", ok(True, [item("需求第 2 节的导出没人做", "vocab", "需求第 2 节")]))])
+    fk = ByContent([
+        ("services/graph.zs", code_reply([item("代码少了约定里的校验", "graph", "services/graph.zs 第 3 行")],
+                                         [item("约定前后矛盾：graph 与 vocab 的依赖对不上", "graph、vocab", "contracts/graph.md")])),
+        ("services/vocab.zs", code_reply([], [])),
+    ])                                                            # progress 没命中：回 found=否、两个列表都空
     res, out = run_audit(p, fk)
     ret = res.get("returned") or {}
-    check(res["status"] == "成功" and ret.get("count") == 2, "回归失败 1 条 + 规划层 1 条", res)
+    check(res["status"] == "成功" and ret.get("count") == 2, "回归失败 1 条 + graph 代码核查 1 条", res)
     text = (p / ret["path"]).read_text(encoding="utf-8")
-    check("模块 graph 全量回归不过" in text and "依据：全量回归" in text and "需求第 2 节的导出没人做" in text, "清单里有回归问题和规划层问题", text)
-    check(fk.n("dsl") == 1, "只派规划层一个子任务", [c["tag"] for c in fk.calls])
-    user = fk.calls[0]["user"]
-    check("plan/top.zs" in user and "contracts/graph.md" in user and "plan/catalog.md" in user, "规划层入参带 top.zs、目录、各模块约定文件", user[:600])
-    check("需求全文" in user, "需求全文当一项文本放进入参", user[:600])
+    check("模块 graph 全量回归不过" in text and "依据：全量回归" in text and "代码少了约定里的校验" in text, "清单里有回归问题和代码核查问题", text)
+    check("约定前后矛盾" not in text, "约定层问题不进问题清单", text)
+    check(fk.n("dsl") == 3, "三个有代码的模块各派一个代码核查，没有规划层任务", [c["tag"] for c in fk.calls])
+    check(all("规划层核查" not in c["user"] and "代码核查" in c["user"] for c in fk.calls), "没有规划层核查任务，都是代码核查")
+    for m in ("graph", "vocab", "progress"):
+        u = next(c["user"] for c in fk.calls if f"services/{m}.zs" in c["user"])
+        check(f"contracts/{m}.md" in u and f"entities/{m}.entity" in u and f"routes/{m}.zs" in u and "plan/top.zs" not in u,
+              f"{m} 的入参 = 约定 + 该模块代码文件（不带 top.zs）", u[:300])
+    cf = json.loads((p / "plan" / "contract_issues.json").read_text(encoding="utf-8"))
+    check(int(cf["count"]) == 1 and cf["items"][0]["modules"] == "graph、vocab" and "回到规划" in cf["note"], "约定层问题单独存 plan/contract_issues.json", cf)
+    check(ret["contract_count"] == 1 and ret["contract_path"] == "plan/contract_issues.json" and "需回到规划" in ret["contract_note"],
+          "返回里标明约定层问题 需回到规划、给出路径", ret)
+    check(ret["path"] == "plan/issues/1.md" and sorted(f.name for f in (p / "plan" / "issues").glob("*")) == ["1.md"], "plan/issues 里只有代码问题清单一份")
     check((out / "smoke_1.json").is_file(), "冒烟完整结果存在 out/smoke_1.json")
-    # 没有 top
+    # 没有 top：没有代码，不派任何子任务
     p3 = fresh("notop")
-    fk3 = ByContent([("规划层核查", ok(True, [item("无顶层", "a")]))])
+    fk3 = ByContent([("代码核查", code_reply([item("无顶层", "a")], []))])
     res3, _ = run_audit(p3, fk3)
-    check(res3["status"] == "成功" and res3["returned"]["count"] == 1 and fk3.n("dsl") == 1, "没有 top：程序检查 0 条，规划层照派", res3)
-    # 规划层失败
+    check(res3["status"] == "成功" and res3["returned"]["count"] == 0 and fk3.n("dsl") == 0, "没有 top / 没有代码：0 条，不派任务", res3)
+    check(res3["returned"]["contract_count"] == 0 and json.loads((p3 / "plan" / "contract_issues.json").read_text(encoding="utf-8"))["count"] in (0, "0"),
+          "约定层问题文件照写（0 条）")
+    # 某个模块的代码核查失败
     p4 = audit_project()
-    fk4 = ByContent([("规划层核查", {"result": {"found": False, "items": []}, "status": "失败", "reason": "模型没有回应"})])
+    fk4 = ByContent([("services/vocab.zs", {"result": {"found": False, "items": [], "contract_items": []}, "status": "失败", "reason": "模型没有回应"}),
+                     ("services/graph.zs", code_reply([item("graph 问题", "graph")], []))])
     res4, _ = run_audit(p4, fk4)
     ret4 = res4["returned"]
-    check(res4["status"] == "成功" and ret4["count"] == 0 and ret4["unchecked"][0]["module"] == "规划层", "规划层失败：清单照存，unchecked 记下规划层", res4)
+    check(res4["status"] == "成功" and ret4["count"] == 1 and [u["module"] for u in ret4["unchecked"]] == ["vocab"]
+          and "模型没有回应" in ret4["unchecked"][0]["reason"], "vocab 核查失败：清单照存，unchecked 记下 vocab（graph 的问题还在）", res4)
+
+
+def test_long_files_split():
+    print("400 行上限：code_modules 给 派任务 的入参里，超长文件按「文件:起-止」切段，每个文件最多 5 段")
+    from tools.dslagent.v3 import regress as RG
+    p = audit_project()
+    (p / "services" / "graph.zs").write_text("\n".join(f"# 行 {i}" for i in range(1, 951)) + "\n", encoding="utf-8")
+    (p / "services" / "vocab.zs").write_text("\n".join(f"# 行 {i}" for i in range(1, 2501)) + "\n", encoding="utf-8")
+    e, ctx = verb_engine(p, fresh("o"))
+    r = run(e, "设 r = 全量回归\n返回 {r}\n")
+    files = {x["module"]: x["files"] for x in r["code_modules"]}
+    check(set(files) == {"graph", "vocab", "progress"} and files["graph"][0] == "contracts/graph.md", "三个模块，约定在前", files)
+    check([f for f in files["graph"] if f.startswith("services/")] == ["services/graph.zs:1-400", "services/graph.zs:401-800", "services/graph.zs:801-950"],
+          "950 行切 3 段", files["graph"])
+    check(len([f for f in files["vocab"] if f.startswith("services/")]) == 5 and "services/vocab.zs:1601-2000" in files["vocab"],
+          "2500 行最多 5 段（后面的读不到）", files["vocab"])
+    check("services/progress.zs" in files["progress"], "不超长的文件就是文件名", files["progress"])
+    check(RG.segment_refs(p, "contracts/nope.md") == ["contracts/nope.md"], "不存在的文件原样返回")
 
 
 def test_issue_fixes():
@@ -256,6 +297,7 @@ if __name__ == "__main__":
         test_smoke_report()
         test_store_issues()
         test_audit_flow()
+        test_long_files_split()
         test_issue_fixes()
     finally:
         shutil.rmtree(T.TMP, ignore_errors=True)

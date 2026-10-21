@@ -366,6 +366,30 @@ def _code_modules(project, mods):
     return [m for m in mods if code_files(project, m, mods)]
 
 
+SEG_LINES = 400      # 派任务 每个文件（每段）最多读 400 行
+SEG_MAX = 5          # 一个文件最多切 5 段，再长的后面读不到
+
+
+def segment_refs(project, rel):
+    """项目里的文件 → 给 派任务 的入参项：不超过 400 行就是文件名，更长切成「文件:起-止」几段（最多 SEG_MAX 段）。"""
+    p = Path(project) / rel
+    n = len(p.read_text(encoding="utf-8", errors="replace").splitlines()) if p.is_file() else 0
+    if n <= SEG_LINES:
+        return [rel]
+    return [f"{rel}:{a}-{min(a + SEG_LINES - 1, n)}" for a in range(1, min(n, SEG_LINES * SEG_MAX) + 1, SEG_LINES)]
+
+
+def code_inputs(project, mods):
+    """有代码的模块 → [{module, files}]：files 是 派任务 的入参列表（contracts/<m>.md + 该模块全部代码文件，超 400 行的按段切开）。"""
+    out = []
+    for m in _code_modules(project, mods):
+        refs = segment_refs(project, f"contracts/{m}.md")
+        for f in code_files(project, m, mods):
+            refs += segment_refs(project, f)
+        out.append({"module": m, "files": refs})
+    return out
+
+
 def _merge_items(rows):
     """[(issue, module)] → 条目列表；同一条 issue 文本只留一条，模块名并到一起（建库失败这类全体模块同一原因）。"""
     merged = {}
@@ -382,12 +406,14 @@ def _failed_text(failed):
 
 def audit_regression(ctx, top):
     """核查用：对所有有代码的模块跑 加载检查 + 比对约定 + 跑用例，只报告（不 unmark、不重做、不记验收）。
-    → {count, items: [{issue, modules, basis}], failed: [{module, reason}], failed_text, summary}；
-    failed 每个不过的模块一条（reason 是该模块的失败原文），failed_text 是「模块：原因」一行一个，供 .zs 决定重做谁。"""
+    → {count, items: [{issue, modules, basis}], failed: [{module, reason}], failed_text, summary, code_modules}；
+    failed 每个不过的模块一条（reason 是该模块的失败原文），failed_text 是「模块：原因」一行一个，供 .zs 决定重做谁；
+    code_modules 是有代码的模块 [{module, files}]（files 见 code_inputs），供 核查.zs 对每个有代码的模块派代码核查。"""
     mods = [m["名"] for m in top["模块"]]
     code_mods = _code_modules(ctx.project, mods)
     if not code_mods:
-        return {"count": 0, "items": [], "failed": [], "failed_text": "", "summary": "还没有代码，跳过"}
+        return {"count": 0, "items": [], "failed": [], "failed_text": "", "summary": "还没有代码，跳过",
+                "code_modules": []}
     items = []
     failed = []
     for m in code_mods:
@@ -397,7 +423,8 @@ def audit_regression(ctx, top):
             failed.append({"module": m, "reason": why})
     summary = (f"{len(code_mods)} 个有代码的模块，{len(items)} 个不过：" + "；".join(i["modules"] for i in items)) if items \
         else f"{len(code_mods)} 个有代码的模块全部通过"
-    return {"count": len(items), "items": items, "failed": failed, "failed_text": _failed_text(failed), "summary": summary}
+    return {"count": len(items), "items": items, "failed": failed, "failed_text": _failed_text(failed), "summary": summary,
+            "code_modules": code_inputs(ctx.project, mods)}
 
 
 def _next_smoke_no(out):

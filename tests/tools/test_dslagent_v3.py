@@ -99,6 +99,8 @@ class Fake:
             return {"text": self.top, "cost": 0.01}
         if tag.startswith("v3_review_"):
             return {"text": '{"通过": "是", "问题列表": []}', "cost": 0.01}
+        if tag.startswith("dsl"):         # 派任务（规划层核查等）缺省：没发现问题
+            return {"text": audit_reply(), "cost": 0.01}
         return {"text": contract_text(tag.replace("v3_contract_", "")), "cost": 0.01}
 
     def n(self, prefix=""):
@@ -635,7 +637,7 @@ def test_full_flow_clean():
     check((proj / "plan" / "build.zs").read_text(encoding="utf-8").count("做模块组") == 2, "plan/build.zs 生成了（两层）")
     check(sorted(json.loads((proj / "plan" / "state.json").read_text(encoding="utf-8"))["模块"]) == ["graph", "progress", "vocab"], "state.json 三个模块都标了通过")
     check({r["模块"] for r in rec["模块"]} == {"graph", "vocab", "progress"} and len(rec["模块"]) == 3, "每个模块做了 1 轮", rec["模块"])
-    check(abs(res["花费"] - (0.01 * 9 + 0.25 * 3)) < 1e-6, "总花费 = 规划 + 模块", res["花费"])
+    check(abs(res["花费"] - (0.01 * 10 + 0.25 * 3)) < 1e-6, "总花费 = 规划（含 1 次规划层核查）+ 模块", res["花费"])
     check(all((Path(r["记录目录"]) / "task.txt").is_file() for r in rec["模块"]), "每个模块的记录目录有任务文件")
     check((out / "result.json").is_file() and (out / "v3_log.jsonl").is_file() and (out / "steps" / "top_w2.txt").is_file(), "out 里有 result.json / v3_log.jsonl / steps/")
     # 同层并行：vocab 与 progress 在一层，各自都收到任务
@@ -645,24 +647,24 @@ def test_full_flow_clean():
     # 续跑：同一命令再跑 → 规划不重写、模块不重做
     fk2, n_stub = Fake(), len(calls)
     res2 = run_v3(proj, out, fk2)
-    check(res2["status"] == "成功" and fk2.calls == [], "续跑：已通过的规划一个模型调用都没有", [c["tag"] for c in fk2.calls])
+    check(res2["status"] == "成功" and [c["tag"] for c in fk2.calls] == ["dsl01"], "续跑：已通过的规划不重写，只有规划层核查 1 次", [c["tag"] for c in fk2.calls])
     check(len(stub_calls(state)) == n_stub and res2["模块花费"] == 0, "续跑：已完成且约定未变的模块不重做", stub_calls(state)[n_stub:])
     check((out / "result_run1.json").is_file() and (out / "result.json").is_file(), "续跑：上一次的 result.json 留成 result_run1.json")
     names = sorted(f.name for f in (out / "calls").glob("*.prompt.txt"))
-    check(len(names) == len(set(n.split("_", 1)[0] for n in names)) == 9, "calls/ 里每次调用一个文件，没有被覆盖", names)
+    check(len(names) == len(set(n.split("_", 1)[0] for n in names)) == 11, "calls/ 里每次调用一个文件，没有被覆盖", names)
     # 约定改了 → 只重做那个模块
     f = proj / "contracts" / "vocab.md"
     f.write_text(f.read_text(encoding="utf-8") + "\n# 改了一行注释\n", encoding="utf-8")
     fk3 = Fake()
     res3 = run_v3(proj, out, fk3)
     again = stub_calls(state)[n_stub:]
-    check(res3["status"] == "成功" and fk3.calls == [] and [c["模块"] for c in again] == ["vocab"], "续跑：约定改了的模块重做，别的不动", again)
+    check(res3["status"] == "成功" and [c["tag"] for c in fk3.calls] == ["dsl01"] and [c["模块"] for c in again] == ["vocab"], "续跑：约定改了的模块重做，别的不动", again)
     check(sorted(d.name for d in (out / "modules" / "vocab").iterdir()) == ["r1", "r2"], "续跑：模块轮号接着走，上一次的记录目录还在", sorted(d.name for d in (out / "modules" / "vocab").iterdir()))
     # 约定被改坏（与 top 不一致）→ 续跑时只重写它，且重写的输入带盘上那份和问题
     f.write_text(f.read_text(encoding="utf-8").replace("依赖 graph", "依赖 无", 1), encoding="utf-8")
     fk4 = Fake()
     res4 = run_v3(proj, out, fk4)
-    check(res4["status"] == "成功" and [c["tag"] for c in fk4.calls] == ["v3_contract_vocab", "v3_review_vocab"], "续跑：不过检查的约定重写，别的跳过", [c["tag"] for c in fk4.calls])
+    check(res4["status"] == "成功" and [c["tag"] for c in fk4.calls] == ["v3_contract_vocab", "v3_review_vocab", "dsl01"], "续跑：不过检查的约定重写，别的跳过（再加 1 次规划层核查）", [c["tag"] for c in fk4.calls])
     u = fk4.calls[0]["user"]
     check("【你上次写的内容】" in u and "不在本模块的「依赖」里" in u and "依赖 无" in u, "续跑重写时输入带盘上那份约定和检查问题", u[-500:])
 
@@ -783,6 +785,65 @@ def test_global_check_flow():
           "两边都不改：全局检查两轮后仍冲突，终止失败", res2["reason"])
 
 
+def test_plan_check():
+    print("规划层核查（规划到通过 规划核查，建模块之前）：查出跨模块问题 → 涉及模块带问题重写 → 再查通过才生成骨架；2 轮仍有问题终止失败；问题没点到模块 / 子任务失败也终止")
+    iss = {"issue": "需求要的导出 vocab 和 progress 都没做，也没人调用", "modules": "vocab,progress", "basis": "需求第 3 节"}
+    proj, out, state = fresh("p"), fresh("o"), fresh("st") / "state"
+    stub_env(state)
+    fk = Fake(scripts={"dsl01": [audit_reply(iss)]})
+    res = run_v3(proj, out, fk, stop_after="build")
+    check(res["status"] == "成功", "查出问题、重写后通过：流程成功", {k: res[k] for k in ("status", "reason")})
+    tags = [c["tag"] for c in fk.calls]
+    check(sum(1 for x in tags if x.startswith("dsl")) == 2, "规划层核查跑了 2 次（重写前后各 1 次）", tags)
+    first, last = tags.index("dsl01"), tags.index("dsl02")
+    between = tags[first + 1:last]
+    check(sorted(between) == ["v3_contract_progress", "v3_contract_vocab"], "两次核查之间只重写点名的 vocab / progress（graph 不动），且不跑逐份复核", between)
+    first_user = fk.calls[first]["user"]
+    check("plan/top.zs" in first_user and "contracts/graph.md" in first_user and "plan/catalog.md" in first_user and "需求：做一个学习系统" in first_user
+          and "services/" not in first_user, "核查入参 = 需求、top.zs、目录、各模块约定（没有代码）", first_user[:700])
+    re_user = [c["user"] for c in fk.calls[first + 1:last] if c["tag"] == "v3_contract_vocab"][0]
+    check("需求要的导出 vocab 和 progress 都没做" in re_user and "需求第 3 节" in re_user, "重写的输入带着核查查出的问题", re_user[-500:])
+    check(first > max(i for i, t in enumerate(tags) if t.startswith("v3_contract_") and i < first), "核查排在全部约定写完之后")
+    check((proj / "services" / "graph.zs").is_file() and (proj / "plan" / "build.zs").is_file(), "核查通过后才生成骨架和 build.zs")
+
+    # 干净：一次核查通过，没有重写
+    proj1, out1, state1 = fresh("p"), fresh("o"), fresh("st") / "state"
+    stub_env(state1)
+    fk1 = Fake()
+    res1 = run_v3(proj1, out1, fk1, stop_after="build")
+    check(res1["status"] == "成功" and [c["tag"] for c in fk1.calls].count("dsl01") == 1 and fk1.n("dsl") == 1 and fk1.n("v3_contract_") == 3, "没问题：核查 1 次、不重写", [c["tag"] for c in fk1.calls])
+
+    # 2 轮后仍有问题：终止失败，没有骨架、不做模块
+    proj2, out2, state2 = fresh("p"), fresh("o"), fresh("st") / "state"
+    stub_env(state2)
+    fk2 = Fake(scripts={k: [audit_reply(iss)] for k in ("dsl01", "dsl02", "dsl03")})
+    res2 = run_v3(proj2, out2, fk2)
+    check(res2["status"] == "失败" and "规划层核查" in res2["reason"] and "2 轮后仍有问题" in res2["reason"] and "需求要的导出" in res2["reason"], "一直有问题：终止 失败", res2["reason"])
+    tags2 = [c["tag"] for c in fk2.calls]
+    check(sum(1 for x in tags2 if x.startswith("dsl")) == 3 and tags2.count("v3_contract_vocab") == 3 and tags2.count("v3_contract_progress") == 3 and tags2.count("v3_contract_graph") == 1,
+          "核查 3 次、点名的模块各重写 2 轮、graph 不动", tags2)
+    check(not (proj2 / "services").exists() and not (proj2 / "plan" / "build.zs").exists() and stub_calls(state2) == [], "没有生成骨架、没有 build.zs、没有做任何模块")
+
+    # 问题没点到任何已有模块
+    proj3, out3, state3 = fresh("p"), fresh("o"), fresh("st") / "state"
+    stub_env(state3)
+    fk3 = Fake(scripts={"dsl01": [audit_reply({"issue": "x", "modules": "不存在的模块", "basis": "y"})]})
+    res3 = run_v3(proj3, out3, fk3)
+    check(res3["status"] == "失败" and "没点到任何已有模块" in res3["reason"] and not (proj3 / "services").exists(), "问题没点到已有模块：终止 失败，不生成骨架", res3["reason"])
+
+    # 子任务失败：不能当作没问题
+    proj4, out4, state4 = fresh("p"), fresh("o"), fresh("st") / "state"
+    stub_env(state4)
+    bad = json.dumps({"result": {"found": False, "items": []}, "status": "失败", "reason": "模型没有回应"}, ensure_ascii=False)
+    fk4 = Fake(scripts={"dsl01": [bad]})
+    res4 = run_v3(proj4, out4, fk4)
+    check(res4["status"] == "失败" and "规划层核查没跑成" in res4["reason"] and not (proj4 / "services").exists(), "核查子任务失败：终止 失败，不生成骨架", res4["reason"])
+
+    # 修改.zs 不动：只改代码，不派规划层任务、不碰约定（脚本文本里没有这些）
+    mod = (Path(core.__file__).parent / "修改.zs").read_text(encoding="utf-8")
+    check("派任务" not in mod and "contracts" not in mod and "规划到通过" not in mod, "修改.zs 只按问题派 modify_module")
+
+
 def test_stop_after():
     print("--stop-after")
     for stop, has_contracts, has_skel, has_build, mods in (("top", False, False, False, 0), ("contract", True, False, False, 0), ("build", True, True, True, 0)):
@@ -823,7 +884,7 @@ def test_top_fails():
     # 续跑：已通过的约定不重写
     fk2 = Fake()
     res2 = run_v3(proj, out, fk2)
-    check(res2["status"] == "成功" and sorted(c["tag"] for c in fk2.calls) == ["v3_contract_vocab", "v3_review_vocab"], "续跑：只补写没通过的 vocab", [c["tag"] for c in fk2.calls])
+    check(res2["status"] == "成功" and sorted(c["tag"] for c in fk2.calls) == ["dsl01", "v3_contract_vocab", "v3_review_vocab"], "续跑：只补写没通过的 vocab", [c["tag"] for c in fk2.calls])
 
 
 def test_group_retry():
@@ -1418,7 +1479,7 @@ def audit_reply(*items, found=None):
 
 
 def test_audit_entry():
-    print("核查.zs（假模型）= 程序检查动词 + 规划层一个子任务，结果存成问题清单；tools.dslagent v3 的 audit 入口（core.run_entry）")
+    print("核查.zs（假模型）= 程序检查动词 + 每个有代码模块一个代码核查，代码问题存成问题清单；tools.dslagent v3 的 audit 入口（core.run_entry）")
     p = fresh("audit_p")
     (p / "plan").mkdir(parents=True)
     (p / "plan" / "top.zs").write_text("项目 demo\n模块 a\n模块 b\n", encoding="utf-8")
@@ -1426,23 +1487,19 @@ def test_audit_entry():
     (p / "contracts" / "a.md").write_text(DUP_A, encoding="utf-8")
     (p / "contracts" / "b.md").write_text(DUP_B, encoding="utf-8")
     out = fresh("audit_out")
-    fk = Fake(scripts={"dsl01": [audit_reply({"issue": "需求第 3 节要求的导出功能两个模块都没做", "modules": "a,b", "basis": "需求第 3 节"})]})
+    fk = Fake()
     res = core.run_entry("核查", p, out, "需求全文", extra_vars={"task": "", "llm": "sonnet"}, backend=fk)
     check(res["status"] == "成功", "核查.zs 跑成功", res)
     ret = res.get("returned") or {}
-    check(ret.get("count") == 3, "问题清单：程序检查（a/b 路径重复）2 条 + 规划层子任务 1 条", ret)
+    check(ret.get("count") == 2, "问题清单：程序检查（a/b 路径重复）2 条；没有代码，不派代码核查", ret)
     path = Path(p) / ret["path"]
     check(path.is_file() and path.name == "1.md", "问题清单存盘到 plan/issues/1.md", ret)
-    text = path.read_text(encoding="utf-8")
-    check("需求第 3 节要求的导出功能两个模块都没做" in text and "GET /dup/x" in text, "程序检查和模型发现的问题都在清单里", text)
-    check(fk.n("dsl") == 1 and fk.n("v3_audit") == 0, "只派了一个规划层子任务（没有专门的核查模型调用）", [c["tag"] for c in fk.calls])
-    check(ret["unchecked"] == [] and ret["dropped"] == [], "没有 unchecked / dropped", ret)
-    # 没有 plan/top.zs 时也能跑（全局检查 0 条，回归 / 冒烟跳过，规划层照派）
+    check("GET /dup/x" in path.read_text(encoding="utf-8"), "程序检查的问题在清单里")
+    check(fk.n("dsl") == 0, "没有代码：不派任何子任务（规划层核查已挪到规划阶段）", [c["tag"] for c in fk.calls])
+    check(ret["unchecked"] == [] and ret["dropped"] == [] and ret["contract_count"] == 0, "没有 unchecked / dropped / 约定层问题", ret)
     p2, out2 = fresh("audit_p2"), fresh("audit_out2")
-    fk2 = Fake(scripts={"dsl01": [audit_reply()]})
-    res2 = core.run_entry("核查", p2, out2, "需求全文", extra_vars={"task": "", "llm": "sonnet"}, backend=fk2)
+    res2 = core.run_entry("核查", p2, out2, "需求全文", extra_vars={"task": "", "llm": "sonnet"}, backend=Fake())
     check(res2["status"] == "成功" and (res2.get("returned") or {}).get("count") == 0, "还没有 plan/top.zs 时核查照样能跑", res2)
-    check(fk2.n("dsl") == 1, "没有 top 也派了规划层子任务", [c["tag"] for c in fk2.calls])
 
 
 def test_modify_entry():
@@ -1540,6 +1597,7 @@ if __name__ == "__main__":
         test_catalog()
         test_global_check()
         test_global_check_flow()
+        test_plan_check()
         test_stop_after()
         test_top_fails()
         test_group_retry()
