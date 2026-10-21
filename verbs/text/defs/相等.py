@@ -6,5 +6,5 @@
 """
 
 
-def 相等(甲: str = "", 乙: str = "") -> bool:
-    return str(甲 if 甲 is not None else "") == str(乙 if 乙 is not None else "")
+def 相等(甲: str = "", 乙: str = "") -> str:
+    return "是" if str(甲 if 甲 is not None else "") == str(乙 if 乙 is not None else "") else "否"

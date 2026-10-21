@@ -9,7 +9,7 @@ WORKSPACE = Path(".")
 PACK_DIR = Path(".")
 
 
-def 核对密码(明文: str, 哈希: str) -> bool:
+def 核对密码(明文: str, 哈希: str) -> str:
     from tools.auth import verify_password
 
-    return verify_password(明文, 哈希)
+    return "是" if verify_password(明文, 哈希) else "否"

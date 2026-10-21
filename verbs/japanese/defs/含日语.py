@@ -11,5 +11,5 @@ import re
 KANA_KANJI = re.compile(r"[\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]")
 
 
-def 含日语(文本: str) -> bool:
-    return bool(KANA_KANJI.search(文本))
+def 含日语(文本: str) -> str:
+    return "是" if KANA_KANJI.search(文本) else "否"
