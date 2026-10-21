@@ -740,6 +740,43 @@ DUP_B = ("模块 b\n\n## 函数\n公开 函数 g y\n  返回 {ok}\n  伪代码 �
          "## 接口\nGET /dup/x -> g\n\n## 用例\n用例 g_ok\n  调用 g y=1\n  得 有返回\n")
 
 
+AUTH_BODY = ("模块 {n}\n依赖 无\n\n认证 可选\n{line}\n\n## 函数\n公开 函数 ping\n  返回 {{ok}}\n"
+             "  伪代码 查询 u：按 username 查账号，返回含 role 列；查询 account_by_name 同理；返回 {{\"ok\": 1}}\n")
+
+
+def _auth_proj(name, line, queries=()):
+    """单模块 a 的项目，约定头 认证 核对 写 line；queries 里的每个名字在 queries/ 下建一个 .sql。"""
+    p = fresh(name)
+    (p / "contracts").mkdir(parents=True)
+    (p / "contracts" / "a.md").write_text(AUTH_BODY.format(n="a", line=line), encoding="utf-8")
+    for q in queries:
+        (p / "queries").mkdir(exist_ok=True)
+        (p / "queries" / f"{q}.sql").write_text("SELECT username, role FROM t WHERE username = :username", encoding="utf-8")
+    return p
+
+
+def test_global_check_auth_lookup():
+    print("全局检查：认证 核对 的库参数要 .db、查询名要对应 queries/<名>.sql（代码阶段）或约定里声明过（约定阶段）")
+    from tools.dslagent.v3 import globalcheck as G
+    top = {"项目": "demo", "模块": [{"名": "a", "依赖": [], "行": 1}]}
+    g = G.check(_auth_proj("ga1", "认证 核对 app.db account_by_name", ["account_by_name"]), top)
+    check(g["条数"] == 0, "代码阶段：库是 app.db、queries/account_by_name.sql 存在 → 通过", g)
+    g = G.check(_auth_proj("ga2", "认证 核对 app.db account_user", ["account_by_name"]), top)
+    check(g["条数"] == 1 and "queries/account_user.sql 不存在" in g["按模块"]["a"][0] and "app.db account_by_name" in g["按模块"]["a"][0],
+          "代码阶段：查询文件不存在 → 点名模块、写清正确写法", g)
+    g = G.check(_auth_proj("ga3", "认证 核对 account account_by_name", ["account_by_name"]), top)
+    check(g["条数"] == 1 and "库参数不对" in g["按模块"]["a"][0] and ".db" in g["按模块"]["a"][0], "库参数不是 .db 文件名 → 不通过", g)
+    g = G.check(_auth_proj("ga4", "认证 核对 app.db account_by_name"), top)
+    check(g["条数"] == 0, "约定阶段（queries 还没写）：约定里声明了这个查询 → 通过", g)
+    g = G.check(_auth_proj("ga5", "认证 核对 app.db nowhere"), top)
+    check(g["条数"] == 1 and "不是一个声明过的查询" in g["按模块"]["a"][0], "约定阶段：约定里没声明这个查询 → 不通过", g)
+    p = _auth_proj("ga6", "认证 核对 account account_user")
+    (p / "contracts" / "a.md").write_text((p / "contracts" / "a.md").read_text(encoding="utf-8").replace("伪代码 ", "伪代码 account_user ", 1)
+                                          + "\n## 表\n表 a_t\n  id 整数 主键\n", encoding="utf-8")
+    g = G.check(p, top)
+    check(g["条数"] >= 1 and "库参数不对" in "".join(g["按模块"]["a"]), "库参数和查询名都写错（kg 的真实写法）→ 不通过", g)
+
+
 def test_global_check():
     print("全局检查：跨模块方法+路径 / 表名重复")
     from tools.dslagent.v3 import globalcheck as G
@@ -758,9 +795,9 @@ def test_global_check():
     mods = {"a": "认证 核对 app.db u", "b": "认证 核对 app.db u", "c": "认证 核对 u 取角色"}
     top3 = {"项目": "demo", "模块": [{"名": n, "依赖": [], "行": i} for i, n in enumerate(mods, 1)]}
     for n, line in mods.items():
-        (p / "contracts" / f"{n}.md").write_text(f"模块 {n}\n依赖 无\n\n认证 可选\n{line}\n", encoding="utf-8")
+        (p / "contracts" / f"{n}.md").write_text(AUTH_BODY.format(n=n, line=line), encoding="utf-8")
     g3 = G.check(p, top3)
-    check(g3["条数"] == 1 and set(g3["按模块"]) == {"c"} and "认证 核对 app.db u" in g3["按模块"]["c"][0] and "a、b" in g3["按模块"]["c"][0],
+    check(g3["条数"] == 3 and set(g3["按模块"]) == {"c"} and "认证 核对 app.db u" in g3["按模块"]["c"][0] and "a、b" in g3["按模块"]["c"][0],
           "「认证 核对」各模块写法不一致：少数派的 c 被点名，照多数写法改", g3)
 
 
@@ -1063,6 +1100,50 @@ def test_interface_smoke_auth():
     check(results4["account"][0], "没有公开登录接口：直接签发 cookie 的退路一样核对通过", results4)
 
 
+def test_smoke_actor_failures():
+    print("G1：冒烟造不出调用人账号 → 判失败（不再静默跳过）；库路径取认证声明第一参数；NOT NULL 列补占位值")
+    import sqlite3
+    from tools.dslagent.v3 import regress as RG
+    # 认证核对指的查询文件不存在：判失败，归到拥有「认证 核对」的模块
+    p = auth_project("smoke_noq")
+    (p / "queries" / "account_by_name.sql").unlink()
+    results, _ = RG.run_smoke(p, ["account"])
+    ok, why = results["account"]
+    check(not ok and "认证核对指的查询 account_by_name.sql 不存在，真实路由必 500" in why, "查询文件不存在 → 失败，原因写清楚", why)
+    check(why.count("不存在，真实路由必 500") == 1, "同一原因只记一次，不按接口重复", why)
+    # 表里没有 role 列、接口要角色：判失败而不是跳过
+    p2 = auth_project("smoke_norole")
+    ent = (p2 / "entities" / "account.entity").read_text(encoding="utf-8").replace("  字段 role 文本 必填 角色\n", "")
+    (p2 / "entities" / "account.entity").write_text(ent, encoding="utf-8")
+    (p2 / "queries" / "account_by_name.sql").write_text("SELECT username FROM account_user WHERE username = :username", encoding="utf-8")
+    results2, notes2 = RG.run_smoke(p2, ["account"])
+    ok2, why2 = results2["account"]
+    check(not ok2 and ("造不出调用人账号" in why2 or "建库失败" in why2 or "role" in why2), "缺 role 列 → 失败而不是跳过", why2)
+    check(not any("造不出调用人账号" in n for n in notes2), "不再写进备注静默跳过", notes2)
+    # _make_actor：库用认证声明第一参数；其他 NOT NULL 无默认值的列补占位
+    w = fresh("actor_ws")
+    (w / "queries").mkdir()
+    (w / "queries" / "q.sql").write_text("SELECT username, role FROM acct WHERE username = :username", encoding="utf-8")
+    con = sqlite3.connect(w / "other.db")
+    con.execute("CREATE TABLE acct(id INTEGER PRIMARY KEY, username TEXT NOT NULL, password_hash TEXT, role TEXT NOT NULL, "
+                "display_name TEXT NOT NULL, disabled INTEGER NOT NULL, score REAL NOT NULL, note TEXT NOT NULL DEFAULT 'd', tag TEXT)")
+    con.commit()
+    con.close()
+    u, pw = RG._make_actor(w, w / "app.db", {"check": ("other.db", "q")}, "teacher")
+    row = sqlite3.connect(w / "other.db").execute("SELECT username, role, display_name, disabled, score, note, tag FROM acct").fetchall()
+    check(row == [(u, "teacher", "x", 0, 0, "d", None)], "按认证声明的库建账号，NOT NULL 文本给 'x'、数字 / disabled 给 0，有默认值的不动", row)
+    try:
+        RG._make_actor(w, w / "app.db", {"check": ("nope.db", "q")}, "teacher")
+        check(False, "库文件不存在应抛 ActorError")
+    except RG.ActorError as e:
+        check("nope.db" in e.why and not e.missing_query, "库文件不存在 → ActorError 写明库名", e.why)
+    try:
+        RG._make_actor(w, w / "app.db", {"check": ("other.db", "zzz")}, "")
+        check(False, "查询文件不存在应抛 ActorError")
+    except RG.ActorError as e:
+        check(e.missing_query and "zzz.sql 不存在" in e.why, "查询文件不存在 → missing_query", e.why)
+
+
 def test_verb_decls():
     print("动词包")
     from tools.verbs import VerbRegistry
@@ -1339,6 +1420,8 @@ def test_check_plan_arg_count():
 if __name__ == "__main__":
     try:
         test_top()
+        test_smoke_actor_failures()
+        test_global_check_auth_lookup()
         test_contract_check()
         test_auth_contract()
         test_prompt_example()

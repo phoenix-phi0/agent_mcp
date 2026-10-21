@@ -140,24 +140,46 @@ def _login_endpoint(mods_contracts):
     return None
 
 
+class ActorError(Exception):
+    """造不出调用人账号。missing_query=真：认证核对指的查询文件不存在（由 run_smoke 开头统一归到拥有认证核对的模块）。"""
+
+    def __init__(self, why, missing_query=False):
+        super().__init__(why)
+        self.why = why
+        self.missing_query = missing_query
+
+
+def _missing_query_reason(q):
+    return f"认证核对指的查询 {q}.sql 不存在，真实路由必 500"
+
+
 def _make_actor(ws, db_path, auth, role):
-    """造一个调用人账号（表在 认证 核对 指的库里，列至少有 username / password_hash，有角色要求再加 role 列）。
-    → (username, password) 或 None（没法造：要角色但没有「认证 核对」可查角色、或建不出这张表的列）。
+    """造一个调用人账号（表在 认证 核对 指的库里——第一个参数，相对 ws；列至少有 username / password_hash，
+    有角色要求再加 role 列；其他 NOT NULL 且无默认值的列补占位值）。→ (username, password)；造不出抛 ActorError。
     没有「认证 核对」时登录只认签名令牌，不查库——只要不需要角色，随便一个用户名都能登录（跟真实路由行为一致）。"""
     import random
 
     username = f"{ACTOR_PREFIX}_{role or 'any'}_{random.randrange(10 ** 9)}"
     password = "smoke_pw_1"
     if not auth["check"]:
-        return (None if role else (username, password))
+        if role:
+            raise ActorError(f"接口要求角色「{role}」，但项目没有「认证 核对」，查不到调用人的角色")
+        return username, password
+    db_name, q = auth["check"]
     table = _auth_table(ws, auth["check"])
-    if not table:
-        return None
-    con = sqlite3.connect(db_path)
+    if table is None:
+        if not (Path(ws) / "queries" / f"{q}.sql").is_file():
+            raise ActorError(_missing_query_reason(q), missing_query=True)
+        raise ActorError(f"认证核对的查询 {q}.sql 里找不到 FROM 表名，造不出调用人账号")
+    db_file = Path(ws) / db_name
+    if not db_file.is_file():
+        raise ActorError(f"认证核对指的库文件 {db_name} 不存在（第一个参数要是库文件名，如 app.db）")
+    con = sqlite3.connect(db_file)
     try:
-        cols = [r[1] for r in con.execute(f"PRAGMA table_info({table})").fetchall()]
+        info = con.execute(f"PRAGMA table_info({table})").fetchall()
+        cols = [r[1] for r in info]
         if not cols or "username" not in cols:
-            return None
+            raise ActorError(f"认证核对的表 {table} 在库 {db_name} 里不存在或没有 username 列，造不出调用人账号")
         from tools.auth import hash_password
 
         values = {"username": username}
@@ -165,13 +187,18 @@ def _make_actor(ws, db_path, auth, role):
             values["password_hash"] = hash_password(password)
         if role:
             if "role" not in cols:
-                return None
+                raise ActorError(f"接口要求角色「{role}」，但认证核对的表 {table} 没有 role 列")
             values["role"] = role
+        for _cid, name, typ, notnull, dflt, pk in info:
+            if name in values or not notnull or dflt is not None or pk:
+                continue
+            numeric = bool(re.search(r"INT|REAL|NUM|FLOA|DOUB|BOOL", (typ or "").upper())) or "disabled" in name.lower()
+            values[name] = 0 if numeric else "x"
         con.execute(f"INSERT INTO {table}({', '.join(values)}) VALUES({', '.join('?' * len(values))})",
                     list(values.values()))
         con.commit()
-    except sqlite3.Error:
-        return None
+    except sqlite3.Error as e:
+        raise ActorError(f"往认证核对的表 {table} 插入调用人账号失败：{e}")
     finally:
         con.close()
     return username, password
@@ -244,11 +271,12 @@ def _smoke_one_inner(ws, sql, module, iface, case, notes, auth, login, login_ep)
             resp0 = call()
             if resp0.status_code != 401:
                 return f"{tag}：不登录应该 401，实际 {resp0.status_code}"
-            actor = _make_actor(ws, db, auth, iface["角色"])
-            if actor is None:
-                notes.append(f"{tag}：需要角色「{iface['角色'] or '（任意已登录）'}」但造不出调用人账号"
-                             f"（没有「认证 核对」指的表，或表里缺 username / role 列），这条接口的登录态核对跳过")
-                return ""
+            try:
+                actor = _make_actor(ws, db, auth, iface["角色"])
+            except ActorError as e:
+                if e.missing_query:
+                    return ""       # 已由 run_smoke 开头归到拥有「认证 核对」的模块，这里不重复记
+                return f"{tag}：造不出调用人账号（角色「{iface['角色'] or '（任意已登录）'}」）：{e.why}"
             _login_cookie(client, ws, actor[0], actor[1], login_ep)
             resp = call()
         else:
@@ -334,6 +362,12 @@ def run_smoke(project, mods):
         login = bool(auth["mandatory"] or auth["optional"])
         login_ep = _login_endpoint(contracts) if login else None
         _check_migrate(ws, sql, contracts, reasons)
+        if login and auth["check"]:
+            q = auth["check"][1]
+            if not (ws / "queries" / f"{q}.sql").is_file():
+                owners = [m for m, c in contracts.items() if list(c["认证"]["核对"] or []) == list(auth["check"])]
+                for m in owners or mods[:1]:
+                    reasons.setdefault(m, []).append(_missing_query_reason(q))
         for m, c in contracts.items():
             for iface in c["接口"]:
                 if iface.get("上传"):          # B2 之前约定里不会有这个字段，先占位
