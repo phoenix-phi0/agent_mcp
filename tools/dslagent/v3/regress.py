@@ -340,6 +340,12 @@ def _check_migrate(ws, sql, contracts, reasons):
 
 def run_smoke(project, mods):
     """→ ({模块: (ok, 原因)}, 备注列表)。project 不被改动（在临时拷贝里跑）。"""
+    reasons, notes = smoke_detail(project, mods)
+    return {m: (m not in reasons, "；".join(reasons.get(m, []))) for m in mods}, notes
+
+
+def smoke_detail(project, mods):
+    """→ ({模块: [不过的原因（每个接口 / 每项检查一条）]}（过了的模块没有键）, 备注列表)。run_smoke 是它的汇总形式。"""
     from ..packs.dslproj import cases as K
     from ..packs.dslproj import project as P
     project = Path(project)
@@ -352,7 +358,7 @@ def run_smoke(project, mods):
             sql = K.build_sql(ws, mods)
         except Exception as e:  # noqa: BLE001
             why = f"建库失败：{type(e).__name__}: {e}"
-            return {m: (False, why) for m in mods}, notes
+            return {m: [why] for m in mods}, notes
         reasons = {}
         contracts = {}
         for m in mods:
@@ -383,7 +389,7 @@ def run_smoke(project, mods):
                 why = _smoke_one(ws, sql, m, iface, case, notes, auth, login, login_ep)
                 if why:
                     reasons.setdefault(m, []).append(why)
-        return {m: (m not in reasons, "；".join(reasons.get(m, []))) for m in mods}, notes
+        return reasons, notes
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -418,3 +424,79 @@ def interface_smoke(ctx, eng, top, modify=False):
     if all_notes:
         ctx.log("验收", 模块="_接口冒烟", 通过=True, 说明="备注：\n" + "\n".join(all_notes)[:1500])
     return r
+
+
+# ------------------------------------------------------------------ 方式=核查：只报告，不重做、不改 state
+
+def code_files(project, module, mods):
+    """模块现有的代码文件（项目相对路径，按 entities / services / routes / queries 排）。"""
+    from ..packs.dslproj import project as P
+    root = Path(project)
+    out = []
+    for rel in (f"entities/{module}.entity", f"services/{module}.zs"):
+        if (root / rel).is_file():
+            out.append(rel)
+    out += [f.relative_to(root).as_posix() for f in P.route_files(project, module, mods)]
+    qd = root / "queries"
+    out += [f.relative_to(root).as_posix() for f in sorted(qd.glob(f"{module}_*.sql"))] if qd.is_dir() else []
+    return out
+
+
+def _code_modules(project, mods):
+    return [m for m in mods if code_files(project, m, mods)]
+
+
+def _merge_items(rows):
+    """[(issue, module)] → 条目列表；同一条 issue 文本只留一条，模块名并到一起（建库失败这类全体模块同一原因）。"""
+    merged = {}
+    for issue, m in rows:
+        merged.setdefault(issue, [])
+        if m not in merged[issue]:
+            merged[issue].append(m)
+    return merged
+
+
+def audit_regression(ctx, top):
+    """核查用：对所有有代码的模块跑 加载检查 + 比对约定 + 跑用例，只报告（不 unmark、不重做、不记验收）。
+    → {count, items: [{issue, modules, basis, type}], summary}。"""
+    mods = [m["名"] for m in top["模块"]]
+    code_mods = _code_modules(ctx.project, mods)
+    if not code_mods:
+        return {"count": 0, "items": [], "summary": "还没有代码，跳过"}
+    items = []
+    for m in code_mods:
+        ok, why = _accept_module(ctx.project, m, mods)
+        if not ok:
+            items.append({"issue": f"模块 {m} 全量回归不过：{why[:1500]}", "modules": m, "basis": "全量回归", "type": "code"})
+    summary = (f"{len(code_mods)} 个有代码的模块，{len(items)} 个不过：" + "；".join(i["modules"] for i in items)) if items \
+        else f"{len(code_mods)} 个有代码的模块全部通过"
+    return {"count": len(items), "items": items, "summary": summary}
+
+
+def _next_smoke_no(out):
+    n = 1
+    while (Path(out) / f"smoke_{n}.json").exists() or (Path(out) / f"smoke_{n}.txt").exists():
+        n += 1
+    return n
+
+
+def audit_smoke(ctx, top):
+    """核查用：同接口冒烟，只报告；每个不过的接口（或每项检查）一条。完整结果存 out/smoke_<n>.json / .txt。
+    → {count, items, summary[, files]}；没有代码时跳过。"""
+    import json
+    mods = [m["名"] for m in top["模块"]]
+    code_mods = _code_modules(ctx.project, mods)
+    if not code_mods:
+        return {"count": 0, "items": [], "summary": "还没有代码，跳过"}
+    reasons, notes = smoke_detail(ctx.project, code_mods)
+    merged = _merge_items((why, m) for m, lst in reasons.items() for why in lst)
+    items = [{"issue": why, "modules": ",".join(ms), "basis": "接口冒烟", "type": "code"} for why, ms in merged.items()]
+    n = _next_smoke_no(ctx.out)
+    f = ctx.out / f"smoke_{n}.json"
+    f.write_text(json.dumps({"模块": {m: {"通过": m not in reasons, "原因": reasons.get(m, [])} for m in code_mods},
+                             "备注": notes}, ensure_ascii=False, indent=2), encoding="utf-8")
+    t = ctx.out / f"smoke_{n}.txt"
+    t.write_text(f"接口冒烟（核查）：{len(code_mods)} 个有代码的模块，{len(reasons)} 个不过；{len(items)} 条问题；备注 {len(notes)} 条\n"
+                 + "\n".join([i["issue"] for i in items] + notes) + "\n", encoding="utf-8")
+    summary = f"{len(code_mods)} 个有代码的模块，{len(reasons)} 个不过，{len(items)} 条问题" if items else f"{len(code_mods)} 个有代码的模块冒烟全部通过"
+    return {"count": len(items), "items": items, "summary": summary, "files": [str(f), str(t)]}

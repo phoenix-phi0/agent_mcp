@@ -198,7 +198,7 @@ def run_entry(script, project, out, req, extra_vars=None, backend=None, cost_cap
               req_path=req_path)
     eng = V3Engine(client=V2.Client(M), workdir=project, verbose=False, verbs_root=C.VERBS)
     eng.v3, ctx.usage = ctx, eng.usage
-    eng.vars.update({"req": req, **(extra_vars or {})})
+    eng.vars.update({"req": req, "req_file": str(req_path or ""), **(extra_vars or {})})
     res, err = {"status": "成功", "reason": "", "at": ""}, None
     try:
         eng.run((HERE / f"{script}.zs").read_text(encoding="utf-8"))

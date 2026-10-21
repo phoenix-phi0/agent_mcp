@@ -61,6 +61,7 @@ def main(argv=None):
     v.add_argument("--llm", default="sonnet", help="（audit / change）调模型用的模型名")
     v.add_argument("--retries", type=int, default=3, help="（change）修改计划写了几次都没通过检查才放弃")
     v.add_argument("--logic-check", action="store_true", help="（audit）核查前对全部已有约定并行跑角色 logic_check，疑点并入问题清单；缺省不开")
+    v.add_argument("--deep", action="store_true", help="（audit）再对每个有代码的模块派一个读代码的子任务（约定、代码、需求对一遍）；缺省只做程序检查 + 规划层一个子任务")
     ag = sp.add_parser("agents", help="子 agent 管理：角色登记表、调度层账本")
     agsp = ag.add_subparsers(dest="agents_cmd", required=True)
     st = agsp.add_parser("stats", help="按角色 / 按模型统计调用数、成功率、平均轮数、花费、用时")
@@ -81,7 +82,8 @@ def main(argv=None):
         req_text = Path(a.req).read_text(encoding="utf-8")
         if a.action == "audit":
             res = V3.run_entry("核查", a.project, a.out, req_text,
-                               extra_vars={"task": a.task or "", "llm": a.llm, "logic_check": "是" if a.logic_check else "否"},
+                               extra_vars={"task": a.task or "", "llm": a.llm, "logic_check": "是" if a.logic_check else "否",
+                                          "deep": "是" if a.deep else "否"},
                                cost_cap=a.cost_cap, **({"wall": a.wall} if a.wall else {}), req_path=a.req)
             print(json.dumps({k: res.get(k) for k in ("status", "reason", "at", "花费", "用时", "模型调用", "returned")}, ensure_ascii=False))
             return 0 if res["status"] == "成功" else 1

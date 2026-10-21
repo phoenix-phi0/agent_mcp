@@ -5,6 +5,7 @@
 多人模式（登录 / 角色）留给 A3，这里先不开登录。
 例如 接口冒烟
 方式=修改（修改流程收尾用）：失败模块只调 改模块（修改式重做，带失败原文），不调 做一个模块；每轮完整结果存 out/smoke_<轮>.json 与 .txt 摘要，返回带 files。
+方式=核查（核查.zs 用）：只报告，不重做、不改 state；每个不过的接口一条 item（issue = 方法 路径 + 直接调用与 HTTP 的差异原文），完整结果存 out/smoke_<n>.json / .txt（n 接着已有的往后排），返回带 files；没有代码时跳过。
 """
 import sys
 from pathlib import Path
@@ -22,6 +23,10 @@ def 接口冒烟(方式: str = "") -> dict:
     try:
         top = PL.current_top(c)
     except ValueError as e:
+        if 方式 == "核查":
+            return {"count": 0, "items": [], "summary": "还没有 plan/top.zs，跳过"}
         X.fail(e)
+    if 方式 == "核查":
+        return RG.audit_smoke(c, top)
     r = RG.interface_smoke(c, current_engine(), top, modify=(方式 == "修改"))
     return {"status": r["状态"], **({"rounds": r["轮数"]} if "轮数" in r else {}), **({"files": r["结果文件"]} if "结果文件" in r else {})}

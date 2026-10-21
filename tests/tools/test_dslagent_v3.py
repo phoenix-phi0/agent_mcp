@@ -1274,8 +1274,14 @@ def test_plan_script_flow():
     check(not (p / "contracts" / "tutor.md").exists(), "删除模块真的清理了约定文件")
 
 
+def audit_reply(*items, found=None):
+    """核查子任务的回复（派任务的固定外壳）：result = {found, items}。"""
+    return json.dumps({"result": {"found": bool(items) if found is None else found, "items": list(items)},
+                       "status": "成功", "reason": ""}, ensure_ascii=False)
+
+
 def test_audit_entry():
-    print("D3：核查.zs（假模型，顶层脚本参数用中文）出问题清单；tools.dslagent v3 的 audit 入口（core.run_entry）")
+    print("N2：核查.zs（假模型）= 程序检查动词 + 规划层一个子任务，结果存成问题清单；tools.dslagent v3 的 audit 入口（core.run_entry）")
     p = fresh("audit_p")
     (p / "plan").mkdir(parents=True)
     (p / "plan" / "top.zs").write_text("项目 demo\n模块 a\n模块 b\n", encoding="utf-8")
@@ -1283,30 +1289,23 @@ def test_audit_entry():
     (p / "contracts" / "a.md").write_text(DUP_A, encoding="utf-8")
     (p / "contracts" / "b.md").write_text(DUP_B, encoding="utf-8")
     out = fresh("audit_out")
-    fk = Fake(scripts={"v3_audit": ['[{"问题": "需求第 3 节要求的导出功能两个模块都没做", "涉及模块": ["a", "b"], "依据": "需求第 3 节"}]']})
-    res = core.run_entry("核查", p, out, "需求全文", extra_vars={"task": "", "llm": "sonnet"}, backend=fk)
+    fk = Fake(scripts={"dsl01": [audit_reply({"issue": "需求第 3 节要求的导出功能两个模块都没做", "modules": "a,b", "basis": "需求第 3 节", "type": "req"})]})
+    res = core.run_entry("核查", p, out, "需求全文", extra_vars={"task": "", "llm": "sonnet", "deep": "否", "logic_check": "否"}, backend=fk)
     check(res["status"] == "成功", "核查.zs 跑成功", res)
     ret = res.get("returned") or {}
-    check(ret.get("count") == 3, "问题清单：程序检查（a/b 路径重复）2 条 + 模型 1 条", ret)
+    check(ret.get("count") == 3, "问题清单：程序检查（a/b 路径重复）2 条 + 规划层子任务 1 条", ret)
     path = Path(p) / ret["path"]
     check(path.is_file() and path.name == "1.md", "问题清单存盘到 plan/issues/1.md", ret)
     text = path.read_text(encoding="utf-8")
-    check("需求第 3 节要求的导出功能两个模块都没做" in text and "GET /dup/x" in text, "程序检查和模型发现的问题都在清单里", text)
-    check(fk.n("v3_audit") == 1, "调了一次模型", [c["tag"] for c in fk.calls])
-    # audit.md 现在要求模型回英文键 issue/modules/basis，核查.zs 照样能处理（新旧键都认）
-    p1b, out1b = fresh("audit_p1b"), fresh("audit_out1b")
-    (p1b / "plan").mkdir(parents=True)
-    (p1b / "plan" / "top.zs").write_text("项目 demo\n模块 a\n", encoding="utf-8")
-    fk1b = Fake(scripts={"v3_audit": ['[{"issue": "新键回复也要能用", "modules": "a", "basis": "需求第 1 节"}]']})
-    res1b = core.run_entry("核查", p1b, out1b, "需求全文", extra_vars={"task": "", "llm": "sonnet"}, backend=fk1b)
-    ret1b = res1b.get("returned") or {}
-    check(ret1b.get("count") == 1, "模型回新键 issue/modules/basis 一样能被核查.zs 消费", ret1b)
-    check("新键回复也要能用" in (Path(p1b) / ret1b["path"]).read_text(encoding="utf-8"), "新键问题进了清单", ret1b)
-    # 没有 plan/top.zs 时也能跑（纯模型找问题，程序检查部分是空）
+    check("需求第 3 节要求的导出功能两个模块都没做" in text and "GET /dup/x" in text and "类型：req" in text, "程序检查和模型发现的问题都在清单里", text)
+    check(fk.n("dsl") == 1 and fk.n("v3_audit") == 0, "只派了一个规划层子任务（没有专门的核查模型调用）", [c["tag"] for c in fk.calls])
+    check(ret["unchecked"] == [] and ret["dropped"] == [], "没有 unchecked / dropped", ret)
+    # 没有 plan/top.zs 时也能跑（全局检查 0 条，回归 / 冒烟跳过，规划层照派）
     p2, out2 = fresh("audit_p2"), fresh("audit_out2")
-    fk2 = Fake(scripts={"v3_audit": ["[]"]})
-    res2 = core.run_entry("核查", p2, out2, "需求全文", extra_vars={"task": "", "llm": "sonnet"}, backend=fk2)
-    check(res2["status"] == "成功" and (res2.get("returned") or {}).get("count") == 0, "还没有 plan/top.zs 时核查照样能跑，程序检查部分是空", res2)
+    fk2 = Fake(scripts={"dsl01": [audit_reply()]})
+    res2 = core.run_entry("核查", p2, out2, "需求全文", extra_vars={"task": "", "llm": "sonnet", "deep": "是", "logic_check": "否"}, backend=fk2)
+    check(res2["status"] == "成功" and (res2.get("returned") or {}).get("count") == 0, "还没有 plan/top.zs 时核查照样能跑；deep 无效", res2)
+    check(fk2.n("dsl") == 1, "没有 top 也派了规划层子任务，deep 没多派", [c["tag"] for c in fk2.calls])
 
 
 def test_modify_entry():
@@ -1711,8 +1710,7 @@ def test_issue_types():
     check([i["type"] for i in back] == ["code", "contract", "req", "contract"], "往返类型一致", back)
     old = "# 问题清单 1\n\n1. 旧问题\n   涉及模块：graph\n   依据：需求\n"
     check(IS.parse_issues(old)[0]["type"] == "contract", "旧清单（没有类型行）按 contract")
-    mi = IS.parse_model_issues('[{"issue":"x","type":"code"},{"issue":"y"},{"issue":"z","类型":"需求缺口"},{"issue":"w","type":"乱写"}]')
-    check([i["type"] for i in mi] == ["code", "contract", "req", "contract"], "模型出参：缺省 contract，认中文别名，乱写按 contract", mi)
+    check([IS.norm_type(x) for x in ("code", "", "需求缺口", "乱写")] == ["code", "contract", "req", "contract"], "类型规整：缺省 contract，认中文别名，乱写按 contract")
     p = fresh("iss")
     (p / "plan" / "issues").mkdir(parents=True)
     (p / "plan" / "issues" / "notes.md").write_text("x", encoding="utf-8")
