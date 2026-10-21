@@ -1,6 +1,6 @@
 """全局检查：全部约定都通过各自检查之后调（不调模型）：同一「方法+路径」或同一张表在两个模块都定义 → 按模块分组的问题。
-返回 {"count": n, "by_module": {模块: "问题（分号隔开）"}, "summary": 摘要文本, "items": [{issue, modules, basis, type}]}；
-没问题 count=0、by_module={}、items=[]。items 同 issues.program_items（含「依赖与顶层不一致」，basis=程序检查，type=contract），给 核查.zs 的 存问题清单 用；
+返回 {"count": n, "by_module": {模块: "问题（分号隔开）"}, "summary": 摘要文本, "items": [{issue, modules, basis}]}；
+没问题 count=0、by_module={}、items=[]。items 同 issues.program_items（含「依赖与顶层不一致」，basis=程序检查），给 核查.zs 的 存问题清单 用；
 count / by_module / summary 只是「方法+路径 / 表重复」（规划到通过 的全局重写按它们判断）。没有 plan/top.zs 时 count=0（核查要能在顶层规划之前跑）。
 例如 设 g = 全局检查
 """

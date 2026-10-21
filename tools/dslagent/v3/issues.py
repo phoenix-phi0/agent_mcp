@@ -1,6 +1,6 @@
 """核查.zs / 修改.zs 用：问题清单的存 / 读 plan/issues/<序号>.md（序号分配、渲染、解析），程序检查条目（program_items），
-逻辑核查（run_logic_checks，角色 logic_check，按约定内容 hash 缓存）。各路结果怎么合并见 audit.merge；
-调模型找问题的部分写在 核查.zs 里（派任务 / 并行派任务）。
+疑点检查（run_logic_checks，角色 logic_check，按约定内容 hash 缓存；现在没有动词调它）。各路结果怎么合并见 audit.merge；
+调模型找问题的部分写在 核查.zs 里（派任务）。
 
 问题清单格式（模型出参 + 程序检查问题 一起序号）：
 
@@ -10,9 +10,8 @@
        涉及模块：graph、vocab
        依据：需求第 3 节 / plan/top.zs 模块 vocab 说明 / 程序检查
 
-每条用「N. 」开头，后面跟缩进的「涉及模块：」「依据：」「类型：」三行（都可省，是给人看的展示文字，不是键名）。
-类型：code=代码和约定不一致 / contract=约定有问题 / req=需求缺口；省略时按 contract（旧清单没有这一行）。
-parse_issues() 解一份清单文本回列表，条目字段名是 issue/modules/basis/type（format_issue 兼容旧键 问题/涉及模块/依据）。
+每条用「N. 」开头，后面跟缩进的「涉及模块：」「依据：」两行（都可省，是给人看的展示文字，不是键名）。
+parse_issues() 解一份清单文本回列表，条目字段名是 issue/modules/basis（format_issue 兼容旧键 问题/涉及模块/依据）。
 """
 import hashlib
 import json
@@ -56,21 +55,6 @@ def resolve(project, ref):
     return p
 
 
-ISSUE_TYPES = ("code", "contract", "req")
-DEFAULT_TYPE = "contract"
-
-
-def norm_type(v):
-    """类型值规整：认 code/contract/req，也认中文别名；认不出（含空）按缺省 contract。"""
-    t = str(v or "").strip().lower()
-    if t in ISSUE_TYPES:
-        return t
-    for key, alias in (("code", ("代码", "代码问题")), ("contract", ("约定", "约定问题")), ("req", ("需求", "需求缺口"))):
-        if t in alias or any(t.startswith(a) for a in alias):
-            return key
-    return DEFAULT_TYPE
-
-
 def format_issue(i, item):
     lines = [f"{i}. {item.get('issue', item.get('问题', ''))}"]
     mods = item.get("modules", item.get("涉及模块"))
@@ -80,9 +64,6 @@ def format_issue(i, item):
     basis = item.get("basis", item.get("依据"))
     if basis:
         lines.append(f"   依据：{basis}")
-    typ = item.get("type", item.get("类型"))
-    if typ and norm_type(typ) != DEFAULT_TYPE:
-        lines.append(f"   类型：{norm_type(typ)}")
     return "\n".join(lines)
 
 
@@ -95,7 +76,7 @@ ITEM_RE = re.compile(r"^(\d+)\.\s+(.*)$")
 
 
 def parse_issues(text):
-    """问题清单文本 → [{"issue", "modules", "basis", "type"}, …]（顺序即原序号；没有「类型：」行的旧清单 type=contract）。"""
+    """问题清单文本 → [{"issue", "modules", "basis"}, …]（顺序即原序号）。"""
     out = None
     items = []
     cur = None
@@ -104,15 +85,13 @@ def parse_issues(text):
         if m:
             if cur:
                 items.append(cur)
-            cur = {"issue": m.group(2).strip(), "modules": "", "basis": "", "type": DEFAULT_TYPE}
+            cur = {"issue": m.group(2).strip(), "modules": "", "basis": ""}
             continue
         s = raw.strip()
         if cur and s.startswith("涉及模块："):
             cur["modules"] = s[len("涉及模块："):].strip()
         elif cur and s.startswith("依据："):
             cur["basis"] = s[len("依据："):].strip()
-        elif cur and s.startswith("类型："):
-            cur["type"] = norm_type(s[len("类型："):])
     if cur:
         items.append(cur)
     return items
@@ -124,7 +103,7 @@ def program_items(project, top):
     items = []
     for m, probs in sorted(g["按模块"].items()):
         for p in probs:
-            items.append({"issue": p, "modules": m, "basis": "程序检查", "type": "contract"})
+            items.append({"issue": p, "modules": m, "basis": "程序检查"})
     return items
 
 
@@ -135,7 +114,7 @@ def logic_cache_path(ctx):
 def run_logic_checks(ctx, top, backend=None):
     """对 top 里全部已有约定的模块并行跑角色 logic_check（找伪代码逻辑漏洞），按约定内容 hash 缓存——内容没变
     不重调模型。疑点转成问题清单条目（依据写「logic_check(疑点)」，由修改规划决定采不采纳），不单独存盘，
-    并入最终问题清单（核查.zs 的 逻辑核查 动词）。"""
+    并入最终问题清单。"""
     from .. import roles as R
     from . import contracts as VC
     cache_f = logic_cache_path(ctx)
@@ -180,7 +159,7 @@ def run_logic_checks(ctx, top, backend=None):
                         found = []
                 cache[m] = {"hash": todo[m], "items": [
                     {"issue": it.get("issue") or it.get("问题") or "", "modules": m,
-                     "basis": f"logic_check(疑点)：{it.get('basis') or it.get('依据') or ''}", "type": "contract"}
+                     "basis": f"logic_check(疑点)：{it.get('basis') or it.get('依据') or ''}"}
                     for it in found if isinstance(it, dict) and (it.get("issue") or it.get("问题"))]}
         cache_f.write_text(json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8")
     for m in mods:

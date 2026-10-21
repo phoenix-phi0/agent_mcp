@@ -267,37 +267,34 @@ SQLite 有列亲和性，所以 `WHERE views > :下限` 能工作。但左边一
 
 ### 入参名约定（D4）
 - **动词的入参名用中文**（`需求=` `模型=` `问题=` 等，不改）。
-- **顶层脚本（`核查.zs`、`修改.zs`、v3 入口）的入参名用英文**：核查 `req req_file? task? llm=sonnet deep=否 logic_check=否`，
+- **顶层脚本（`核查.zs`、`修改.zs`、v3 入口）的入参名用英文**：核查 `req task? llm=sonnet`，
   修改 `req issues=latest task? llm=sonnet retries=3`（`model` 是引擎关键字别名不能当变量名，所以用 `llm`）；
   `读问题清单` 的 `问题` 同时认 `latest` 和 `最新`。取值（是/否、最新、成功…）仍是中文。
   宿主（`core.run_entry` 的变量键、`__main__.py` 的 `extra_vars`）按这些英文名注入。
 - **新写的业务函数入参用英文**。
 
-### 核查.zs（N2 重写）
-旧的 `核查` 动词（程序检查 + 模型调用 + 逻辑核查合在一起，按 hash 缓存）已删除，不留兼容壳。`核查.zs` 现在是：
+### 核查.zs（程序检查用动词，判断处派子任务）
+旧的 `核查` 动词（程序检查 + 模型调用合在一起，按 hash 缓存）已删除，不留兼容壳。`核查.zs` 现在是：
 
 ```
 设 a = 全局检查                   # {count, by_module, summary, items}
 设 b = 全量回归 方式=核查         # 有代码才跑；只报告，不重做、不改 state
 设 c = 接口冒烟 方式=核查         # 同上；完整结果存 out/smoke_<n>.json/.txt
-设 mat = 取规划材料 需求={text}     # {需求, 顶层, 目录, 约定}：规划层子任务读不到工作目录之外的文件，材料必须放进入参
-设 p = 派任务 … 入参={mat} … found:是否,items:列表   # 规划层一个子任务（不读代码）
-设 m = 并行派任务 {jobs}          # deep=是：核查任务表 对每个有代码的模块一项（读代码）
-设 s = 存问题清单 程序={a} 回归={b} 冒烟={c} 规划={p} 模块={m} 模块名={mods} 疑点={e}
+设 files = 列表加项 …             # plan/catalog.md、plan/top.zs、contracts/<模块>.md（有 top 才加）、需求全文
+设 p = 派任务 {desc} {files} {logic} found:是否,items:列表   # 规划层一个子任务（不读代码）
+设 s = 存问题清单 程序={a} 回归={b} 冒烟={c} 规划={p}
 ```
 
-- 程序检查类动词统一返回 `{count, items:[{issue, modules, basis, type}], summary}`，type 取 code / contract / req，
-  modules 是逗号隔开的模块名。`全局检查` 的 count / by_module / summary 保持原样（只含方法+路径 / 表重复），
-  items 同 `issues.program_items`（含依赖与顶层不一致）。
-- 新动词：`取文件 <路径>`（需求文件 / 项目目录内；`@名字` = v3 自带提示词）、`取规划材料 需求=<路径或文本>`（返回 `{需求, 顶层, 目录, 约定}`，约定 = 各模块约定全文去用例、单份超 12000 字截断；规划层 派任务 必须用它的返回当入参）、`列出模块 [有代码=是]`、
-  `核查任务表 模块列表 任务 已知问题=`、`逻辑核查`。
-- `存问题清单` 的参数都可省：`程序 回归 冒烟 规划 模块 疑点 模块名`。规划 / 模块 接 `派任务` / `并行派任务` 的返回：
+- 程序检查类动词统一返回 `{count, items:[{issue, modules, basis}], summary}`，modules 是逗号隔开的模块名。
+  `全局检查` 的 count / by_module / summary 保持原样（只含方法+路径 / 表重复），items 同 `issues.program_items`（含依赖与顶层不一致）。
+- `派任务` 的入参是文件名列表：工作目录（项目目录）内的文件由它读出，每个文件最多 400 行；需求全文直接当一项文本放进去。
+- `存问题清单` 的参数都可省：`程序 回归 冒烟 规划`。规划 接 `派任务` 的返回：
   status 非成功的记入返回的 `unchecked`（`{module, reason}`，**不能当作没问题**）；`found` 与 `items` 前后矛盾、
-  缺 issue/modules/basis/type、type 不在三种之内的条目丢弃并记入 `dropped`（带原文，不重调模型）。
+  缺 issue/modules/basis 的条目丢弃并记入 `dropped`（带原文，不重调模型）。
   合并 → 按（issue, modules）去重 → 统一序号 → 存 `plan/issues/<序号>.md`；返回 `{path, count, unchecked, dropped}`。
-  旧的 `存问题清单 g={g}` 单参写法不再保留。
-- 命令行：`python -m tools.dslagent v3 audit --req … --project … --out … [--deep] [--logic-check] [--task …]`。
-- 没有 plan/top.zs 时也能跑：全局检查 0 条，回归 / 冒烟跳过，规划层照派，deep 无效。
+- `检查修改计划 {plan} 问题={iss.items}`：问题清单按调用时传入的检查（没传才读 plan/issues 最新一份）。
+- 命令行：`python -m tools.dslagent v3 audit --req … --project … --out … [--task …]`。
+- 没有 plan/top.zs 时也能跑：全局检查 0 条，回归 / 冒烟跳过，规划层照派。
 
 ### 最终对照表（字段名，R1/R3/R4 的改动汇总，权威版本）
 
@@ -453,7 +450,7 @@ R4（提示词/模型回复键）；`tools/dslagent` 内部 `c.log(...)` 记的�
 
 已改（模型回复 JSON 的键，解析端兼容旧键）：
 - `v3/prompts/audit.md`：`{"问题","涉及模块","依据"}` → `{"issue","modules","basis"}`；
-  `v3/issues.py`（`parse_model_issues`〔N2 已删，改由 `v3/audit.py` 的 `merge` 收口〕/`format_issue`/`parse_issues`/`program_items`/
+  `v3/issues.py`（`parse_model_issues`〔已删，改由 `v3/audit.py` 的 `merge` 收口〕/`format_issue`/`parse_issues`/`program_items`/
   `run_logic_checks` 的内部条目表示同步改成 issue/modules/basis，`parse_model_issues`
   与 `run_logic_checks` 对模型回复两种键都认；持久化的问题清单 .md 文件里「涉及模块：」
   「依据：」是给人看的展示文字，不是键名，没有改）。

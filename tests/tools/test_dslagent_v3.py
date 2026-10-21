@@ -1244,15 +1244,11 @@ def test_plan_script_flow():
         "v3_review_tutor": ['{"通过": "是", "问题列表": []}'],
         "v3_contract_progress": [contract_text("progress")],
     })
-    state = fresh("pf_st") / "state"
-    stub_env(state)
     M = V2.Model(out, backend=fk)
-    ctx = core.Ctx(p, out, "需求全文", M, module_cmd=CMD)
+    ctx = core.Ctx(p, out, "需求全文", M)
     eng = core.V3Engine(V2.Client(M), workdir=p, verbose=False, verbs_root=CM.VERBS)
     eng.v3, ctx.usage = ctx, eng.usage
     eng.run("用包 v3\n执行 plan/changes/1.zs 需求=需求全文\n")
-    check({c["模块"] for c in stub_calls(state)} == {"tutor"},
-          "M2：只有新增的 tutor（旧约定为空，算约定变了）进了 改模块；progress 约定重写后文本没变，不重做（tutor 没有参考代码，重做不过是预期的）", stub_calls(state))
     check(eng.halted is None, "直接执行计划文件（不经过一个专门的「执行修改计划」动词），没有终止失败", eng.halted)
     check((p / "contracts" / "tutor.md").is_file(), "新增模块：约定写出来了")
     check(fk.n("v3_contract_tutor") == 1 and fk.n("v3_review_tutor") == 1, "新增模块走的是正常全流程：写一次、复核一次", [c["tag"] for c in fk.calls])
@@ -1281,7 +1277,7 @@ def audit_reply(*items, found=None):
 
 
 def test_audit_entry():
-    print("N2：核查.zs（假模型）= 程序检查动词 + 规划层一个子任务，结果存成问题清单；tools.dslagent v3 的 audit 入口（core.run_entry）")
+    print("核查.zs（假模型）= 程序检查动词 + 规划层一个子任务，结果存成问题清单；tools.dslagent v3 的 audit 入口（core.run_entry）")
     p = fresh("audit_p")
     (p / "plan").mkdir(parents=True)
     (p / "plan" / "top.zs").write_text("项目 demo\n模块 a\n模块 b\n", encoding="utf-8")
@@ -1289,23 +1285,23 @@ def test_audit_entry():
     (p / "contracts" / "a.md").write_text(DUP_A, encoding="utf-8")
     (p / "contracts" / "b.md").write_text(DUP_B, encoding="utf-8")
     out = fresh("audit_out")
-    fk = Fake(scripts={"dsl01": [audit_reply({"issue": "需求第 3 节要求的导出功能两个模块都没做", "modules": "a,b", "basis": "需求第 3 节", "type": "req"})]})
-    res = core.run_entry("核查", p, out, "需求全文", extra_vars={"task": "", "llm": "sonnet", "deep": "否", "logic_check": "否"}, backend=fk)
+    fk = Fake(scripts={"dsl01": [audit_reply({"issue": "需求第 3 节要求的导出功能两个模块都没做", "modules": "a,b", "basis": "需求第 3 节"})]})
+    res = core.run_entry("核查", p, out, "需求全文", extra_vars={"task": "", "llm": "sonnet"}, backend=fk)
     check(res["status"] == "成功", "核查.zs 跑成功", res)
     ret = res.get("returned") or {}
     check(ret.get("count") == 3, "问题清单：程序检查（a/b 路径重复）2 条 + 规划层子任务 1 条", ret)
     path = Path(p) / ret["path"]
     check(path.is_file() and path.name == "1.md", "问题清单存盘到 plan/issues/1.md", ret)
     text = path.read_text(encoding="utf-8")
-    check("需求第 3 节要求的导出功能两个模块都没做" in text and "GET /dup/x" in text and "类型：req" in text, "程序检查和模型发现的问题都在清单里", text)
+    check("需求第 3 节要求的导出功能两个模块都没做" in text and "GET /dup/x" in text, "程序检查和模型发现的问题都在清单里", text)
     check(fk.n("dsl") == 1 and fk.n("v3_audit") == 0, "只派了一个规划层子任务（没有专门的核查模型调用）", [c["tag"] for c in fk.calls])
     check(ret["unchecked"] == [] and ret["dropped"] == [], "没有 unchecked / dropped", ret)
     # 没有 plan/top.zs 时也能跑（全局检查 0 条，回归 / 冒烟跳过，规划层照派）
     p2, out2 = fresh("audit_p2"), fresh("audit_out2")
     fk2 = Fake(scripts={"dsl01": [audit_reply()]})
-    res2 = core.run_entry("核查", p2, out2, "需求全文", extra_vars={"task": "", "llm": "sonnet", "deep": "是", "logic_check": "否"}, backend=fk2)
-    check(res2["status"] == "成功" and (res2.get("returned") or {}).get("count") == 0, "还没有 plan/top.zs 时核查照样能跑；deep 无效", res2)
-    check(fk2.n("dsl") == 1, "没有 top 也派了规划层子任务，deep 没多派", [c["tag"] for c in fk2.calls])
+    res2 = core.run_entry("核查", p2, out2, "需求全文", extra_vars={"task": "", "llm": "sonnet"}, backend=fk2)
+    check(res2["status"] == "成功" and (res2.get("returned") or {}).get("count") == 0, "还没有 plan/top.zs 时核查照样能跑", res2)
+    check(fk2.n("dsl") == 1, "没有 top 也派了规划层子任务", [c["tag"] for c in fk2.calls])
 
 
 def test_modify_entry():
@@ -1343,149 +1339,7 @@ def test_modify_entry():
     plans = sorted((p / "plan" / "changes").glob("*.zs"), key=lambda f: int(f.stem))
     check(len(plans) == 2, "两次写修改计划都存盘了（没通过检查的那份也留着痕迹）", [f.name for f in plans])
     check(plans[-1].read_text(encoding="utf-8").strip() == GOOD_PLAN.strip(), "最后一份是通过检查、真正执行的那份", plans[-1].read_text(encoding="utf-8"))
-    check(res["reason"].startswith("修改完成"), "M2：计划执行完直接结束，不再生成分配 / 跑 plan/build.zs", res)
-    check(not (p / "plan" / "build.zs").exists(), "M2：没有生成 plan/build.zs")
-    calls = stub_calls(state)
-    check(calls and all("全量回归发现问题" in x["task"] for x in calls),
-          "M2：progress 的约定重写后文本没变，不因约定重做；只有收尾的全量回归（夹具骨架用例都是未实现）调起了重做", [x["模块"] for x in calls])
-    check(all("## 这次是修改，不是新建" in x["task"] for x in calls),
-          "M3：收尾回归的失败模块走 改模块（修改式任务，带失败原文），不走 做一个模块", [x["task"][:60] for x in calls])
-    check(res["reason"].count("全量回归") == 1 and "接口冒烟" in res["reason"], "M3：修改.zs 的返回带全量回归与接口冒烟的结果", res)
-    sj = out / "smoke_1.json"
-    check(sj.is_file() and (out / "smoke_1.txt").is_file() and "progress" in json.loads(sj.read_text(encoding="utf-8"))["模块"],
-          "M3：接口冒烟的完整结果存 out/smoke_<轮>.json 与摘要 .txt", sorted(f.name for f in out.iterdir()))
-
-
-def graph_old_contract():
-    """参考实现的 graph 约定，只把 加边 的一行伪代码改了（取知识点 没变）→ 旧约定。"""
-    t = contract_text("graph")
-    old = t.replace('返回 {"ok": 1}', '返回 {"ok": 1, "edge": 1}')
-    assert old != t
-    return old
-
-
-def test_modify_redo():
-    print("M2：约定变了的模块修改式重做——只重做约定真变了的模块；任务含四段；旧约定 / 基线存 plan/changes/<序号>.json；下游不重做")
-    from tools.dslagent.v3 import modify as MD
-    p = solution_project()
-    (p / "contracts" / "graph.md").write_text(graph_old_contract(), encoding="utf-8")
-    out, state = fresh("redo_out"), fresh("redo_st") / "state"
-    stub_env(state)
-    for m in ("graph", "vocab", "progress"):
-        core.Ctx(p, out, "x", None).mark_done(m)
-    (p / "plan" / "issues").mkdir(parents=True)
-    (p / "plan" / "issues" / "1.md").write_text(
-        "# 问题清单 1\n\n1. graph 加边的伪代码写得不对\n   涉及模块：graph\n", encoding="utf-8")
-    GOOD = "# 对应问题 1\n改约定 graph 加边的伪代码去掉多余的\\_edge\\_字段\n落实修改\n"
-    fk = Fake(scripts={"v3_change_plan": [GOOD], "v3_contract_graph": [contract_text("graph")]})
-    res = core.run_entry("修改", p, out, "需求全文", extra_vars={"issues": "latest", "task": "把加边的伪代码改回去", "llm": "sonnet", "retries": "3"},
-                          backend=fk, module_cmd=CMD)
-    check(res["status"] == "成功" and res["reason"].startswith("修改完成"), "修改.zs 成功并结束", res)
-    calls = stub_calls(state)
-    check([c["模块"] for c in calls] == ["graph"], "只重做了约定变了的 graph；下游 vocab / progress（约定没变）一次都没重做", [c["模块"] for c in calls])
-    check(not (p / "plan" / "build.zs").exists(), "不生成 plan/build.zs")
-    task = calls[0]["task"]
-    check(task.startswith("模块 graph\n") and "## 这次是修改，不是新建" in task, "改模块 任务文本：模块名 + 这次是修改，不是新建", task[:200])
-    for h in ("## 修改需求", "## 本模块的计划条目与问题", "## 新旧约定差异", "## 范围规则"):
-        check(h in task, f"任务文本含「{h}」", task)
-    check("把加边的伪代码改回去" in task and "改约定 graph 加边的伪代码去掉多余的 edge 字段" in task and "graph 加边的伪代码写得不对" in task,
-          "任务文本带修改需求原文 / 本模块计划条目原文 / 对应问题原文", task)
-    check("### 函数" in task and "修改：" in task and "函数 加边" in task and "函数 取知识点" not in task.split("## 新旧约定差异")[1].split("## 范围规则")[0],
-          "差异按函数分组，只列 加边（修改），不列没变的 取知识点", task)
-    j = json.loads((p / "plan" / "changes" / "1.json").read_text(encoding="utf-8"))["modules"]["graph"]
-    check(j["old_contract"] == graph_old_contract() and j["task"] == "把加边的伪代码改回去" and j["plan_entries"] and j["issues"],
-          "plan/changes/1.json 存了旧约定全文 / 计划条目 / 问题原文 / task", list(j))
-    check(set(j["baseline"]) >= {"取知识点_取到", "加边_成功"} and all(b["通过"] for b in j["baseline"].values()), "基线记了修改前各用例的通过状态", j["baseline"])
-    ctx = core.Ctx(p, out, "x", None)
-    check(ctx.is_done("graph") and ctx.is_done("vocab") and ctx.is_done("progress"), "graph 标完成时记了新 hash；vocab / progress 本来就是完成的")
-    check(MD.explanation(p, "vocab") == "" and MD.latest_record(p, "vocab") is None, "没有记录的模块：取修改说明为空")
-    e = engine(p)
-    e.v3 = ctx
-    e.run("用包 v3\n设 s = 取修改说明 graph\n返回 {s}\n")
-    check("## 范围规则" in e.returned[0] and e.returned[0].startswith("## 修改需求"), "取修改说明 动词返回渲染好的说明", e.returned)
-    e2 = engine(p)
-    e2.v3 = ctx
-    e2.run("用包 v3\n设 s = 取修改说明 vocab\n返回 {s}\n")
-    check(e2.returned[0] == "", "取修改说明：没记录返回空串", e2.returned)
-
-
-def test_modify_unchanged_not_redone():
-    print("M2：改约定 重写出来文本不变 → 不重做；约定没变的上下游不重做")
-    p = solution_project()
-    out, state = fresh("redo_out"), fresh("redo_st") / "state"
-    stub_env(state)
-    for m in ("graph", "vocab", "progress"):
-        core.Ctx(p, out, "x", None).mark_done(m)
-    (p / "plan" / "changes").mkdir(parents=True)
-    (p / "plan" / "changes" / "1.zs").write_text("# 对应问题 1\n改约定 graph 随便改点\n落实修改\n", encoding="utf-8")
-    fk = Fake(scripts={"v3_contract_graph": [contract_text("graph")]})
-    M = V2.Model(out, backend=fk)
-    ctx = core.Ctx(p, out, "x", M)
-    ctx.module_cmd = CMD
-    eng = core.V3Engine(V2.Client(M), workdir=p, verbose=False, verbs_root=CM.VERBS)
-    eng.v3, ctx.usage = ctx, eng.usage
-    eng.run("用包 v3\n改约定 graph 随便改点\n设 r = 落实修改\n返回 {r}\n")
-    check(eng.halted is None and eng.returned[0]["written"] == ["graph"] and eng.returned[0]["changed"] == [] and eng.returned[0]["redone"] == [],
-          "写了 graph 的约定，但文本没变：changed / redone 都是空", (eng.halted, eng.returned))
-    check(fk.n("v3_contract_graph") == 1, "约定确实重写了一次", [c["tag"] for c in fk.calls])
-    check(stub_calls(state) == [], "没有起任何改模块子进程", stub_calls(state))
-
-
-def test_unaffected_cases():
-    print("M2：查未受影响用例——差异外函数的、修改前通过的用例变红被拒；差异里的函数不比；改模块.zs 因此不标完成")
-    from tools.dslagent.v3 import modify as MD
-    p = solution_project()
-    (p / "contracts" / "graph.md").write_text(graph_old_contract(), encoding="utf-8")
-    (p / "plan" / "changes").mkdir(parents=True)
-    (p / "plan" / "changes" / "1.zs").write_text("# 对应问题 1\n改约定 graph x\n落实修改\n", encoding="utf-8")
-    out = fresh("un_out")
-    ctx = core.Ctx(p, out, "x", None)
-    rec = MD.record(ctx, "graph", "x")
-    (p / "contracts" / "graph.md").write_text(contract_text("graph"), encoding="utf-8")      # 新约定写好
-    r = MD.unaffected_check(p, "graph")
-    check(r["ok"] and r["checked"] == 2, "代码没坏：未受影响的 2 个用例（取知识点_取到 / 取知识点_没有）都在，全过", r)
-    check(MD.affected_funcs(rec["old_contract"], contract_text("graph")) == {"加边"}, "差异里的函数只有 加边", MD.affected_funcs(rec["old_contract"], contract_text("graph")))
-    svc = p / "services" / "graph.zs"
-    good = svc.read_text(encoding="utf-8")
-    svc.write_text(good.replace("    返回 {p}\n", '    返回 {"code": "X"}\n', 1), encoding="utf-8")
-    r2 = MD.unaffected_check(p, "graph")
-    check(not r2["ok"] and any("取知识点_取到" in x for x in r2["problems"]) and not any("加边" in x for x in r2["problems"]),
-          "取知识点 的代码被改坏：未受影响用例变红被拒（加边的用例在差异里，不比）", r2)
-    e = engine(p)
-    e.v3 = ctx
-    e.run("用包 dslproj v3\n设 u = 查未受影响用例 graph\n返回 {u}\n")
-    check(e.returned[0]["ok"] == "否" and "取知识点_取到" in e.returned[0]["problems"], "查未受影响用例 动词：ok=否，problems 带用例名", e.returned)
-    svc.write_text(good, encoding="utf-8")
-    e2 = engine(p)
-    e2.v3 = ctx
-    e2.run("用包 dslproj v3\n设 u = 查未受影响用例 vocab\n返回 {u}\n")
-    check(e2.returned[0]["ok"] == "是" and e2.returned[0]["checked"] == 0, "没有修改记录的模块：通过", e2.returned)
-
-
-def test_modify_unaffected_rejects_flow():
-    print("M2：改模块.zs——修改后未受影响用例变红，不标完成、带原因重试，N 次都不过 终止 失败")
-    p = solution_project()
-    (p / "contracts" / "graph.md").write_text(graph_old_contract(), encoding="utf-8")
-    out, state = fresh("rej_out"), fresh("rej_st") / "state"
-    stub_env(state, plan={"graph": 99})                    # 子进程什么都不做（保留我们先弄坏的代码）
-    for m in ("graph", "vocab", "progress"):
-        core.Ctx(p, out, "x", None).mark_done(m)
-    (p / "plan" / "changes").mkdir(parents=True)
-    (p / "plan" / "changes" / "1.zs").write_text("# 对应问题 1\n改约定 graph x\n落实修改\n", encoding="utf-8")
-    fk = Fake(scripts={"v3_contract_graph": [contract_text("graph")]})
-    M = V2.Model(out, backend=fk)
-    ctx = core.Ctx(p, out, "x", M, module_cmd=CMD)
-    eng = core.V3Engine(V2.Client(M), workdir=p, verbose=False, verbs_root=CM.VERBS)
-    eng.v3, ctx.usage = ctx, eng.usage
-    from tools.dslagent.v3 import modify as MD
-    MD.record(ctx, "graph", "x")                            # 旧约定 + 基线（代码还是好的）
-    svc = p / "services" / "graph.zs"
-    svc.write_text(svc.read_text(encoding="utf-8").replace("    返回 {p}\n", '    返回 {"code": "X"}\n', 1), encoding="utf-8")
-    (p / "contracts" / "graph.md").write_text(contract_text("graph"), encoding="utf-8")
-    eng.run("用包 v3\n改模块 graph 最多=2 末次模型=opus\n")
-    check(eng.halted is not None and eng.halted["status"] == "失败" and "取知识点_取到" in eng.halted["reason"], "两轮都因未受影响用例变红（还有跑用例不过）失败", eng.halted)
-    check(len(stub_calls(state)) == 2 and "未受影响用例" in stub_calls(state)[1]["task"], "第二轮任务带了上一轮的失败原文（含未受影响用例）", stub_calls(state))
-    check(not core.Ctx(p, out, "x", None).is_done("graph"), "没有标完成")
+    check(res["reason"] == "全部模块完成", "一路跑到 build、build 自己也成功（终止 {b.状态} {b.原因} 带出来的）", res)
 
 
 def test_modify_retries_exhausted():
@@ -1540,185 +1394,6 @@ def test_check_plan_arg_count():
     check(CP.check_plan(ok, issues, top, "## 1 概述\nx\n") == [], "没有空格的写法通过", CP.check_plan(ok, issues, top, "## 1 概述\nx\n"))
 
 
-def solution_project():
-    """参考实现整份拷出来（约定 + entities / queries / routes / services）+ plan/top.zs。"""
-    p = fresh("sol")
-    for d in ("contracts", "entities", "queries", "routes", "services"):
-        shutil.copytree(SOL / d, p / d)
-    (p / "plan").mkdir()
-    (p / "plan" / "top.zs").write_text(TOP3, encoding="utf-8")
-    return p
-
-
-def run_plan_text(p, text, mark=("graph", "vocab", "progress")):
-    out = fresh("out")
-    for m in mark:
-        core.Ctx(p, out, "x", None).mark_done(m)
-    (p / "plan" / "changes").mkdir(exist_ok=True)
-    (p / "plan" / "changes" / "1.zs").write_text(text, encoding="utf-8")
-    fk = Fake()
-    ctx = core.Ctx(p, out, "需求全文", V2.Model(out, backend=fk))
-    eng = core.V3Engine(V2.Client(ctx.M), workdir=p, verbose=False, verbs_root=CM.VERBS)
-    eng.v3, ctx.usage = ctx, eng.usage
-    eng.run("用包 dslproj v3\n设 r = 执行 plan/changes/1.zs 需求=需求全文\n返回 {r}\n")
-    r = eng.returned[0] if eng.returned else {}
-    eng.halted = r if (isinstance(r, dict) and r.get("status") not in (None, "成功")) else eng.halted   # 子脚本的终止在 r 里
-    return eng, ctx, fk
-
-
-def test_file_edit_check():
-    print("M1：check_plan 对 改文件 的检查——文件存在 / 原文恰好出现一次 / 范围 / 参数个数 / 验收动词的模块")
-    from tools.dslagent.v3 import change_plan as CP
-    p = solution_project()
-    top = VT.load(TOP3)
-    iss = [{"issue": "a", "modules": "vocab", "type": "code"}, {"issue": "b", "modules": "graph"}]
-    E = CP.decode_edit_arg
-    check(E("\\_\\_a\\nb\\\\n\\t{{x}}") == "  a\nb\\n\t{x}", "转义：\\_ 空格 \\n 换行 \\\\ 反斜杠 \\t 制表符 {{x}}→{x}", repr(E("\\_\\_a\\nb\\\\n\\t{{x}}")))
-    def chk(plan, issues=iss):
-        return CP.check_plan(plan, issues, top, "", project=p)
-    ok = "# 对应问题 1\n改文件 services/vocab.zs correct\\_只能是\\_0\\_或\\_1 correct\\_必须是\\_0\\_或\\_1\n# 对应问题 2\n改文件 services/graph.zs 业务\\_graph 业务\\_graph\\_x\n落实修改\n"
-    probs = chk(ok)
-    check(probs == [], "唯一原文、范围内、对应问题涉及的模块 → 通过（两个问题都被覆盖）", probs)
-    check(CP.only_file_edits(CP.parse_plan(ok)[0]) and CP.planned_files(CP.parse_plan(ok)[0]) == ["services/vocab.zs", "services/graph.zs"],
-          "only_file_edits / planned_files")
-    mixed = ok.replace("落实修改", "改约定 vocab 加一个接口\n落实修改")
-    check(not CP.only_file_edits(CP.parse_plan(mixed)[0]), "带改约定的计划不是 only_files")
-    one = "# 对应问题 1\n%s\n落实修改\n"
-    check(any("找不到原文" in x for x in chk((one % "改文件 services/vocab.zs 根本没有这句 x") + "# 对应问题 2\n改约定 graph y\n")), "原文不存在被拒")
-    check(any("出现 " in x and "必须唯一" in x for x in chk((one % "改文件 services/vocab.zs 如果 x") + "# 对应问题 2\n改约定 graph y\n")), "原文不唯一被拒")
-    for bad, why in (("改文件 services/nosuch.zs a b", "不属于任何模块|不存在"), ("改文件 kg/x.py a b", "不属于任何模块"),
-                     ("改文件 ../x a b", "项目目录之外"), ("改文件 tests/vocab_x.py a b", "测试文件"),
-                     ("改文件 services/graph.zs 业务\\_graph b", "不在对应问题涉及的模块"), ("改文件 services/vocab.zs 完全不存在的原文 x", "找不到原文"),
-                     ("改文件 services/vocab.zs a b c d", "2～3 个参数")):
-        pr = chk((one % bad) + "# 对应问题 2\n改约定 graph y\n")
-        check(any(__import__("re").search(why, x) for x in pr), f"{bad[:30]}… 被拒（{why}）", pr)
-    same = chk((one % "改文件 services/vocab.zs 公开\\_函数\\_记作答 公开\\_函数\\_记作答") + "# 对应问题 2\n改约定 graph y\n")
-    check(any("原文和新文一样" in x for x in same), "原文和新文一样被拒", same)
-    seq = "# 对应问题 1\n改文件 services/vocab.zs 报错\\_400\\_correct 报错\\_400\\_XX\n# 对应问题 1\n改文件 services/vocab.zs 报错\\_400\\_correct 报错\\_400\\_YY\n# 对应问题 2\n改约定 graph y\n落实修改\n"
-    check(any("找不到原文" in x for x in chk(seq)), "前一处改掉的原文，后一处再引用 → 按顺序套用后找不到")
-    check(any("验收" not in x and "不在 plan/top.zs" in x for x in chk("# 对应问题 1\n跑用例 nosuch\n# 对应问题 2\n改约定 graph y\n落实修改\n")), "验收动词的模块不存在被拒")
-    check(chk("# 对应问题 1\n加载检查 vocab\n比对约定 vocab\n跑用例 vocab\n# 对应问题 2\n改约定 graph y\n落实修改\n") == [], "三个验收动词合法")
-    check(CP.check_plan(ok, iss, top, "") == [], "不给 project 时不查改文件（兼容旧调用）")
-    # CRLF 文件：原文只用 LF 也能找到
-    f = p / "services" / "vocab.zs"
-    f.write_bytes(f.read_bytes().replace(b"\n", b"\r\n"))
-    check(chk(ok) == [], "CRLF 文件：LF 写法的原文照样唯一定位", chk(ok))
-
-
-def test_file_edit_flow():
-    print("M1：改文件 由 执行 直接跑——验收过则文件改了、模块仍是已完成、不调模型；验收不过恢复；中途失败恢复")
-    p = solution_project()
-    f = p / "services" / "vocab.zs"
-    orig = f.read_text(encoding="utf-8")
-    good = "# 对应问题 1\n改文件 services/vocab.zs correct\\_只能是\\_0\\_或\\_1 correct\\_必须是\\_0\\_或\\_1\n落实修改\n"
-    eng, ctx, fk = run_plan_text(p, good)
-    check(eng.halted is None, "只含改文件的计划整条跑通", eng.halted)
-    check("correct 必须是 0 或 1" in f.read_text(encoding="utf-8") and "correct 只能是" not in f.read_text(encoding="utf-8"), "文件真的改了")
-    check(all(ctx.is_done(m) for m in ("graph", "vocab", "progress")), "约定没变：三个模块都保持已完成")
-    check(fk.n() == 0 and ctx.file_edits == {}, "没有调任何模型；登记表已清", ([c["tag"] for c in fk.calls], ctx.file_edits))
-    check(any(r.get("模块") == "vocab" and r.get("通过") for r in ctx.records["验收"]), "记了 vocab 的验收")
-    # 验收不过：把 写库 的查询名改成不存在的 → 恢复
-    p2 = solution_project()
-    f2 = p2 / "services" / "vocab.zs"
-    o2 = f2.read_text(encoding="utf-8")
-    bad = "# 对应问题 1\n改文件 services/vocab.zs correct\\_只能是\\_0\\_或\\_1 correct\\_必须是\\_0\\_或\\_1\n改文件 services/vocab.zs 写库\\_app.db\\_vocab_answer_insert 写库\\_app.db\\_vocab_nosuch_query\n落实修改\n"
-    eng2, ctx2, _ = run_plan_text(p2, bad)
-    check(eng2.halted is not None and eng2.halted["status"] == "失败" and "验收没通过" in eng2.halted["reason"], "验收不过：终止失败，原因带验收原文", eng2.halted)
-    check(f2.read_text(encoding="utf-8") == o2, "两处改动都恢复成改之前的原文")
-    check(ctx2.file_edits == {}, "登记表清空")
-    # 原文不存在：这一行 终止 失败，前面已改的恢复
-    p3 = solution_project()
-    f3 = p3 / "services" / "vocab.zs"
-    o3 = f3.read_text(encoding="utf-8")
-    bad3 = "# 对应问题 1\n改文件 services/vocab.zs correct\\_只能是\\_0\\_或\\_1 correct\\_必须是\\_0\\_或\\_1\n改文件 services/vocab.zs 根本没有 x\n落实修改\n"
-    eng3, ctx3, _ = run_plan_text(p3, bad3)
-    check(eng3.halted is not None and "找不到" in eng3.halted["reason"] and "已恢复" in eng3.halted["reason"], "运行时原文找不到：终止失败并说明已恢复", eng3.halted)
-    check(f3.read_text(encoding="utf-8") == o3, "前一处已改的也恢复了")
-    # 范围外 / 越界在运行时也拒绝
-    for bad_file in ("kg/x.py", "../x", "tests/vocab_a.py"):
-        e4, _, _ = run_plan_text(solution_project(), f"改文件 {bad_file} a b\n落实修改\n")
-        check(e4.halted is not None and e4.halted["status"] == "失败", f"运行时拒绝 {bad_file}", e4.halted)
-    # CRLF 文件改完仍是 CRLF，没动的行一字不变
-    p6 = solution_project()
-    f6 = p6 / "services" / "vocab.zs"
-    f6.write_bytes(f6.read_bytes().replace(b"\n", b"\r\n"))
-    e6, _, _ = run_plan_text(p6, good)
-    raw = f6.read_bytes()
-    check(e6.halted is None and b"\r\n" in raw and raw.count(b"\n") == raw.count(b"\r\n") and "必须是".encode() in raw, "CRLF 文件改完仍是 CRLF", e6.halted)
-    # 恢复改动 动词：计划中途别的动词失败
-    p7 = solution_project()
-    f7 = p7 / "services" / "vocab.zs"
-    o7 = f7.read_text(encoding="utf-8")
-    out7 = fresh("out")
-    ctx7 = core.Ctx(p7, out7, "x", None)
-    eng7 = core.V3Engine(V2.Client(V2.Model(out7, backend=Fake())), workdir=p7, verbose=False, verbs_root=CM.VERBS)
-    eng7.v3 = ctx7
-    eng7.run("用包 v3\n改文件 services/vocab.zs correct\\_只能是 correct\\_必须是\n设 x = 恢复改动\n返回 {x.restored}\n")
-    check(eng7.returned and str(eng7.returned[0]) == "1" and f7.read_text(encoding="utf-8") == o7, "恢复改动 把没验收的改动恢复，返回文件数", (eng7.returned, eng7.halted))
-
-
-def test_modify_files_only():
-    print("M1：修改.zs 只含改文件的计划——改完直接结束，不生成骨架 / 不分配 / 不 build；执行失败恢复文件")
-    p = solution_project()
-    out = fresh("modify_out")
-    for m in ("graph", "vocab", "progress"):
-        core.Ctx(p, out, "x", None).mark_done(m)
-    (p / "plan" / "issues").mkdir()
-    (p / "plan" / "issues" / "1.md").write_text(
-        "# 问题清单 1\n\n1. vocab 的 记作答 错误提示和约定不一致\n   涉及模块：vocab\n   依据：程序检查\n   类型：code\n", encoding="utf-8")
-    f = p / "services" / "vocab.zs"
-    orig = f.read_text(encoding="utf-8")
-    GOOD = "# 对应问题 1\n改文件 services/vocab.zs correct\\_只能是\\_0\\_或\\_1 correct\\_必须是\\_0\\_或\\_1\n落实修改\n"
-    BAD = "# 对应问题 1\n改文件 services/vocab.zs 这句根本没有 x\n落实修改\n"
-    fk = Fake(scripts={"v3_change_plan": [BAD, GOOD]})
-    res = core.run_entry("修改", p, out, "需求全文", extra_vars={"issues": "latest", "task": "", "llm": "sonnet", "retries": "3"},
-                          backend=fk, module_cmd=CMD)
-    check(res["status"] == "成功" and "services/vocab.zs" in res["reason"], "修改.zs 成功，返回改了哪些文件", res)
-    check(fk.n("v3_change_plan") == 2, "第一份计划原文不存在，检查挡住后重写（--issues 传入的清单参与检查）", [c["tag"] for c in fk.calls])
-    check("correct 必须是 0 或 1" in f.read_text(encoding="utf-8"), "文件改了")
-    check(not (p / "plan" / "build.zs").exists() and fk.n("v3_contract") == 0, "没有生成 build.zs、没有重写任何约定")
-    pu = [c for c in fk.calls if c["tag"] == "v3_change_plan"][0]["user"]
-    check("services/vocab.zs" in pu and "   1| 业务 vocab" in pu and "行号前缀" in pu and "graph.zs" not in pu.split("现有文件原文")[-1].split("###")[0], "code 类问题：附了涉及模块的文件原文（带行号前缀说明）", pu[-400:])
-    # 执行中途失败（原文在检查之后被人改掉）→ 恢复
-    p2 = solution_project()
-    out2 = fresh("modify_out")
-    (p2 / "plan" / "issues").mkdir()
-    (p2 / "plan" / "issues" / "1.md").write_text("# 问题清单 1\n\n1. x\n   涉及模块：vocab\n   类型：code\n", encoding="utf-8")
-    f2 = p2 / "services" / "vocab.zs"
-    o2 = f2.read_text(encoding="utf-8")
-    fk2 = Fake(scripts={"v3_change_plan": [GOOD]})
-    res2 = core.run_entry("修改", p2, out2, "需求全文", extra_vars={"issues": "latest", "task": "", "llm": "sonnet", "retries": "1"},
-                           backend=fk2, module_cmd=CMD)
-    check(res2["status"] == "成功", "单份通过", res2)
-    # 非数字文件名的问题清单：CLI --issues 路径在项目内即可
-    p3 = solution_project()
-    (p3 / "my").mkdir()
-    (p3 / "my" / "iss.md").write_text("# 问题清单 x\n\n1. x\n   涉及模块：vocab\n   类型：code\n", encoding="utf-8")
-    res3 = core.run_entry("修改", p3, fresh("o3"), "需求全文", extra_vars={"issues": "my/iss.md", "task": "", "llm": "sonnet", "retries": "1"},
-                           backend=Fake(scripts={"v3_change_plan": [GOOD]}), module_cmd=CMD)
-    check(res3["status"] == "成功" and "services/vocab.zs" in res3["reason"], "非数字文件名的清单也能用", res3)
-
-
-def test_issue_types():
-    print("M1：问题清单的「类型」——存读往返、缺省 contract、旧清单兼容、模型出参、程序检查自带类型")
-    from tools.dslagent.v3 import issues as IS
-    items = [{"issue": "a", "modules": "x", "basis": "b", "type": "code"}, {"issue": "c", "modules": "y"}, {"issue": "d", "type": "req"},
-             {"issue": "e", "modules": "z", "type": "contract"}]
-    txt = IS.render(1, items)
-    check("   类型：code" in txt and "   类型：req" in txt and txt.count("类型：") == 2, "contract 缺省不写行，code/req 写", txt)
-    back = IS.parse_issues(txt)
-    check([i["type"] for i in back] == ["code", "contract", "req", "contract"], "往返类型一致", back)
-    old = "# 问题清单 1\n\n1. 旧问题\n   涉及模块：graph\n   依据：需求\n"
-    check(IS.parse_issues(old)[0]["type"] == "contract", "旧清单（没有类型行）按 contract")
-    check([IS.norm_type(x) for x in ("code", "", "需求缺口", "乱写")] == ["code", "contract", "req", "contract"], "类型规整：缺省 contract，认中文别名，乱写按 contract")
-    p = fresh("iss")
-    (p / "plan" / "issues").mkdir(parents=True)
-    (p / "plan" / "issues" / "notes.md").write_text("x", encoding="utf-8")
-    check(IS.next_no(p) == 1 and IS.latest_path(p) is None, "plan/issues/ 下有非数字文件名也不炸")
-    for it in IS.program_items(solution_project(), VT.load(TOP3)):
-        check(it["type"] == "contract", "程序检查的问题自带类型")
-
-
 if __name__ == "__main__":
     try:
         test_top()
@@ -1754,14 +1429,6 @@ if __name__ == "__main__":
         test_modify_retries_exhausted()
         test_check_plan_arg_count()
         test_change_plan_contracts()
-        test_issue_types()
-        test_file_edit_check()
-        test_file_edit_flow()
-        test_modify_files_only()
-        test_modify_redo()
-        test_modify_unchanged_not_redone()
-        test_unaffected_cases()
-        test_modify_unaffected_rejects_flow()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n通过 {PASS}，失败 {FAIL}")

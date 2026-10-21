@@ -40,9 +40,6 @@ class Ctx:
         self.last_text = {}                    # (种类, 模块) → 上一次写的文本（重写时带上）
         self.rounds = {}                       # 模块 → 做了几轮
         self.pending_contracts = {}             # 模块 → 条目文本或空串（新增模块/改约定 登记，落实修改 消费后清空）
-        self.file_edits = {}                    # 模块 → {项目相对路径: 改之前的原文(None=原本不存在)}（改文件 登记；验收通过 / 恢复改动 后清掉）
-        self.issues_items = []                  # 写修改计划 的问题清单条目（改约定 记录对应问题原文用）
-        self.task = ""                           # 写修改计划 的 任务（修改需求原文，改模块 的任务文本用）
         self.records = {"规划": [], "模块": [], "验收": []}
         self.t0 = time.time()
         (self.out).mkdir(parents=True, exist_ok=True)
@@ -198,7 +195,7 @@ def run_entry(script, project, out, req, extra_vars=None, backend=None, cost_cap
               req_path=req_path)
     eng = V3Engine(client=V2.Client(M), workdir=project, verbose=False, verbs_root=C.VERBS)
     eng.v3, ctx.usage = ctx, eng.usage
-    eng.vars.update({"req": req, "req_file": str(req_path or ""), **(extra_vars or {})})
+    eng.vars.update({"req": req, **(extra_vars or {})})
     res, err = {"status": "成功", "reason": "", "at": ""}, None
     try:
         eng.run((HERE / f"{script}.zs").read_text(encoding="utf-8"))
