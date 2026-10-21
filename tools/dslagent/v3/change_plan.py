@@ -119,6 +119,18 @@ def resolve_plan_text(project, ref):
     return s
 
 
+def normalize_plan(text):
+    """模型常在「改需求 / 改约定」的自由文本里夹 ASCII 空格（DSL 一行按空格分词，会超参数个数）：
+    把第 2 个参数之后的空格换成两字符 \\_（改需求 / 改约定 执行时还原成空格，和 \\n 同理），不再靠反复让模型重写。"""
+    out = []
+    for line in (text or "").replace("\r\n", "\n").split("\n"):
+        parts = line.split(None, 2)
+        if len(parts) == 3 and parts[0] in ("改需求", "改约定"):
+            line = f"{parts[0]} {parts[1]} " + re.sub(r"\s+", "\\\\_", parts[2].strip())
+        out.append(line)
+    return "\n".join(out)
+
+
 def write(ctx, issues_text, task="", model="sonnet"):
     """调一次模型写修改计划文本（未必通过 parse_plan；检查留给 检查修改计划）。"""
     ctx.guard()
@@ -135,7 +147,7 @@ def write(ctx, issues_text, task="", model="sonnet"):
     except RuntimeError as e:
         ctx.log("修改计划", 事件="模型没有回应", 原因=str(e)[:200])
         text = ""
-    return (text or "").strip() + "\n"
+    return normalize_plan((text or "").strip()) + "\n"
 
 
 def save(project, text):
@@ -147,7 +159,7 @@ def save(project, text):
     return str(p.relative_to(Path(project)))
 
 
-SECTION_RE = re.compile(r"^(?:##+\s*|)(\d+(?:\.\d+)*)[.\s]")
+SECTION_RE = re.compile(r"^(?:##+\s*(?=[一二三四五六七八九十百]+(?:[.\s、．]|$))|(?:##+\s*)?(?=\d))(\d+(?:\.\d+)*|[一二三四五六七八九十百]+)(?:[.\s、．]|$)")
 
 
 def req_sections(req_text):
@@ -205,10 +217,14 @@ def check_plan(text, issues, top, req_text=""):
                 probs.append(f"第 {it['行']} 行：删除模块「{name}」不在 plan/top.zs 里")
         elif verb == "改约定":
             name = content.split()[0] if content.split() else ""
+            if len(content.split()) > 2:
+                probs.append(f"第 {it['行']} 行：改约定只接受 2 个参数（模块、改动条目），这行有 {len(content.split())} 个——条目里不能有 ASCII 空格，用中文标点分隔")
             if name not in mod_names and name not in new_mods:
                 probs.append(f"第 {it['行']} 行：改约定的模块「{name}」不在 plan/top.zs 里（也不是本计划新增的）")
         elif verb == "改需求":
             sec = content.split()[0] if content.split() else ""
+            if len(content.split()) > 2:
+                probs.append(f"第 {it['行']} 行：改需求只接受 2 个参数（节号、新正文），这行有 {len(content.split())} 个——新正文里不能有 ASCII 空格（含「## 标题」里的空格：节标题已保留，正文不要重写标题），用中文标点分隔")
             secs = req_sections(req_text)
             if req_text and secs and sec not in secs:
                 probs.append(f"第 {it['行']} 行：改需求的节号「{sec}」在需求文本里找不到")

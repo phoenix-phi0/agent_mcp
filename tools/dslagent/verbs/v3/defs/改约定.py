@@ -23,7 +23,7 @@ def 改约定(模块: str, 改动条目: str) -> dict:
     live = {m["名"] for m in top["模块"]}
     if name not in live and name not in c.pending_contracts:
         X.fail(f"改约定的模块「{name}」不在 plan/top.zs 里（也不是本计划新增的）")
-    note = (改动条目 or "").strip()
+    note = (改动条目 or "").replace("\\_", " ").strip()
     old = c.pending_contracts.get(name) or ""
     c.pending_contracts[name] = (old + ("\n" if old else "") + f"- {note}") if note else old
     c.log("修改计划", 事件="改约定", 模块=name, 条目=note)

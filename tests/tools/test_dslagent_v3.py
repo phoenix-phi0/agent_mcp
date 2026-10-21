@@ -1121,6 +1121,16 @@ def test_plan_verbs():
     e1b.run("用包 v3\n改需求 3 第一段" + chr(92) + "n第二段\n")
     check(e1b.halted is None, "两段式改需求没有终止失败", e1b.halted)
     check("## 3 进度\n第一段\n第二段" in req_file.read_text(encoding="utf-8"), "\\n 解码成了真正的换行", req_file.read_text(encoding="utf-8"))
+    # E3：中文数字节号（## 五、做题），改完不吞掉后面没编号的「## 通用」
+    rf2 = fresh("req_cn") / "req.md"
+    rf2.write_text("## 一、角色\naaa\n\n## 五、做题\nbbb\n\n## 通用\nccc\n", encoding="utf-8")
+    ctx2 = core.Ctx(p, out, "x", None, req_path=rf2)
+    e1c = engine(p)
+    e1c.v3 = ctx2
+    e1c.run("用包 v3\n改需求 五 新正文" + chr(92) + "_带空格\n")
+    cn = rf2.read_text(encoding="utf-8")
+    check(e1c.halted is None and "## 五、做题\n新正文 带空格\n" in cn and "## 通用\nccc" in cn and "## 一、角色\naaa" in cn,
+          "改需求认中文数字节号，\\_ 还原成空格，不吞后面的无编号节", (e1c.halted, cn))
     # 新增模块：改 top.zs + 登记 pending_contracts（空串＝走全流程）
     e2 = engine(p)
     e2.v3 = ctx
@@ -1309,6 +1319,23 @@ def test_modify_retries_exhausted():
     check(fk.n("v3_change_plan") == 2, "正好调了 次数 次模型，不多不少", [c["tag"] for c in fk.calls])
 
 
+def test_check_plan_arg_count():
+    print("E3：检查修改计划——改需求 / 改约定 带 ASCII 空格（参数超过 2 个）要在检查阶段挡住，别等执行才炸")
+    from tools.dslagent.v3 import change_plan as CP
+    top = VT.load(TOP3)
+    issues = [{"问题": "x"}]
+    bad = "# 对应问题 1\n改需求 1 ## 概述\\n正文\n落实修改\n"
+    probs = CP.check_plan(bad, issues, top, "## 1 概述\nx\n")
+    check(any("改需求只接受 2 个参数" in x for x in probs), "改需求正文带空格被挡", probs)
+    bad2 = "# 对应问题 1\n改约定 graph 加 一个 接口\n落实修改\n"
+    probs2 = CP.check_plan(bad2, issues, top, "")
+    check(any("改约定只接受 2 个参数" in x for x in probs2), "改约定条目带空格被挡", probs2)
+    nz = CP.normalize_plan("# 对应问题 1\n改需求 1 ## 概述 a b\\n正文\n改约定 graph 加 一个 接口\n落实修改")
+    check(CP.check_plan(nz, issues, top, "## 1 概述\nx\n") == [] and nz.splitlines()[1].count(" ") == 2 and "\\_" in nz, "normalize_plan 把自由文本里的空格换成全角后通过检查", (CP.check_plan(nz, issues, top, "## 1 概述\nx\n"), nz.splitlines()[1]))
+    ok = "# 对应问题 1\n改需求 1 正文\\n第二段\n改约定 graph 加一个接口\n落实修改\n"
+    check(CP.check_plan(ok, issues, top, "## 1 概述\nx\n") == [], "没有空格的写法通过", CP.check_plan(ok, issues, top, "## 1 概述\nx\n"))
+
+
 if __name__ == "__main__":
     try:
         test_top()
@@ -1341,6 +1368,7 @@ if __name__ == "__main__":
         test_audit_entry()
         test_modify_entry()
         test_modify_retries_exhausted()
+        test_check_plan_arg_count()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n通过 {PASS}，失败 {FAIL}")

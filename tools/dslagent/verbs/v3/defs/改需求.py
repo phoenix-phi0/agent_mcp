@@ -23,6 +23,9 @@ def _find_section(lines, sec, SECTION_RE):
     for i, l in enumerate(lines):
         m = SECTION_RE.match(l.strip())
         if not m:
+            if start is not None and l.startswith("## "):
+                end = i
+                break
             continue
         num = m.group(1)
         if start is None:
@@ -49,7 +52,7 @@ def 改需求(节号: str, 内容: str) -> dict:
     start, end = _find_section(lines, sec, CP.SECTION_RE)
     if start is None:
         X.fail(f"需求文件里找不到第 {sec} 节")
-    body = (内容 or "").replace("\\n", "\n").rstrip("\n")
+    body = (内容 or "").replace("\\_", " ").replace("\\n", "\n").rstrip("\n")
     new_lines = lines[:start + 1] + ([body] if body else []) + lines[end:]
     new_text = "\n".join(new_lines).rstrip("\n")
     date = time.strftime("%Y-%m-%d")
