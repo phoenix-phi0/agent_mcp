@@ -14,7 +14,7 @@
   auto.py       engine=auto 的判定：decide_auto、capability_gaps、test_state（cbatch 用）
   agents.py     各 agent（plan / plan_fix / sub / sub_tool / fix / bound / bfix）的定义：从 agents/*.md 读步骤、工具、轮数、回复格式、system；user 拼装、解析、重试在代码里
   guard.py      模型调用保险的常量和原因（超时 / 空闲 / 超长 / invoke 拦截 / 禁工具…），四个引擎和 Model 共用
-  engines.py    按步骤选模型（parse / validate / step_of）、_Proc 进程保险、call_claude / call_codex / call_grok / call_opencode
+  engines.py    按步骤选模型（parse / validate / step_of）、_Proc 进程保险、call_claude / call_codex / call_grok / call_opencode / call_goose
   v2.py         v2 核心（与任务类型无关）：Model（唯一模型入口：计数 / 墙钟 / 记账 / 重试）、Client、规划（plan_read_call）、V2Engine（闸门动词由包给）、计划检查、run(pack=)、记录
   entry.py      统一入口：run_pack（v2.run 的封装，--pack 用）、run_task(project, task, pack, scope, model, out) → {status, reason, 花费}
   packs/        资料包（run(pack=) / --pack / DSLAGENT_PACK，缺省 code）：声明资料 / 动词 / 验收 / 范围 / 规划说明 / 计划检查（接口见 packs/__init__.py，写新包见 packs/README.md）；

@@ -21,7 +21,7 @@
 - 单独一行 `{{插入 路径}}`：换成 `shared/` 下该文件的原文（`lib/…` 指 `tools/dslagent/lib/`；路径里的 `{包}` 换成资料包名，缺省 code）。
 - 正文只有一行 `{{沿用 别的.md}}`：整个用那个 agent 的 system（plan_fix 就是这样沿用 plan）。
 - `## 变体：引擎名`：该引擎专用的改写，里面成对写 `### 原文` / `### 改成`，把渲染后提示词里的原文换成新文（找不到原文直接报错，防止悄悄失效）。
-  目前只有 plan.md 的 `变体：grok`（grok 没有 dsl 工具，读代码的两处说法不同）；claude / codex 用正文原样。
+  目前只有 plan.md 的 `变体：grok`（grok 没有 dsl 工具，读代码的两处说法不同）；claude / codex / goose 用正文原样。
 - `## 模板：名字`：给代码拼 user 用的模板，`str.format` 填 `{占位}`（字面花括号写 `{{` `}}`）。目前只有 plan_fix.md 的「用户提示词」。
 
 ## 文件一览
@@ -59,7 +59,7 @@
 
 ## dsl_options 怎么作用到这些文件
 - `models`：`{plan, sub, fix, bound}` 各步用哪个引擎 / 模型（`engines.step_of`）。文件里的「步骤」就是这里的键：plan.md、plan_fix.md、bound_table_fill.md（补表）用 `plan`；sub.md、sub_tool.md 用 `sub`；fix.md 用 `fix`；bound.md、bfix.md、bound_judge.md 用 `bound`。
-  引擎是 grok 时：plan / plan_fix 的工具、轮数取 frontmatter 里「grok：…」那一项，system 套 `变体：grok`；codex 与 claude 用同一份正文。
+  引擎是 grok 时：plan / plan_fix 的工具、轮数取 frontmatter 里「grok：…」那一项，system 套 `变体：grok`；codex / goose 与 claude 用同一份正文。
 - `planner`（DSLAGENT_PLANNER=v2）：走 v2 流水线（上面 1–6）才用这些文件；缺省的旧路径用 `prompts/legacy/`。
 - `subtask`：`json`（缺省）用 sub.md，`tool` 用 sub_tool.md。
 - `pack`（DSLAGENT_PACK / `run(pack=)` / 命令行 `--pack`，缺省 code）：决定资料、动词白名单、验收、范围、规划说明（接口见 `packs/README.md`）。

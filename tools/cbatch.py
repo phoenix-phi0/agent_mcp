@@ -80,7 +80,8 @@ CLAUDE_CODE_SESSION_ID 这些。原样传给子进程，claude -p 会以为自�
 按步骤指定模型：dsl_options.models = {plan, sub, fix, bound}（或一个字符串 = 四步都用它），没写的步骤 sonnet。
 plan = 规划 / 规划重写，sub = 计划里的 问 / 问JSON / 派任务 / 并行派任务，fix = 验收补改，bound = 边界复核及其补改。
 模型串：sonnet / opus / haiku（或完整 claude 模型名）；codex:<模型>[:<强度>]（强度缺省 medium）；grok[:<强度>]（low|medium|high|xhigh，缺省 low）；
-opencode:<provider/model>。提交时校验，不合格直接报错：规划只支持 claude / codex / grok（grok 用自带只读工具读代码；opencode 不能做规划），
+opencode:<provider/model>；goose[:<模型>[:<强度>]]（goose run，provider / 登录用 goose 自己的配置，如 goose:gpt-6-luna；模型缺省取 goose 配置）。
+提交时校验，不合格直接报错：规划只支持 claude / codex / grok / goose（grok 用自带只读工具读代码，codex / goose 挂只读 dsl 工具；opencode 不能做规划），
 subtask=tool（DSLAGENT_SUBTASK=tool）时 sub 只支持 claude。顶层 model 仍是执行任务那个 claude 的模型，也仍透传成规划模型，但 models.plan 写了以它为准。
 
 dsl 在独立进程里跑（python -m tools.dslagent run），记录在任务目录 task_<n>/ 下；每条任务的

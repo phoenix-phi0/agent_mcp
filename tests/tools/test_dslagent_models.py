@@ -3,14 +3,15 @@
 
     cd /home/ysc/mcp && .venv/bin/python tests/tools/test_dslagent_models.py
 
-  一、解析 / 校验：模型串各格式、强度取值、步骤名、字符串简写；read 规划支持 claude / codex / grok（opencode 不行）、tool 子任务只支持 claude；tag → 步骤
+  一、解析 / 校验：模型串各格式、强度取值、步骤名、字符串简写；read 规划支持 claude / codex / grok / goose（opencode 不行）、tool 子任务只支持 claude；tag → 步骤
   二、路由（假 Python backend 跑 v2.run）：每步走对模型、缺省 sonnet、字符串简写、旧 DSLAGENT_PLAN_MODEL 兼容、models.plan 优先并记一句、
      非法 DSLAGENT_MODELS 判失败不调模型、calls.json 记 engine / model / effort、result.json 记生效的 models
-  三、各引擎（假 codex / grok / opencode / claude 可执行脚本）：argv / stdin；保险：首事件前静默、空闲超时、<invoke、超长、rc≠0、尝试调用工具
-  四、整条流程走假二进制：read 规划走 codex 挂 MCP（参数、plan_tools.json）、边界复核走 grok；full 规划走 opencode；失败重试 1 次
+  三、各引擎（假 codex / grok / opencode / goose / claude 可执行脚本）：argv / stdin；保险：首事件前静默、空闲超时、<invoke、超长、rc≠0、尝试调用工具
+  四、整条流程走假二进制：read 规划走 codex / goose 挂 MCP（参数、plan_tools.json）、边界复核走 grok；full 规划走 opencode；失败重试 1 次
 """
 import json
 import os
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -61,6 +62,16 @@ def t_parse():
     check(P("grok:high")["effort"] == "high" and P("grok:xhigh")["effort"] == "xhigh", "grok:<强度>")
     o = P("opencode:zhipuai-coding-plan/glm-5.3")
     check((o["engine"], o["model"]) == ("opencode", "zhipuai-coding-plan/glm-5.3"), "opencode:<provider/model>", o)
+    g = P("goose")
+    check((g["engine"], g["model"], g["effort"]) == ("goose", None, None), "goose：模型 / 强度都缺省（用 goose 自己的配置）", g)
+    g = P("goose:gpt-6-luna")
+    check((g["engine"], g["model"], g["effort"]) == ("goose", "gpt-6-luna", None), "goose:<模型>", g)
+    g = P("goose:gpt-6.1-sol:high")
+    check((g["model"], g["effort"]) == ("gpt-6.1-sol", "high"), "goose:<模型>:<强度>", g)
+    for bad, needles in [("goose:", ("goose[:",)), ("goose:a b", ("goose[:",)), ("goose:gpt:turbo", ("强度", "turbo")), ("goose:gpt:low:x", ("goose[:",)),
+                         ("gooseX", ("不认识",))]:
+        r = raises(lambda: P(bad), *needles)
+        check(r is True, f"goose 模型串 {bad!r} 报错", r)
     for bad, needles in [("gpt-5", ("不认识",)), ("", ("非空",)), (5, ("非空",)), ("codex:", ("codex:<模型>",)), ("codex", ("codex:<模型>",)),
                          ("codex:gpt-5:turbo", ("强度", "turbo")), ("codex:gpt-5:low:x", ("codex",)), ("grok:turbo", ("强度", "turbo")),
                          ("grok:", ("grok[:",)), ("grok:low:x", ("grok[:",)), ("grok:minimal", ("强度",)),
@@ -79,6 +90,10 @@ def t_parse():
     V_ = E.validate
     check(V_({"plan": "codex:gpt-5"}, "json") == {"plan": "codex:gpt-5"} and V_({"plan": "opus"}, "tool"), "规划：claude / codex 可以")
     check(V_({"plan": "grok:medium"}, "json") == {"plan": "grok:medium"} and V_("grok", "json"), "规划：grok 可以（含字符串简写）")
+    check(V_({"plan": "goose:gpt-6-luna", "plan_fix": "goose"}, "json") == {"plan": "goose:gpt-6-luna", "plan_fix": "goose"} and V_("goose:gpt-6-luna", "json"),
+          "规划：goose 可以（挂只读 dsl MCP，同 codex）")
+    r = raises(lambda: V_({"sub": "goose:gpt-6-luna"}, "tool"), "DSLAGENT_SUBTASK=tool", "claude")
+    check(r is True, "tool 子任务用 goose → 报错", r)
     for eng in ("opencode:a/b",):
         r = raises(lambda: V_({"plan": eng}, "json"), "不能做规划", "claude")
         check(r is True, f"规划用 {eng} → 报错，说明 opencode 不能做规划", r)
@@ -108,6 +123,7 @@ def t_parse():
         check(PE("codex:gpt-5:medium", "plan") == "medium" and PE("codex:gpt-5:medium", "plan_fix") == "medium", "已写 medium：plan 不变，plan_fix 带强度也不升")
         check(PE("codex:gpt-5:xhigh", "plan") == "xhigh" and PE("codex:gpt-5:xhigh", "plan_fix") == "xhigh", "已写 xhigh：plan_fix 不再升")
         check(PE("codex:gpt-5:low", "plan") == "low" and PE("codex:gpt-5:high", "plan_fix") == "high", "已写 low 不动；plan_fix 显式 high 不升")
+        check(PE("goose:gpt-6-luna", "plan") is None and PE("goose:gpt-6-luna", "plan_fix") is None, "goose 规划不升强度（只动 codex）")
         check(PE("codex:gpt-5", "dsl01") == "medium" and PE("codex:gpt-5", "fix") == "medium" and PE("codex:gpt-5", "table_fill") == "medium",
               "sub / fix / 补表等其它步骤保持原缺省 medium")
         check(E.plan_effort(E.parse("sonnet"), "plan")["effort"] is None and E.plan_effort(E.parse("grok"), "plan")["effort"] == "low", "claude / grok 不受影响")
@@ -247,12 +263,12 @@ def t_routes():
 FAKE_PY = HERE / "fake_engine_tool.py"
 BINS = TMP / "bins"
 BINS.mkdir(exist_ok=True)
-for _n in ("codex", "grok", "opencode", "claude"):
+for _n in ("codex", "grok", "opencode", "claude", "goose"):
     _p = BINS / _n
     _p.write_text(f'#!/bin/sh\nexec {sys.executable} {FAKE_PY} {_n} "$@"\n', encoding="utf-8")
     _p.chmod(0o755)
 ENV_BINS = {"DSLAGENT_CODEX_BIN": str(BINS / "codex"), "DSLAGENT_GROK_BIN": str(BINS / "grok"), "DSLAGENT_OC_BIN": str(BINS / "opencode"),
-            "CBATCH_CLAUDE": str(BINS / "claude")}
+            "CBATCH_CLAUDE": str(BINS / "claude"), "DSLAGENT_GOOSE_BIN": str(BINS / "goose")}
 REC = TMP / "rec.jsonl"
 _cfg_n = [0]
 
@@ -272,13 +288,14 @@ def recs():
 
 
 def t_engines():
-    print("三、各引擎（假 codex / grok / opencode）")
+    print("三、各引擎（假 codex / grok / opencode / goose）")
     old = (G.IDLE_SEC, G.IDLE_OC)
-    first_env = {"DSLAGENT_CODEX_FIRST_CAP": "1", "DSLAGENT_GROK_FIRST_CAP": "1", "DSLAGENT_OC_FIRST_CAP": "1"}
+    first_env = {"DSLAGENT_CODEX_FIRST_CAP": "1", "DSLAGENT_GROK_FIRST_CAP": "1", "DSLAGENT_OC_FIRST_CAP": "1", "DSLAGENT_GOOSE_FIRST_CAP": "1"}
     os.environ.update(first_env)
     G.IDLE_SEC, G.IDLE_OC = 1, 1
     try:
-        for name, spec in (("codex", "codex:gpt-5.1:high"), ("grok", "grok:medium"), ("opencode", "opencode:zhipuai-coding-plan/glm-5.3")):
+        for name, spec in (("codex", "codex:gpt-5.1:high"), ("grok", "grok:medium"), ("opencode", "opencode:zhipuai-coding-plan/glm-5.3"),
+                           ("goose", "goose:gpt-6-luna:high")):
             sp = E.parse(spec)
             print(f"  -- {name}")
             setup_fake({name: [{"text": "你好 .zs"}]})
@@ -302,6 +319,17 @@ def t_engines():
                 check(argv[argv.index("-p") + 1] == "USER-文本" and argv[argv.index("--system-prompt-override") + 1] == "SYS-文本"
                       and argv[argv.index("--reasoning-effort") + 1] == "medium" and "--model" not in argv
                       and argv[argv.index("--output-format") + 1] == "streaming-json" and "--no-subagents" in argv, "grok argv：-p、system override、强度、无 --model", argv)
+            elif name == "goose":
+                ev = a["env"]
+                check(argv[:2] == ["run", "--no-session"] and "--no-profile" in argv and argv[argv.index("--output-format") + 1] == "stream-json"
+                      and argv[argv.index("-i") + 1] == "-" and argv[argv.index("--model") + 1] == "gpt-6-luna" and argv[argv.index("--max-turns") + 1] == "1"
+                      and "--with-extension" not in argv and "USER-文本" not in argv and "SYS-文本" not in argv,
+                      "goose argv：run --no-session --no-profile、stream-json、-i -（stdin）、--model、--max-turns 1、不挂扩展", argv)
+                check(a["stdin"] == "USER-文本" and ev["system"] == "SYS-文本" and ev["GOOSE_MODE"] == "chat" and ev["GOOSE_MODEL"] == "gpt-6-luna"
+                      and ev["CHATGPT_CODEX_REASONING_EFFORT"] == "high" and ev["GOOSE_DISABLE_SESSION_NAMING"] == "true",
+                      "goose：user 走 stdin、system 走 GOOSE_SYSTEM_PROMPT_FILE_PATH、GOOSE_MODE=chat、模型 / 强度走环境变量", ev)
+                check(not list(Path(E._empty_cwd("v2_goose_empty")[0]).glob("v2_goose_sys_*")), "goose 系统提示临时文件用完删掉")
+                check(r["cost"] == 0.0 and r["usage"]["input"] == 12 and r["usage"]["cost_est_usd"] == 0.0001, "goose：cost 记 0，usage 取 complete 事件", r["usage"])
             else:
                 check(argv[:3] == ["run", "--format", "json"] and argv[argv.index("-m") + 1] == "zhipuai-coding-plan/glm-5.3" and "--pure" not in argv
                       and a["stdin"] == "USER-文本" and "USER-文本" not in argv, "opencode argv：run --format json、-m、无 --pure、user 走 stdin", argv)
@@ -324,6 +352,21 @@ def t_engines():
             setup_fake({name: [{"mode": "idle"}]})
             r = E.call(sp, "s", "u", 1.5)
             check(r["reason"] in ("总超时", "空闲超时"), "总超时兜底", r["reason"])
+            if name == "goose":
+                setup_fake({name: [{"mode": "error", "error": "Request failed: Unauthorized (401): token expired"}]})
+                r = E.call(sp, "s", "u", 30)
+                check(r["rc"] == 1 and r["text"] == "" and "登录失效" in r["stderr"] and "401" in r["stderr"] and not r["reason"],
+                      "goose 登录失效 → rc=1、stderr 带提示", r)
+                setup_fake({name: [{"mode": "error"}]})
+                r = E.call(sp, "s", "u", 30)
+                check(r["rc"] == 1 and "Bad request" in r["stderr"] and "登录失效" not in r["stderr"], "goose 别的错误 → rc=1、不带登录提示", r)
+                setup_fake({name: [{"text": "x"}]})
+                E.call(sp, "s", "u", 30, mcp_config=str(_mcp_cfg()))
+                a = recs()[0]
+                argv = a["argv"]
+                ext = argv[argv.index("--with-extension") + 1]
+                check(ext.startswith("dsl:") and shlex.split(ext[4:]) == [sys.executable, "-c", "pass", "--a", "中文"] and a["env"]["GOOSE_MODE"] == "auto"
+                      and "--max-turns" not in argv, "goose + mcp_config：--with-extension dsl:<命令>（shlex 引号）、GOOSE_MODE=auto、不限轮数", argv)
             if name == "codex":
                 setup_fake({name: [{"text": "x"}]})
                 E.call(sp, "s", "u", 30, mcp_config=str(_mcp_cfg()))
@@ -336,6 +379,10 @@ def t_engines():
         check('model_reasoning_effort="medium"' in recs()[0]["argv"], "codex 强度缺省 medium")
         E.call(E.parse("opencode:a/b"), "s", "u", 20)
         check("--variant" not in recs()[1]["argv"], "opencode 没有强度参数")
+        setup_fake({"goose": [{"text": "x"}]})
+        E.call(E.parse("goose"), "s", "u", 20)
+        a = recs()[0]
+        check("--model" not in a["argv"] and a["env"]["CHATGPT_CODEX_REASONING_EFFORT"] is None, "goose 没写模型 / 强度：不传 --model、不设强度", a)
         setup_fake({"grok": [{"text": "x"}]})
         E.call(E.parse("grok"), "s", "u", 20)
         check(recs()[0]["argv"][recs()[0]["argv"].index("--reasoning-effort") + 1] == "low", "grok 强度缺省 low")
@@ -402,6 +449,22 @@ def t_flow():
     check([(c["tag"], c["engine"], c["model"], c["effort"]) for c in calls] == [("plan", "codex", "gpt-5.1", "high"), ("bound", "grok", "grok", "high")]
           and calls[0]["tool"] == 1 and calls[0]["tool_calls"] == 1, "calls.json：engine / model / effort（codex 规划记工具调用 1 次）", calls)
     check(r["v2"]["models"] == {"plan": "codex:gpt-5.1:high", "plan_fix": "sonnet", "sub": "sonnet", "fix": "sonnet", "bound": "grok:high"}, "v2.models 记生效的四步", r["v2"]["models"])
+
+    # read 规划走 goose 挂只读 MCP（真的调一次 dsl 工具），子任务走 goose，边界复核走 grok
+    setup_fake({"goose": [{"text": T.PLAN_OK, "call": "设 r = 读片段 pkg/util.py:1-9\n打印 {r}"}], "grok": [{"text": T.BOUND_OK}]})
+    r, p, out = run_real("fl_goose", {"plan": "goose:gpt-6-luna", "bound": "grok"})
+    rc = recs()
+    check(r["fixed"] and "x + x" in T.util(p) and [x["engine"] for x in rc] == ["goose", "grok"], "read 规划 goose + 边界复核 grok：全流程成功",
+          ([x["engine"] for x in rc], r.get("stop")))
+    argv = rc[0]["argv"]
+    srv = shlex.split(argv[argv.index("--with-extension") + 1][4:])
+    check(srv[0] == sys.executable and "--readonly" in srv and srv[srv.index("--workdir") + 1] == str(p) and rc[0]["env"]["GOOSE_MODE"] == "auto"
+          and rc[0]["stdin"].startswith("【任务原文】"), "read 规划 goose：挂只读 dslmcp（workdir=项目）、auto 批准、stdin = 任务原文", srv)
+    tools = json.loads((out / "plan_tools.json").read_text(encoding="utf-8"))
+    check(len(tools) == 1 and "读片段" in tools[0]["参数"] and tools[0]["状态"] == "ok", "goose：plan_tools.json 照写", tools)
+    calls = json.loads((out / "calls.json").read_text(encoding="utf-8"))
+    check([(c["tag"], c["engine"], c["model"], c["effort"]) for c in calls] == [("plan", "goose", "gpt-6-luna", None), ("bound", "grok", "grok", "low")]
+          and calls[0]["tool"] == 1 and calls[0]["tool_calls"] == 1, "calls.json：goose 记 engine / model，工具调用 1 次", calls)
 
     # 规划走 claude（缺省 sonnet），子任务走 opencode，边界复核走 claude haiku（假 claude）
     setup_fake({"opencode": [{"text": json.dumps(REMEDY_FIX, ensure_ascii=False)}], "claude": [{"text": REMEDY_PLAN}, {"text": T.BOUND_OK}]})

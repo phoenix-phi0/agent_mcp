@@ -2,7 +2,7 @@
 # 这不是可执行的 DSL 脚本——只是数据，格式仿 DSL 写法（关键字中文、值英文），由 tools/dslagent/roles.py 解析与检查。
 # 每个角色一块：「角色 <名>」开头，「结束」收尾。字段：
 #   用途          一句话
-#   默认模型      模型串（见 tools/dslagent/engines.py parse()：sonnet/opus/haiku、codex:<模型>[:<强度>]、grok[:<强度>]、opencode:<provider/model>）
+#   默认模型      模型串（见 tools/dslagent/engines.py parse()：sonnet/opus/haiku、codex:<模型>[:<强度>]、grok[:<强度>]、opencode:<provider/model>、goose[:<模型>[:<强度>]]）
 #   回退模型      默认模型调用失败 / 回复不合格时退回的模型串
 #   工具          无 | 只读 | 读写
 #   动词包        工具=只读/读写 时可用的动词包，逗号分隔；没有就留空
