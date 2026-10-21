@@ -47,7 +47,7 @@ def main(argv=None):
     n.add_argument("--no-contract", action="store_true", help="（只对 --modular）不先约定接口：回到逐文件规划、按下层真实文件对接的老做法；缺省先约定接口（CONTRACTS.md）再按约定实现，实现后试调一轮")
     n.add_argument("--from-plan", default=None, metavar="旧输出目录", help="（只对 --modular）读回旧运行的顶层规划与层次×模块（plan/top.zs、plan/layers.zs；旧版 JSON 目录也读，转成 DSL 规划文件；再不行从 result.json 与 calls/ 还原），跳过这两步，在新的 project / --out 里从数据层做起")
     v = sp.add_parser("v3", help="v3 流程（v3/v3.zs）：顶层规划 → 约定 → 骨架 → 分配 → 按层做模块；断了重跑同一命令即续跑；"
-                       "action=audit/change 改走 核查.zs / 修改.zs（修改计划的核对与执行），缺省 build 是原来的新建流程")
+                       "action=audit/change 改走 核查.zs / 修改.zs（核查出问题清单 / 按问题清单改代码），缺省 build 是原来的新建流程")
     v.add_argument("action", nargs="?", choices=("build", "audit", "change"), default="build")
     v.add_argument("--req", required=True, help="需求文件")
     v.add_argument("--project", required=True, help="项目目录（不存在就建）")
@@ -59,7 +59,6 @@ def main(argv=None):
     v.add_argument("--task", default=None, help="（audit / change）这一轮要完成的具体任务，不写就是纯核查 / 按问题清单改")
     v.add_argument("--issues", default="latest", help="（change）读哪份问题清单：路径或 latest（默认最新一份）")
     v.add_argument("--llm", default="sonnet", help="（audit / change）调模型用的模型名")
-    v.add_argument("--retries", type=int, default=3, help="（change）修改计划写了几次都没通过检查才放弃")
     ag = sp.add_parser("agents", help="子 agent 管理：角色登记表、调度层账本")
     agsp = ag.add_subparsers(dest="agents_cmd", required=True)
     st = agsp.add_parser("stats", help="按角色 / 按模型统计调用数、成功率、平均轮数、花费、用时")
@@ -81,14 +80,13 @@ def main(argv=None):
         if a.action == "audit":
             res = V3.run_entry("核查", a.project, a.out, req_text,
                                extra_vars={"task": a.task or "", "llm": a.llm},
-                               cost_cap=a.cost_cap, **({"wall": a.wall} if a.wall else {}), req_path=a.req)
+                               cost_cap=a.cost_cap, **({"wall": a.wall} if a.wall else {}))
             print(json.dumps({k: res.get(k) for k in ("status", "reason", "at", "花费", "用时", "模型调用", "returned")}, ensure_ascii=False))
             return 0 if res["status"] == "成功" else 1
         if a.action == "change":
             res = V3.run_entry("修改", a.project, a.out, req_text,
-                               extra_vars={"issues": a.issues, "task": a.task or "", "llm": a.llm, "retries": str(a.retries)},
-                               cost_cap=a.cost_cap, **({"wall": a.wall} if a.wall else {}), module_wall=a.module_wall,
-                               req_path=a.req)
+                               extra_vars={"issues": a.issues, "task": a.task or "", "llm": a.llm},
+                               cost_cap=a.cost_cap, **({"wall": a.wall} if a.wall else {}), module_wall=a.module_wall)
             print(json.dumps({k: res.get(k) for k in ("status", "reason", "at", "花费", "用时", "模型调用", "returned")}, ensure_ascii=False))
             return 0 if res["status"] == "成功" else 1
         res = V3.run(req_text, a.project, a.out, stop_after=a.stop_after, cost_cap=a.cost_cap,

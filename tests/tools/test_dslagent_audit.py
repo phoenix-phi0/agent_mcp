@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """核查.zs——程序检查是动词（全局检查 items / 全量回归·接口冒烟 / 存问题清单 多份结果），需要判断的地方派子任务（派任务）。
-另有 R 的小修复：检查修改计划 按传入的问题清单检查、next_no/latest_path 容忍非数字文件名、--issues 路径限项目目录内。不调真模型。
+另有 R 的小修复：next_no/latest_path 容忍非数字文件名、--issues 路径限项目目录内。不调真模型。
 
     cd /workspace/agent_mcp && .venv/bin/python tests/tools/test_dslagent_audit.py
 
@@ -18,8 +18,8 @@ check, fresh, core, Fake = T.check, T.fresh, T.core, T.Fake
 from tools.dslagent.v3 import planning as PLC                # noqa: E402
 
 
-def verb_engine(p, out, req="需求全文", req_path=None):
-    ctx = core.Ctx(p, out, req, None, req_path=req_path)
+def verb_engine(p, out, req="需求全文"):
+    ctx = core.Ctx(p, out, req, None)
     e = T.engine(p)
     e.v3 = ctx
     return e, ctx
@@ -184,7 +184,7 @@ def audit_project(broken=False):
 def run_audit(p, fk, **vars_):
     out = fresh("aout")
     v = {"task": "", "llm": "sonnet", **vars_}
-    return core.run_entry("核查", p, out, "## 1 概述\n需求全文\n", extra_vars=v, backend=fk, req_path=None), out
+    return core.run_entry("核查", p, out, "## 1 概述\n需求全文\n", extra_vars=v, backend=fk), out
 
 
 def code_reply(items, contract_items=None):
@@ -256,7 +256,7 @@ def test_long_files_split():
 
 
 def test_issue_fixes():
-    print("小修复：next_no / latest_path 容忍非数字文件名；resolve 路径限项目目录内；检查修改计划 按传入的问题清单检查")
+    print("小修复：next_no / latest_path 容忍非数字文件名；resolve 路径限项目目录内")
     from tools.dslagent.v3 import issues as IS
     p = fresh("iss")
     (p / "plan" / "issues").mkdir(parents=True)
@@ -274,20 +274,6 @@ def test_issue_fixes():
         check(False, "项目目录外的清单被拒")
     except ValueError as e:
         check("不在项目目录" in str(e), "项目目录外的清单被拒", e)
-    # 检查修改计划 按传入的问题清单，而不是 plan/issues 最新一份
-    q = T.full_project()
-    (q / "plan").mkdir(exist_ok=True)
-    (q / "plan" / "top.zs").write_text(T.TOP3, encoding="utf-8")
-    (q / "plan" / "issues").mkdir(exist_ok=True)
-    (q / "plan" / "issues" / "1.md").write_text("# 问题清单 1\n\n1. 最新那份的问题\n   涉及模块：vocab\n", encoding="utf-8")
-    e, _ = verb_engine(q, fresh("o"))
-    plan = "# 对应问题 1\n改约定 vocab 补一个说明\n落实修改\n"
-    e.vars["pl"] = plan
-    e.vars["two"] = [{"issue": "甲", "modules": "vocab", "basis": "b"}, {"issue": "乙", "modules": "graph", "basis": "b"}]
-    c1 = run(e, "设 c = 检查修改计划 {pl}\n返回 {c}\n")
-    check(c1["ok"] == "是", "不传问题：读 plan/issues 最新一份（1 条，计划覆盖了）", c1)
-    c2 = run(e, "设 c = 检查修改计划 {pl} 问题={two}\n返回 {c}\n")
-    check(c2["ok"] == "否" and "2" in c2["problems"], "传了 2 条的清单：第 2 条没被计划覆盖，检查不过", c2)
 
 
 def test_f1_top_broken():

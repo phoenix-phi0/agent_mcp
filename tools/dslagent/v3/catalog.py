@@ -4,7 +4,7 @@
 公开函数（函数头 + 返回 + 报错，不含伪代码，复用 contract.public_heads）、接口（方法 路径 -> 函数，带 角色 / 公开 / 上传）。
 
 build(project, top_text) -> 全文；refresh(project) -> 读 plan/top.zs + 全部 contracts/*.md 重新生成并存盘，
-内容没变不重写（约定通过 / 重写 / 删除模块 / 同步顶层依赖时调，见 planning.save / 清理删掉的模块 / 同步顶层依赖）；
+内容没变不重写（约定通过 / 重写 / 清理删掉的模块 / 同步顶层依赖时调，见 planning.save / 清理删掉的模块 / 同步顶层依赖）；
 brief_index(project, top_text, exclude) -> 除 exclude 外每个模块一行概要（说明 + 公开函数名），给写约定时非直接依赖的模块用。
 """
 from pathlib import Path
@@ -88,7 +88,7 @@ def section(name, c, desc):
 def build(project, top_text):
     comments = top_comments(top_text)
     mods = _parsed_modules(project)
-    header = "# 接口目录（程序生成，只读；约定通过 / 重写 / 删除模块 / 同步顶层依赖时自动刷新）\n\n"
+    header = "# 接口目录（程序生成，只读；约定通过 / 重写 / 清理删掉的模块 / 同步顶层依赖时自动刷新）\n\n"
     if not mods:
         return header + "（还没有通过检查的模块约定）\n"
     return header + "\n".join(section(name, mods[name], comments.get(name, "")) for name in sorted(mods))

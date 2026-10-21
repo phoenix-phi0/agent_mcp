@@ -552,14 +552,14 @@ def t_flow():
     (pf / "services" / "graph.zs").write_text(big, encoding="utf-8")
     mt = DP_PACK.materials("模块 graph", pf, None)["text"]
     check("后面略" not in mt and "标记_文件末尾" in mt, "materials：本模块现有文件读到 40000 字，不再在 12000 处截断", len(mt))
-    # 4 计划想改约定 / 别的模块的文件：被拦（整体没写），失败、项目回滚
+    # 4 计划想改 contracts / 别的模块的文件：被拦（整体没写），失败、项目回滚
     p4 = skeleton("fl_oos", modules=("progress",))
     oos = {"contracts/progress.md": "模块 progress\n", "services/graph.zs": "业务 graph\n结束\n"}
     f = Fake(plan=plan_for("progress", p4, oos))
     before = {str(x.relative_to(p4)): x.read_text(encoding="utf-8") for x in p4.rglob("*") if x.is_file()}
     r = V.run(p4, "模块 progress", TMP / "out_fl_oos", model=f, pack="dslproj")
     after = {str(x.relative_to(p4)): x.read_text(encoding="utf-8") for x in p4.rglob("*") if x.is_file()}
-    check(r["status"] == "失败" and "范围拦截" in r["stop"] and before == after, "改约定 / 上游文件 → 被拦、失败、项目原样", r["stop"])
+    check(r["status"] == "失败" and "范围拦截" in r["stop"] and before == after, "改 contracts / 上游文件 → 被拦、失败、项目原样", r["stop"])
     # 5 写进范围内但内容不合约定（函数头改了）：比对约定不过 → 补改
     p5 = skeleton("fl_head")
     wrong = dict(files)

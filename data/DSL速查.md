@@ -293,7 +293,6 @@ SQLite 有列亲和性，所以 `WHERE views > :下限` 能工作。但左边一
   status 非成功的记入返回的 `unchecked`（`{module, reason}`，**不能当作没问题**）；`found` 与 `items` 前后矛盾、
   缺 issue/modules/basis 的条目丢弃并记入 `dropped`（带原文，不重调模型）。
   合并 → 按（issue, modules）去重 → 统一序号 → 存 `plan/issues/<序号>.md`；返回 `{path, count, unchecked, dropped}`。
-- `检查修改计划 {plan} 问题={iss.items}`：问题清单按调用时传入的检查（没传才读 plan/issues 最新一份）。
 - 命令行：`python -m tools.dslagent v3 audit --req … --project … --out … [--task …]`。
 - 没有 plan/top.zs 时也能跑：全局检查 0 条，回归 / 冒烟跳过，规划层照派。
 
@@ -313,8 +312,7 @@ SQLite 有列亲和性，所以 `WHERE views > :下限` 能工作。但左边一
 | 模板 | template | 功能 | features |
 | 调用上限 | call_limit | 角色 | roles |
 | 角色模板 | role_template | 解析 | parsed |
-| 未实现/未实现列表 | unimplemented/unimplemented_list | 名（模块名返回） | name |
-| 模块（改约定返回） | module | 节 | section |
+| 未实现/未实现列表 | unimplemented/unimplemented_list | | |
 | 改了/没变 | changed/unchanged | 删了/写了 | removed/written |
 | 新建/已有/新建数 | created/existing/created_count | 次数（规划一份的重试计数） | attempts |
 | 问题/涉及模块/依据（模型回复） | issue/modules/basis | 通过/问题列表（模型回复） | passed/issues |
@@ -427,8 +425,7 @@ C1 那条先补上这个检查器（哪怕先只对 `verbs/` 生效）才能扩�
 | 功能 | features | 调用上限 | call_limit |
 | 角色 | roles | 角色模板 | role_template |
 | 解析 | parsed | 未实现/未实现列表 | unimplemented/unimplemented_list |
-| 名（模块名返回） | name | 模块（改约定返回） | module |
-| 节 | section | 改了/没变 | changed/unchanged |
+| 改了/没变 | changed/unchanged | | |
 | 删了 | removed | 写了 | written |
 | 新建/已有/新建数 | created/existing/created_count | 花费/调用/轮/记录目录/秒 | cost/calls/round/log_dir/secs |
 | 次数（规划一份的重试计数，区别于「轮数」=rounds） | attempts | | |

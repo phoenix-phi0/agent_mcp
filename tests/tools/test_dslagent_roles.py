@@ -77,7 +77,7 @@ def test_real_registry():
     print("真实登记表 tools/dslagent/roles.zs")
     rm = R.load_roles()
     want = ("plan", "plan_fix", "sub", "sub_tool", "fix", "bound", "bfix", "write_top", "write_contract", "review",
-            "audit", "write_change_plan", "build_module", "logic_check", "summarize", "classify", "extract", "prescreen")
+            "audit", "build_module", "logic_check", "summarize", "classify", "extract", "prescreen")
     missing = [w for w in want if w not in rm]
     check(not missing, "spec 要求的全部角色都登记了", missing)
     probs = R.check_roles(rm)
