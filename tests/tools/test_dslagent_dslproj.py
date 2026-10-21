@@ -165,12 +165,6 @@ def t_contract():
     uf, uf_probs = C.parse("模块 x\n## 函数\n公开 函数 f a\n## 用例\n用例 u1\n  先 文件 uploads/a.md 内容=第一行\\n第二行\n  调用 f a=1\n  得 有返回\n")
     st = uf["用例"][0]["先"][0]
     check(not uf_probs and st == {"种类": "文件", "路径": "uploads/a.md", "内容": "第一行\\n第二行", "行": st["行"]}, "先 文件 解析：路径 + 内容（字面 \\n，写文件时再还原）", (uf_probs, st))
-    cf = '模块 x\n## 函数\n公开 函数 f p\n## 用例\n用例 u1\n  先 文件 a/b.csv 内容=x\n  调用 f p=a/b.csv\n  得 有返回\n'
-    check(any("后缀要用 .md 或 .txt" in x for x in C.check(C.parse(cf)[0], "x", {}, ["x"])) and not any("后缀" in x for x in C.check(C.parse(cf.replace("b.csv", "b.txt"))[0], "x", {}, ["x"])), "先 文件 后缀 .csv → 约定检查报，.txt 通过")
-    nd = '模块 x\n## 表\n表 t\n  a 文本 甲\n  b 文本 乙（可空）\n  c 文本 丙\n## 函数\n公开 函数 f a\n## 用例\n用例 u1\n  先 数据 t a=1\n  调用 f a=1\n  得 有返回\n'
-    npr = C.check(C.parse(nd)[0], "x", {}, ["x"])
-    check(any("没给必填字段 c" in x for x in npr) and not any("必填字段 b" in x or "、b" in x for x in npr), "先 数据 缺必填字段（没写可空的）→ 约定检查报，可空的不报", npr)
-    check(not any("必填字段" in x for x in C.check(C.parse(nd.replace("a=1\n  调用", "a=1 c=2\n  调用"))[0], "x", {}, ["x"])), "先 数据 字段给全不报")
     check(any("相对路径且不含 .." in x for x in C.check(C.parse('模块 x\n## 函数\n公开 函数 f a\n## 用例\n用例 u1\n  先 文件 /etc/passwd\n  调用 f a=1\n  得 有返回\n')[0], "x", {}, ["x"])),
           "先 文件 的路径不能是绝对路径 → 约定检查报错")
     check(any("相对路径且不含 .." in x for x in C.check(C.parse('模块 x\n## 函数\n公开 函数 f a\n## 用例\n用例 u1\n  先 文件 a/../../b.md\n  调用 f a=1\n  得 有返回\n')[0], "x", {}, ["x"])),

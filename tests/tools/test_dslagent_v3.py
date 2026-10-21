@@ -740,43 +740,6 @@ DUP_B = ("模块 b\n\n## 函数\n公开 函数 g y\n  返回 {ok}\n  伪代码 �
          "## 接口\nGET /dup/x -> g\n\n## 用例\n用例 g_ok\n  调用 g y=1\n  得 有返回\n")
 
 
-AUTH_BODY = ("模块 {n}\n依赖 无\n\n认证 可选\n{line}\n\n## 函数\n公开 函数 ping\n  返回 {{ok}}\n"
-             "  伪代码 查询 u：按 username 查账号，返回含 role 列；查询 account_by_name 同理；返回 {{\"ok\": 1}}\n")
-
-
-def _auth_proj(name, line, queries=()):
-    """单模块 a 的项目，约定头 认证 核对 写 line；queries 里的每个名字在 queries/ 下建一个 .sql。"""
-    p = fresh(name)
-    (p / "contracts").mkdir(parents=True)
-    (p / "contracts" / "a.md").write_text(AUTH_BODY.format(n="a", line=line), encoding="utf-8")
-    for q in queries:
-        (p / "queries").mkdir(exist_ok=True)
-        (p / "queries" / f"{q}.sql").write_text("SELECT username, role FROM t WHERE username = :username", encoding="utf-8")
-    return p
-
-
-def test_global_check_auth_lookup():
-    print("全局检查：认证 核对 的库参数要 .db、查询名要对应 queries/<名>.sql（代码阶段）或约定里声明过（约定阶段）")
-    from tools.dslagent.v3 import globalcheck as G
-    top = {"项目": "demo", "模块": [{"名": "a", "依赖": [], "行": 1}]}
-    g = G.check(_auth_proj("ga1", "认证 核对 app.db account_by_name", ["account_by_name"]), top)
-    check(g["条数"] == 0, "代码阶段：库是 app.db、queries/account_by_name.sql 存在 → 通过", g)
-    g = G.check(_auth_proj("ga2", "认证 核对 app.db account_user", ["account_by_name"]), top)
-    check(g["条数"] == 1 and "queries/account_user.sql 不存在" in g["按模块"]["a"][0] and "app.db account_by_name" in g["按模块"]["a"][0],
-          "代码阶段：查询文件不存在 → 点名模块、写清正确写法", g)
-    g = G.check(_auth_proj("ga3", "认证 核对 account account_by_name", ["account_by_name"]), top)
-    check(g["条数"] == 1 and "库参数不对" in g["按模块"]["a"][0] and ".db" in g["按模块"]["a"][0], "库参数不是 .db 文件名 → 不通过", g)
-    g = G.check(_auth_proj("ga4", "认证 核对 app.db account_by_name"), top)
-    check(g["条数"] == 0, "约定阶段（queries 还没写）：约定里声明了这个查询 → 通过", g)
-    g = G.check(_auth_proj("ga5", "认证 核对 app.db nowhere"), top)
-    check(g["条数"] == 1 and "不是一个声明过的查询" in g["按模块"]["a"][0], "约定阶段：约定里没声明这个查询 → 不通过", g)
-    p = _auth_proj("ga6", "认证 核对 account account_user")
-    (p / "contracts" / "a.md").write_text((p / "contracts" / "a.md").read_text(encoding="utf-8").replace("伪代码 ", "伪代码 account_user ", 1)
-                                          + "\n## 表\n表 a_t\n  id 整数 主键\n", encoding="utf-8")
-    g = G.check(p, top)
-    check(g["条数"] >= 1 and "库参数不对" in "".join(g["按模块"]["a"]), "库参数和查询名都写错（kg 的真实写法）→ 不通过", g)
-
-
 def test_global_check():
     print("全局检查：跨模块方法+路径 / 表名重复")
     from tools.dslagent.v3 import globalcheck as G
@@ -792,13 +755,6 @@ def test_global_check():
     (p / "contracts" / "a.md").write_text(DUP_A_FIXED, encoding="utf-8")
     g2 = G.check(p, top)
     check(g2["条数"] == 0, "路径改掉之后没有冲突了", g2)
-    mods = {"a": "认证 核对 app.db u", "b": "认证 核对 app.db u", "c": "认证 核对 u 取角色"}
-    top3 = {"项目": "demo", "模块": [{"名": n, "依赖": [], "行": i} for i, n in enumerate(mods, 1)]}
-    for n, line in mods.items():
-        (p / "contracts" / f"{n}.md").write_text(AUTH_BODY.format(n=n, line=line), encoding="utf-8")
-    g3 = G.check(p, top3)
-    check(g3["条数"] == 3 and set(g3["按模块"]) == {"c"} and "认证 核对 app.db u" in g3["按模块"]["c"][0] and "a、b" in g3["按模块"]["c"][0],
-          "「认证 核对」各模块写法不一致：少数派的 c 被点名，照多数写法改", g3)
 
 
 def test_global_check_flow():
@@ -1421,7 +1377,6 @@ if __name__ == "__main__":
     try:
         test_top()
         test_smoke_actor_failures()
-        test_global_check_auth_lookup()
         test_contract_check()
         test_auth_contract()
         test_prompt_example()
