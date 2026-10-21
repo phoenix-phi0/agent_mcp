@@ -470,7 +470,8 @@ def check(c, name, upstream, all_modules):
             if path_param not in names:
                 probs.append(f"第 {i['行']} 行：接口 {i['路径']} 声明了「上传 {i['上传']['字段']}」，但函数「{i['函数']}」没有入参「{path_param}」接收存盘路径")
     # 先 数据 往本模块的表里造行：骨架里没写「可空」的字段都是必填，缺了造数据就失败（实现再对也过不了），所以在约定阶段挡
-    tdefs = {t["名"]: t for t in c["表"]}
+    tdefs = {t["名"]: t for up in upstream.values() for t in up.get("表", [])}
+    tdefs.update({t["名"]: t for t in c["表"]})
     for u in c["用例"]:
         for st in u["先"]:
             t = tdefs.get(st["表"]) if st["种类"] == "数据" else None

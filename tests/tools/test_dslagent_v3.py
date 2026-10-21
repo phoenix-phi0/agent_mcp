@@ -340,6 +340,12 @@ def test_skeleton_build_state():
     r2 = SF.gen_skeleton(p, top)
     check(r2["新建"] == [] and len(r2["已有"]) == 9, "已存在的文件不覆盖", r2)
     check("返回" in (p / "services" / "graph.zs").read_text(encoding="utf-8"), "改过的 services/graph.zs 原样保留")
+    # 从没通过过的模块（never_built）：约定重写后骨架跟着重写，改过的文件也被刷成新骨架；通过过的不动
+    r3 = SF.gen_skeleton(p, top, never_built=lambda n: n == "graph")
+    check(r3["新建"] == ["services/graph.zs"] and "报错 未实现" in (p / "services" / "graph.zs").read_text(encoding="utf-8"), "never_built 的模块：内容和约定骨架不同的已有文件重写，别的模块不动", r3)
+    r3b = SF.gen_skeleton(p, top, never_built=lambda n: True)
+    check(r3b["新建"] == [], "never_built 的模块：内容已是最新骨架 → 不重写", r3b)
+    (p / "services" / "graph.zs").write_text("业务 graph\n  用包 db\n  公开 函数 取知识点 code\n    返回 {\"x\": 1}\n  结束\n结束\n", encoding="utf-8")
     # 可选入参用 {x 或}
     c, _ = VC.load(p, "progress")
     c["函数"][0]["入参"].append("pass_line?")

@@ -172,6 +172,16 @@ def seed_case(ws, sql, module, u):
     return ""
 
 
+def _mock_reply(prompt, system=None):
+    """用例里模型调用的假回复：「问JSON … 格式 …」的提示词末尾带「示例：{…}」，照示例回（字段齐、类型对，函数才走得下去，
+    用例只核对流程与落库，不核对回答文字）；别的调用回「[模拟回复] 提示词」，同 MockClient 默认。"""
+    if "输出格式：只输出一个 JSON 对象" in prompt:
+        for line in reversed(prompt.splitlines()):
+            if line.startswith("示例："):
+                return line[len("示例："):]
+    return f"[模拟回复] {prompt}"
+
+
 def make_engine(ws):
     """一个装好业务层（services 刷新过）的引擎，在 ws 上调「调用 模块.函数」用。业务层加载失败抛 RuntimeError。"""
     from tools import packs
@@ -179,7 +189,7 @@ def make_engine(ws):
     from tools.dsl_http import DEFAULT_PACKS
     from tools.dsl_service import get_services
     from tools.mock import MockClient
-    eng = DSLEngine(MockClient(offline=True), workdir=Path(ws), verbose=False,
+    eng = DSLEngine(MockClient(offline=True, handler=_mock_reply), workdir=Path(ws), verbose=False,
                     verbs=packs.registry(DEFAULT_PACKS, Path(ws)), verbs_root=packs.verbs_root())
     svc = get_services(Path(ws) / "services")
     svc.refresh()

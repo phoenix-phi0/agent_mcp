@@ -116,10 +116,12 @@ def route_text(name, c):
 PROJECT_ROUTES = "routes/_project.zs"           # 项目级（不属于任何模块）的 routes 文件：目前只放「迁移 只加」
 
 
-def gen_skeleton(project, top):
+def gen_skeleton(project, top, never_built=None):
     """→ {"新建": [相对路径], "已有": [相对路径], "问题": [加载检查问题]}。约定缺 / 解析不过抛 ValueError。
     任一模块的表带了「学习记录」标注 → 额外生成 routes/_project.zs（顶层「迁移 只加」，模型不写、top.zs 也不写，
-    见 tools/migrate.py）。"""
+    见 tools/migrate.py）。
+    never_built(名) 为真的模块（state 里从没通过过，文件只可能是旧约定生成的骨架）：已有文件内容和现在的约定生成的不同就重写——
+    约定在骨架之后被重写过（续跑 / 约定重做），不重写的话表结构会停在旧约定上，用例造数据必然失败。通过过的模块（改约定的修改流程）不动。"""
     project = Path(project)
     made, kept = [], []
     learner_record = False
@@ -140,8 +142,9 @@ def gen_skeleton(project, top):
                 continue
             f = project / rel
             if f.exists():
-                kept.append(rel)
-                continue
+                if not (never_built and never_built(name)) or f.read_text(encoding="utf-8") == text:
+                    kept.append(rel)
+                    continue
             f.parent.mkdir(parents=True, exist_ok=True)
             f.write_text(text, encoding="utf-8", newline="\n")
             made.append(rel)

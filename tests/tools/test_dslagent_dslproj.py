@@ -584,12 +584,25 @@ def t_flow():
     check(SC.guard("services/progress.zs") == "", "流程结束后范围拦截关闭")
 
 
+def t_mock_json():
+    print("跑用例里的模型调用（问JSON 按格式示例回）")
+    ws = TMP / "mockjson"
+    (ws / "services").mkdir(parents=True)
+    (ws / "services" / "m.zs").write_text(
+        "业务 m\n  用包 common\n  公开 函数 问 q\n    问JSON r = 回答 {q} 格式 reply:文本 score:数字\n    返回 {\"reply\": \"{r.reply}\", \"score\": \"{r.score}\"}\n  结束\n结束\n",
+        encoding="utf-8")
+    eng = CS.make_engine(ws)
+    res, err = CS.call(eng, "m", "问", {"q": "你好"})
+    check(not err and isinstance(res, dict) and "reply" in res and "score" in res, "函数里的 问JSON 在用例的假模型下能拿到格式齐全的结构", (res, err))
+
+
 def main():
     try:
         t_contract()
         t_project()
         t_compare()
         t_cases()
+        t_mock_json()
         t_case_files()
         t_settle()
         t_accept_materials()
