@@ -344,7 +344,7 @@ def _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, mod
     if v2_backend is None and project is None:
         return _fail("执行方式 v2 的角色需要项目目录（project）")
     from .packs.dslproj import project as P
-    scope = _v2_scope(role) + (P.scope_globs(module) if "本模块路径" in _list_field(role, "可写范围") else [])
+    scope = _v2_scope(role) + (P.scope_globs(module, project) if "本模块路径" in _list_field(role, "可写范围") else [])
     req = {"role": role_name, "module": module, "task": f"模块 {module}\n{(task or '').strip()}\n", "scope": scope,
            "project": project, "module_cmd": module_cmd, "timeout": timeout, "out_dir": str(out_dir)}
     run = v2_backend or _run_v2_subprocess
@@ -369,13 +369,16 @@ def _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, mod
             "model": spec["spec"], "cost": cost, "calls": calls, "secs": round(secs, 2), "call_id": row["call_id"]}
 
 
-def parallel_dispatch_agents(items, *, out_dir, backend=None, parent_id=None, roles_map=None, max_workers=None):
+def parallel_dispatch_agents(items, *, out_dir, backend=None, parent_id=None, roles_map=None, max_workers=None,
+                             project=None, module_cmd=None, v2_backend=None):
     """`并行派代理` 的 Python 实现：items 是 [{角色, 任务?, 入参?, 格式?, parent_id?}, …]，共用一份账本；
-    并发数缺省 DSLAGENT_AGENT_CONCURRENCY（没设 = 4），超了排队（线程池天然排队）。按入参原序返回结果列表。"""
+    并发数缺省 DSLAGENT_AGENT_CONCURRENCY（没设 = 4），超了排队（线程池天然排队）。按入参原序返回结果列表。
+    project / module_cmd / v2_backend 原样转给每个 dispatch_agent（执行方式=v2 的角色要用，与单个 派代理 一致）。"""
     led = LG.Ledger(Path(out_dir) / LG.LEDGER_NAME)
     mw = max_workers or int(os.environ.get("DSLAGENT_AGENT_CONCURRENCY") or 4)
     with CF.ThreadPoolExecutor(max_workers=max(1, mw)) as ex:
         futs = [ex.submit(dispatch_agent, it["角色"], it.get("任务", ""), it.get("入参"), it.get("格式"),
                            out_dir=out_dir, backend=backend, parent_id=it.get("parent_id", parent_id),
-                           ledger=led, roles_map=roles_map) for it in items]
+                           ledger=led, roles_map=roles_map, project=project, module_cmd=module_cmd,
+                           v2_backend=v2_backend) for it in items]
         return [f.result() for f in futs]

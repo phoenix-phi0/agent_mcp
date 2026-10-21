@@ -3,6 +3,7 @@
                 已存在的文件不覆盖。生成后对新文件跑加载检查。
   gen_build     从 top.zs 按依赖分层生成 plan/build.zs（做模块组 …），不调模型。
 """
+import json
 from pathlib import Path
 
 from .. import loadcheck
@@ -113,6 +114,7 @@ def route_text(name, c):
     return "\n".join(out)
 
 
+SKELETON_REC = "plan/skeleton.json"           # {模块: 生成骨架时的约定 hash}
 PROJECT_ROUTES = "routes/_project.zs"           # 项目级（不属于任何模块）的 routes 文件：目前只放「迁移 只加」
 
 
@@ -120,11 +122,19 @@ def gen_skeleton(project, top, never_built=None):
     """→ {"新建": [相对路径], "已有": [相对路径], "问题": [加载检查问题]}。约定缺 / 解析不过抛 ValueError。
     任一模块的表带了「学习记录」标注 → 额外生成 routes/_project.zs（顶层「迁移 只加」，模型不写、top.zs 也不写，
     见 tools/migrate.py）。
-    never_built(名) 为真的模块（state 里从没通过过，文件只可能是旧约定生成的骨架）：已有文件内容和现在的约定生成的不同就重写——
-    约定在骨架之后被重写过（续跑 / 约定重做），不重写的话表结构会停在旧约定上，用例造数据必然失败。通过过的模块（改约定的修改流程）不动。"""
+    重写判据：只看约定 hash，不拿磁盘文件和新骨架比。plan/skeleton.json 记每个模块生成骨架时的约定 hash；
+    文件不存在 → 写；never_built(名) 为真（state 里从没通过过）且记录的 hash 与现在的约定 hash 不同（约定在骨架之后被重写过）
+    → 该模块三个文件都重写；其余（约定没变，或通过过的模块，或没有记录的老项目）已有文件一律不动——做了一半、没通过、约定没变的模块续跑不会丢进度。"""
     project = Path(project)
     made, kept = [], []
     learner_record = False
+    rec_f = project / SKELETON_REC
+    try:
+        rec = json.loads(rec_f.read_text(encoding="utf-8")) if rec_f.is_file() else {}
+    except ValueError:
+        rec = {}
+    if not isinstance(rec, dict):
+        rec = {}
     for m in top["模块"]:
         name = m["名"]
         try:
@@ -136,18 +146,22 @@ def gen_skeleton(project, top, never_built=None):
             raise ValueError(f"contracts/{name}.md 解析不过：{probs[0]}")
         if any(t.get("学习记录") for t in c["表"]):
             learner_record = True
+        chash = VC.C.hash_of(VC.path_of(project, name).read_text(encoding="utf-8"))
+        stale = bool(never_built and never_built(name) and rec.get(name) and rec.get(name) != chash)
+        rec[name] = chash
         for rel, text in ((f"entities/{name}.entity", entity_text(c)), (f"services/{name}.zs", service_text(name, c)),
                           (f"routes/{name}.zs", route_text(name, c))):
             if not text.strip():
                 continue
             f = project / rel
-            if f.exists():
-                if not (never_built and never_built(name)) or f.read_text(encoding="utf-8") == text:
-                    kept.append(rel)
-                    continue
+            if f.exists() and not stale:
+                kept.append(rel)
+                continue
             f.parent.mkdir(parents=True, exist_ok=True)
             f.write_text(text, encoding="utf-8", newline="\n")
             made.append(rel)
+    rec_f.parent.mkdir(parents=True, exist_ok=True)
+    rec_f.write_text(json.dumps(rec, ensure_ascii=False, indent=1, sort_keys=True), encoding="utf-8", newline="\n")
     if learner_record:
         f = project / PROJECT_ROUTES
         if f.exists():

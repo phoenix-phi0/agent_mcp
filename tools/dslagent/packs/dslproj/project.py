@@ -29,9 +29,21 @@ def require_module(task):
     return m
 
 
-def scope_globs(module):
-    """该模块允许写 / 删的路径（scope.py 的 glob）。"""
-    return [f"entities/{module}.entity", f"services/{module}.zs", f"routes/{module}*.zs", f"queries/{module}_*.sql", f"tests/{module}_*"]
+def scope_globs(module, project=None):
+    """该模块允许写 / 删的路径（scope.py 的 glob）。给了 project 时 routes 按「最长模块名归属」（同 route_files）收窄：
+    别的模块名以本模块名开头（quiz 与 quiz_knowledge）时，routes/quiz*.zs 会吞掉对方的文件，改成 routes/<模块>.zs + 已有的、归本模块的文件。"""
+    routes = [f"routes/{module}*.zs"]
+    if project is not None:
+        mods = sorted(set(all_modules(project)) | {module})
+        if any(m != module and m.startswith(module) for m in mods):
+            routes = [f"routes/{module}.zs"] + [f"routes/{f.name}" for f in route_files(project, module, mods) if f.stem != module]
+    return [f"entities/{module}.entity", f"services/{module}.zs", *routes, f"queries/{module}_*.sql", f"tests/{module}_*"]
+
+
+def scope_files(root, module):
+    """root 下现有的、属于该模块范围的文件（相对路径，排序）；routes 按最长模块名归属。"""
+    root = Path(root)
+    return sorted({str(f.relative_to(root)) for g in scope_globs(module, root) for f in root.glob(g) if f.is_file()})
 
 
 def contract_path(project, module):

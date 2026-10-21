@@ -11,6 +11,7 @@
        依据：需求第 3 节 / plan/top.zs 模块 vocab 说明 / 程序检查
 
 每条用「N. 」开头，后面跟缩进的「涉及模块：」「依据：」两行（都可省，是给人看的展示文字，不是键名）。
+issue 含换行时，第 2 行起每行前加 6 个空格（续行），解析时并回 issue；续行即使以「1. 」开头也不算新条目。
 parse_issues() 解一份清单文本回列表，条目字段名是 issue/modules/basis（format_issue 兼容旧键 问题/涉及模块/依据）。
 """
 import hashlib
@@ -55,15 +56,20 @@ def resolve(project, ref):
     return p
 
 
+CONT = " " * 6   # 多行 issue 的续行缩进（比「涉及模块：」「依据：」的 3 格缩进深，解析时靠它区分）
+
+
 def format_issue(i, item):
-    lines = [f"{i}. {item.get('issue', item.get('问题', ''))}"]
+    issue = str(item.get("issue", item.get("问题", "")) or "").replace("\r\n", "\n").replace("\r", "\n").strip("\n")
+    first, *rest = issue.split("\n")
+    lines = [f"{i}. {first}"] + [CONT + r for r in rest]
     mods = item.get("modules", item.get("涉及模块"))
     if mods:
         mods = mods if isinstance(mods, str) else "、".join(mods)
-        lines.append(f"   涉及模块：{mods}")
+        lines.append(f"   涉及模块：{' '.join(mods.split())}")
     basis = item.get("basis", item.get("依据"))
     if basis:
-        lines.append(f"   依据：{basis}")
+        lines.append(f"   依据：{' '.join(str(basis).split())}")
     return "\n".join(lines)
 
 
@@ -77,10 +83,12 @@ ITEM_RE = re.compile(r"^(\d+)\.\s+(.*)$")
 
 def parse_issues(text):
     """问题清单文本 → [{"issue", "modules", "basis"}, …]（顺序即原序号）。"""
-    out = None
     items = []
     cur = None
     for raw in (text or "").replace("\r\n", "\n").split("\n"):
+        if cur is not None and raw.startswith(CONT):      # 多行 issue 的续行（即使以「1. 」开头也不是新条目）
+            cur["issue"] += "\n" + raw[len(CONT):]
+            continue
         m = ITEM_RE.match(raw.strip())
         if m:
             if cur:
@@ -94,6 +102,8 @@ def parse_issues(text):
             cur["basis"] = s[len("依据："):].strip()
     if cur:
         items.append(cur)
+    for it in items:
+        it["issue"] = it["issue"].rstrip()
     return items
 
 

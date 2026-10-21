@@ -6,7 +6,9 @@
 返回 {count, items, failed:[{module,reason}], failed_text, notes, notes_text, summary, files}；failed 每个不过的模块一条（reason 是它所有问题的原文），
 failed_text 是「模块：原因」一行一个；没有代码时跳过（count=0，没有 files）。
 方式：旧参数，只认 核查（等同默认），其他值报错。
-多人模式（登录 / 角色）留给 A3，这里先不开登录。
+登录：约定头部写了「认证 …」的模块，其受保护（非公开）接口会开登录跑：先核对不登录返回 401，再按接口角色造一个调用人账号并登录，用这个账号再跑 HTTP 与直接调用；造不出账号记成该模块的问题。
+老库迁移：约定里带「学习记录」标注的表，额外检查老库迁移——拿掉这些表模拟老库，跑「迁移 只加」应补齐，再跑一次应是空操作；routes/ 没有「迁移 只加」声明也记成问题。
+没有 plan/top.zs → 跳过（count=0）；plan/top.zs 在但有问题 → 终止 失败（不当作没有代码）。
 例如 设 r = 接口冒烟
 """
 import sys
@@ -19,12 +21,11 @@ PACK_DIR = Path(".")
 def 接口冒烟(方式: str = "") -> dict:
     sys.path.insert(0, str(Path(__file__).parent))
     import _v3ctx as X
-    from tools.dslagent.v3 import planning as PL, regress as RG
+    from tools.dslagent.v3 import regress as RG
     if 方式 not in ("", "核查"):
         X.fail(f"接口冒烟：方式只认 核查（现在默认就是只检查），不认「{方式}」")
     c = X.ctx()
-    try:
-        top = PL.current_top(c)
-    except ValueError:
+    top = X.top_or_none(c)
+    if top is None:
         return {"count": 0, "items": [], "failed": [], "failed_text": "", "notes": [], "notes_text": "", "summary": "还没有 plan/top.zs，跳过"}
     return RG.audit_smoke(c, top)

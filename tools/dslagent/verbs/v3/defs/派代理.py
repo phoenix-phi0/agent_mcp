@@ -17,20 +17,7 @@ def 派代理(角色: str, 任务: str = "", 入参: dict = None, 格式: str = 
     c = X.ctx()
     c.guard()
 
-    def backend(spec, system, user, timeout):
-        if c.M.real:
-            from tools.dslagent import engines as EG
-            return EG.call(spec, system, user, timeout)
-        return c.M.backend(system, user, f"v3_agent_{角色}", timeout, model=spec["spec"])
-
-    v2_backend = None
-    if not c.M.real:             # 执行方式 v2 的角色：假模型不起子进程，用假回复当 v2 的结果（回复非空 = 验收通过）
-        def v2_backend(spec, req):
-            r = c.M.backend("", req["task"], f"v3_agent_{角色}", req["timeout"], model=spec)
-            r = r if isinstance(r, dict) else {"text": str(r)}
-            return {"fixed": bool(not r.get("reason") and (r.get("text") or "").strip()), "stop": r.get("reason") or "",
-                    "cost": r.get("cost") or 0.0, "sec": r.get("sec") or 0.0, "calls": 1, "started": not r.get("reason"), "files": []}
-
+    backend, v2_backend = X.agent_backends(c, f"v3_agent_{角色}")
     from tools.dslagent.v3 import modrun as MR
     r = R.dispatch_agent(角色, 任务, 入参, 格式 or None, out_dir=c.out, backend=backend, parent_id=str(c.out),
                          project=c.project, module_cmd=MR.base_cmd(c), v2_backend=v2_backend)

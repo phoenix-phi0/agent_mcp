@@ -54,7 +54,7 @@ files = K.files
 
 def scope_for(task, project, given=None):
     m = P.module_of(task)
-    return P.scope_globs(m) if m else []
+    return P.scope_globs(m, project) if m else []
 
 
 def _read(project, rel, cap=40000):
@@ -69,7 +69,7 @@ def current_files(project, module):
     """范围内现有文件 → [(相对路径, 内容)]。"""
     root = Path(project)
     out = []
-    for rel in sorted({str(f.relative_to(root)) for g in P.scope_globs(module) for f in root.glob(g) if f.is_file()}):
+    for rel in P.scope_files(root, module):
         if rel.startswith("tests/"):
             continue
         out.append((rel, _read(project, rel)))
@@ -124,7 +124,7 @@ def service_verbs(project, module):
 def materials(task, project, scope):
     module = P.require_module(task)
     c, text = P.load_contract(project, module)
-    parts = [f"## 本次要做的模块：{module}\n允许写 / 删的路径：{'、'.join(scope or P.scope_globs(module))}",
+    parts = [f"## 本次要做的模块：{module}\n允许写 / 删的路径：{'、'.join(scope or P.scope_globs(module, project))}",
              f"## 本模块约定（contracts/{module}.md，冻结，不能改）\n```\n{text.strip()}\n```"]
     ups = []
     for d in c["依赖"]:

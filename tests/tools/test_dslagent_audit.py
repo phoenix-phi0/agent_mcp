@@ -290,6 +290,27 @@ def test_issue_fixes():
     check(c2["ok"] == "否" and "2" in c2["problems"], "传了 2 条的清单：第 2 条没被计划覆盖，检查不过", c2)
 
 
+def test_f1_top_broken():
+    print("F1：全量回归 / 接口冒烟——没有 plan/top.zs 跳过；top.zs 有问题 终止 失败")
+    for verb in ("全量回归", "接口冒烟"):
+        q = fresh("notop")
+        e, _ = verb_engine(q, fresh("o"))
+        r = run(e, f"设 r = {verb}\n返回 {{r}}\n")
+        check(r["count"] == 0 and "还没有 plan/top.zs，跳过" in r["summary"] and e.halted is None, f"{verb}：没有 top.zs → 跳过", r)
+        q2 = fresh("badtop")
+        (q2 / "plan").mkdir()
+        (q2 / "plan" / "top.zs").write_text("项目 demo\n模块 a 依赖 不存在\n", encoding="utf-8")
+        e2, _ = verb_engine(q2, fresh("o"))
+        run(e2, f"设 r = {verb}\n返回 {{r}}\n")
+        check(e2.halted and e2.halted["status"] == "失败" and "plan/top.zs 有问题" in e2.halted["reason"], f"{verb}：top.zs 有问题 → 终止 失败", e2.halted)
+
+
+def test_f1_smoke_doc():
+    print("F1：接口冒烟 文档写清实际行为")
+    doc = (T.ROOT / "tools" / "dslagent" / "verbs" / "v3" / "defs" / "接口冒烟.py").read_text(encoding="utf-8")
+    check("401" in doc and "造一个调用人账号" in doc and "学习记录" in doc and "留给 A3" not in doc and "有问题 → 终止 失败" in doc, "文档：认证开登录 / 核对 401 / 造账号 / 学习记录迁移 / top.zs 坏了终止")
+
+
 if __name__ == "__main__":
     try:
         test_global_check_items()
@@ -299,6 +320,8 @@ if __name__ == "__main__":
         test_audit_flow()
         test_long_files_split()
         test_issue_fixes()
+        test_f1_top_broken()
+        test_f1_smoke_doc()
     finally:
         shutil.rmtree(T.TMP, ignore_errors=True)
     print(f"\n通过 {T.PASS}，失败 {T.FAIL}")

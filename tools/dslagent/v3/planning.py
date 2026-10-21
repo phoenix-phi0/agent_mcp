@@ -187,8 +187,9 @@ def review_user(ctx, module, text, req):
 
 
 def review(ctx, module, text, req="", model="sonnet"):
-    """约定通过程序检查后，调一次模型对照需求复核 → {passed, issues, 状态}（状态 = 已复核 / 未复核）。
-    回复不是约定的 JSON 时再问一次；还不行就记「未复核」并放行（记录里看得到）。预算 / 花费 / 墙钟用完抛 ScriptHalt。"""
+    """约定通过程序检查后，调一次模型对照需求复核 → {passed, issues, 状态}（状态 = 已复核 / 未复核；未复核时 passed=False）。
+    回复不是约定的 JSON 时再问一次；还不行就返回 passed=False、状态=未复核（带一条说明问题）——没复核不算通过，
+    由 规划一份.zs 带原因重写、次数用尽 终止 失败。预算 / 花费 / 墙钟用完抛 ScriptHalt。"""
     if not str(module or "").strip():
         raise ValueError("复核约定要写模块名")
     user = review_user(ctx, module, text, req or ctx.req)
@@ -209,7 +210,8 @@ def review(ctx, module, text, req="", model="sonnet"):
             break
     if got is None:
         ctx.log("规划", 种类="约定", 模块=module, 事件="复核", 状态=REVIEW_FAIL, 原因="回复不是 {passed, issues} 的 JSON")
-        return {"passed": True, "issues": [], "状态": REVIEW_FAIL}
+        return {"passed": False, "issues": [f"复核没做成（模型没有给出合格回复，不是约定本身的问题）：请原样保留约定要点重新提交以便再复核"],
+                "状态": REVIEW_FAIL}
     ok = got["passed"] and not got["issues"]
     probs = [f"复核（对照需求）：{p}" for p in got["issues"]]
     ctx.log("规划", 种类="约定", 模块=module, 事件="复核", 状态="已复核", 通过=ok, 条数=len(probs), 问题=got["issues"])

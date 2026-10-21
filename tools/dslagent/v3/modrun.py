@@ -1,7 +1,7 @@
 """做一个模块：起子进程跑 `python -m tools.dslagent run --pack dslproj …`（范围激活、DSLAGENT_MODELS 等环境变量是进程级的，同进程并行会串）。
 
 每一轮在项目的一份拷贝里做（out/modules/<模块>/r<轮>/proj）：v2 的范围闸会把「范围外的改动」恢复成改前内容，
-同层几个模块在同一个目录里并行就会互相恢复；做完只把本模块范围内的文件（entities / services / routes / queries / tests 里属于它的）拷回项目。
+同层几个模块在同一个目录里并行就会互相恢复；做成了（验收通过）才把本模块范围内的文件（entities / services / routes / queries / tests 里属于它的，routes 按最长模块名归属）拷回项目，失败不拷回。
 返回 {状态, 原因, 花费, 调用, 轮, 模型, 记录目录, 秒}。
 """
 import json
@@ -28,8 +28,7 @@ def base_cmd(ctx):
 
 
 def scope_files(root, module):
-    root = Path(root)
-    return sorted({str(f.relative_to(root)) for g in P.scope_globs(module) for f in root.glob(g) if f.is_file()})
+    return P.scope_files(root, module)
 
 
 def sync_back(work, project, module):
@@ -103,7 +102,9 @@ def run_module(ctx, module, last_fail="", model="sonnet"):
     else:
         out.update(状态="成功" if j.get("fixed") else "失败", 原因=str(j.get("stop") or ""), 花费=float(j.get("cost") or 0.0),
                    调用=int(j.get("calls") or 0), 秒=sec)
-    written, gone = sync_back(work, ctx.project, module)
+    written, gone = [], []
+    if out["状态"] == "成功":                 # 失败不把文件拷回项目（与 roles._run_v2_subprocess 一致）
+        written, gone = sync_back(work, ctx.project, module)
     out.update(写入=written, 删除=gone)
     with ctx.lock:
         ctx.module_cost += out["花费"]

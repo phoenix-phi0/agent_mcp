@@ -4,6 +4,7 @@
 failed_text 是「模块：原因」一行一个；没有代码时 count=0、summary 写「还没有代码，跳过」、code_modules=[]。
 code_modules 是有代码的模块，files = 派任务 的入参列表（contracts/<模块>.md + 该模块代码文件，超 400 行的文件按「文件:起-止」切段，每个文件最多 5 段），核查.zs 用它对每个有代码的模块派代码核查。
 方式：旧参数，只认 核查（等同默认），其他值报错。
+没有 plan/top.zs → 跳过（count=0）；plan/top.zs 在但有问题 → 终止 失败（不当作没有代码）。
 例如 设 r = 全量回归
 """
 import sys
@@ -16,12 +17,11 @@ PACK_DIR = Path(".")
 def 全量回归(方式: str = "") -> dict:
     sys.path.insert(0, str(Path(__file__).parent))
     import _v3ctx as X
-    from tools.dslagent.v3 import planning as PL, regress as RG
+    from tools.dslagent.v3 import regress as RG
     if 方式 not in ("", "核查"):
         X.fail(f"全量回归：方式只认 核查（现在默认就是只检查），不认「{方式}」")
     c = X.ctx()
-    try:
-        top = PL.current_top(c)
-    except ValueError:
+    top = X.top_or_none(c)
+    if top is None:
         return {"count": 0, "items": [], "failed": [], "failed_text": "", "summary": "还没有 plan/top.zs，跳过", "code_modules": []}
     return RG.audit_regression(c, top)

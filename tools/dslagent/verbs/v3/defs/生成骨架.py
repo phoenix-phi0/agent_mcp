@@ -1,5 +1,5 @@
 """生成骨架：从冻结的约定生成 entities/<m>.entity（表）、services/<m>.zs（函数头 + 伪代码注释 + 报错 未实现）、routes/<m>.zs（接口头 + 调用）。
-已存在的文件不覆盖（续跑安全），只有从没通过过的模块、文件内容和现在约定生成的不同时才重写；新生成的文件要过加载检查，不过 终止 失败。返回 {created, existing, created_count}。
+已存在的文件不覆盖（续跑安全），只有从没通过过的模块、约定 hash 比生成骨架时变了才重写（判据见 scaffold.gen_skeleton）；新生成的文件要过加载检查，不过 终止 失败。返回 {created, existing, created_count}。
 例如 生成骨架
 """
 import sys

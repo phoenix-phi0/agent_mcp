@@ -342,11 +342,26 @@ def test_skeleton_build_state():
     r2 = SF.gen_skeleton(p, top)
     check(r2["新建"] == [] and len(r2["已有"]) == 9, "已存在的文件不覆盖", r2)
     check("返回" in (p / "services" / "graph.zs").read_text(encoding="utf-8"), "改过的 services/graph.zs 原样保留")
-    # 从没通过过的模块（never_built）：约定重写后骨架跟着重写，改过的文件也被刷成新骨架；通过过的不动
-    r3 = SF.gen_skeleton(p, top, never_built=lambda n: n == "graph")
-    check(r3["新建"] == ["services/graph.zs"] and "报错 未实现" in (p / "services" / "graph.zs").read_text(encoding="utf-8"), "never_built 的模块：内容和约定骨架不同的已有文件重写，别的模块不动", r3)
-    r3b = SF.gen_skeleton(p, top, never_built=lambda n: True)
-    check(r3b["新建"] == [], "never_built 的模块：内容已是最新骨架 → 不重写", r3b)
+    # F1：只看约定 hash——约定没变，没通过过的模块（never_built）做了一半的文件也不覆盖
+    r3 = SF.gen_skeleton(p, top, never_built=lambda n: True)
+    check(r3["新建"] == [] and "返回" in (p / "services" / "graph.zs").read_text(encoding="utf-8"),
+          "F1：never_built 但约定 hash 没变：磁盘上做了一半的 services/graph.zs 不被骨架覆盖", r3)
+    rec = json.loads((p / "plan" / "skeleton.json").read_text(encoding="utf-8"))
+    check(set(rec) == {"graph", "vocab", "progress"} and rec["graph"] == DC.hash_of(contract_text("graph")), "plan/skeleton.json 记每个模块生成骨架时的约定 hash", rec)
+    (p / "contracts" / "graph.md").write_text(contract_text("graph") + "\n# 约定改了\n", encoding="utf-8")
+    r4 = SF.gen_skeleton(p, top, never_built=lambda n: n == "graph")
+    check(sorted(r4["新建"]) == ["entities/graph.entity", "routes/graph.zs", "services/graph.zs"] and "报错 未实现" in (p / "services" / "graph.zs").read_text(encoding="utf-8"),
+          "F1：never_built 且约定 hash 变了：该模块三个文件重写，别的模块不动", r4)
+    r4b = SF.gen_skeleton(p, top, never_built=lambda n: True)
+    check(r4b["新建"] == [], "F1：重写后记录更新，再跑不重写", r4b)
+    (p / "services" / "graph.zs").write_text("业务 graph\n  用包 db\n  公开 函数 取知识点 code\n    返回 {\"x\": 1}\n  结束\n结束\n", encoding="utf-8")
+    (p / "contracts" / "graph.md").write_text(contract_text("graph") + "\n# 约定又改了\n", encoding="utf-8")
+    r4c = SF.gen_skeleton(p, top)
+    check(r4c["新建"] == [] and "返回" in (p / "services" / "graph.zs").read_text(encoding="utf-8"), "F1：通过过的模块（never_built 不传）约定变了也不动", r4c)
+    (p / "services" / "graph.zs").unlink()
+    r4d = SF.gen_skeleton(p, top, never_built=lambda n: False)
+    check(r4d["新建"] == ["services/graph.zs"], "F1：文件不存在就写", r4d)
+    (p / "contracts" / "graph.md").write_text(contract_text("graph"), encoding="utf-8")
     (p / "services" / "graph.zs").write_text("业务 graph\n  用包 db\n  公开 函数 取知识点 code\n    返回 {\"x\": 1}\n  结束\n结束\n", encoding="utf-8")
     # 可选入参用 {x 或}
     c, _ = VC.load(p, "progress")
@@ -702,12 +717,22 @@ def test_review():
     fk3 = Fake(scripts={"v3_contract_graph": [broken, contract_text("graph")]})
     run_v3(proj3, out3, fk3, stop_after="contract")
     check(fk3.n("v3_review_graph") == 1 and fk3.n("v3_contract_graph") == 2, "程序检查不过的稿子不进复核", [c["tag"] for c in fk3.calls])
-    # 回复不是 JSON：再问一次；仍不行记「未复核」放行
+    # F1：回复不是 JSON：再问一次；仍不行 → 未复核、ok=否，按没过处理（带原因重写，次数用尽 终止 失败）
     proj4, out4 = fresh("p"), fresh("o")
     fk4 = Fake(scripts={"v3_review_graph": ["我觉得挺好"]})
     res4 = run_v3(proj4, out4, fk4, stop_after="contract")
     rv4 = [r for r in res4["记录"]["规划"] if r["模块"] == "graph" and r["事件"] == "复核"]
-    check(res4["status"] == "成功" and fk4.n("v3_review_graph") == 2 and rv4 and rv4[-1]["状态"] == "未复核", "复核回复坏掉：问两次后记未复核并放行", rv4)
+    check(res4["status"] == "失败" and "复核没做成" in res4["reason"] and fk4.n("v3_contract_graph") == 3 and fk4.n("v3_review_graph") == 6
+          and rv4 and rv4[-1]["状态"] == "未复核" and not (proj4 / "contracts" / "graph.md").exists(),
+          "F1：复核回复一直坏：每轮问两次，写 3 次后终止失败，约定不存盘（不再悄悄放行）", (res4["status"], res4["reason"][:120]))
+    proj5, out5 = fresh("p"), fresh("o")
+    fk5 = Fake(scripts={"v3_review_graph": ["我觉得挺好", "还行", ok]})
+    res5 = run_v3(proj5, out5, fk5, stop_after="contract")
+    check(res5["status"] == "成功" and fk5.n("v3_contract_graph") == 2 and (proj5 / "contracts" / "graph.md").is_file(), "F1：第一轮未复核 → 重写 → 第二轮复核通过才存盘", fk5.n("v3_contract_graph"))
+    rw5 = [c for c in fk5.calls if c["tag"] == "v3_contract_graph"][1]["user"]
+    check("复核没做成" in rw5, "F1：未复核的原因带进重写", rw5[-200:])
+    rvd = PL.review.__doc__
+    check("未复核" in rvd and "passed=False" in rvd, "review 文档写明未复核 passed=False")
     check(PL.parse_review('{"通过": "否", "问题列表": []}') is None and PL.parse_review('x {"通过":"是"} y') == {"passed": True, "issues": []},
           "parse_review：否且没问题视为无效；容忍前后文字；兼容旧键 通过/问题列表")
     check(PL.parse_review('{"passed": false, "issues": []}') is None and PL.parse_review('x {"passed":true} y') == {"passed": True, "issues": []},
@@ -1478,6 +1503,82 @@ def audit_reply(*items, found=None):
                        "status": "成功", "reason": ""}, ensure_ascii=False)
 
 
+def test_f1_issues_roundtrip():
+    print("F1：多行 issue 存问题清单 / 读问题清单 读回完全一致；续行里「1. 」开头不当新条目")
+    from tools.dslagent.v3 import issues as IS
+    p = fresh("iss")
+    multi = "graph：比对约定：缺函数 取知识点\n跑用例：\n1. 用例 A 失败\n2. 用例 B 失败\n\n  缩进行 涉及模块：x\n依据：这行也是续行"
+    items = [{"issue": multi, "modules": "graph", "basis": "全量回归"}, {"issue": "单行问题", "modules": "vocab、progress", "basis": "程序检查"},
+             {"issue": "结尾\n续行", "modules": "", "basis": ""}]
+    rel = IS.save(p, items)
+    got, rel2 = IS.load(p, rel)
+    check(rel == rel2 and [g["issue"] for g in got] == [multi, "单行问题", "结尾\n续行"], "多行 issue 存后读回完全一致，条数不变", got)
+    check([g["modules"] for g in got] == ["graph", "vocab、progress", ""] and [g["basis"] for g in got] == ["全量回归", "程序检查", ""], "涉及模块 / 依据 不受续行影响", got)
+    txt = (p / rel).read_text(encoding="utf-8")
+    check("\n      1. 用例 A 失败" in txt and "\n1. 用例 A" not in txt, "续行缩进 6 格", txt)
+    check(IS.parse_issues("# x\n\n1. 老格式\n   涉及模块：a\n2. 第二条\n") == [{"issue": "老格式", "modules": "a", "basis": ""}, {"issue": "第二条", "modules": "", "basis": ""}], "老格式清单照常解析")
+
+
+def test_f1_modrun_scope():
+    print("F1：做模块——失败不拷回项目；范围按最长模块名归属（quiz 不认 routes/quiz_knowledge.zs）")
+    from tools.dslagent.v3 import modrun as MR
+    p = fresh("scope")
+    (p / "contracts").mkdir()
+    for m in ("quiz", "quiz_knowledge", "graph"):
+        (p / "contracts" / f"{m}.md").write_text("模块 x\n", encoding="utf-8")
+    (p / "routes").mkdir()
+    (p / "routes" / "quiz.zs").write_text("OLD quiz\n", encoding="utf-8")
+    (p / "routes" / "quiz_knowledge.zs").write_text("OLD qk\n", encoding="utf-8")
+    (p / "routes" / "quiz_extra.zs").write_text("OLD extra\n", encoding="utf-8")
+    g = PJ.scope_globs("quiz", p)
+    check("routes/quiz*.zs" not in g and "routes/quiz.zs" in g and "routes/quiz_extra.zs" in g and "routes/quiz_knowledge.zs" not in g,
+          "scope_globs(quiz, project)：精确列自己的 routes 文件，不含 quiz_knowledge", g)
+    check("routes/quiz_knowledge*.zs" in PJ.scope_globs("quiz_knowledge", p) and "routes/graph*.zs" in PJ.scope_globs("graph", p), "没有同前缀模块的仍是前缀 glob")
+    check(PJ.scope_globs("quiz") == ["entities/quiz.entity", "services/quiz.zs", "routes/quiz*.zs", "queries/quiz_*.sql", "tests/quiz_*"], "不给 project 时与原来一致")
+    check(PJ.scope_files(p, "quiz") == ["routes/quiz.zs", "routes/quiz_extra.zs"], "scope_files(quiz) 不含 quiz_knowledge", PJ.scope_files(p, "quiz"))
+    from tools.dslagent.packs import dslproj as DP
+    check(DP.scope_for("模块 quiz\n", p) == g, "dslproj.scope_for（STRICT_SCOPE 的范围）同一套归属")
+    stub = fresh("stubs") / "stub.py"
+    stub.write_text(
+        "import sys, os, json\nfrom pathlib import Path\n"
+        "a = dict(zip(sys.argv[2::2], sys.argv[3::2]))\nproj = Path(a['--project'])\n"
+        "(proj / 'routes' / 'quiz.zs').write_text('NEW quiz\\n', encoding='utf-8')\n"
+        "(proj / 'routes' / 'quiz_knowledge.zs').write_text('NEW qk\\n', encoding='utf-8')\n"
+        "print(json.dumps({'fixed': os.environ.get('STUB_OK') == '1', 'calls': 1, 'cost': 0.1, 'stop': 'x'}))\n", encoding="utf-8")
+    out = fresh("o")
+    M = V2.Model(out, backend=Fake(), max_calls=100, deadline=time.time() + 600)
+    ctx = core.Ctx(p, out, "x", M, module_cmd=[sys.executable, str(stub)])
+    os.environ["STUB_OK"] = "0"
+    r = MR.run_module(ctx, "quiz", "", "sonnet")
+    check(r["状态"] == "失败" and (p / "routes" / "quiz.zs").read_text(encoding="utf-8") == "OLD quiz\n", "做模块失败：不把文件拷回项目", r)
+    os.environ["STUB_OK"] = "1"
+    r = MR.run_module(ctx, "quiz", "", "sonnet")
+    check(r["状态"] == "成功" and (p / "routes" / "quiz.zs").read_text(encoding="utf-8") == "NEW quiz\n", "做模块成功：范围内的文件拷回", r)
+    check((p / "routes" / "quiz_knowledge.zs").read_text(encoding="utf-8") == "OLD qk\n", "别的模块（最长名归属 quiz_knowledge）的 routes 文件不被覆盖")
+    os.environ.pop("STUB_OK", None)
+
+
+def test_f1_parallel_agents():
+    print("F1：并行派代理转发 project / module_cmd / v2_backend，执行方式=v2 的角色经它能跑")
+    from tools import dsl_core  # noqa: F401
+    from tools.dslagent import roles as R
+    p = project_with_contracts(("graph", "vocab"))
+    out = fresh("o")
+    seen = []
+
+    def v2b(spec, req):
+        seen.append((req["module"], req["project"], req["scope"]))
+        return {"fixed": True, "stop": "", "cost": 0.1, "sec": 0.1, "calls": 1, "started": True, "files": ["services/" + req["module"] + ".zs"]}
+    items = [{"角色": "modify_module", "任务": "改一下", "入参": {"模块": "graph"}}, {"角色": "modify_module", "任务": "改一下", "入参": {"模块": "vocab"}}]
+    rs = R.parallel_dispatch_agents(items, out_dir=out, project=p, v2_backend=v2b)
+    check([r["status"] for r in rs] == ["ok", "ok"] and sorted(x[0] for x in seen) == ["graph", "vocab"] and all(x[1] == p for x in seen),
+          "传了 project / v2_backend：v2 角色并行跑通，project 转发到每个任务", (rs, seen))
+    rs2 = R.parallel_dispatch_agents(items[:1], out_dir=fresh("o"))
+    check(rs2[0]["status"] == "fail" and "需要项目目录" in rs2[0]["reason"], "不传 project：执行方式 v2 的角色按原样失败（说明转发的确是这个参数起作用）", rs2)
+    seen.clear()
+    R.parallel_dispatch_agents(items[:1], out_dir=fresh("o"), project=p, module_cmd=["x"], v2_backend=v2b)
+
+
 def test_audit_entry():
     print("核查.zs（假模型）= 程序检查动词 + 每个有代码模块一个代码核查，代码问题存成问题清单；tools.dslagent v3 的 audit 入口（core.run_entry）")
     p = fresh("audit_p")
@@ -1611,6 +1712,9 @@ if __name__ == "__main__":
         test_verb_decls()
         test_plan_verbs()
         test_plan_script_flow()
+        test_f1_issues_roundtrip()
+        test_f1_modrun_scope()
+        test_f1_parallel_agents()
         test_audit_entry()
         test_modify_entry()
         test_check_plan_arg_count()
