@@ -1346,7 +1346,15 @@ def test_modify_entry():
     check(plans[-1].read_text(encoding="utf-8").strip() == GOOD_PLAN.strip(), "最后一份是通过检查、真正执行的那份", plans[-1].read_text(encoding="utf-8"))
     check(res["reason"].startswith("修改完成"), "M2：计划执行完直接结束，不再生成分配 / 跑 plan/build.zs", res)
     check(not (p / "plan" / "build.zs").exists(), "M2：没有生成 plan/build.zs")
-    check(stub_calls(state) == [], "M2：progress 的约定重写后文本没变，不重做任何模块（子进程一次都没起）", stub_calls(state))
+    calls = stub_calls(state)
+    check(calls and all("全量回归发现问题" in x["task"] for x in calls),
+          "M2：progress 的约定重写后文本没变，不因约定重做；只有收尾的全量回归（夹具骨架用例都是未实现）调起了重做", [x["模块"] for x in calls])
+    check(all("## 这次是修改，不是新建" in x["task"] for x in calls),
+          "M3：收尾回归的失败模块走 改模块（修改式任务，带失败原文），不走 做一个模块", [x["task"][:60] for x in calls])
+    check(res["reason"].count("全量回归") == 1 and "接口冒烟" in res["reason"], "M3：修改.zs 的返回带全量回归与接口冒烟的结果", res)
+    sj = out / "smoke_1.json"
+    check(sj.is_file() and (out / "smoke_1.txt").is_file() and "progress" in json.loads(sj.read_text(encoding="utf-8"))["模块"],
+          "M3：接口冒烟的完整结果存 out/smoke_<轮>.json 与摘要 .txt", sorted(f.name for f in out.iterdir()))
 
 
 def graph_old_contract():

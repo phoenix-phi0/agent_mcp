@@ -4,6 +4,7 @@
 不过的模块同全量回归的规则重做，最多 2 轮，仍不过 终止 失败。含上传的接口暂跳过并记备注。
 多人模式（登录 / 角色）留给 A3，这里先不开登录。
 例如 接口冒烟
+方式=修改（修改流程收尾用）：失败模块只调 改模块（修改式重做，带失败原文），不调 做一个模块；每轮完整结果存 out/smoke_<轮>.json 与 .txt 摘要，返回带 files。
 """
 import sys
 from pathlib import Path
@@ -12,7 +13,7 @@ WORKSPACE = Path(".")
 PACK_DIR = Path(".")
 
 
-def 接口冒烟() -> dict:
+def 接口冒烟(方式: str = "") -> dict:
     sys.path.insert(0, str(Path(__file__).parent))
     import _v3ctx as X
     from tools.dsl import current_engine
@@ -22,5 +23,5 @@ def 接口冒烟() -> dict:
         top = PL.current_top(c)
     except ValueError as e:
         X.fail(e)
-    r = RG.interface_smoke(c, current_engine(), top)
-    return {"status": r["状态"], **({"rounds": r["轮数"]} if "轮数" in r else {})}
+    r = RG.interface_smoke(c, current_engine(), top, modify=(方式 == "修改"))
+    return {"status": r["状态"], **({"rounds": r["轮数"]} if "轮数" in r else {}), **({"files": r["结果文件"]} if "结果文件" in r else {})}
