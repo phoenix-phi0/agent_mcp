@@ -755,6 +755,13 @@ def test_global_check():
     (p / "contracts" / "a.md").write_text(DUP_A_FIXED, encoding="utf-8")
     g2 = G.check(p, top)
     check(g2["条数"] == 0, "路径改掉之后没有冲突了", g2)
+    mods = {"a": "认证 核对 app.db u", "b": "认证 核对 app.db u", "c": "认证 核对 u 取角色"}
+    top3 = {"项目": "demo", "模块": [{"名": n, "依赖": [], "行": i} for i, n in enumerate(mods, 1)]}
+    for n, line in mods.items():
+        (p / "contracts" / f"{n}.md").write_text(f"模块 {n}\n依赖 无\n\n认证 可选\n{line}\n", encoding="utf-8")
+    g3 = G.check(p, top3)
+    check(g3["条数"] == 1 and set(g3["按模块"]) == {"c"} and "认证 核对 app.db u" in g3["按模块"]["c"][0] and "a、b" in g3["按模块"]["c"][0],
+          "「认证 核对」各模块写法不一致：少数派的 c 被点名，照多数写法改", g3)
 
 
 def test_global_check_flow():

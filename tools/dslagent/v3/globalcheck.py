@@ -1,6 +1,7 @@
 """全局程序检查：全部约定都通过各自的检查之后跑一次，不调模型。查两类跨模块重复：
 同一「方法 + 路径」在两个模块的「## 接口」里都定义、同一张表名在两个模块的「## 表」里都定义
-（约定检查已经要求表名以「模块名_」开头，正常不该撞，这里兜底防拼错 / 抄错）。
+（约定检查已经要求表名以「模块名_」开头，正常不该撞，这里兜底防拼错 / 抄错）；
+以及「认证 核对」「认证 身份」各模块写得不一样（路由层整个项目只认一种，不一致加载就报错，冒烟起不来）。
 
 check(project, top) -> {"条数": n, "按模块": {模块: [问题…]}, "摘要": 摘要文本}；没问题 条数=0。
 
@@ -21,6 +22,7 @@ from . import contracts as VC
 
 def check(project, top):
     by_route, by_table = defaultdict(set), defaultdict(set)
+    by_auth = {"核对": defaultdict(set), "身份": defaultdict(set)}
     for m in top["模块"]:
         name = m["名"]
         f = VC.path_of(project, name)
@@ -33,7 +35,19 @@ def check(project, top):
             by_route[(i["方法"], i["路径"])].add(name)
         for t in c["表"]:
             by_table[t["名"]].add(name)
+        for kind, groups in by_auth.items():
+            if c["认证"][kind]:
+                groups[tuple(c["认证"][kind])].add(name)
     per_module = defaultdict(list)
+    for kind, groups in by_auth.items():
+        if len(groups) > 1:
+            # 多数派为准（并列取写法靠前的）；其余模块照它改
+            keep = max(sorted(groups), key=lambda k: len(groups[k]))
+            for k, mods in sorted(groups.items()):
+                if k != keep:
+                    for m in sorted(mods):
+                        per_module[m].append(f"「认证 {kind}」与其他模块不一致：本模块写「认证 {kind} {' '.join(k)}」，"
+                                             f"{'、'.join(sorted(groups[keep]))} 写「认证 {kind} {' '.join(keep)}」；整个项目只能有一种写法，照后者改")
     for (method, path), mods in sorted(by_route.items()):
         if len(mods) > 1:
             msg = f"接口「{method} {path}」在模块 {'、'.join(sorted(mods))} 里都定义了，一个方法+路径只能属于一个模块"
