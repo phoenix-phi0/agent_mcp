@@ -882,6 +882,11 @@ def t_loadcheck():
     probs = LC.check_text(BAD_COND_EQ, "routes/quiz.zs", True)
     check(len(probs) == 1 and probs[0].startswith("[接口出错] routes/quiz.zs") and "POST /quiz/answer" in probs[0] and "看不懂的条件" in probs[0], "接口文件：[接口出错] 文件 接口 报错原话（与服务打印同款）", probs)
     check(LC.check_text(ZS_QUIZ, "routes/quiz.zs", True) == [] and LC.check_text(ZS_FLOW, "scripts/quiz_judge.zs", False) == [], "合法的接口 / 流程文件通过")
+    svc_zs = "业务 t\n  用包 common\n  公开 函数 取 k\n    设 msg = 没有这个 k\n    报错 404 {msg}\n  结束\n结束\n"
+    d0 = TMP / "lc_biz"
+    (d0 / "services").mkdir(parents=True, exist_ok=True)
+    (d0 / "services" / "t.zs").write_text(svc_zs, encoding="utf-8")
+    check(LC.check_project(d0) == [], "services 里「报错 4xx {变量}」是业务错误，不当 common 的报错动词查参数个数", LC.check_project(d0))
     probs = LC.check_text("接口 POST /a\n  打印 x\n", "routes/a.zs", True)
     check(len(probs) == 1 and "没有对应的「结束」" in probs[0], "接口块没有结束 → 同服务启动时一样报", probs)
     # 磁盘：整项目

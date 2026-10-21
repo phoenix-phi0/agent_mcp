@@ -106,6 +106,7 @@ def _opened(lines, at):
 
 
 BAD_BIZ_CODE_RE = re.compile(r"^报错\s+(\d{3})(?:\s|$)")
+BIZ_CODE_HEAD_RE = re.compile(r"^4\d\d(?:\s|$)")
 
 
 def call_sites(lines, funcs=None):
@@ -188,6 +189,8 @@ def check_verb_calls(lines, reg, label, base=0):
             head, rest = split_head(value.strip())
         if head in RESERVED or not reg.has(head):
             continue
+        if head == "报错" and BIZ_CODE_HEAD_RE.match(rest.strip()):
+            continue   # 「报错 4xx 文字」是业务错误（引擎先认它），不是 common 的报错动词
         problem = reg.check_call(head, rest.split())
         if problem:
             probs.append(f"[接口出错] {label}: 第 {base + i + 1} 行：{problem}")
