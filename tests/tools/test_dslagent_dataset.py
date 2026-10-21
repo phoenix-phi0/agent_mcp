@@ -251,7 +251,7 @@ def t_thought():
     check("思路" not in pr0, "build_prompt 默认（Claude）回复格式里没有思路", pr0)
     check("thought：可选" in pr and pr.index("thought：") < pr.index("result：") and '"thought"' in pr.split("示例：")[1],
           "build_prompt thought=True（codex）说明和示例里有思路、在结果前面")
-    # 各 agent 的 system：claude（缺省）与 HEAD 一致、不含思路；codex 含思路；for_engine 只在默认 system + codex 时换
+    # 各 agent 的 system：claude（缺省）与 HEAD 一致、不含 thought；codex 含 thought；for_engine 只在默认 system + codex 时换
     import subprocess
     from tools.dslagent import agents as AG, promptfile as PF
     root = Path(__file__).resolve().parents[2]
@@ -260,10 +260,10 @@ def t_thought():
                               text=True, encoding="utf-8").stdout
         body = head.split("\n## 变体：")[0]
         cl, cx = a.system_text("claude"), a.system_text("codex")
-        check("思路" not in cl and a.system_text() == cl and "思路" not in body, f"{a.file}：claude 渲染不含思路", a.file)
+        check("thought" not in cl and a.system_text() == cl, f"{a.file}：claude 渲染不含 thought", a.file)
         check(PF.agent_doc(a.file).body.strip() == body.split("---\n", 2)[-1].strip() or "思路" not in body,
               f"{a.file}：正文与 HEAD 一致", a.file)
-        check("思路" in cx and cx != cl, f"{a.file}：codex 渲染含思路", a.file)
+        check("thought" in cx and cx != cl, f"{a.file}：codex 渲染含 thought", a.file)
     check(AG.for_engine(AG.FIX.system_text(), "fix", "codex") == AG.FIX.system_text("codex")
           and AG.for_engine(AG.FIX.system_text(), "fix", "claude") == AG.FIX.system_text()
           and AG.for_engine("自带 system", "fix", "codex") == "自带 system"

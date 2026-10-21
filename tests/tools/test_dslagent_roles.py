@@ -338,8 +338,8 @@ def test_audit_logic_check_opt_in():
         return {"text": '[{"问题":"漏了鉴权","依据":"函数 x"}]', "cost": 0.01, "rc": 0}
 
     items_on = IS.run_logic_checks(ctx, top, backend=backend)
-    check(len(items_on) == 1 and items_on[0]["涉及模块"] == "a" and "logic_check(疑点)" in items_on[0]["依据"],
-          "开了之后疑点标「logic_check(疑点)」并到模块 a", items_on)
+    check(len(items_on) == 1 and items_on[0]["modules"] == "a" and "logic_check(疑点)" in items_on[0]["basis"],
+          "开了之后疑点标「logic_check(疑点)」并到模块 a（模型回旧键 问题/依据 也能用）", items_on)
     check(IS.logic_cache_path(ctx).is_file(), "按约定内容 hash 缓存落盘")
 
     items_again = IS.run_logic_checks(ctx, top, backend=backend)

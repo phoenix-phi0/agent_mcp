@@ -348,6 +348,66 @@ R4（提示词/模型回复键）；`tools/dslagent` 内部 `c.log(...)` 记的�
 全绿（含 `test_dslagent_v3.py` 317 项、`test_dslagent_modbuild.py` 268 项、
 `test_dslagent_layered.py` 168 项）。
 
+**R4（dslagent 提示词与 .zs 流程的数据键，部分完成）**：做了范围里能独立核实、
+消费点可控的一块，`packs/newproj` 整个族没碰（见下「没做完的」）。
+
+已改（模型回复 JSON 的键，解析端兼容旧键）：
+- `v3/prompts/audit.md`：`{"问题","涉及模块","依据"}` → `{"issue","modules","basis"}`；
+  `v3/issues.py`（`parse_model_issues`/`format_issue`/`parse_issues`/`program_items`/
+  `run_logic_checks` 的内部条目表示同步改成 issue/modules/basis，`parse_model_issues`
+  与 `run_logic_checks` 对模型回复两种键都认；持久化的问题清单 .md 文件里「涉及模块：」
+  「依据：」是给人看的展示文字，不是键名，没有改）。
+- `v3/prompts/logic_check.md`：`{"问题","依据"}` → `{"issue","basis"}`，消费点同 issues.py。
+- `v3/prompts/review.md`：`{"通过","问题列表"}` → `{"passed","issues"}`；
+  `v3/planning.py` 的 `parse_review`/`review()` 内部表示同步改成 passed/issues
+  （两种键都认），`verbs/v3/defs/复核约定.py` 读 `r["passed"]`/`r["issues"]`；
+  `ctx.log(...)` 记账用的 `状态=`/`通过=`/`问题=` 关键字参数名不算数据键，没有改
+  （只是取值的来源从 `got["问题"]` 变成 `got["issues"]`）。
+- `v3/prompts/classify.md`：`{"标签"}` → `{"label"}`；`v3/prompts/prescreen.md`：
+  `{"通过","理由"}` → `{"passed","reason"}`（这两个角色是 F 任务新加的通用助手，
+  当前没有 Python 消费点读这两个字段，改提示词不牵连代码）。
+- `agents/bound_judge.md`：`{"条目序号","判定","依据"}` → `{"item","verdict","basis"}`
+  （枚举值「代码错」「期望写错」不改）；`verify/bound_table.py` 的 `parse_judge` 两种键都认。
+- `agents/fix.md`、`agents/bfix.md`、`agents/sub.md`、`agents/sub_tool.md`、
+  `agents/README.md`、`packs/dslproj/prompts/fix_system.md`：回复格式里的
+  `结果/状态/原因/思路` → `result/status/reason/thought`（顶层）；这几个 agent 本来就走
+  `tools.dsl_task.check_reply`/`json_repair.normalize_keys`（R1 加的兼容层），改的只是
+  提示词文字，不是解析代码；嵌套在 `结果`/`result` 里的 `说明`（补改的记账字段，R1 已经
+  定了不动）、`edits`（本来就是英文）没有改。
+- 发现并修了两处 R1 之后没跟上的**失真教学文档**（规划模型读到的提示词，不是代码，
+  但教的写法与改名后的真实返回键不一致，模型照抄会生成跑不起来的脚本）：
+  `agents/shared/verbs.md`、`packs/dslproj/prompts/verbs.md` 文档的 `派任务`/`并行派任务`
+  返回 `{结果,状态,原因}` → `{result,status,reason}`（R1 只改了引擎和消费点，没改这两份
+  教模型怎么写 .zs 的速查文档）；`packs/dslproj/prompts/verbs.md` 顺手连带修了
+  `加载检查`/`比对约定`/`跑用例` 的文档返回形状（R3 改引擎时没同步这份文档）；
+  `agents/shared/cheat.md` 的 `执行 _plan/x.zs` 后 `{r.状态}{r.原因}{r.停在}` →
+  `{r.status}{r.reason}{r.at}`；`agents/shared/plan_rules_code.md` 的 `{r.结果}` → `{r.result}`
+  （两处）。
+
+没做完的（已查清范围，留给后续任务）：
+1. `packs/newproj/prompts/` 下十余份要求模型回 JSON 的提示词（`sys_plan.md`、
+   `sys_llayer.md`、`sys_lfiles.md`、`sys_lfplan.md`、`sys_mplan_{ent,flow,iface,sql,ui}.md`、
+   `sys_frule.md` 等），每份字段名都是中文（如「功能/角色/规则/界面」及更深的嵌套字段），
+   消费点是 `verbs/newproj/defs/` 下对应的校验/解析动词与 `scaffold`/生成代码——这些字段同时
+   是 newproj 生成管线的内部协议，改一处牵全链，量级比本条已做的部分大得多，没有碰，
+   连同 C2 留的「29 个「是/否」字符串返回」一起留给专门任务。
+2. `agents/bound_table_fill.md` + `agents/shared/plan_rules_code_table.md`（「code」资料包
+   的「期望表」协议：模型回 JSON 数组，字段「规则/函数/参数/断言/期望/期望包含/期望异常/文件」，
+   外加 11 种断言算子「条数/都不含/都含/有含/都匹配/字段都在/有序/行号连续/不抛异常/同改前/
+   类型」）——消费点是 `verify/bound_table.py`/`verify/asserts.py` 整套断言判定逻辑，字段名同时
+   是内部表示（`bound_table.py` 里 `k['rule']`/`k['key']`/`k['args']` 等已经是英文，但模型侧
+   协议还是中文），改动面和历史分量（依据 `/workspace/dslagent_exp/bound_code4/REPORT.md` 的
+   实测调参）都不小，没有碰。
+3. `verify/code.py`/`fix.md`/`bfix.md`/`fix_system.md` 里嵌套在 `结果`/`result` 内的 `说明`
+   字段——R1 已经定性为「补改自己的记账字段」不在范围内，本条延续同一判断，没有改。
+
+## 命名约定收尾（R6 待办）
+数据键改英文目前覆盖：引擎终止/派任务/并行执行（R1）、`tools/dslagent/verbs` 返回键
+（R3）、本条列出的 v3 提示词与 agents 通用回复格式（R4 部分）。还没覆盖：R2（`verbs/db`
+`common` `http` `quiz`）、C1/C2 遗留的「是/否」字符串返回布尔（R5 处理一半，C2 的 29 个
+文件还没动）、`packs/newproj` 整条提示词协议、`code` 资料包的期望表协议。R6 收尾前这张
+表还不是最终版。
+
 ---
 
 ## 五、动词包

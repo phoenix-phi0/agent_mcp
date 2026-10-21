@@ -148,7 +148,7 @@ def t_cover():
     check(AG.of_tag("bound_judge").step == "bound" and AG.of_tag("bound_judge_reask") is AG.BOUND_JUDGE and AG.of_tag("table_fill").step == "plan"
           and engines.step_of("bound_judge") == "bound" and engines.step_of("table_fill") == "plan", "tag 归步骤：bound_judge → bound；table_fill → plan")
     check(AG.BOUND_JUDGE.retry.times == 2 and AG.BOUND_JUDGE.tools == "无" and AG.TABLE_FILL.retry.times == 1, "bound_judge 最多 2 次，补表 1 次")
-    check("条目序号" in AG.BOUND_JUDGE.system_text() and "不写 .zs" in AG.TABLE_FILL.system_text() and "断言词表" in AG.TABLE_FILL.system_text(),
+    check("item" in AG.BOUND_JUDGE.system_text() and "不写 .zs" in AG.TABLE_FILL.system_text() and "断言词表" in AG.TABLE_FILL.system_text(),
           "bound_judge system = judge_prompt；补表 system 带表项格式")
 
 
@@ -253,9 +253,11 @@ def t_validate():
     check(len(json.loads(r2[0]["rep"])) == 150000, "结果上限 200000 字符（15 万字符不被截断）")
     check(r2[1] is not None and "CallTimeout" in (r2[1]["exc"] or ""), "单次调用 5 秒超时被打断", r2[1])
     jp = BT.parse_judge('[{"条目序号": 1, "判定": "期望写错", "依据": "x"}, {"条目序号": 2, "判定": "代码错", "依据": "y"}]')
-    check(not jp["problems"] and jp["value"] == {1: ("期望写错", "x"), 2: ("代码错", "y")}, "bound_judge 回复解析")
+    check(not jp["problems"] and jp["value"] == {1: ("期望写错", "x"), 2: ("代码错", "y")}, "bound_judge 回复解析（旧键 条目序号/判定/依据 也认）")
     check(BT.parse_judge("没有数组")["problems"] and BT.parse_judge('[{"条目序号": 1, "判定": "随便"}]')["problems"] and BT.parse_judge("[]")["problems"],
           "bound_judge 回复不合格：无数组 / 判定不对 / 空数组")
+    jp2 = BT.parse_judge('[{"item": 1, "verdict": "期望写错", "basis": "x"}]')
+    check(not jp2["problems"] and jp2["value"] == {1: ("期望写错", "x")}, "bound_judge 回复解析：新键 item/verdict/basis")
 
 
 # ------------------------------------------------------------------ 五、全流程

@@ -19,5 +19,5 @@ def 复核约定(模块: str, 文本: str, 需求: str = "", 模型: str = "sonn
         r = PL.review(c, 模块, 文本, 需求, 模型 or "sonnet")
     except ValueError as e:
         X.fail(e)
-    return {"ok": "是" if r["通过"] else "否", "problems": X.numbered(r["问题"]), "summary": "；".join(r["问题"][:3]),
-            "count": len(r["问题"]), "status": r["状态"]}
+    return {"ok": "是" if r["passed"] else "否", "problems": X.numbered(r["issues"]), "summary": "；".join(r["issues"][:3]),
+            "count": len(r["issues"]), "status": r["状态"]}

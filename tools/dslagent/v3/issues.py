@@ -10,7 +10,9 @@
        涉及模块：graph、vocab
        依据：需求第 3 节 / plan/top.zs 模块 vocab 说明 / 程序检查
 
-每条用「N. 」开头，后面跟缩进的「涉及模块：」「依据：」两行（都可省）。parse_issues() 解一份清单文本回列表。
+每条用「N. 」开头，后面跟缩进的「涉及模块：」「依据：」两行（都可省，是给人看的展示文字，不是键名）。
+parse_issues() 解一份清单文本回列表，条目字段名是 issue/modules/basis（模型出参与存盘前的内部表示一致；
+兼容旧键 问题/涉及模块/依据，见 parse_model_issues）。
 """
 import hashlib
 import json
@@ -56,13 +58,14 @@ def resolve(project, ref):
 
 
 def format_issue(i, item):
-    lines = [f"{i}. {item['问题']}"]
-    if item.get("涉及模块"):
-        mods = item["涉及模块"]
+    lines = [f"{i}. {item.get('issue', item.get('问题', ''))}"]
+    mods = item.get("modules", item.get("涉及模块"))
+    if mods:
         mods = mods if isinstance(mods, str) else "、".join(mods)
         lines.append(f"   涉及模块：{mods}")
-    if item.get("依据"):
-        lines.append(f"   依据：{item['依据']}")
+    basis = item.get("basis", item.get("依据"))
+    if basis:
+        lines.append(f"   依据：{basis}")
     return "\n".join(lines)
 
 
@@ -75,7 +78,7 @@ ITEM_RE = re.compile(r"^(\d+)\.\s+(.*)$")
 
 
 def parse_issues(text):
-    """问题清单文本 → [{"问题", "涉及模块", "依据"}, …]（顺序即原序号）。"""
+    """问题清单文本 → [{"issue", "modules", "basis"}, …]（顺序即原序号）。"""
     out = None
     items = []
     cur = None
@@ -84,20 +87,21 @@ def parse_issues(text):
         if m:
             if cur:
                 items.append(cur)
-            cur = {"问题": m.group(2).strip(), "涉及模块": "", "依据": ""}
+            cur = {"issue": m.group(2).strip(), "modules": "", "basis": ""}
             continue
         s = raw.strip()
         if cur and s.startswith("涉及模块："):
-            cur["涉及模块"] = s[len("涉及模块："):].strip()
+            cur["modules"] = s[len("涉及模块："):].strip()
         elif cur and s.startswith("依据："):
-            cur["依据"] = s[len("依据："):].strip()
+            cur["basis"] = s[len("依据："):].strip()
     if cur:
         items.append(cur)
     return items
 
 
 def parse_model_issues(raw):
-    """模型出参：JSON 数组，每项 {"问题", "涉及模块"(可选 list|str), "依据"(可选)}。不是 JSON / 不是数组 → []。"""
+    """模型出参：JSON 数组，每项 {"issue", "modules"(可选 list|str), "basis"(可选)}；兼容旧键 问题/涉及模块/依据。
+    不是 JSON / 不是数组 → []。"""
     t = (raw or "").strip()
     a, b = t.find("["), t.rfind("]")
     if a < 0 or b <= a:
@@ -110,18 +114,22 @@ def parse_model_issues(raw):
         return []
     out = []
     for it in j:
-        if isinstance(it, dict) and str(it.get("问题") or "").strip():
-            out.append({"问题": str(it["问题"]).strip(), "涉及模块": it.get("涉及模块") or "", "依据": it.get("依据") or ""})
+        if not isinstance(it, dict):
+            continue
+        issue = str(it.get("issue") or it.get("问题") or "").strip()
+        if issue:
+            out.append({"issue": issue, "modules": it.get("modules") or it.get("涉及模块") or "",
+                        "basis": it.get("basis") or it.get("依据") or ""})
     return out
 
 
 def program_items(project, top):
-    """程序检查（全局检查 + 依赖与顶层不一致）→ 问题清单条目列表（并入核查结果，依据统一写「程序检查」）。"""
+    """程序检查（全局检查 + 依赖与顶层不一致）→ 问题清单条目列表（并入核查结果，basis 统一写「程序检查」）。"""
     g = GC.full_check(project, top)
     items = []
     for m, probs in sorted(g["按模块"].items()):
         for p in probs:
-            items.append({"问题": p, "涉及模块": m, "依据": "程序检查"})
+            items.append({"issue": p, "modules": m, "basis": "程序检查"})
     return items
 
 
@@ -202,8 +210,9 @@ def run_logic_checks(ctx, top, backend=None):
                     except ValueError:
                         found = []
                 cache[m] = {"hash": todo[m], "items": [
-                    {"问题": it.get("问题", ""), "涉及模块": m, "依据": f"logic_check(疑点)：{it.get('依据', '')}"}
-                    for it in found if isinstance(it, dict) and it.get("问题")]}
+                    {"issue": it.get("issue") or it.get("问题") or "", "modules": m,
+                     "basis": f"logic_check(疑点)：{it.get('basis') or it.get('依据') or ''}"}
+                    for it in found if isinstance(it, dict) and (it.get("issue") or it.get("问题"))]}
         cache_f.write_text(json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8")
     for m in mods:
         if m in cache:

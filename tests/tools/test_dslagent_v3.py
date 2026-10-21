@@ -653,8 +653,8 @@ def test_full_flow_clean():
 
 def test_review():
     print("约定对照需求复核")
-    bad = '{"通过": "否", "问题列表": ["需求第九节要求讲解调模型回答，约定改成了模板"]}'
-    ok = '{"通过": "是", "问题列表": []}'
+    bad = '{"passed": false, "issues": ["需求第九节要求讲解调模型回答，约定改成了模板"]}'
+    ok = '{"passed": true, "issues": []}'
     proj, out, state = fresh("p"), fresh("o"), fresh("st") / "state"
     stub_env(state)
     fk = Fake(scripts={"v3_review_graph": [bad, "```json\n" + ok + "\n```"]})
@@ -690,8 +690,10 @@ def test_review():
     res4 = run_v3(proj4, out4, fk4, stop_after="contract")
     rv4 = [r for r in res4["记录"]["规划"] if r["模块"] == "graph" and r["事件"] == "复核"]
     check(res4["status"] == "成功" and fk4.n("v3_review_graph") == 2 and rv4 and rv4[-1]["状态"] == "未复核", "复核回复坏掉：问两次后记未复核并放行", rv4)
-    check(PL.parse_review('{"通过": "否", "问题列表": []}') is None and PL.parse_review('x {"通过":"是"} y') == {"通过": True, "问题": []},
-          "parse_review：否且没问题视为无效；容忍前后文字")
+    check(PL.parse_review('{"通过": "否", "问题列表": []}') is None and PL.parse_review('x {"通过":"是"} y') == {"passed": True, "issues": []},
+          "parse_review：否且没问题视为无效；容忍前后文字；兼容旧键 通过/问题列表")
+    check(PL.parse_review('{"passed": false, "issues": []}') is None and PL.parse_review('x {"passed":true} y') == {"passed": True, "issues": []},
+          "parse_review：新键 passed/issues")
 
 
 def test_catalog():
@@ -1224,6 +1226,15 @@ def test_audit_entry():
     text = path.read_text(encoding="utf-8")
     check("需求第 3 节要求的导出功能两个模块都没做" in text and "GET /dup/x" in text, "程序检查和模型发现的问题都在清单里", text)
     check(fk.n("v3_audit") == 1, "调了一次模型", [c["tag"] for c in fk.calls])
+    # audit.md 现在要求模型回英文键 issue/modules/basis，核查.zs 照样能处理（新旧键都认）
+    p1b, out1b = fresh("audit_p1b"), fresh("audit_out1b")
+    (p1b / "plan").mkdir(parents=True)
+    (p1b / "plan" / "top.zs").write_text("项目 demo\n模块 a\n", encoding="utf-8")
+    fk1b = Fake(scripts={"v3_audit": ['[{"issue": "新键回复也要能用", "modules": "a", "basis": "需求第 1 节"}]']})
+    res1b = core.run_entry("核查", p1b, out1b, "需求全文", extra_vars={"任务": "", "模型": "sonnet"}, backend=fk1b)
+    ret1b = res1b.get("returned") or {}
+    check(ret1b.get("count") == 1, "模型回新键 issue/modules/basis 一样能被核查.zs 消费", ret1b)
+    check("新键回复也要能用" in (Path(p1b) / ret1b["path"]).read_text(encoding="utf-8"), "新键问题进了清单", ret1b)
     # 没有 plan/top.zs 时也能跑（纯模型找问题，程序检查部分是空）
     p2, out2 = fresh("audit_p2"), fresh("audit_out2")
     fk2 = Fake(scripts={"v3_audit": ["[]"]})

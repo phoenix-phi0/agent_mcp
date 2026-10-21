@@ -659,17 +659,21 @@ def judge_user(task, root, items):
 
 
 def parse_judge(text):
-    """bound_judge 的回复 → {"value": {序号: (判定, 依据)}, "problems": [问题]}（同 dsl_task.parse_check 的出参风格）。"""
+    """bound_judge 的回复 → {"value": {序号: (判定, 依据)}, "problems": [问题]}（同 dsl_task.parse_check 的出参风格）。
+    每项 {item, verdict, basis}；兼容旧键 条目序号/判定/依据。"""
     t = re.sub(r"^```[a-z]*\n|\n```$", "", (text or "").strip())
     rows = parse_rows(t)
     if rows is None:
         return {"value": None, "problems": ["回复不是 JSON 数组"]}
     val, probs = {}, []
     for r in rows:
-        if not isinstance(r, dict) or not isinstance(r.get("条目序号"), int) or r.get("判定") not in (VERDICT_CODE, VERDICT_WRONG):
-            probs.append(f"项格式不对：{str(r)[:80]}（需要 条目序号 + 判定「{VERDICT_CODE}」或「{VERDICT_WRONG}」+ 依据）")
+        item = r.get("item", r.get("条目序号")) if isinstance(r, dict) else None
+        verdict = r.get("verdict", r.get("判定")) if isinstance(r, dict) else None
+        if not isinstance(r, dict) or not isinstance(item, int) or verdict not in (VERDICT_CODE, VERDICT_WRONG):
+            probs.append(f"项格式不对：{str(r)[:80]}（需要 item + verdict「{VERDICT_CODE}」或「{VERDICT_WRONG}」+ basis）")
             continue
-        val[r["条目序号"]] = (r["判定"], str(r.get("依据") or ""))
+        basis = r.get("basis", r.get("依据"))
+        val[item] = (verdict, str(basis or ""))
     if not val and not probs:
         probs.append("数组是空的")
     return {"value": val, "problems": probs}

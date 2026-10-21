@@ -147,7 +147,7 @@ REVIEW_FAIL = "未复核"
 
 
 def parse_review(text):
-    """复核回复 → {通过: bool, 问题: [str]}；不是 JSON 或缺字段返回 None。"""
+    """复核回复 → {passed: bool, issues: [str]}；不是 JSON 或缺字段返回 None。兼容旧键 通过/问题列表/问题。"""
     import json
     t = (text or "").strip()
     a, b = t.find("{"), t.rfind("}")
@@ -157,16 +157,17 @@ def parse_review(text):
         j = json.loads(t[a:b + 1])
     except ValueError:
         return None
-    if not isinstance(j, dict) or "通过" not in j:
+    if not isinstance(j, dict) or not ({"passed", "通过"} & set(j)):
         return None
-    ok = str(j.get("通过")).strip() in ("是", "true", "True", "1", "通过")
-    items = j.get("问题列表") or j.get("问题") or []
+    raw = j["passed"] if "passed" in j else j.get("通过")
+    ok = raw is True or str(raw).strip() in ("是", "true", "True", "1", "通过")
+    items = j.get("issues") if "issues" in j else (j.get("问题列表") or j.get("问题") or [])
     if isinstance(items, str):
         items = [items]
     items = [str(x).strip() for x in items if str(x).strip()]
     if not ok and not items:
         return None
-    return {"通过": ok, "问题": items}
+    return {"passed": ok, "issues": items}
 
 
 def review_user(ctx, module, text, req):
@@ -184,7 +185,7 @@ def review_user(ctx, module, text, req):
 
 
 def review(ctx, module, text, req="", model="sonnet"):
-    """约定通过程序检查后，调一次模型对照需求复核 → {通过, 问题, 状态}（状态 = 已复核 / 未复核）。
+    """约定通过程序检查后，调一次模型对照需求复核 → {passed, issues, 状态}（状态 = 已复核 / 未复核）。
     回复不是约定的 JSON 时再问一次；还不行就记「未复核」并放行（记录里看得到）。预算 / 花费 / 墙钟用完抛 ScriptHalt。"""
     if not str(module or "").strip():
         raise ValueError("复核约定要写模块名")
@@ -205,9 +206,9 @@ def review(ctx, module, text, req="", model="sonnet"):
         if got is not None:
             break
     if got is None:
-        ctx.log("规划", 种类="约定", 模块=module, 事件="复核", 状态=REVIEW_FAIL, 原因="回复不是 {通过, 问题列表} 的 JSON")
-        return {"通过": True, "问题": [], "状态": REVIEW_FAIL}
-    ok = got["通过"] and not got["问题"]
-    probs = [f"复核（对照需求）：{p}" for p in got["问题"]]
-    ctx.log("规划", 种类="约定", 模块=module, 事件="复核", 状态="已复核", 通过=ok, 条数=len(probs), 问题=got["问题"])
-    return {"通过": ok, "问题": probs, "状态": "已复核"}
+        ctx.log("规划", 种类="约定", 模块=module, 事件="复核", 状态=REVIEW_FAIL, 原因="回复不是 {passed, issues} 的 JSON")
+        return {"passed": True, "issues": [], "状态": REVIEW_FAIL}
+    ok = got["passed"] and not got["issues"]
+    probs = [f"复核（对照需求）：{p}" for p in got["issues"]]
+    ctx.log("规划", 种类="约定", 模块=module, 事件="复核", 状态="已复核", 通过=ok, 条数=len(probs), 问题=got["issues"])
+    return {"passed": ok, "issues": probs, "状态": "已复核"}
