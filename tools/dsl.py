@@ -1218,8 +1218,9 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
         for m in CALL_PARAM_RE.finditer(tail):
             params[m.group(1).strip()] = self._resolve_items(m.group(2).strip())
 
-        fname = name if name.endswith(".zs") else f"{name}.zs"
-        path = self._safe_path(self.expand(fname))
+        expanded_name = self.expand(name)
+        fname = expanded_name if expanded_name.endswith(".zs") else f"{expanded_name}.zs"
+        path = self._safe_path(fname)
         if not path.is_file():
             raise DSLError(f"找不到脚本：{self._rel(path)}")
 

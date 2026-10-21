@@ -166,8 +166,9 @@ def report():
         text = p.read_text(encoding="utf-8")
         if p.name.endswith(".j2"):
             text = strip_jinja(text)
-        # verbs/ 下的 .zs 动词（包顶层、defs/ 里的都算；dslagent 私有动词根 tools/dslagent/verbs/ 同）：声明的参数是动词参数名
-        allowed = parse_param_decl(text) if (ROOT / "verbs" in p.parents or ROOT / "tools" / "dslagent" / "verbs" in p.parents) else ()
+        # .zs 开头「# 参数：」声明的参数名放行——verbs/ 下的动词是动词参数名；顶层脚本（如 tools/dslagent/v3/
+        # 核查.zs、修改.zs）的「参数：」声明同样是语法层，可以写中文。局部变量、循环变量不在此列，仍要求 ASCII。
+        allowed = parse_param_decl(text)
         hits = scan_zs(text, allowed) if kind == "zs" else scan_sql(text)
         for no, where, name in hits:
             out.append((str(p.relative_to(ROOT)), no, where, name))

@@ -81,13 +81,13 @@ def main(argv=None):
         req_text = Path(a.req).read_text(encoding="utf-8")
         if a.action == "audit":
             res = V3.run_entry("核查", a.project, a.out, req_text,
-                               extra_vars={"task": a.task or "", "llm": a.llm, "logic_check": "是" if a.logic_check else "否"},
+                               extra_vars={"任务": a.task or "", "模型": a.llm, "逻辑核查": "是" if a.logic_check else "否"},
                                cost_cap=a.cost_cap, **({"wall": a.wall} if a.wall else {}), req_path=a.req)
             print(json.dumps({k: res.get(k) for k in ("状态", "原因", "停在", "花费", "用时", "模型调用", "返回")}, ensure_ascii=False))
             return 0 if res["状态"] == "成功" else 1
         if a.action == "change":
             res = V3.run_entry("修改", a.project, a.out, req_text,
-                               extra_vars={"issues": a.issues, "task": a.task or "", "llm": a.llm, "retries": str(a.retries)},
+                               extra_vars={"问题": a.issues, "任务": a.task or "", "模型": a.llm, "次数": str(a.retries)},
                                cost_cap=a.cost_cap, **({"wall": a.wall} if a.wall else {}), module_wall=a.module_wall,
                                req_path=a.req)
             print(json.dumps({k: res.get(k) for k in ("状态", "原因", "停在", "花费", "用时", "模型调用", "返回")}, ensure_ascii=False))

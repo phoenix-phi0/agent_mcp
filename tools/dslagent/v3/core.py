@@ -39,6 +39,7 @@ class Ctx:
         self.attempts = {}                     # (种类, 模块) → 写了几次
         self.last_text = {}                    # (种类, 模块) → 上一次写的文本（重写时带上）
         self.rounds = {}                       # 模块 → 做了几轮
+        self.pending_contracts = {}             # 模块 → 条目文本或空串（新增模块/改约定 登记，落实修改 消费后清空）
         self.records = {"规划": [], "模块": [], "验收": []}
         self.t0 = time.time()
         (self.out).mkdir(parents=True, exist_ok=True)
@@ -194,7 +195,7 @@ def run_entry(script, project, out, req, extra_vars=None, backend=None, cost_cap
               req_path=req_path)
     eng = V3Engine(client=V2.Client(M), workdir=project, verbose=False, verbs_root=C.VERBS)
     eng.v3, ctx.usage = ctx, eng.usage
-    eng.vars.update({"req": req, **(extra_vars or {})})
+    eng.vars.update({"需求": req, **(extra_vars or {})})
     res, err = {"状态": "成功", "原因": "", "停在": ""}, None
     try:
         eng.run((HERE / f"{script}.zs").read_text(encoding="utf-8"))

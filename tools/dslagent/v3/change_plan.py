@@ -1,16 +1,17 @@
-"""修改.zs 用：写修改计划（调模型）+ 检查修改计划（程序）+ 存 plan/changes/<序号>.zs。
-计划四种动词的执行（改需求 改 plan/req.md 对应节 + 追加变更记录、新增模块/删除模块 改 top.zs、改约定 带条目重写约定）
-本次预算未实现，留给后续任务（见 data/reports/rebuild_D.md「没做完的部分」）。
+"""修改.zs 用：写修改计划（调模型，自己存 plan/changes/<序号>.zs）+ 检查修改计划（程序）。
 
-计划动词（产出约定）：
-    改需求 <节号> <新内容或改法>
+计划是一份真正能被 `执行` 直接跑的 .zs 脚本，四种动词（产出约定）+ 一个固定收尾动词：
+    改需求 <节号> <内容>              # 内容可含转义的 \\n（多段正文），没有空格（中文标点，不留 ASCII 空格）
     新增模块 <名> 依赖=<…> 说明=<…>
     删除模块 <名>
     改约定 <模块> <改动条目>
-每行可带「# 对应问题 N」。
+    落实修改                          # 固定末行：按依赖分层写/重写新增与改约定涉及的约定、同步顶层依赖
+每行可带「# 对应问题 N」（落实修改 不用标）。四个内容类动词的值不能有 ASCII 空格（DSL 调用一行按空格分词，
+值里要空格用中文标点；改需求 要分段用两个字符的 \\n，执行时由 改需求 动词解码成真正的换行）。
 
-check_plan(text, issues, top) -> 问题列表（空 = 通过）：
-- 格式：每行必须是四种动词之一开头（parse_plan 已经按行拆出格式问题）
+check_plan(text, issues, top, req_text) -> 问题列表（空 = 通过）：
+- 格式：每行必须是四种动词或「落实修改」开头（parse_plan 已经按行拆出格式问题）
+- 末行固定是「落实修改」（没有 → 报问题，提醒模型漏写）
 - 模块存在：删除模块 / 改约定 的模块名要在 top.zs 里；新增模块 不能和已有模块重名
 - 不成环：新增模块 的「依赖=」只能是 top.zs 里的模块或本次计划里别的「新增模块」，且合起来不成环
 - 新增模块写了说明：「新增模块 …」必须带「说明=」
@@ -43,29 +44,39 @@ def latest_plan_path(project):
 
 
 DIRECTIVE_RE = re.compile(r"^(改需求|新增模块|删除模块|改约定)\s")
+CLOSING_VERB = "落实修改"
 
 
-def strip_comment_tag(line):
-    """去掉行末「# 对应问题 N」，返回 (正文, 对应问题号|None)。"""
-    m = re.search(r"#\s*对应问题\s*(\d+)\s*$", line)
-    if not m:
-        return line.rstrip(), None
-    return line[:m.start()].rstrip(), int(m.group(1))
+TAG_RE = re.compile(r"^#\s*对应问题\s*([\d,，\s]+)\s*$")
 
 
 def parse_plan(text):
-    """修改计划 .zs 文本 → ([{"动词", "内容", "对应问题"}], 问题列表)。只认四种动词开头的行，空行/注释行跳过。"""
+    """修改计划 .zs 文本 → ([{"动词", "内容", "对应问题"}], 问题列表)。只认四种动词 + 落实修改 开头的行。
+
+    「# 对应问题 N」要单独写一行，紧接在它标注的指令行**之前**（不能写在指令行末尾——这份计划要能被 `执行`
+    原样当 DSL 脚本跑，DSL 不会剥掉一行末尾的 # 注释，写在行末会被当成这一行调用的参数，execution 时报错）。
+    """
     items, probs = [], []
+    pending = []
     for no, raw in enumerate((text or "").replace("\r\n", "\n").split("\n"), 1):
         line = raw.strip()
-        if not line or line.startswith("#"):
+        if not line:
             continue
-        body, issue_no = strip_comment_tag(line)
-        if not DIRECTIVE_RE.match(body):
-            probs.append(f"第 {no} 行：只能用 改需求 / 新增模块 / 删除模块 / 改约定 开头，现在是「{body[:40]}」")
+        m = TAG_RE.match(line)
+        if m:
+            pending = [int(x) for x in re.findall(r"\d+", m.group(1))]
             continue
-        verb, _, rest = body.partition(" ")
-        items.append({"动词": verb, "内容": rest.strip(), "对应问题": issue_no, "行": no})
+        if line.startswith("#"):
+            continue
+        tags, pending = pending, []
+        if line == CLOSING_VERB:
+            items.append({"动词": CLOSING_VERB, "内容": "", "对应问题": tags, "行": no})
+            continue
+        if not DIRECTIVE_RE.match(line):
+            probs.append(f"第 {no} 行：只能用 改需求 / 新增模块 / 删除模块 / 改约定 / 落实修改 开头，现在是「{line[:40]}」")
+            continue
+        verb, _, rest = line.partition(" ")
+        items.append({"动词": verb, "内容": rest.strip(), "对应问题": tags, "行": no})
     return items, probs
 
 
@@ -83,8 +94,33 @@ def user_text(issues_text, req_excerpt, task, top_text, catalog_text, contracts_
     return "\n\n".join(parts)
 
 
+def as_issues_text(问题):
+    """问题清单入参可能是：渲染好的文本、读问题清单 的返回（{"items":…}）、或直接的 items 列表——统一成
+    干净的编号文本（给模型看、也给「上次问题」拼接用）。"""
+    if isinstance(问题, dict):
+        items = 问题.get("items") or []
+    elif isinstance(问题, list):
+        items = 问题
+    else:
+        return str(问题 or "")
+    if not items:
+        return "（没有发现问题）"
+    from . import issues as IS
+    return "\n".join(IS.format_issue(i, it) for i, it in enumerate(items, 1))
+
+
+def resolve_plan_text(project, ref):
+    """计划入参可能是一份 plan/changes/<序号>.zs 的相对路径，也可能是计划原文（带换行）——统一成原文。"""
+    s = ref or ""
+    if isinstance(s, str) and "\n" not in s:
+        p = Path(project) / s if not Path(s).is_absolute() else Path(s)
+        if p.is_file():
+            return p.read_text(encoding="utf-8")
+    return s
+
+
 def write(ctx, issues_text, task="", model="sonnet"):
-    """调一次模型写修改计划文本（未必通过 parse_plan；检查留给 检查修改计划，本次预算未实现）。"""
+    """调一次模型写修改计划文本（未必通过 parse_plan；检查留给 检查修改计划）。"""
     ctx.guard()
     ctx.take_call()
     top_text = ctx.top_path().read_text(encoding="utf-8") if ctx.top_path().is_file() else ""
@@ -141,13 +177,17 @@ def check_plan(text, issues, top, req_text=""):
     items, probs = parse_plan(text)
     if not items and not probs:
         probs.append("计划是空的，没有一行指令")
+    content_items = [it for it in items if it["动词"] != CLOSING_VERB]
+    if not items or items[-1]["动词"] != CLOSING_VERB:
+        probs.append(f"计划最后一行必须是固定的收尾动词「{CLOSING_VERB}」（没有写，或写在了中间）")
+    if sum(1 for it in items if it["动词"] == CLOSING_VERB) > 1:
+        probs.append(f"「{CLOSING_VERB}」只能出现一次，写在最后一行")
+    items = content_items
     mod_names = {m["名"] for m in top.get("模块", [])}
     new_mods = set()
     covered = set()
     for it in items:
-        no = it["对应问题"]
-        if no:
-            covered.add(no)
+        covered.update(it["对应问题"])
         verb, content = it["动词"], it["内容"]
         if verb == "新增模块":
             name = content.split()[0] if content.split() else ""
