@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test_dslagent_v3 as T                                   # noqa: E402
 
 check, fresh, core, Fake = T.check, T.fresh, T.core, T.Fake
+from tools.dslagent.v3 import planning as PLC                # noqa: E402
 
 
 def verb_engine(p, out, req="需求全文", req_path=None):
@@ -233,6 +234,41 @@ def test_logic_verb():
     check("漏了鉴权" not in (p / res3["returned"]["path"]).read_text(encoding="utf-8"), "logic_check=否 不并疑点")
 
 
+def test_planning_material():
+    print("取规划材料：需求 + top.zs + 目录 + 各模块约定（去用例，按名排序，缺约定跳过，超长截断）")
+    p = T.solution_project()
+    (p / "plan" / "catalog.md").write_text("# 目录\n- graph 知识点图\n", encoding="utf-8")
+    reqdir = fresh("req")
+    req = reqdir / "req.md"
+    req.write_text("## 1 概述\n需求原文\n", encoding="utf-8")
+    e, ctx = verb_engine(p, fresh("o"), req_path=req)
+    mat = run(e, f"设 mat = 取规划材料 需求={req}\n返回 {{mat}}\n")
+    check(set(mat) == {"需求", "顶层", "目录", "约定"}, "返回 {需求, 顶层, 目录, 约定}", list(mat))
+    check("需求原文" in mat["需求"], "需求给文件路径：读成文本", mat["需求"])
+    check(mat["顶层"] == (p / "plan" / "top.zs").read_text(encoding="utf-8") and "知识点图" in mat["目录"], "top.zs、目录全文")
+    names = sorted(f.stem for f in (p / "contracts").glob("*.md"))
+    heads = [m for m in names if f"### {m}\n" in mat["约定"]]
+    check(heads == names and [mat["约定"].index(f"### {m}\n") for m in names] == sorted(mat["约定"].index(f"### {m}\n") for m in names),
+          "每个有约定的模块都在，按名排序", names)
+    for m in names:
+        full = (p / "contracts" / f"{m}.md").read_text(encoding="utf-8")
+        body = full.split("## 用例")[0].strip()
+        check(body in mat["约定"], f"{m} 的约定全文（去用例）在里面", None)
+    check("## 用例" not in mat["约定"], "不含用例小节")
+    # 需求直接给文本；缺约定的模块被跳过；缺 top / 目录给空串
+    q = fresh("mat0")
+    e2, _ = verb_engine(q, fresh("o"))
+    m2 = run(e2, "设 mat = 取规划材料 需求=只有一句需求\n返回 {mat}\n")
+    check(m2 == {"需求": "只有一句需求", "顶层": "", "目录": "", "约定": ""}, "需求给文本、什么都没有：缺的项是空串", m2)
+    (p / "contracts" / f"{names[0]}.md").rename(p / "contracts" / "zz.txt")
+    m3 = run(e, "设 mat = 取规划材料 需求=x\n返回 {mat}\n")
+    check(f"### {names[0]}\n" not in m3["约定"] and f"### {names[1]}\n" in m3["约定"], "没有约定文件的模块被跳过")
+    (p / "contracts" / f"{names[1]}.md").write_text("# " + names[1] + "\n" + "长" * 13000, encoding="utf-8")
+    m4 = run(e, "设 mat = 取规划材料 需求=x\n返回 {mat}\n")
+    seg = m4["约定"].split(f"### {names[1]}\n")[1].split("\n\n### ")[0]
+    check(seg.endswith("……（后面略）") and len(seg) < 12100, "单份超 12000 字截断并注明", len(seg))
+
+
 # ------------------------------------------------------------------ 核查.zs 整条
 
 class ByContent(Fake):
@@ -279,6 +315,9 @@ def test_audit_flow():
     check("模块 graph 全量回归不过" in text and "依据：全量回归" in text and "类型：code" in text and "需求第 2 节的导出没人做" in text, "清单里有回归的 code 问题和规划层问题", text)
     check(fk.n("dsl") == 1, "deep=否：只派规划层一个子任务", [c["tag"] for c in fk.calls])
     user = fk.calls[0]["user"]
+    check("项目 demo" in user or "模块 graph" in user, "规划层入参带 top.zs 全文", user[:400])
+    gtext = PLC.without_cases((p / "contracts" / "graph.md").read_text(encoding="utf-8")).strip()
+    check("### graph" in user and gtext.splitlines()[-1] in user and "## 用例" not in user, "规划层入参带各模块约定全文（去用例）", user[:400])
     check("全量回归" in user and "graph" in user and "接口冒烟" in user, "规划层子任务的入参带回归 / 冒烟摘要", user[-600:])
     check((out / "smoke_1.json").is_file(), "冒烟完整结果存在 out/smoke_1.json")
     # deep=是
@@ -335,6 +374,7 @@ if __name__ == "__main__":
         test_regression_report()
         test_smoke_report()
         test_read_file_and_list()
+        test_planning_material()
         test_audit_task_table()
         test_store_issues()
         test_logic_verb()

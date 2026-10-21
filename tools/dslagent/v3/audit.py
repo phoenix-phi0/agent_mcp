@@ -2,6 +2,7 @@
 
   tasks(...)      核查任务表：每个模块一项 {任务, 入参, 逻辑, 格式}，给 并行派任务 用（deep 核查：读代码的子任务）
   read_file(...)  取文件：需求文件 / 项目目录内文件 / v3 自带提示词（@名字）→ 文本
+  material(...)   取规划材料：需求 + top.zs + 接口目录 + 各模块约定（去用例）→ 规划层子任务的入参字典
   merge(...)      存问题清单：把各路结果（程序 / 回归 / 冒烟 / 规划 / 模块 / 疑点）并成一份、去重、丢掉不合格项
 
 模型子任务的回复固定是 {result, status, reason}（见 tools/dsl_task.py），核查类的 result 是 {found: 是否, items: 列表}。
@@ -19,6 +20,7 @@ from ..packs.dslproj import contract as C
 PROMPTS = Path(__file__).parent / "prompts"
 SEG = 400                       # 一段代码引用最多多少行（tools/dsl_task.MAX_LINES）
 REQ_CAP = 14000
+CONTRACT_CAP = 12000            # 规划材料里单份约定的字数上限
 FORMAT = "found:是否,items:列表"
 KEYS = ("issue", "modules", "basis", "type")
 
@@ -55,6 +57,31 @@ def read_file(ctx, path):
     if not f.is_file():
         return "", f"文件「{path}」不存在"
     return f.read_text(encoding="utf-8", errors="replace"), ""
+
+
+def material(ctx, req=""):
+    """规划层子任务要的全部材料 → {需求, 顶层, 目录, 约定}，缺的项是空串。子任务读不到工作目录之外的文件，
+    所以需求、top.zs、目录、约定都得以文本放进入参。req 可以是需求文件路径，也可以直接是需求文本。"""
+    req = req if isinstance(req, str) else str(req or "")
+    text = ""
+    if req.strip() and "\n" not in req.strip() and len(req.strip()) < 500:
+        text, _ = read_file(ctx, req)
+    if not text:
+        text = req
+    project = Path(ctx.project)
+
+    def slurp(f):
+        return f.read_text(encoding="utf-8", errors="replace") if f.is_file() else ""
+
+    blocks = []
+    cdir = project / "contracts"
+    for f in sorted(cdir.glob("*.md"), key=lambda x: x.stem) if cdir.is_dir() else []:
+        body = PL.without_cases(f.read_text(encoding="utf-8", errors="replace")).strip()
+        if len(body) > CONTRACT_CAP:
+            body = body[:CONTRACT_CAP] + "\n……（后面略）"
+        blocks.append(f"### {f.stem}\n{body}")
+    return {"需求": text, "顶层": slurp(ctx.top_path()), "目录": slurp(CAT.path_of(project)),
+            "约定": "\n\n".join(blocks)}
 
 
 def split_sections(req_text):
