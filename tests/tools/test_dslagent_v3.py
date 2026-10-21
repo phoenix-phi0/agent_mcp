@@ -361,11 +361,13 @@ def test_skeleton_build_state():
     text = SF.build_text(top)
     lines = text.splitlines()
     check(lines[2:5] == ["用包 common v3 text", "做模块组 graph", "做模块组 vocab,progress"] and lines[5] == "设 layers = 依赖分层" and lines[-1] == "终止 成功 全部模块完成"
-          and text.index("设 rs = 全量回归") < text.index("设 rs = 接口冒烟") and text.count("设 job.脚本 = plan/redo_module") == 2
-          and "做一个模块" not in text and text.count("并行执行") == 2, "build.zs 按依赖分层 + 全量回归 / 接口冒烟 流程写在 .zs 里（检查 → 按层重做 → 再检查）", text)
+          and text.index("设 rs = 全量回归") < text.index("设 rs = 接口冒烟") and text.count("执行 plan/redo_failed") == 2
+          and "做一个模块" not in text and "并行执行" not in text, "build.zs 按依赖分层 + 全量回归 / 接口冒烟 流程写在 .zs 里（检查 → 按层重做 → 再检查）", text)
     check((p / SF.gen_build(p, top)).read_text(encoding="utf-8") == text, "生成分配写 plan/build.zs")
-    check((p / "plan" / "redo_module.zs").read_text(encoding="utf-8") == SF.REDO_TEXT and "已完成" not in SF.REDO_TEXT.replace("「已完成」", ""),
-          "生成分配同时写 plan/redo_module.zs，且不看「已完成」")
+    SF.gen_build(p, top)
+    redo = (p / "plan" / "redo_failed.zs").read_text(encoding="utf-8")
+    check(redo == SF.REDO_TEXT and '"脚本":"做一个模块"' in redo and "已完成" not in redo.replace("「已完成」", "") and not (p / "plan" / "redo_module.zs").exists(),
+          "生成分配同时写 plan/redo_failed.zs（直接调 做一个模块、不看已完成），不再生成 redo_module.zs")
     # state：约定 hash 变了视为未完成
     ctx = core.Ctx(p, fresh("out"), "x", None)
     check(ctx.is_done("graph") is False, "没记过 = 未完成")
@@ -915,7 +917,7 @@ def stub_cmd(out, fixes=None):
 
 
 def run_build(p, ctx, top):
-    """按生成分配写出的 plan/build.zs（+ plan/redo_module.zs）跑一遍，→ 子引擎（看 halted / vars）。"""
+    """按生成分配写出的 plan/build.zs（+ plan/redo_failed.zs）跑一遍，→ 子引擎（看 halted / vars）。"""
     from tools.dslagent.v3 import scaffold as SF
     (p / "plan").mkdir(exist_ok=True)
     (p / "plan" / "top.zs").write_text(TOP3, encoding="utf-8")
@@ -927,8 +929,45 @@ def run_build(p, ctx, top):
     return sub
 
 
+def run_zs(p, ctx, text):
+    eng = core.V3Engine(MockClient(handler=lambda s, u=None: "嗯", offline=True), workdir=p, verbose=False, verbs_root=CM.VERBS)
+    eng.v3 = ctx
+    sub = eng._sub_engine()
+    sub.run(text)
+    return sub
+
+
+def test_make_one_no_skip():
+    print("做一个模块 不再自己判已完成：已完成的模块也真做；做模块组仍跳过已完成的")
+    text = (ROOT / "tools/dslagent/verbs/v3/defs/做一个模块.zs").read_text(encoding="utf-8")
+    check("已完成" not in text.split("用包", 1)[1] and "跳过" not in text.split("用包", 1)[1], "做一个模块 正文里不再看 已完成 / 跳过")
+    p = full_project()
+    out = fresh("o")
+    ctx = core.Ctx(p, out, "x", None, module_cmd=stub_cmd(out))
+    for m in ("graph", "vocab", "progress"):
+        ctx.mark_done(m)
+    sub = run_zs(p, ctx, "用包 common v3 text\n设 r = 做一个模块 模块=graph\n返回 {r.status}\n")
+    check(sorted(f.name for f in out.glob("task_*.txt")) == ["task_graph.txt"] and [r["模块"] for r in ctx.records["模块"]] == ["graph"],
+          "已完成的 graph 直接做一个模块：真的做了一轮（做模块跑了）", [f.name for f in out.glob("task_*.txt")])
+    check(ctx.is_done("graph"), "验收过了仍是完成")
+    # 做模块组：已完成的跳过，没完成的做
+    out2 = fresh("o")
+    ctx2 = core.Ctx(p, out2, "x", None, module_cmd=stub_cmd(out2))
+    ctx2.mark_done("graph")
+    ctx2.mark_done("vocab")
+    sub2 = run_zs(p, ctx2, "用包 common v3 text\n做模块组 graph,vocab,progress\n")
+    check(sorted(f.name for f in out2.glob("task_*.txt")) == ["task_progress.txt"], "做模块组：graph、vocab 已完成不碰，只做 progress", [f.name for f in out2.glob("task_*.txt")])
+    # 全部已完成：什么也不做，也不出错
+    out3 = fresh("o")
+    ctx3 = core.Ctx(p, out3, "x", None, module_cmd=stub_cmd(out3))
+    for m in ("graph", "vocab", "progress"):
+        ctx3.mark_done(m)
+    sub3 = run_zs(p, ctx3, "用包 common v3 text\n做模块组 graph,vocab\n")
+    check(not list(out3.glob("task_*.txt")) and not sub3.halted, "做模块组：整组都已完成 → 不做、不终止", sub3.halted)
+
+
 def test_full_regression():
-    print("build.zs 里的回归流程：全量回归（只检查）→ 不过的模块按依赖分层交 redo_module 重做（带原因）→ 再检查；2 轮仍不过 终止 失败；全过不重做")
+    print("build.zs 里的回归流程：全量回归（只检查）→ 不过的模块按依赖分层交 redo_failed 重做（带原因）→ 再检查；2 轮仍不过 终止 失败；全过不重做")
     top = VT.load(TOP3)
     mods = ("graph", "vocab", "progress")
     p = full_project()
@@ -958,7 +997,7 @@ def test_full_regression():
     check(any(not row["通过"] and "全量回归" in row["说明"] and "跑用例" in row["说明"] for row in acc), "验收记录里有全量回归查出的失败原因", acc)
     check(ctx2.records["模块"] and all(r["模块"] == "graph" for r in ctx2.records["模块"]), "做模块只跑了 graph", ctx2.records["模块"])
 
-    # 一直修不好：redo_module 3 次都没过 → 立刻 终止 失败（不等再检查）
+    # 一直修不好：做一个模块 3 次都没过 → 立刻 终止 失败（不等再检查）
     (p / "services" / "graph.zs").write_text(broken, encoding="utf-8")
     out3 = fresh("o")
     ctx3 = core.Ctx(p, out3, "x", None, module_cmd=stub_cmd(out3))        # 不给 fixes：谁都修不好
