@@ -5,17 +5,17 @@
 找不到就当脚本动词（.zs 动词）的名字，参数按动词的声明绑定（默认值生效）。并发缺省 3（1–8）。
 
 每个子脚本独立作用域、独立子引擎（共用客户端、动词表、预算），互不影响：某项出错或「终止」不影响别的项，
-全部跑完才返回。每项的结果是 {脚本, 参数, 状态, 原因, 停在, 返回}：
-    状态   成功（正常结束或「返回」了）| 失败 | 超出预期（子脚本「终止」的状态；脚本出错算 失败，原因是错误的第一行）
-    返回   子脚本「返回」的值，没有「返回」就是它的输出文本
+全部跑完才返回。每项的结果是 {script, params, status, reason, at, returned}：
+    status     成功（正常结束或「返回」了）| 失败 | 超出预期（子脚本「终止」的状态；脚本出错算 失败，原因是错误的第一行）
+    returned   子脚本「返回」的值，没有「返回」就是它的输出文本
 预算用完时各项按「终止 超出预期」结束，调用方下一条语句照样终止。
 
     设 jobs = 解析JSON []
     设 jobs = 列表加项 {jobs} 做一个模块 模块=graph
     设 rs = 并行执行 {jobs} 并发=2
     遍历 r 于 {rs}
-      如果 {r.状态} 不等于 成功
-        打印 {r.脚本} 没做成：{r.原因}
+      如果 {r.status} 不等于 成功
+        打印 {r.script} 没做成：{r.reason}
       结束
     结束
 """
@@ -73,11 +73,11 @@ def _run_one(eng, job):
         out = sub.run(text)
         if sub.halted is not None:
             h = sub.halted
-            return {"脚本": name, "参数": params, "状态": h["状态"], "原因": h["原因"], "停在": h["停在"], "返回": ""}
-        return {"脚本": name, "参数": params, "状态": "成功", "原因": "", "停在": "",
-                "返回": sub.returned[0] if sub.returned else out}
+            return {"script": name, "params": params, "status": h["status"], "reason": h["reason"], "at": h["at"], "returned": ""}
+        return {"script": name, "params": params, "status": "成功", "reason": "", "at": "",
+                "returned": sub.returned[0] if sub.returned else out}
     except Exception as e:  # noqa: BLE001  单项出错是结果，不能带崩整组
-        return {"脚本": name, "参数": params, "状态": "失败", "原因": background_reason(e), "停在": "", "返回": ""}
+        return {"script": name, "params": params, "status": "失败", "reason": background_reason(e), "at": "", "returned": ""}
 
 
 def 并行执行(列表: str = "", 并发: str = str(DEFAULT_PARALLEL)) -> list:

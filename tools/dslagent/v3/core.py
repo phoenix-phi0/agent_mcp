@@ -141,7 +141,7 @@ def ctx_of(engine=None):
 
 def run(req, project, out, stop_after=None, backend=None, cost_cap=None, wall=WALL, module_cmd=None, module_wall=1800):
     """跑 v3.zs。req：需求文本；backend：假模型（测试用）；module_cmd：替换「做模块」起的子进程命令（测试用）。
-    → {状态, 原因, 停在, 花费, 用时, 记录…}，同时写 out/result.json。"""
+    → {status, reason, at, 花费, 用时, 记录…}，同时写 out/result.json。"""
     project, out = Path(project), Path(out)
     project.mkdir(parents=True, exist_ok=True)
     out.mkdir(parents=True, exist_ok=True)
@@ -163,13 +163,13 @@ def run(req, project, out, stop_after=None, backend=None, cost_cap=None, wall=WA
     eng = V3Engine(client=V2.Client(M), workdir=project, verbose=False, verbs_root=C.VERBS)
     eng.v3, ctx.usage = ctx, eng.usage
     eng.vars.update({"req": req, "project": str(project), "stop_after": stop})
-    res, err = {"状态": "成功", "原因": "", "停在": ""}, None
+    res, err = {"status": "成功", "reason": "", "at": ""}, None
     try:
         eng.run(V3_ZS.read_text(encoding="utf-8"))
         if eng.halted is not None:
             res = dict(eng.halted)
     except Exception as e:  # noqa: BLE001  引擎 / 动词出错：记成失败，不往外抛
-        res = {"状态": "失败", "原因": f"{type(e).__name__}: {e}"[:600], "停在": ""}
+        res = {"status": "失败", "reason": f"{type(e).__name__}: {e}"[:600], "at": ""}
         err = e
     res.update(花费=round(ctx.cost(), 4), 规划花费=round(M.cost, 4), 模块花费=round(ctx.module_cost, 4),
                用时=round(time.time() - ctx.t0, 1), 模型调用=M.n, 记录=ctx.records, 输出=eng.output[-20:])
@@ -185,7 +185,7 @@ def run_entry(script, project, out, req, extra_vars=None, backend=None, cost_cap
               module_cmd=None, module_wall=1800, req_path=None):
     """跑 v3/ 下的顶层脚本（核查.zs / 修改.zs，script 不带 .zs）：req 是需求全文；req_path（可选）是需求文件的
     真实路径，「改需求」执行时写回这个文件（没给、计划里又有「改需求」就 终止 失败，见 应用修改计划 动词）。
-    → {状态, 原因, 停在, 花费, 用时, 模型调用[, 返回]}，同时写 out/<script>_result.json。"""
+    → {status, reason, at, 花费, 用时, 模型调用[, returned]}，同时写 out/<script>_result.json。"""
     project, out = Path(project), Path(out)
     project.mkdir(parents=True, exist_ok=True)
     out.mkdir(parents=True, exist_ok=True)
@@ -196,15 +196,15 @@ def run_entry(script, project, out, req, extra_vars=None, backend=None, cost_cap
     eng = V3Engine(client=V2.Client(M), workdir=project, verbose=False, verbs_root=C.VERBS)
     eng.v3, ctx.usage = ctx, eng.usage
     eng.vars.update({"需求": req, **(extra_vars or {})})
-    res, err = {"状态": "成功", "原因": "", "停在": ""}, None
+    res, err = {"status": "成功", "reason": "", "at": ""}, None
     try:
         eng.run((HERE / f"{script}.zs").read_text(encoding="utf-8"))
         if eng.halted is not None:
             res = dict(eng.halted)
         elif eng.returned:
-            res["返回"] = eng.returned[0]
+            res["returned"] = eng.returned[0]
     except Exception as e:  # noqa: BLE001  引擎 / 动词出错：记成失败，不往外抛
-        res = {"状态": "失败", "原因": f"{type(e).__name__}: {e}"[:600], "停在": ""}
+        res = {"status": "失败", "reason": f"{type(e).__name__}: {e}"[:600], "at": ""}
         err = e
     res.update(花费=round(ctx.cost(), 4), 用时=round(time.time() - ctx.t0, 1), 模型调用=M.n, 记录=ctx.records)
     if err is not None:

@@ -11,4 +11,4 @@
   终止 成功 停在分配脚本
 结束
 设 r = 执行 plan/build.zs
-终止 {r.状态} {r.原因}
+终止 {r.status} {r.reason}

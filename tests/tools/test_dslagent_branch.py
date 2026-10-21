@@ -74,7 +74,7 @@ def test_whitelist():
     check({"派任务", "并行派任务", "查引用"} <= P.ALLOWED_VERBS, "ALLOWED_VERBS 有 派任务 / 并行派任务 / 查引用")
     check({"派任务", "并行派任务", "查引用"} <= P.ALL_VERBS, "ALL_VERBS 认得出新动词")
     script = ("用包 common text code\n设 r = 派任务 {task}\n设 rs = 并行派任务 {jobs} 2\n设 f = 查引用 x py\n"
-              "如果 {r.状态} 等于 失败\n  终止 失败 {r.原因}\n结束\n终止 成功 好")
+              "如果 {r.status} 等于 失败\n  终止 失败 {r.reason}\n结束\n终止 成功 好")
     check(P.whitelist_check(script, {}) == [], f"新语句、新动词过白名单：{P.whitelist_check(script, {})}")
     check(P.whitelist_check(EXAMPLE.read_text(encoding="utf-8"), {}) == [], "示例脚本过白名单")
     for word in ("终止 成功|失败|超出预期", "派任务", "并行派任务", "查引用"):
@@ -95,14 +95,14 @@ def test_dry(tmp):
                          lambda d, s: {f"_plan/{k}": Path(d) / k for k in s}, "平衡")
 
     err, n, out = dry("用包 common text code\n设 r = 派任务 {task} 无 无 edits:列表,note:文本\n"
-                      "设 rs = 并行派任务 [\"甲\",\"乙\"] 2\n打印 {r.状态} {r.空跑} {rs.1.状态}\n打印 结论：没修好 示意")
+                      "设 rs = 并行派任务 [\"甲\",\"乙\"] 2\n打印 {r.status} {r.空跑} {rs.1.status}\n打印 结论：没修好 示意")
     check(not err and n == 0 and "成功 是 成功" in out, f"派任务 / 并行派任务 空跑不调假模型、给合法假结果：err={err!r} calls={n} {out!r}")
     err, n, out = dry("用包 common text code\n终止 超出预期 前提不对")
     check(not err and "[终止] 超出预期：前提不对" in out, f"以 终止 收尾的计划没打印「结论：」也算过：{err!r}")
     err, n, out = dry("用包 common text code\n打印 什么也没说")
     check("结论" in err, "既没 结论 也没 终止 照旧不过")
-    err, n, out = dry("用包 common text code\n设 r = 执行 _plan/s.zs\n打印 结论：没修好 {r.状态}|{r.停在}",
-                      {"s.zs": "用包 common text code\n设 x = 派任务 做事\n终止 {x.状态} 子脚本{x.空跑}"})
+    err, n, out = dry("用包 common text code\n设 r = 执行 _plan/s.zs\n打印 结论：没修好 {r.status}|{r.at}",
+                      {"s.zs": "用包 common text code\n设 x = 派任务 做事\n终止 {x.status} 子脚本{x.空跑}"})
     check(not err and "结论：没修好 成功|_plan/s.zs 第 3 行" in out,
           f"子脚本里空跑标志传下去、子脚本终止交回调用方：{err!r} {out!r}")
 
@@ -133,7 +133,7 @@ def test_example_real(tmp):
             edits = [{"file": "pkg/__init__.py", "old": "import yaml", "new": ""}]
         else:
             edits = [{"file": "pkg/__init__.py", "old": "import json\n", "new": ""}]
-        return json.dumps({"结果": {"edits": edits, "note": f"第{n['i']}版"}, "状态": "成功", "原因": ""},
+        return json.dumps({"result": {"edits": edits, "note": f"第{n['i']}版"}, "status": "成功", "reason": ""},
                           ensure_ascii=False)
     import os
     old = os.environ.get("DSLAGENT_STATE")
@@ -147,7 +147,7 @@ def test_example_real(tmp):
             os.environ.pop("DSLAGENT_STATE", None)
         else:
             os.environ["DSLAGENT_STATE"] = old
-    check(eng.halted and eng.halted["状态"] == "成功" and "第2版" in eng.halted["原因"],
+    check(eng.halted and eng.halted["status"] == "成功" and "第2版" in eng.halted["reason"],
           f"第 2 次改法通过测试后终止 成功：{eng.halted}")
     first = m.calls[0]["messages"][-1]["content"] if m.calls else ""
     check("   1| import json" in first, "入参 src=文件:起-止 被读出附在子任务提示里")

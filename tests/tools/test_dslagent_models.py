@@ -164,14 +164,14 @@ REMEDY_PLAN = T.plan('''
 设 t = 跑测试
 如果 {t.passed} 不等于 是
   设 r = 派任务 修测试 {t.summary} 修好 edits:列表
-  设 res = 改文件 {r.结果}
+  设 res = 改文件 {r.result}
 结束
 终止 成功 好
 ''', edits=T.EDIT_DOUBLE.replace("return x + x", "return x * 3"))
-REMEDY_FIX = {"结果": {"edits": [{"file": "pkg/util.py", "old": "return x * 3", "new": "return x + x"}]}, "状态": "成功", "原因": ""}
+REMEDY_FIX = {"result": {"edits": [{"file": "pkg/util.py", "old": "return x * 3", "new": "return x + x"}]}, "status": "成功", "reason": ""}
 RESID_PLAN = T.PLAN_OK.replace("预算 调用 4 秒 300\n", "预算 调用 4 秒 300\n# 旧写法: return x \\* 2$\n")
-RESID_FIX = {"结果": {"edits": [{"file": "pkg/other.py", "old": "    return x * 2", "new": "    return x + x"}], "说明": "twice 也改"},
-             "状态": "成功", "原因": ""}
+RESID_FIX = {"result": {"edits": [{"file": "pkg/other.py", "old": "    return x * 2", "new": "    return x + x"}], "说明": "twice 也改"},
+             "status": "成功", "reason": ""}
 
 
 def models_of(f):
@@ -235,11 +235,11 @@ def t_routes():
                               ("rt_bad4", {"plan": "opencode:a/b"}, "不能做规划")]:
         f = MFake()
         r, p, out = run_with(name, f, val)
-        check(r["reply"]["状态"] == "失败" and needle in r["reply"]["原因"] and not f.log and not r["changed_files"],
+        check(r["reply"]["status"] == "失败" and needle in r["reply"]["reason"] and not f.log and not r["changed_files"],
               f"运行时再校验：{val!r} → 失败、不调模型", r["reply"])
     f = MFake()
     r, p, out = run_with("rt_tool", f, {"sub": "codex:gpt-5"}, env={"DSLAGENT_SUBTASK": "tool"})
-    check(r["reply"]["状态"] == "失败" and "DSLAGENT_SUBTASK=tool" in r["reply"]["原因"] and not f.log, "tool 子任务 + codex → 失败、不调模型", r["reply"])
+    check(r["reply"]["status"] == "失败" and "DSLAGENT_SUBTASK=tool" in r["reply"]["reason"] and not f.log, "tool 子任务 + codex → 失败、不调模型", r["reply"])
 
 
 # ------------------------------------------------------------------ 三、各引擎（假二进制）
@@ -423,7 +423,7 @@ def t_flow():
     # 两次都失败 → 判失败，项目不动
     setup_fake({"codex": [{"mode": "rc"}]})
     r, p, out = run_real("fl_fail", {"plan": "codex:gpt-5.1"})
-    check(r["reply"]["状态"] == "失败" and "模型没有回应" in r["reply"]["原因"] and "rc=3" in r["reply"]["原因"] and not r["changed_files"]
+    check(r["reply"]["status"] == "失败" and "模型没有回应" in r["reply"]["reason"] and "rc=3" in r["reply"]["reason"] and not r["changed_files"]
           and T.util(p) == T.UTIL, "两次都失败 → 状态失败、项目不动", r["reply"])
 
     # sub / fix 走 codex（json 子任务）：计划里派任务 → codex；验收残留补改 → grok

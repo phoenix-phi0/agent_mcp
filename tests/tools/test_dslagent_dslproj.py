@@ -493,7 +493,7 @@ def t_flow():
     r = V.run(p, "模块 graph", TMP / "out_fl_ok", model=f, pack="dslproj")
     check(r["status"] == "成功" and r["calls"] == 1 and [t for t, _, _ in f.log] == ["plan"], "一次做对：成功、只有 plan 一次调用", (r["stop"], [t for t, _, _ in f.log]))
     check(sorted(r["changed_files"]) == sorted(solution_files("graph")), "改动文件 = 范围内的文件", r["changed_files"])
-    check(r["v2"]["验收"]["通过"] and "用例 7/7 通过" in r["v2"]["验收"]["测试摘要"] and "边界复核" in r["reply"]["结果"], "验收：通过（加载检查 + 比对 + 用例）", r["v2"]["验收"])
+    check(r["v2"]["验收"]["通过"] and "用例 7/7 通过" in r["v2"]["验收"]["测试摘要"] and "边界复核" in r["reply"]["result"], "验收：通过（加载检查 + 比对 + 用例）", r["v2"]["验收"])
     check(r["v2"]["pack"] == "dslproj" and r["v2"]["模块"] == "graph" and (TMP / "out_fl_ok" / "outline.md").read_text(encoding="utf-8").startswith("## 本次要做的模块：graph"), "记录：pack / 模块 / outline.md（= 资料）")
     sysm, user = f.log[0][1], f.log[0][2]
     check(sysm == DP_PACK.PLAN_SYSTEM("claude") and "用例 加边_成环" in user and "报错 501 未实现" in user, "规划 system = 包的规划说明；user = 任务 + 资料（约定、用例、骨架）")
@@ -509,9 +509,9 @@ def t_flow():
     buggy = dict(files)
     buggy["services/graph.zs"] = files["services/graph.zs"].replace("    如果 {hit.yes} 等于 1\n      报错 409 会形成环\n    结束\n", "")
     p3 = skeleton("fl_fix")
-    fixed = {"结果": {"edits": [{"file": "services/graph.zs", "old": "    设 n = 写库 app.db graph_edge_insert",
+    fixed = {"result": {"edits": [{"file": "services/graph.zs", "old": "    设 n = 写库 app.db graph_edge_insert",
                                 "new": "    如果 {hit.yes} 等于 1\n      报错 409 会形成环\n    结束\n    设 n = 写库 app.db graph_edge_insert"}], "说明": "补上环检查"},
-             "状态": "成功", "原因": ""}
+             "status": "成功", "reason": ""}
     plan3 = plan_for("graph", p3, buggy).replace("  终止 成功 三项检查都过\n结束\n", "  终止 成功 三项检查都过\n结束\n终止 成功 先这样交给验收\n", 1)
     plan3 = plan3.replace("终止 成功 做完了\n", "", 1)
     f = Fake(plan=plan3, fix=fixed)
@@ -566,15 +566,15 @@ def t_flow():
     wrong["services/graph.zs"] = files["services/graph.zs"].replace("公开 函数 加边 src dst", "公开 函数 加边 dst src")
     plan5 = plan_for("graph", p5, wrong).replace("  终止 成功 三项检查都过\n结束\n", "  终止 成功 先这样\n结束\n", 1)
     f = Fake(plan=plan5.replace("终止 成功 做完了\n", "终止 成功 到此\n"),
-             fix={"结果": {"edits": [{"file": "services/graph.zs", "old": "公开 函数 加边 dst src", "new": "公开 函数 加边 src dst"}], "说明": "函数头改回约定"}, "状态": "成功", "原因": ""})
+             fix={"result": {"edits": [{"file": "services/graph.zs", "old": "公开 函数 加边 dst src", "new": "公开 函数 加边 src dst"}], "说明": "函数头改回约定"}, "status": "成功", "reason": ""})
     r = V.run(p5, "模块 graph", TMP / "out_fl_head", model=f, pack="dslproj")
     check(r["status"] in ("成功", "失败") and "比对约定：函数「加边」入参约定是 src dst" in f.log[1][2], "函数头与约定不符：问题里带比对约定的差异", f.log[1][2][-900:] if len(f.log) > 1 else r["stop"])
     # 6 入口 run_task：失败 / 成功 + 模块名缺失
     p6 = skeleton("fl_entry")
     r = entry.run_task(p6, "模块 graph", "dslproj", model=Fake(plan=plan_for("graph", p6)), out=TMP / "out_fl_entry")
-    check(r["状态"] == "成功" and r["原因"] == "" and abs(r["花费"] - 0.01) < 1e-9, "run_task(pack=dslproj)：{状态, 原因, 花费}", r)
+    check(r["status"] == "成功" and r["reason"] == "" and abs(r["花费"] - 0.01) < 1e-9, "run_task(pack=dslproj)：{status, reason, 花费}", r)
     r = entry.run_task(skeleton("fl_nomod"), "做点什么", "dslproj", model=Fake(plan="x"))
-    check(r["状态"] == "失败" and "模块" in r["原因"], "任务里没有模块行 → 失败并说明", r)
+    check(r["status"] == "失败" and "模块" in r["reason"], "任务里没有模块行 → 失败并说明", r)
     check(SC.guard("services/progress.zs") == "", "流程结束后范围拦截关闭")
 
 

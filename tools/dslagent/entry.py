@@ -2,7 +2,7 @@
 
     from tools.dslagent.entry import run_task
     r = run_task(project, task, "dslproj", scope=None, model=None, out=None)
-    r["状态"], r["原因"], r["花费"]          # 状态：成功 | 失败 | 超出预期 | 部分成功
+    r["status"], r["reason"], r["花费"]          # status：成功 | 失败 | 超出预期 | 部分成功
 
 命令行（__main__.py）：python -m tools.dslagent run --pack <名> --project DIR --task-file F --out DIR [--scope a/,b/*.zs]
 （不写 --pack = 旧命令，行为不变；写了 --pack 就走 v2，与 DSLAGENT_PLANNER 无关。）
@@ -28,10 +28,10 @@ def run_pack(project, task, pack, out_dir, scope=None, model=None, test_cmd=None
 
 
 def run_task(project, task, pack="code", scope=None, model=None, out=None, **kw):
-    """做一件事 → {状态, 原因, 花费, 记录目录, 改动文件}。out 缺省在 DSLAGENT_TMP 下建一个临时记录目录；
+    """做一件事 → {status, reason, 花费, 记录目录, 改动文件}。out 缺省在 DSLAGENT_TMP 下建一个临时记录目录；
     model 是假模型 backend(system, user, tag, timeout)（测试用，缺省走真模型）；scope 缺省取包的 scope_for。"""
     out_dir = Path(out) if out else Path(tempfile.mkdtemp(prefix="dslagent_task_", dir=C.tmp_dir()))
     res = run_pack(project, task, pack, out_dir, scope=scope, model=model, **kw)
     r = res.get("reply") or {}
-    return {"状态": r.get("状态") or ("成功" if res.get("fixed") else "失败"), "原因": r.get("原因") or res.get("stop") or "",
+    return {"status": r.get("status") or ("成功" if res.get("fixed") else "失败"), "reason": r.get("reason") or res.get("stop") or "",
             "花费": res.get("cost", 0.0), "记录目录": str(out_dir), "改动文件": res.get("changed_files", [])}

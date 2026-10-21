@@ -2,7 +2,7 @@
 
 - check：调 accept；有问题就组补改入参（任务原文 + 问题列表 + 范围内现有文件全文，包可用 fix_input 替换）；
   补改后的复核（stage=补改后）不再组补改入参。没有边界复核（boundary）——验收通过就算成功。
-- fix：派 1 次补改（回复 {结果:{edits}, 状态, 原因}，edits 能套就套；套用同样过范围拦截）。补改 system 取包的 FIX_SYSTEM，缺省通用文本。
+- fix：派 1 次补改（回复 {result:{edits}, status, reason}，edits 能套就套；套用同样过范围拦截）。补改 system 取包的 FIX_SYSTEM，缺省通用文本。
 """
 import re
 from pathlib import Path
@@ -19,11 +19,11 @@ FIX_SYSTEM_DEFAULT = """你是补改子任务执行者。一个任务已经做�
 ## 输出
 只输出一个 JSON 对象，不要 markdown 围栏，不要别的文字：
 
-{"结果": {"edits": [{"file": "…", "old": "…", "new": "…"}], "说明": "…"}, "状态": "成功|失败|超出预期", "原因": "…"}
+{"result": {"edits": [{"file": "…", "old": "…", "new": "…"}], "说明": "…"}, "status": "成功|失败|超出预期", "reason": "…"}
 
 - file：相对项目根的路径；old：要替换的原文，从给你的当前文件一字不差抄（不带行号前缀，含缩进，在文件里唯一）；new：替换后的文本
 - 新建文件：old 写空串，new 是完整内容；整份重写已有文件：用一条 edit，old 取整个原文
-- 状态：成功 / 失败 / 超出预期；原因：失败或超出预期时写"""
+- status：成功 / 失败 / 超出预期；reason：失败或超出预期时写"""
 FILE_CAP, TOTAL_CAP = 12000, 40000
 TEXT_SUF = {".py", ".zs", ".md", ".txt", ".json", ".ui", ".entity", ".sql", ".csv", ".yaml", ".yml", ".toml"}
 

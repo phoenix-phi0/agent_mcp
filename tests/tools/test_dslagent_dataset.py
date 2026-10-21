@@ -66,7 +66,7 @@ def t_live():
     a = s["规划尝试"][0]
     check(len(s["规划尝试"]) == 1 and a["tag"] == "plan" and a["输出zs"].startswith("用包") and a["计划检查"]["通过"] is True,
           "规划尝试：输出 .zs、计划检查通过", a["计划检查"])
-    check(s["执行"]["执行的计划版本"] == 1 and s["执行"]["脚本正常结束"] and s["执行"]["终止"]["状态"] == "成功", "执行：版本、正常结束、终止状态")
+    check(s["执行"]["执行的计划版本"] == 1 and s["执行"]["脚本正常结束"] and s["执行"]["终止"]["status"] == "成功", "执行：版本、正常结束、终止状态")
     check([x["agent"] for x in s["子任务调用"]] == ["bound"] and s["子任务调用"][0]["user"] and s["子任务调用"][0]["回复原文"],
           "子任务调用：bound 一次，有提示词和回复", [x["tag"] for x in s["子任务调用"]])
     check(s["结果"]["状态"] == "成功" and s["结果"]["验收"]["通过"] is True and s["结果"]["边界复核"].get("结论"),
@@ -108,7 +108,7 @@ def t_unwritable():
     err = io.StringIO()
     with contextlib.redirect_stderr(err):
         r_bad, p, out = T.go("ds_w2", T.Fake())
-    check(r_bad["fixed"] == r_ok["fixed"] and r_bad["reply"]["状态"] == r_ok["reply"]["状态"] == "成功"
+    check(r_bad["fixed"] == r_ok["fixed"] and r_bad["reply"]["status"] == r_ok["reply"]["status"] == "成功"
           and r_bad["calls"] == r_ok["calls"] and "x + x" in T.util(p), "目录不可写：运行结果不变（成功、调用数、改动）", r_bad.get("stop"))
     check(err.getvalue().count("[dataset] 写样本失败") == 1 and (out / "result.json").exists(), "只记一行警告，result.json 照写", err.getvalue())
     ro = TMP / "ro"
@@ -228,23 +228,28 @@ def t_thought():
     print("六、思路字段（可选，只记录）")
     from tools import dsl_task as DT
     from tools import json_repair as JR
-    base_ = {"结果": {"edits": [], "说明": "x"}, "状态": "成功", "原因": ""}
-    withT = json.dumps({"思路": "先看调用方再改", **base_}, ensure_ascii=False)
+    base_ = {"result": {"edits": [], "说明": "x"}, "status": "成功", "reason": ""}
+    withT = json.dumps({"thought": "先看调用方再改", **base_}, ensure_ascii=False)
     noT = json.dumps(base_, ensure_ascii=False)
-    inRes = json.dumps({"结果": {**base_["结果"], "思路": "写在结果里"}, "状态": "成功", "原因": ""}, ensure_ascii=False)
+    inRes = json.dumps({"result": {**base_["result"], "thought": "写在结果里"}, "status": "成功", "reason": ""}, ensure_ascii=False)
     p1, p2, p3 = DT.parse_check(withT, []), DT.parse_check(noT, []), DT.parse_check(inRes, [])
-    check(p1["value"] and p1["value"]["思路"] == "先看调用方再改" and not p1["repaired"], "带思路：解析通过，思路取出", p1)
-    check(p2["value"] and "思路" not in p2["value"] and not p2["problems"], "不带思路：解析照常通过，没有思路键", p2)
-    check(p3["value"] and p3["value"]["思路"] == "写在结果里" and "思路" not in p3["value"]["结果"]
+    check(p1["value"] and p1["value"]["thought"] == "先看调用方再改" and not p1["repaired"], "带思路：解析通过，思路取出", p1)
+    check(p2["value"] and "thought" not in p2["value"] and not p2["problems"], "不带思路：解析照常通过，没有思路键", p2)
+    check(p3["value"] and p3["value"]["thought"] == "写在结果里" and "thought" not in p3["value"]["result"]
           and p3["repaired"] == "思路上提", "思路写在结果里：提到外层，标 思路上提", p3)
-    lifted, f = JR.lift_thought({"思路": "外", "结果": {"思路": "内"}})
-    check(not f and lifted["结果"]["思路"] == "内", "顶层已有思路：不动")
-    p4 = DT.parse_check('{"结果": {"edits": [], "状态": "成功", "思路": "二者都写在里面"}}', [])
-    check(p4["value"] and p4["value"]["思路"] == "二者都写在里面" and p4["repaired"] == "状态上提+思路上提", "状态和思路都写在结果里", p4)
-    check(DT.parse_check(json.dumps({"思路": "", **base_}, ensure_ascii=False), [])["value"].get("思路") is None, "空思路当没有")
+    lifted, f = JR.lift_thought({"thought": "外", "result": {"thought": "内"}})
+    check(not f and lifted["result"]["thought"] == "内", "顶层已有思路：不动")
+    p4 = DT.parse_check('{"result": {"edits": [], "status": "成功", "thought": "二者都写在里面"}}', [])
+    check(p4["value"] and p4["value"]["thought"] == "二者都写在里面" and p4["repaired"] == "状态上提+思路上提", "状态和思路都写在结果里", p4)
+    check(DT.parse_check(json.dumps({"thought": "", **base_}, ensure_ascii=False), [])["value"].get("thought") is None, "空思路当没有")
+    # 兼容旧键：模型仍回中文键，解析后统一成英文键（repaired 多记一步「旧键转换」）
+    withT_cn = json.dumps({"思路": "先看调用方再改", "结果": {"edits": [], "说明": "x"}, "状态": "成功", "原因": ""}, ensure_ascii=False)
+    p1_cn = DT.parse_check(withT_cn, [])
+    check(p1_cn["value"] and p1_cn["value"]["thought"] == "先看调用方再改" and p1_cn["repaired"] == "旧键转换",
+          "模型回旧中文键（含思路）：一样解析通过，记旧键转换", p1_cn)
     pr0, pr = DT.build_prompt("t", [], "", []), DT.build_prompt("t", [], "", [], thought=True)
     check("思路" not in pr0, "build_prompt 默认（Claude）回复格式里没有思路", pr0)
-    check("思路：可选" in pr and pr.index("思路：") < pr.index("结果：") and '"思路"' in pr.split("示例：")[1],
+    check("thought：可选" in pr and pr.index("thought：") < pr.index("result：") and '"thought"' in pr.split("示例：")[1],
           "build_prompt thought=True（codex）说明和示例里有思路、在结果前面")
     # 各 agent 的 system：claude（缺省）与 HEAD 一致、不含思路；codex 含思路；for_engine 只在默认 system + codex 时换
     import subprocess

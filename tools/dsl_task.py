@@ -2,11 +2,12 @@
 """派子任务：「派任务」「并行派任务」两个动词的实现（verbs/common/defs 里只是薄壳）。
 
 一个子任务 = 任务描述 + 入参 + 处理逻辑 + 回复格式字段，交给模型做一件事，
-回复固定是 {结果, 状态, 原因}（前面可带一个可选的 思路，只记录不参与判断）：
+回复固定是 {result, status, reason}（前面可带一个可选的 thought，只记录不参与判断）；
+模型回复兼容旧中文键（结果/状态/原因/思路），解析后统一产出英文键：
 
-    结果   格式给了字段（改法:列表,说明:文本）就是带这些字段的对象，没给就是非空文本
-    状态   只能是 成功 / 失败 / 超出预期（同「终止」的三个状态）
-    原因   状态不是成功时必须写；成功时可以空
+    result   格式给了字段（改法:列表,说明:文本）就是带这些字段的对象，没给就是非空文本
+    status   只能是 成功 / 失败 / 超出预期（同「终止」的三个状态）
+    reason   状态不是成功时必须写；成功时可以空
 
 模型走调用它的那个引擎：同一个客户端（api / cli 通道、llm_router 的并发上限）、
 同一个系统提示、「模型 X」设的模型和温度——跟「问JSON」一样，所以缓存设置也一样。
@@ -187,58 +188,58 @@ def build_prompt(task, inputs: list, logic, spec: list, thought: bool = False) -
     if inputs:
         parts.append("【入参】\n" + "\n".join(f"◆ {t}\n{c}" for t, c in inputs))
     states = "、".join(f"\"{s}\"" for s in STATES)
-    ex = {"结果": sample, "状态": STATES[0], "原因": ""}
+    ex = {"result": sample, "status": STATES[0], "reason": ""}
     if thought:
-        ex = {"思路": "1–3 句：判断依据、为什么这样做", **ex}
+        ex = {"thought": "1–3 句：判断依据、为什么这样做", **ex}
     example = json.dumps(ex, ensure_ascii=False)
     parts.append(
         "【回复格式】只输出一个 JSON 对象，不要代码围栏，不要任何解释。顶层字段：\n"
-        + ("- 思路：可选，放在最前面；1–3 句、不超过 150 字，写判断依据、为什么这样做，拿不准的地方也写出来\n" if thought else "") +
-        f"- 结果：{result_desc}\n"
-        f"- 状态：只能是 {states} 之一（成功＝按要求做完；失败＝做不到或出错；"
+        + ("- thought：可选，放在最前面；1–3 句、不超过 150 字，写判断依据、为什么这样做，拿不准的地方也写出来\n" if thought else "") +
+        f"- result：{result_desc}\n"
+        f"- status：只能是 {states} 之一（成功＝按要求做完；失败＝做不到或出错；"
         f"超出预期＝实际情况和任务的前提不符，要上层重新决定）\n"
-        f"- 原因：文本；状态不是成功时必须写清楚原因，成功时留空\n"
+        f"- reason：文本；status 不是成功时必须写清楚原因，成功时留空\n"
         f"示例：{example}")
     return "\n\n".join(parts)
 
 
 def check_reply(data, spec: list):
-    """返回 (规范化后的 {结果, 状态, 原因}, 问题列表)。"""
+    """返回 (规范化后的 {result, status, reason}, 问题列表)。data 的键已经是英文（JR.parse_reply 兼容旧中文键转换过）。"""
     from .dsl_model import _check_format
     if not isinstance(data, dict):
         return None, ["回复应该是一个 JSON 对象" if data is not None else "回复不是合法 JSON"]
     problems = []
-    state = to_text(data.get("状态")).strip()
+    state = to_text(data.get("status")).strip()
     if state not in STATES:
-        problems.append(f"状态 只能是 {' / '.join(STATES)}，你回了「{state[:30]}」")
-    reason = data.get("原因")
+        problems.append(f"status 只能是 {' / '.join(STATES)}，你回了「{state[:30]}」")
+    reason = data.get("reason")
     reason = "" if reason is None else to_text(reason).strip()
     if state in STATES and state != STATES[0] and not reason:
-        problems.append(f"状态是 {state} 时 原因 不能空")
-    result = data.get("结果")
+        problems.append(f"status 是 {state} 时 reason 不能空")
+    result = data.get("result")
     if spec:
         if not isinstance(result, dict):
-            problems.append("结果 应该是一个对象")
+            problems.append("result 应该是一个对象")
         else:
             result, more = _check_format(result, spec)
-            problems += [f"结果.{p}" if not p.startswith("缺少") else p.replace("缺少字段 ", "缺少字段 结果.")
+            problems += [f"result.{p}" if not p.startswith("缺少") else p.replace("缺少字段 ", "缺少字段 result.")
                          for p in more]
     elif result is None or (isinstance(result, str) and not result.strip()):
-        problems.append("缺少 结果")
+        problems.append("缺少 result")
     if problems:
         return None, problems
-    out = {"结果": result, "状态": state, "原因": reason}
-    thought = data.get("思路")
+    out = {"result": result, "status": state, "reason": reason}
+    thought = data.get("thought")
     if thought is not None and to_text(thought).strip():      # 可选；只记录，不参与判断
-        out = {"思路": to_text(thought).strip(), **out}
+        out = {"thought": to_text(thought).strip(), **out}
     return out, []
 
 
 def parse_check(text, spec: list, extra=None, shell=False):
-    """模型回复原文 → 同一套解析（JR.parse_reply：补括号、状态上提）+ 同一套 {结果,状态,原因} 校验（check_reply）；
+    """模型回复原文 → 同一套解析（JR.parse_reply：补括号、旧键转英文、状态上提）+ 同一套 {result,status,reason} 校验（check_reply）；
     extra(value) 在其上叠加专属校验（如补改的 edits 结构），返回问题文本或空。
-    shell=True（子任务）时，回复只有 {edits:[…]} 没有 结果/状态外壳，先补成标准结构（repaired 记「外壳补齐」，状态视为成功）。
-    返回 {value（合格的 {结果,状态,原因}，否则 None）, problems, repaired, err, data}。"""
+    shell=True（子任务）时，回复只有 {edits:[…]} 没有 result/status 外壳，先补成标准结构（repaired 记「外壳补齐」，状态视为成功）。
+    返回 {value（合格的 {result,status,reason}，否则 None）, problems, repaired, err, data}。"""
     data, repaired, err = JR.parse_reply(text)
     if shell:
         data, filled = JR.fill_shell(data)
@@ -264,21 +265,21 @@ def _fake(task, spec: list) -> dict:
                 else _KIND_SAMPLE.get(kind))
     else:
         result = f"（空跑）{head}"
-    return {"结果": result, "状态": STATES[0], "原因": "", "空跑": True}
+    return {"result": result, "status": STATES[0], "reason": "", "空跑": True}
 
 
 def _failed(reason: str, **extra) -> dict:
-    return {"结果": "", "状态": "失败", "原因": reason, **extra}
+    return {"result": "", "status": "失败", "reason": reason, **extra}
 
 
 def dispatch(engine, task, inputs="", logic="", fmt="") -> dict:
-    """派一个子任务，返回 {结果, 状态, 原因}（失败时可能多 问题 / 回复）。不抛错。"""
+    """派一个子任务，返回 {result, status, reason}（失败时可能多 问题 / 回复）。不抛错。"""
     value = _dispatch(engine, task, inputs, logic, fmt)
     log = getattr(engine, "sublog", None)
     if isinstance(log, list) and not value.get("空跑"):
         log.append({"模式": "工具" if getattr(engine, "subtask_mode", "json") == "tool" else "json",
-                    "任务": to_text(task).strip()[:200], **{k: v for k, v in value.items() if k != "结果"},
-                    "结果": to_text(value.get("结果"))[:500]})
+                    "任务": to_text(task).strip()[:200], **{k: v for k, v in value.items() if k != "result"},
+                    "结果": to_text(value.get("result"))[:500]})
     return value
 
 
@@ -324,9 +325,10 @@ def dispatch_json(engine, task, inputs: list, logic, spec: list, client=None) ->
             return _failed(f"模型没有回应：{first}"[:200])
         if isinstance(reply, (dict, list)):        # 假客户端可以直接回结构
             data, last, repaired, err = reply, to_text(reply), "", ""
+            data, normalized = JR.normalize_keys(data) if isinstance(data, dict) else (data, False)
             data, lifted = JR.lift_status(data)
             data, lifted_t = JR.lift_thought(data)
-            repaired = "+".join(x for x, f in (("状态上提", lifted), ("思路上提", lifted_t)) if f)
+            repaired = "+".join(x for x, f in (("旧键转换", normalized), ("状态上提", lifted), ("思路上提", lifted_t)) if f)
             value, problems = check_reply(data, spec)
         else:
             last = str(reply)

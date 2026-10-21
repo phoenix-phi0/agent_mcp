@@ -161,7 +161,7 @@ def t_flow():
     f = T.Fake(plan=bad)
     r, p, out = T.go("af_ok", f)
     v = r["v2"]
-    check(r["reply"]["状态"] == "成功" and f.tags() == ["plan", "bound"] and not v["重写"], "修好 → 不走 plan_fix，照常执行验收", (r["reply"], f.tags()))
+    check(r["reply"]["status"] == "成功" and f.tags() == ["plan", "bound"] and not v["重写"], "修好 → 不走 plan_fix，照常执行验收", (r["reply"], f.tags()))
     fx = v["检查"][0].get("自动修复")
     check(fx and fx[0]["类型"] == "赋值右边:文本" and {"类型", "行号", "原文", "新文"} <= set(fx[0]) and "没有名为" in v["检查"][0]["问题"],
           "result.json 的 v2.检查[0].自动修复 记 类型/行号/原文/新文", v["检查"])
@@ -176,7 +176,7 @@ def t_flow():
     f = T.Fake(plan=bad2, plan_fix=T.PLAN_OK)
     r, p, out = T.go("af_part", f)
     fxu = next(u for t, _, u in f.log if t == "plan_fix")
-    check(r["reply"]["状态"] == "成功" and r["v2"]["重写"] and "使用：tools.safepath" in fxu and "没有打印「结论" in fxu and "没有名为" not in fxu,
+    check(r["reply"]["status"] == "成功" and r["v2"]["重写"] and "使用：tools.safepath" in fxu and "没有打印「结论" in fxu and "没有名为" not in fxu,
           "没修完 → plan_fix 的输入是修过的计划 + 剩余报错", fxu[:600])
     ck = r["v2"]["检查"][0]
     check(ck.get("自动修复") and "没有打印「结论" in ck.get("自动修复后问题", "") and "没有名为" in ck["问题"], "记录里有原问题和自动修复后的剩余问题", ck)

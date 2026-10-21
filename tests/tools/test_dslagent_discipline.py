@@ -101,11 +101,11 @@ def t_shell():
     spec = [("edits", False, "列表", None)] if False else []
     ed = [{"file": "a.py", "old": "x", "new": "y"}]
     p = T.parse_check(json.dumps({"edits": ed}), [], shell=True)
-    check(p["value"] and p["value"]["状态"] == "成功" and p["value"]["结果"]["edits"] == ed and "外壳补齐" in p["repaired"], "{edits:[…]} → 补齐、状态成功、记外壳补齐", p)
+    check(p["value"] and p["value"]["status"] == "成功" and p["value"]["result"]["edits"] == ed and "外壳补齐" in p["repaired"], "{edits:[…]} → 补齐、状态成功、记外壳补齐", p)
     p = T.parse_check("```json\n" + json.dumps({"edits": ed, "思路": "t"}) + "\n```", [], shell=True)
-    check(p["value"] and p["value"].get("思路") == "t" and "思路" not in p["value"]["结果"], "带围栏 + 思路：思路留顶层", p)
+    check(p["value"] and p["value"].get("thought") == "t" and "thought" not in p["value"]["result"], "带围栏 + 思路：思路留顶层", p)
     p = T.parse_check(json.dumps({"edits": ed, "说明": "s"}), [], shell=True)
-    check(p["value"] and p["value"]["结果"] == {"edits": ed, "说明": "s"}, "edits 的兄弟字段进 结果")
+    check(p["value"] and p["value"]["result"] == {"edits": ed, "说明": "s"}, "edits 的兄弟字段进 结果")
     p = T.parse_check(json.dumps({"edits": ed}), [], shell=False)
     check(p["value"] is None, "不开 shell（fix / 工具模式）仍按原样判不合格")
     p = T.parse_check(json.dumps({"edits": "oops"}), [], shell=True)
@@ -116,10 +116,10 @@ def t_shell():
     check(p["value"] is None, "已有 状态 → 不补")
     p = T.parse_check("纯文字回复", [], shell=True)
     check(p["value"] is None, "非 JSON → 不补")
-    p = T.parse_check(json.dumps({"结果": {"edits": ed}, "状态": "成功", "原因": ""}), [], shell=True)
+    p = T.parse_check(json.dumps({"result": {"edits": ed}, "status": "成功", "reason": ""}), [], shell=True)
     check(p["value"] and not p["repaired"], "标准回复：不标补齐")
     p = T.parse_check(json.dumps({"edits": []}), [], shell=True)
-    check(p["value"] and p["value"]["结果"]["edits"] == [], "edits 空列表也补（校验交给后续套用）")
+    check(p["value"] and p["value"]["result"]["edits"] == [], "edits 空列表也补（校验交给后续套用）")
     d, f = JR.fill_shell([1])
     check(d == [1] and f is False, "非字典原样返回")
 
@@ -140,10 +140,10 @@ def t_dispatch():
     eng = type("E", (), {"system": "S", "temperature": 0, "model": None, "workdir": "."})()
     eng.client = _Client([json.dumps({"edits": ed})])
     r = T.dispatch_json(eng, "改", [], "", [])
-    check(r.get("状态") == "成功" and r["结果"]["edits"] == ed and "外壳补齐" in r.get("repaired", "") and eng.client.n == 1, "缺外壳不重问、记外壳补齐", r)
+    check(r.get("status") == "成功" and r["result"]["edits"] == ed and "外壳补齐" in r.get("repaired", "") and eng.client.n == 1, "缺外壳不重问、记外壳补齐", r)
     eng.client = _Client(["不是 json", json.dumps({"结果": {"edits": ed}, "状态": "成功", "原因": ""})])
     r = T.dispatch_json(eng, "改", [], "", [])
-    check(r.get("状态") == "成功" and eng.client.n == 2, "其他格式错误仍走重问", r)
+    check(r.get("status") == "成功" and eng.client.n == 2, "其他格式错误仍走重问", r)
 
 
 def t_prompt():

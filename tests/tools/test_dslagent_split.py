@@ -44,12 +44,12 @@ def check(cond, msg, extra=""):
 OLD_RX = "预算 调用 4 秒 300\n# 旧写法: return x \\* 2$\n"
 SUB_PLAN = T.plan('''
 设 r = 派任务 改double {task} 改好 edits:列表
-设 res = 改文件 {r.结果}
+设 res = 改文件 {r.result}
 终止 成功 好
 ''')
 BAD = "用包 common text code\n预算 调用 2 秒 60\n设 x = 转大写 ls\n终止 成功 好\n\n#清单\n改 pkg/util.py:double\n"
-FIXREP = {"结果": {"edits": [{"file": "pkg/other.py", "old": "    return x * 2", "new": "    return x + x"}],
-                   "说明": "twice 也改"}, "状态": "成功", "原因": ""}
+FIXREP = {"result": {"edits": [{"file": "pkg/other.py", "old": "    return x * 2", "new": "    return x + x"}],
+                   "说明": "twice 也改"}, "status": "成功", "reason": ""}
 
 
 def scenarios():
@@ -62,12 +62,12 @@ def scenarios():
         "rewrite": {"plan": BAD, "plan_fix": T.PLAN_OK},
         "resid_fix": {"plan": T.PLAN_OK.replace("预算 调用 4 秒 300\n", OLD_RX), "fix": FIXREP},
         "checklist": {"plan": T.plan(body, checklist="改 pkg/util.py:double\n改 pkg/other.py:twice"),
-                      "fix": {"结果": {"edits": []}, "状态": "失败", "原因": "不会"}},
+                      "fix": {"result": {"edits": []}, "status": "失败", "reason": "不会"}},
         "bound_fix": {"bound": T.BOUND_RAISE, "bfix": T.FIX_CLAMP},
-        "bound_case": {"bound": harness, "bfix": {"结果": {"edits": [], "用例代码": "```python\n" + T.BOUND_OK + "```",
-                                                           "说明": "用例把函数存成类属性"}, "状态": "成功", "原因": ""}},
-        "subtask": {"plan": SUB_PLAN, "dsl": {"结果": {"edits": [{"file": "pkg/util.py", "old": "    return x * 2\n", "new": "    return x + x\n"}]},
-                                              "状态": "成功", "原因": ""}},
+        "bound_case": {"bound": harness, "bfix": {"result": {"edits": [], "用例代码": "```python\n" + T.BOUND_OK + "```",
+                                                           "说明": "用例把函数存成类属性"}, "status": "成功", "reason": ""}},
+        "subtask": {"plan": SUB_PLAN, "dsl": {"result": {"edits": [{"file": "pkg/util.py", "old": "    return x * 2\n", "new": "    return x + x\n"}]},
+                                              "status": "成功", "reason": ""}},
     }
 
 
@@ -147,7 +147,7 @@ def t_select():
         os.environ.pop("DSLAGENT_VERIFY", None)
         f = T.Fake()
         r, p, _ = T.go("badpack", f)
-        check(r["reply"]["状态"] == "失败" and "DSLAGENT_PACK" in r["reply"]["原因"] and "code" in r["reply"]["原因"] and f.log == []
+        check(r["reply"]["status"] == "失败" and "DSLAGENT_PACK" in r["reply"]["reason"] and "code" in r["reply"]["reason"] and f.log == []
               and T.util(p) == T.UTIL, "run：PACK 取值不对 → 失败、不调模型、不动项目", r["reply"])
     finally:
         for k, v in env.items():

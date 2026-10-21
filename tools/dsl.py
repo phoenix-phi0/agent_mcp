@@ -80,12 +80,12 @@
     终止 成功|失败|超出预期 原因
                                结束整个流程（多深的循环、如果、事务里都行，事务算提交），
                                带状态和原因。顶层：脚本正常结束，engine.halted =
-                               {状态, 原因, 停在}，输出末尾一行「[终止] 状态：原因」；
+                               {status, reason, at}，输出末尾一行「[终止] 状态：原因」；
                                子脚本里：只结束子脚本，「设 r = 执行 子.zs」拿到的
-                               就是 {状态, 原因, 停在}（停在 = 「子.zs 第 N 行」），
-                               调用方决定接着走还是 终止 {r.状态} {r.原因}。
+                               就是 {status, reason, at}（at = 「子.zs 第 N 行」），
+                               调用方决定接着走还是 终止 {r.status} {r.reason}。
                                脚本动词（.zs 动词）里的 终止：调用方没写 设 r = … 接结果时
-                               接着往外传，结束调用方；接了结果的拿到同样的 {状态, 原因, 停在}。
+                               接着往外传，结束调用方；接了结果的拿到同样的 {status, reason, at}。
                                状态可以是 {变量}，展开后不是这三个之一就报错
     预算 调用 N 秒 M           整个流程最多调 N 次模型、跑 M 秒墙钟（可只写其一，
                                N、M 是正整数或 {变量}）。从顶层脚本开始累计，含
@@ -601,12 +601,12 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
             # 不是错误，是脚本主动收尾。调用方读 self.returned。
             self.returned = (r.value, r.status)
             if isinstance(r, ScriptHalt):
-                if not r.value["停在"]:      # 预算在调模型时拦下的，不知道行号
-                    r.value["停在"] = f"第 {self._at + 1} 行"
+                if not r.value["at"]:      # 预算在调模型时拦下的，不知道行号
+                    r.value["at"] = f"第 {self._at + 1} 行"
                 self.halted = r.value
                 if self._depth == 0:
-                    self._emit(f"[终止] {r.value['状态']}：{r.value['原因']}"
-                               f"（停在 {r.value['停在']}）")
+                    self._emit(f"[终止] {r.value['status']}：{r.value['reason']}"
+                               f"（停在 {r.value['at']}）")
         except LoopControl as e:   # _check_loops 挡过，到这里是引擎的 bug
             raise DSLError(f"「跳出 / 继续」跑到了循环外面：{e}") from None
         return "\n".join(self.output)
@@ -1120,9 +1120,9 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
             text = sub.run(Path(impl).read_text(encoding="utf-8"))
             if sub.halted is not None and assign_to is None:
                 # 脚本动词里「终止」了、调用方又没接结果（没写 设 r = …）：终止接着往外传，结束调用方；
-                # 接了结果（设 r = 动词 …）的拿到 {状态, 原因, 停在}，自己决定接着走还是终止
+                # 接了结果（设 r = 动词 …）的拿到 {status, reason, at}，自己决定接着走还是终止
                 h = sub.halted
-                raise ScriptHalt(h["状态"], h["原因"], f"{name} {h['停在']}".strip())
+                raise ScriptHalt(h["status"], h["reason"], f"{name} {h['at']}".strip())
             result = sub.returned[0] if sub.returned else text
 
         self._deliver(result, assign_to)
@@ -1228,8 +1228,8 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
         sub.vars.update(params)
         text = sub.run(path.read_text(encoding="utf-8"))
         if sub.halted is not None:
-            # 子脚本「终止」了：交给调用方的是 {状态, 原因, 停在}，停在带上脚本名（照「执行」里写的）
-            sub.halted["停在"] = f"{self.expand(fname)} {sub.halted['停在']}"
+            # 子脚本「终止」了：交给调用方的是 {status, reason, at}，at 带上脚本名（照「执行」里写的）
+            sub.halted["at"] = f"{self.expand(fname)} {sub.halted['at']}"
         self._deliver(sub.returned[0] if sub.returned else text, assign_to)
 
     def _do_halt(self, rest: str, lineno: int) -> None:

@@ -14,7 +14,7 @@
       出参：{"通过": bool, "缺口列表": [{"说明": ...}], "补改入参": 给补改调用的 user 文本（通过 / 补改后复核时为 None）,
              "补改系统": 补改调用的 system 提示, "原因": 没通过时的失败原因, "测试摘要": str}
   fix(M, project, chk, tag="fix") -> dict   用 check 的出参派 1 次补改（回复不合格重答 1 次、能套就套），返回补改记录。
-  boundary(M, project, plan_result) -> {"状态", "原因"}   可选：验收通过后的边界复核（M 模型调用；plan_result 另含 "out" 任务目录、
+  boundary(M, project, plan_result) -> {"status", "reason"}   可选：验收通过后的边界复核（M 模型调用；plan_result 另含 "out" 任务目录、
       "bound" 边界记录 dict，函数往里写；"expect_table" 规划阶段的期望表记录，没有表为 None）。没有这个名字就跳过、按成功处理。
   split_table(raw) -> (去掉表的回复, 表行|None, 说明)   可选：规划回复里 #期望表 之后的块在进入 .zs 处理之前切出（code 有）。
   fixture_notes(text) -> str                         可选：规划 user 按涉及的模块追加的专用夹具说明（没有就空串）。

@@ -71,9 +71,9 @@ def _redo_rounds(ctx, eng, top, kind, check_all):
             sub.vars["_regress_jobs"] = jobs
             sub.run("用包 common v3\n设 rs = 并行执行 {_regress_jobs} 并发=" + str(min(3, len(jobs))) + "\n返回 {rs}\n")
             rs = sub.returned[0] if sub.returned else []
-            bad = [r for r in rs if isinstance(r, dict) and r.get("状态") != "成功"]
+            bad = [r for r in rs if isinstance(r, dict) and r.get("status") != "成功"]
             if bad:
-                lines = "\n".join(f"{(r.get('参数') or {}).get('模块') or '?'}：{r.get('原因') or r.get('状态')}" for r in bad)
+                lines = "\n".join(f"{(r.get('params') or {}).get('模块') or '?'}：{r.get('reason') or r.get('status')}" for r in bad)
                 raise ScriptHalt("失败", f"{kind}重做未通过：\n{lines}"[:2000], "")
     return {"状态": "通过"}        # 理论上到不了这里（第 2 轮不过已经抛了）
 

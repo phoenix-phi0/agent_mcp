@@ -130,13 +130,14 @@ def _agent_name(tag):
 
 
 def _parse_reply(text):
-    """子任务 / 补改 / 复核回复：能解析成 JSON 对象 → (True, 状态)，否则 (False, None)。"""
+    """子任务 / 补改 / 复核回复：能解析成 JSON 对象 → (True, 状态)，否则 (False, None)。兼容旧中文键（JR.normalize_keys）。"""
     try:
         from tools.zhipu import strip_json
-        d = json.loads(strip_json(text or ""))
+        from tools import json_repair as JR
+        d, _ = JR.normalize_keys(json.loads(strip_json(text or "")))
     except Exception:  # noqa: BLE001
         return False, None
-    return (True, d.get("状态")) if isinstance(d, dict) else (False, None)
+    return (True, d.get("status")) if isinstance(d, dict) else (False, None)
 
 
 def _thought(text):
@@ -146,7 +147,7 @@ def _thought(text):
         d, _, _ = JR.parse_reply(text or "")
     except Exception:  # noqa: BLE001
         return None
-    t = d.get("思路") if isinstance(d, dict) else None
+    t = d.get("thought") if isinstance(d, dict) else None
     return t.strip() if isinstance(t, str) and t.strip() else None
 
 

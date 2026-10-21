@@ -165,9 +165,9 @@ class B(unittest.TestCase):
         """区间内原样返回"""
         self.assertEqual(clamp(2, 1, 3), 2)
 ```'''
-FIX_CLAMP = {"结果": {"edits": [{"file": "pkg/util.py", "old": "def clamp(x, lo, hi):\n",
+FIX_CLAMP = {"result": {"edits": [{"file": "pkg/util.py", "old": "def clamp(x, lo, hi):\n",
                                 "new": "def clamp(x, lo, hi):\n    if lo > hi:\n        raise ValueError(\"区间不对\")\n"}],
-                     "说明": "加区间检查"}, "状态": "成功", "原因": ""}
+                     "说明": "加区间检查"}, "status": "成功", "reason": ""}
 
 
 class Fake:
@@ -252,15 +252,15 @@ def t_flow():
     f = Fake()
     r, p, out = go("ok", f)
     rp = r["reply"]
-    check(rp["状态"] == "成功" and r["fixed"] and "x + x" in util(p), "成功：改法套上、验收过、边界用例过", r.get("stop"))
+    check(rp["status"] == "成功" and r["fixed"] and "x + x" in util(p), "成功：改法套上、验收过、边界用例过", r.get("stop"))
     check(f.tags() == ["plan", "bound"] and r["calls"] == 2 and abs(r["cost"] - 0.02) < 1e-9,
           "没有补查；调用 2 次，费用累加", f.tags())
     v = r["v2"]
     check([x["mode"] for x in v["计划内测试"]] == ["skipped", "real"] and v["验收"]["测试"][0]["方式"] == "真跑",
           "计划里不影响走向的 跑测试 跳过，验收真跑一次", v["计划内测试"])
     check(set(v["步骤秒"]) == {"1大纲", "3规划", "4执行", "5验收", "6边界复核"}, "记下各步耗时", v["步骤秒"])
-    check(set(rp) == {"结果", "状态", "原因"} and rp["结果"]["改动文件"] == ["pkg/util.py"] and rp["结果"]["调用"] == 2
-          and "全过" in rp["结果"]["边界复核"], "reply 是 结果/状态/原因 结构", rp)
+    check(set(rp) == {"result", "status", "reason"} and rp["result"]["改动文件"] == ["pkg/util.py"] and rp["result"]["调用"] == 2
+          and "全过" in rp["result"]["边界复核"], "reply 是 结果/状态/原因 结构", rp)
     check((out / "result.json").is_file() and (out / "calls.json").is_file() and (out / "boundary" / "test_boundary_v2.py").is_file()
           and not (p / "test_boundary_v2.py").exists(), "记录写进任务目录，用例文件不进项目")
     check("x + x" in r["diff"] and "DSL v2 成功" in r["report"], "diff / report")
@@ -284,19 +284,19 @@ def t_flow():
     f = Fake(plan=bad, plan_fix=PLAN_OK)
     r, p, _ = go("rewrite", f)
     fx = next(u for t, _, u in f.log if t == "plan_fix")
-    check(r["reply"]["状态"] == "成功" and r["v2"]["重写"] and "转大写" in fx and "没通过检查" in fx,
+    check(r["reply"]["status"] == "成功" and r["v2"]["重写"] and "转大写" in fx and "没通过检查" in fx,
           "计划没过检查 → 带着错误重写 1 次", r["v2"]["检查"])
     f = Fake(plan=bad, plan_fix=bad.replace("预算 调用 2 秒 60\n", ""))
     r, p, _ = go("rewrite2", f)
-    check(r["reply"]["状态"] == "失败" and "重写 1 次仍没过检查" in r["reply"]["原因"] and util(p) == UTIL
+    check(r["reply"]["status"] == "失败" and "重写 1 次仍没过检查" in r["reply"]["reason"] and util(p) == UTIL
           and f.tags() == ["plan", "plan_fix"], "重写仍错 → 失败、不执行", r["reply"])
     f = Fake(plan=plan("设 res = 改文件 {e1}\n终止 失败 故意失败"))
     r, p, _ = go("halt", f)
-    check(r["reply"]["状态"] == "失败" and "故意失败" in r["reply"]["原因"] and util(p) == UTIL and r["changed_files"] == [],
+    check(r["reply"]["status"] == "失败" and "故意失败" in r["reply"]["reason"] and util(p) == UTIL and r["changed_files"] == [],
           "脚本 终止 失败 → 回滚到开局", r["reply"])
     f = Fake(plan=plan("设 res = 改文件 {e1}\n终止 超出预期 前提不对"))
     r, p, _ = go("halt2", f)
-    check(r["reply"]["状态"] == "超出预期" and util(p) == UTIL, "脚本 终止 超出预期 → 状态照报、回滚")
+    check(r["reply"]["status"] == "超出预期" and util(p) == UTIL, "脚本 终止 超出预期 → 状态照报、回滚")
 
     # 计划内测试影响走向：真跑，验收复用
     pl = plan('''
@@ -304,47 +304,47 @@ def t_flow():
 设 t = 跑测试
 如果 {t.passed} 不等于 是
   设 r = 派任务 修测试 {t.summary} 修好 edits:列表
-  设 res = 改文件 {r.结果}
+  设 res = 改文件 {r.result}
 结束
 终止 成功 好
 ''')
     f = Fake(plan=pl)
     r, p, _ = go("reuse", f)
     v = r["v2"]
-    check(r["reply"]["状态"] == "成功" and [x["mode"] for x in v["计划内测试"]] == ["real"]
-          and v["验收"]["测试"][0]["方式"] == "复用" and r["reply"]["结果"]["测试次数"]["复用"] == 1,
+    check(r["reply"]["status"] == "成功" and [x["mode"] for x in v["计划内测试"]] == ["real"]
+          and v["验收"]["测试"][0]["方式"] == "复用" and r["reply"]["result"]["测试次数"]["复用"] == 1,
           "影响走向的 跑测试 真跑；代码没变，验收复用它", v["验收"].get("测试"))
     broke = EDIT_DOUBLE.replace("return x + x", "return x * 3")
     pl2 = plan(pl.split("预算 调用 4 秒 300\n", 1)[1].split("\n\n#改法")[0], edits=broke)
-    f = Fake(plan=pl2, dsl={"结果": {"edits": [{"file": "pkg/util.py", "old": "return x * 3", "new": "return x + x"}]},
-                            "状态": "成功", "原因": ""})
+    f = Fake(plan=pl2, dsl={"result": {"edits": [{"file": "pkg/util.py", "old": "return x * 3", "new": "return x + x"}]},
+                            "status": "成功", "reason": ""})
     r, p, _ = go("remedy", f)
     v = r["v2"]
-    check(r["reply"]["状态"] == "成功" and "dsl01" in f.tags() and "x + x" in util(p)
+    check(r["reply"]["status"] == "成功" and "dsl01" in f.tags() and "x + x" in util(p)
           and v["验收"]["测试"][0]["方式"] == "真跑", "测试没过 → 计划里派任务补救，代码变了验收重跑", (f.tags(), v["验收"]))
 
     # 5 残留：只搜计划声明的旧写法、范围限任务涉及的目录（docs/old.py 不在范围里）
-    fixrep = {"结果": {"edits": [{"file": "pkg/other.py", "old": "    return x * 2", "new": "    return x + x"}],
-                       "说明": "twice 也改"}, "状态": "成功", "原因": ""}
+    fixrep = {"result": {"edits": [{"file": "pkg/other.py", "old": "    return x * 2", "new": "    return x + x"}],
+                       "说明": "twice 也改"}, "status": "成功", "reason": ""}
     f = Fake(plan=PLAN_OK.replace("预算 调用 4 秒 300\n", "预算 调用 4 秒 300\n# 旧写法: return x \\* 2$\n"), fix=fixrep)
     r, p, _ = go("resid", f)
     a = r["v2"]["验收"]
     fu = next(u for t, _, u in f.log if t == "fix")
     check(a["残留"] == 1 and a["残留列表"][0]["文件"] == "pkg/other.py" and a["范围"] == ["pkg"],
           "残留只在任务涉及的目录里搜（docs/ 不算）", a)
-    check("def twice(x):" in fu and "pkg/other.py:9" in fu and a["补改后残留"] == 0 and r["reply"]["状态"] == "成功",
+    check("def twice(x):" in fu and "pkg/other.py:9" in fu and a["补改后残留"] == 0 and r["reply"]["status"] == "成功",
           "补改入参给残留所在函数全文；补改后没残留 → 成功", fu[-600:])
     f = Fake(plan=PLAN_OK.replace("预算 调用 4 秒 300\n", "预算 调用 4 秒 300\n# 旧写法: return x \\* 2$\n"),
-             fix={"结果": {"edits": []}, "状态": "失败", "原因": "不会"})
+             fix={"result": {"edits": []}, "status": "失败", "reason": "不会"})
     r, p, _ = go("resid2", f)
-    check(r["reply"]["状态"] == "失败" and "旧写法残留" in r["reply"]["原因"] and "bound" not in f.tags(),
+    check(r["reply"]["status"] == "失败" and "旧写法残留" in r["reply"]["reason"] and "bound" not in f.tags(),
           "补改后仍有残留 → 失败，不做边界复核", r["reply"])
     f = Fake(plan=plan(PLAN_OK.split("预算 调用 4 秒 300\n", 1)[1].split("\n\n#改法")[0],
                        checklist="改 pkg/util.py:double\n改 pkg/other.py:twice"),
-             fix={"结果": {"edits": []}, "状态": "失败", "原因": "不会"})
+             fix={"result": {"edits": []}, "status": "失败", "reason": "不会"})
     r, p, _ = go("cl", f)
     fu = next(u for t, _, u in f.log if t == "fix")
-    check(r["reply"]["状态"] == "失败" and "清单没做到" in r["reply"]["原因"] and "def twice(x):" in fu,
+    check(r["reply"]["status"] == "失败" and "清单没做到" in r["reply"]["reason"] and "def twice(x):" in fu,
           "清单里要改的文件没动 → 补改（给那个函数）→ 仍没动 → 失败", r["reply"])
 
     # 6 边界复核
@@ -352,58 +352,58 @@ def t_flow():
     r, p, out = go("b_fix", f)
     b = r["v2"]["边界复核"]
     bu = next(u for t, _, u in f.log if t == "bfix")
-    check(r["reply"]["状态"] == "成功" and "raise ValueError" in util(p) and b["第1次"]["failed_desc"]
+    check(r["reply"]["status"] == "成功" and "raise ValueError" in util(p) and b["第1次"]["failed_desc"]
           and b["第2次"]["ok"] and "改了代码）后全过" in b["结论"], "边界用例没过 → 补改 → 再跑全过 → 成功", b)
     check("test_bad_range" in bu and "def double(x):" in bu and "【任务原文】" in bu, "边界补改入参：用例、失败输出、改动所在函数")
-    f = Fake(bound=BOUND_RAISE, bfix={"结果": {"edits": []}, "状态": "超出预期", "原因": "任务没说要检查区间"})
+    f = Fake(bound=BOUND_RAISE, bfix={"result": {"edits": []}, "status": "超出预期", "reason": "任务没说要检查区间"})
     r, p, _ = go("b_disagree", f)
-    check(r["reply"]["状态"] == "超出预期" and "test_bad_range" in r["reply"]["原因"] and not r["fixed"],
+    check(r["reply"]["status"] == "超出预期" and "test_bad_range" in r["reply"]["reason"] and not r["fixed"],
           "补改说用例不对、不改 → 超出预期（不报成功），原因写明用例", r["reply"])
-    f = Fake(bound=BOUND_RAISE, bfix={"结果": {"edits": [{"file": "pkg/util.py", "old": "    return x\n",
-                                                          "new": "    return x  # 看过了\n"}]}, "状态": "成功", "原因": ""})
+    f = Fake(bound=BOUND_RAISE, bfix={"result": {"edits": [{"file": "pkg/util.py", "old": "    return x\n",
+                                                          "new": "    return x  # 看过了\n"}]}, "status": "成功", "reason": ""})
     r, p, _ = go("b_still", f)
-    check(r["reply"]["状态"] == "超出预期" and "仍没过" in r["reply"]["原因"] and "lo 大于 hi" in r["reply"]["原因"],
+    check(r["reply"]["status"] == "超出预期" and "仍没过" in r["reply"]["reason"] and "lo 大于 hi" in r["reply"]["reason"],
           "补改后仍失败 → 超出预期，原因带用例说明", r["reply"])
-    f = Fake(bound=BOUND_RAISE, bfix={"结果": {"edits": [{"file": "pkg/util.py", "old": "        return hi\n",
-                                                          "new": "        return lo\n"}]}, "状态": "成功", "原因": ""})
+    f = Fake(bound=BOUND_RAISE, bfix={"result": {"edits": [{"file": "pkg/util.py", "old": "        return hi\n",
+                                                          "new": "        return lo\n"}]}, "status": "成功", "reason": ""})
     r, p, _ = go("b_break", f)
-    check(r["reply"]["状态"] == "超出预期" and "撤回" in r["reply"]["原因"] and "return hi" in util(p)
+    check(r["reply"]["status"] == "超出预期" and "撤回" in r["reply"]["reason"] and "return hi" in util(p)
           and "x + x" in util(p), "补改弄坏现有测试 → 撤回补改，超出预期", r["reply"])
     harness = BOUND_OK.replace("class B(unittest.TestCase):\n", "class B(unittest.TestCase):\n    f = double\n\n") \
         .replace("double(0)", "self.f(0)")
-    f = Fake(bound=harness, bfix={"结果": {"edits": [], "用例代码": "```python\n" + BOUND_OK + "```", "说明": "用例把函数存成类属性"},
-                                  "状态": "成功", "原因": ""})
+    f = Fake(bound=harness, bfix={"result": {"edits": [], "用例代码": "```python\n" + BOUND_OK + "```", "说明": "用例把函数存成类属性"},
+                                  "status": "成功", "reason": ""})
     r, p, out = go("b_case", f)
     b = r["v2"]["边界复核"]
-    check(r["reply"]["状态"] == "成功" and "修了用例自身的错" in b["结论"] and b["补改"]["改了用例"]
+    check(r["reply"]["status"] == "成功" and "修了用例自身的错" in b["结论"] and b["补改"]["改了用例"]
           and (out / "boundary" / "test_boundary_v2.run1.py").is_file() and util(p).count("x + x") == 1,
           "用例自身的编程错误 → 补改给改好的用例文件 → 再跑全过（代码不动）", b)
     f = Fake(bound="import unittest\nclass B(unittest.TestCase:\n    def test_x(self):\n        pass\n")
     r, p, _ = go("b_broken", f)
-    check(r["reply"]["状态"] == "成功" and "跑不起来" in r["v2"]["边界复核"]["结论"] and "bfix" not in f.tags(),
+    check(r["reply"]["status"] == "成功" and "跑不起来" in r["v2"]["边界复核"]["结论"] and "bfix" not in f.tags(),
           "用例文件跑不起来 → 记下，不算代码的问题", r["v2"]["边界复核"])
     check(r["v2"]["边界复核"].get("未复核") is True, "用例文件跑不起来 → bound 记 未复核=True（判定不变）", r["v2"]["边界复核"])
     f = Fake()
     r, p, _ = go("calls_cap", f, max_calls=1)
-    check(r["reply"]["状态"] == "超出预期" and "未复核" in r["v2"]["边界复核"]["结论"] and r["v2"]["边界复核"].get("未复核") is True
-          and "边界复核没做成" in r["reply"]["原因"], "调用次数用完时边界复核没做成 → 超出预期，不当通过", (r["reply"], r["v2"]["边界复核"]))
+    check(r["reply"]["status"] == "超出预期" and "未复核" in r["v2"]["边界复核"]["结论"] and r["v2"]["边界复核"].get("未复核") is True
+          and "边界复核没做成" in r["reply"]["reason"], "调用次数用完时边界复核没做成 → 超出预期，不当通过", (r["reply"], r["v2"]["边界复核"]))
 
     def boom(user):
         raise RuntimeError("额度用完")
     f = Fake(bound=boom)
     r, p, _ = go("b_raise", f)
     b = r["v2"]["边界复核"]
-    check(r["reply"]["状态"] == "超出预期" and "未复核" in b["结论"] and b.get("未复核") is True and "额度用完" in r["reply"]["原因"]
+    check(r["reply"]["status"] == "超出预期" and "未复核" in b["结论"] and b.get("未复核") is True and "额度用完" in r["reply"]["reason"]
           and "x + x" in util(p), "边界复核时引擎抛错 → 超出预期、结论含未复核（代码不回滚）", (r["reply"], b))
     for nm, rep in (("b_empty", ""), ("b_blank", "  \n\n ")):
         f = Fake(bound=rep)
         r, p, _ = go(nm, f)
         b = r["v2"]["边界复核"]
-        check(r["reply"]["状态"] == "超出预期" and "未复核" in b["结论"] and b.get("未复核") is True and "边界复核没做成" in r["reply"]["原因"],
+        check(r["reply"]["status"] == "超出预期" and "未复核" in b["结论"] and b.get("未复核") is True and "边界复核没做成" in r["reply"]["reason"],
               f"边界复核回复为空（{nm}）→ 超出预期、结论含未复核", (r["reply"], b))
     f = Fake()
     r, p, _ = go("b_pass", f)
-    check(r["reply"]["状态"] == "成功" and "全过" in r["v2"]["边界复核"]["结论"] and "未复核" not in r["v2"]["边界复核"],
+    check(r["reply"]["status"] == "成功" and "全过" in r["v2"]["边界复核"]["结论"] and "未复核" not in r["v2"]["边界复核"],
           "正常用例全过 → 仍成功（防回归）", r["v2"]["边界复核"])
 
 
@@ -574,25 +574,25 @@ def t_reply():
             self.tags.append(tag)
             return self.replies.pop(0)
     # 缺末尾括号 → 补括号后能套用，记录标 repaired
-    M = FakeM('{"结果": {"edits": [' + ok_edit + '], "说明": "改了"}, "状态": "成功", "原因": ""')
+    M = FakeM('{"result": {"edits": [' + ok_edit + '], "说明": "改了"}, "status": "成功", "reason": ""')
     rec = VC.dispatch_fix(M, p, "s", "u", "fix")
     check(rec.get("套用") is True and rec.get("repaired") == "补括号" and M.tags == ["fix"], "fix 回复缺末尾括号 → 补括号解析，记录标 repaired", rec)
     # 状态写进结果里 → 状态上提
     p = make_proj("rp_lift")
-    M = FakeM('{"结果": {"edits": [' + ok_edit + '], "状态": "成功", "原因": ""}}')
+    M = FakeM('{"result": {"edits": [' + ok_edit + '], "status": "成功", "reason": ""}}')
     rec = VC.dispatch_fix(M, p, "s", "u", "fix")
     check(rec.get("套用") is True and rec.get("repaired") == "状态上提", "状态写在结果里 → 状态上提，标 repaired", rec)
     # edits 结构不对 → 带问题重问 1 次（tag fix_reask），仍不合格 → 回复不合格
     p = make_proj("rp_bad")
-    M = FakeM('{"结果": {"edits": "没有"}, "状态": "成功", "原因": ""}', '{"结果": {"edits": []}, "状态": "成功", "原因": ""}')
+    M = FakeM('{"result": {"edits": "没有"}, "status": "成功", "reason": ""}', '{"result": {"edits": []}, "status": "成功", "reason": ""}')
     rec = VC.dispatch_fix(M, p, "s", "u", "bfix")
-    check(M.tags == ["bfix", "bfix_reask"] and rec.get("状态") == "成功" and rec.get("edits") == 0, "edits 结构不对 → 重问 1 次（bfix_reask），空 edits 合格", (M.tags, rec))
+    check(M.tags == ["bfix", "bfix_reask"] and rec.get("status") == "成功" and rec.get("edits") == 0, "edits 结构不对 → 重问 1 次（bfix_reask），空 edits 合格", (M.tags, rec))
     M = FakeM("不是 JSON", "还不是")
     rec = VC.dispatch_fix(M, p, "s", "u", "fix")
-    check(rec.get("状态") == "回复不合格" and M.tags == ["fix", "fix_reask"], "不是 JSON → 重问 1 次仍不合格", rec)
-    M = FakeM('{"结果": {"edits": []}, "状态": "失败", "原因": ""}', '{"结果": {"edits": []}, "状态": "失败", "原因": "做不到"}')
+    check(rec.get("status") == "回复不合格" and M.tags == ["fix", "fix_reask"], "不是 JSON → 重问 1 次仍不合格", rec)
+    M = FakeM('{"result": {"edits": []}, "status": "失败", "reason": ""}', '{"result": {"edits": []}, "status": "失败", "reason": "做不到"}')
     rec = VC.dispatch_fix(M, p, "s", "u", "fix")
-    check(M.tags == ["fix", "fix_reask"] and rec.get("原因") == "做不到", "通用校验：状态不是成功时原因不能空（同子任务）", (M.tags, rec))
+    check(M.tags == ["fix", "fix_reask"] and rec.get("reason") == "做不到", "通用校验：状态不是成功时原因不能空（同子任务）", (M.tags, rec))
 
 
 def t_reason_setup():

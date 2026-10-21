@@ -20,10 +20,10 @@
 设 inp.跑用例 = {t.失败}
 设 logic = 要求：只改 services/graph.zs、entities/graph.entity、queries/graph_*.sql、routes/graph*.zs 里有问题的地方，函数头不改；edits 每项字段名固定为 file、old、new，old 从入参原文一字不差抄、不带行号前缀；新文件 old 写空串
 设 r = 派任务 补改 {inp} {logic} edits:列表,note:文本
-如果 {r.状态} 不等于 成功
-  终止 失败 补改没成：{r.原因}
+如果 {r.status} 不等于 成功
+  终止 失败 补改没成：{r.reason}
 结束
-设 res2 = 改文件 {r.结果}
+设 res2 = 改文件 {r.result}
 如果 {res2.ok} 不等于 是
   终止 失败 补改没套上：{res2.msg}
 结束

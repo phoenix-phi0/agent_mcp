@@ -539,11 +539,11 @@ def test_engine_bits():
                                             "def register(reg, ws):\n    scan_verbs(reg, PACK_DIR, ws, pack_dir=PACK_DIR)\n", encoding="utf-8")
     e = DSLEngine(MockClient(handler=lambda p, s=None: "嗯", offline=True), workdir=w, verbose=False, verbs_root=vroot)
     e.run("用包 tv\n停一下 7\n打印 不该到这里\n")
-    check(e.halted and e.halted["状态"] == "失败" and e.halted["原因"] == "停了7" and "不该到这里" not in "\n".join(e.output),
+    check(e.halted and e.halted["status"] == "失败" and e.halted["reason"] == "停了7" and "不该到这里" not in "\n".join(e.output),
           "没接结果：脚本动词里的终止结束调用方", (e.halted, e.output))
     e = DSLEngine(MockClient(handler=lambda p, s=None: "嗯", offline=True), workdir=w, verbose=False, verbs_root=vroot)
-    e.run("用包 tv\n设 r = 停一下 7\n打印 接着走 {r.状态} {r.原因}\n")
-    check(e.halted is None and "接着走 失败 停了7" in "\n".join(e.output), "接了结果：拿到 {状态, 原因, 停在}，接着走", (e.halted, e.output))
+    e.run("用包 tv\n设 r = 停一下 7\n打印 接着走 {r.status} {r.reason}\n")
+    check(e.halted is None and "接着走 失败 停了7" in "\n".join(e.output), "接了结果：拿到 {status, reason, at}，接着走", (e.halted, e.output))
     # 并行执行
     (w / "ok.zs").write_text("返回 {\"v\": \"{x}\"}\n", encoding="utf-8")
     (w / "bad.zs").write_text("终止 失败 boom\n", encoding="utf-8")
@@ -555,19 +555,19 @@ def test_engine_bits():
     rs = e.returned[0] if e.returned else None
     check(isinstance(rs, list) and len(rs) == 5, "返回结果列表，长度同输入", rs)
     if isinstance(rs, list) and len(rs) == 5:
-        check([r["状态"] for r in rs] == ["成功", "失败", "失败", "成功", "失败"], "单个失败 / 出错不影响别的项，顺序同输入", [r["状态"] for r in rs])
-        check(rs[0]["返回"] == {"v": "1"} and rs[3]["返回"] == {"v": "4"}, "子脚本的返回值带回来", rs)
-        check(rs[1]["原因"] == "boom", "终止的原因带回来", rs[1])
-        check("不存在" in rs[2]["原因"] or "找不到" in rs[2]["原因"], "脚本出错：状态失败 + 原因", rs[2])
-        check("找不到子脚本" in rs[4]["原因"], "找不到子脚本：状态失败", rs[4])
+        check([r["status"] for r in rs] == ["成功", "失败", "失败", "成功", "失败"], "单个失败 / 出错不影响别的项，顺序同输入", [r["status"] for r in rs])
+        check(rs[0]["returned"] == {"v": "1"} and rs[3]["returned"] == {"v": "4"}, "子脚本的返回值带回来", rs)
+        check(rs[1]["reason"] == "boom", "终止的原因带回来", rs[1])
+        check("不存在" in rs[2]["reason"] or "找不到" in rs[2]["reason"], "脚本出错：状态失败 + 原因", rs[2])
+        check("找不到子脚本" in rs[4]["reason"], "找不到子脚本：状态失败", rs[4])
     # 对象形式：值可以带空格 / 换行；每项独立作用域；脚本动词按声明绑默认值
     (w / "echo.zs").write_text("返回 {a}\n", encoding="utf-8")
     e = engine(w)
     e.vars["jobs"] = [{"脚本": "echo", "参数": {"a": "有 空格\n和换行"}}, {"脚本": "echo", "参数": {}}]
     e.run("用包 common\n设 rs = 并行执行 {jobs}\n返回 {rs}\n")
     rs = e.returned[0]
-    check(rs[0]["返回"] == "有 空格\n和换行", "对象形式的参数可以带空格和换行", rs)
-    check(rs[1]["返回"] == "{a}", "每项独立作用域（上一项的变量不串过来）", rs)
+    check(rs[0]["returned"] == "有 空格\n和换行", "对象形式的参数可以带空格和换行", rs)
+    check(rs[1]["returned"] == "{a}", "每项独立作用域（上一项的变量不串过来）", rs)
     # 并发：同时在跑的数目 = 并发（用 sleep 脚本动词量）
     pk = fresh("vp") / "pp"
     pk.mkdir()
@@ -586,7 +586,7 @@ def test_engine_bits():
         e.run(f"用包 common pp\n设 rs = 并行执行 {{jobs}} 并发={conc}\n返回 {{rs}}\n")
         el = time.time() - t0
         rs = e.returned[0]
-        check(all(r["状态"] == "成功" for r in rs), f"脚本动词当子脚本，并发={conc} 全部成功", rs)
+        check(all(r["status"] == "成功" for r in rs), f"脚本动词当子脚本，并发={conc} 全部成功", rs)
         check((el >= 0.85) if conc == "1" else (el < 0.85), f"并发={conc}：耗时 {el:.2f}s", el)
 
 
@@ -601,7 +601,7 @@ def test_full_flow_clean():
         "v3_contract_progress": [contract_text("progress").replace("依赖 graph", "依赖 无", 1), contract_text("progress")],
     })
     res = run_v3(proj, out, fk)
-    check(res["状态"] == "成功" and res["原因"] == "全部模块完成", "整条流程成功", {k: res[k] for k in ("状态", "原因", "输出")})
+    check(res["status"] == "成功" and res["reason"] == "全部模块完成", "整条流程成功", {k: res[k] for k in ("status", "reason", "输出")})
     rec = res["记录"]
     top_ev = [r for r in rec["规划"] if r["种类"] == "顶层" and r["事件"] == "检查"]
     check([r["通过"] for r in top_ev] == [False, True], "顶层：第 1 次不过、重写后通过", top_ev)
@@ -629,7 +629,7 @@ def test_full_flow_clean():
     # 续跑：同一命令再跑 → 规划不重写、模块不重做
     fk2, n_stub = Fake(), len(calls)
     res2 = run_v3(proj, out, fk2)
-    check(res2["状态"] == "成功" and fk2.calls == [], "续跑：已通过的规划一个模型调用都没有", [c["tag"] for c in fk2.calls])
+    check(res2["status"] == "成功" and fk2.calls == [], "续跑：已通过的规划一个模型调用都没有", [c["tag"] for c in fk2.calls])
     check(len(stub_calls(state)) == n_stub and res2["模块花费"] == 0, "续跑：已完成且约定未变的模块不重做", stub_calls(state)[n_stub:])
     check((out / "result_run1.json").is_file() and (out / "result.json").is_file(), "续跑：上一次的 result.json 留成 result_run1.json")
     names = sorted(f.name for f in (out / "calls").glob("*.prompt.txt"))
@@ -640,13 +640,13 @@ def test_full_flow_clean():
     fk3 = Fake()
     res3 = run_v3(proj, out, fk3)
     again = stub_calls(state)[n_stub:]
-    check(res3["状态"] == "成功" and fk3.calls == [] and [c["模块"] for c in again] == ["vocab"], "续跑：约定改了的模块重做，别的不动", again)
+    check(res3["status"] == "成功" and fk3.calls == [] and [c["模块"] for c in again] == ["vocab"], "续跑：约定改了的模块重做，别的不动", again)
     check(sorted(d.name for d in (out / "modules" / "vocab").iterdir()) == ["r1", "r2"], "续跑：模块轮号接着走，上一次的记录目录还在", sorted(d.name for d in (out / "modules" / "vocab").iterdir()))
     # 约定被改坏（与 top 不一致）→ 续跑时只重写它，且重写的输入带盘上那份和问题
     f.write_text(f.read_text(encoding="utf-8").replace("依赖 graph", "依赖 无", 1), encoding="utf-8")
     fk4 = Fake()
     res4 = run_v3(proj, out, fk4)
-    check(res4["状态"] == "成功" and [c["tag"] for c in fk4.calls] == ["v3_contract_vocab", "v3_review_vocab"], "续跑：不过检查的约定重写，别的跳过", [c["tag"] for c in fk4.calls])
+    check(res4["status"] == "成功" and [c["tag"] for c in fk4.calls] == ["v3_contract_vocab", "v3_review_vocab"], "续跑：不过检查的约定重写，别的跳过", [c["tag"] for c in fk4.calls])
     u = fk4.calls[0]["user"]
     check("【你上次写的内容】" in u and "不在本模块的「依赖」里" in u and "依赖 无" in u, "续跑重写时输入带盘上那份约定和检查问题", u[-500:])
 
@@ -659,7 +659,7 @@ def test_review():
     stub_env(state)
     fk = Fake(scripts={"v3_review_graph": [bad, "```json\n" + ok + "\n```"]})
     res = run_v3(proj, out, fk, stop_after="contract")
-    check(res["状态"] == "成功", "复核打回一次后通过，流程成功", {k: res[k] for k in ("状态", "原因")})
+    check(res["status"] == "成功", "复核打回一次后通过，流程成功", {k: res[k] for k in ("status", "reason")})
     rv = [r for r in res["记录"]["规划"] if r["模块"] == "graph" and r["事件"] == "复核"]
     check([r["通过"] for r in rv] == [False, True] and "模板" in rv[0]["问题"][0] and rv[0]["状态"] == "已复核", "记录里有复核结果：打回、通过", rv)
     check(fk.n("v3_review_graph") == 2 and fk.n("v3_contract_graph") == 2, "打回后重写一次再复核（各 2 次）", [c["tag"] for c in fk.calls])
@@ -675,8 +675,8 @@ def test_review():
     proj2, out2 = fresh("p"), fresh("o")
     fk2 = Fake(scripts={"v3_review_graph": [bad]})
     res2 = run_v3(proj2, out2, fk2, stop_after="contract")
-    check(res2["状态"] == "失败" and "模板" in res2["原因"] and fk2.n("v3_contract_graph") == 3 and fk2.n("v3_review_graph") == 3,
-          "复核一直不过：写 3 次后终止失败", {k: res2[k] for k in ("状态", "原因")})
+    check(res2["status"] == "失败" and "模板" in res2["reason"] and fk2.n("v3_contract_graph") == 3 and fk2.n("v3_review_graph") == 3,
+          "复核一直不过：写 3 次后终止失败", {k: res2[k] for k in ("status", "reason")})
     check(not (proj2 / "contracts" / "graph.md").exists(), "没通过的约定不存盘")
     # 程序检查不过时不调复核
     proj3, out3 = fresh("p"), fresh("o")
@@ -689,7 +689,7 @@ def test_review():
     fk4 = Fake(scripts={"v3_review_graph": ["我觉得挺好"]})
     res4 = run_v3(proj4, out4, fk4, stop_after="contract")
     rv4 = [r for r in res4["记录"]["规划"] if r["模块"] == "graph" and r["事件"] == "复核"]
-    check(res4["状态"] == "成功" and fk4.n("v3_review_graph") == 2 and rv4 and rv4[-1]["状态"] == "未复核", "复核回复坏掉：问两次后记未复核并放行", rv4)
+    check(res4["status"] == "成功" and fk4.n("v3_review_graph") == 2 and rv4 and rv4[-1]["状态"] == "未复核", "复核回复坏掉：问两次后记未复核并放行", rv4)
     check(PL.parse_review('{"通过": "否", "问题列表": []}') is None and PL.parse_review('x {"通过":"是"} y') == {"通过": True, "问题": []},
           "parse_review：否且没问题视为无效；容忍前后文字")
 
@@ -752,7 +752,7 @@ def test_global_check_flow():
     stub_env(state)
     fk = Fake(top="项目 demo\n模块 a\n模块 b\n", scripts={"v3_contract_a": [DUP_A, DUP_A_FIXED], "v3_contract_b": [DUP_B]})
     res = run_v3(proj, out, fk, stop_after="contract")
-    check(res["状态"] == "成功", "冲突被发现、强制重写后解决，流程成功", {k: res[k] for k in ("状态", "原因")})
+    check(res["status"] == "成功", "冲突被发现、强制重写后解决，流程成功", {k: res[k] for k in ("status", "reason")})
     check("/a/x" in (proj / "contracts" / "a.md").read_text(encoding="utf-8"), "冲突的模块 a 被强制重写成了不冲突的路径")
     check(fk.n("v3_contract_a") == 2, "模块 a 因全局检查冲突多写了一次（原来 1 次 + 逼写 1 次）", [c["tag"] for c in fk.calls])
     gev = [r for r in res["记录"]["规划"] if r["事件"] == "全局检查"]
@@ -761,8 +761,8 @@ def test_global_check_flow():
     proj2, out2 = fresh("p"), fresh("o")
     fk2 = Fake(top="项目 demo\n模块 a\n模块 b\n", scripts={"v3_contract_a": [DUP_A], "v3_contract_b": [DUP_B]})
     res2 = run_v3(proj2, out2, fk2, stop_after="contract")
-    check(res2["状态"] == "失败" and "全局检查" in res2["原因"] and "/dup/x" in res2["原因"],
-          "两边都不改：全局检查两轮后仍冲突，终止失败", res2["原因"])
+    check(res2["status"] == "失败" and "全局检查" in res2["reason"] and "/dup/x" in res2["reason"],
+          "两边都不改：全局检查两轮后仍冲突，终止失败", res2["reason"])
 
 
 def test_stop_after():
@@ -772,7 +772,7 @@ def test_stop_after():
         stub_env(state)
         fk = Fake()
         res = run_v3(proj, out, fk, stop_after=stop)
-        check(res["状态"] == "成功" and "停在" in res["原因"], f"stop-after={stop}：成功并说明停在哪", (res["状态"], res["原因"]))
+        check(res["status"] == "成功" and "停在" in res["reason"], f"stop-after={stop}：成功并说明停在哪", (res["status"], res["reason"]))
         check((proj / "plan" / "top.zs").is_file(), f"stop-after={stop}：top.zs 写了")
         check((proj / "contracts" / "graph.md").is_file() == has_contracts, f"stop-after={stop}：约定 {'写了' if has_contracts else '没写'}")
         check((proj / "services" / "graph.zs").is_file() == has_skel, f"stop-after={stop}：骨架 {'生成了' if has_skel else '没生成'}")
@@ -791,21 +791,21 @@ def test_top_fails():
     stub_env(state)
     fk = Fake(scripts={"v3_top": ["项目 demo\n模块 A\n"]})
     res = run_v3(proj, out, fk)
-    check(res["状态"] == "失败" and "写了 3 次都没通过检查" in res["原因"] and fk.n("v3_top") == 3, "顶层 3 次不过：终止 失败，写了 3 次", (res["状态"], res["原因"]))
+    check(res["status"] == "失败" and "写了 3 次都没通过检查" in res["reason"] and fk.n("v3_top") == 3, "顶层 3 次不过：终止 失败，写了 3 次", (res["status"], res["reason"]))
     check(not (proj / "plan" / "top.zs").exists() and not (proj / "contracts").exists(), "没通过的不存，后面的步骤不走")
     # 约定 3 次不过：只有这个模块失败，同层别的模块写完
     proj, out, state = fresh("p"), fresh("o"), fresh("st") / "state"
     stub_env(state)
     fk = Fake(scripts={"v3_contract_vocab": ["这不是约定"]})
     res = run_v3(proj, out, fk)
-    check(res["状态"] == "失败" and "vocab：" in res["原因"] and "progress：" not in res["原因"], "约定：vocab 3 次不过，终止 失败，原因点名 vocab", res["原因"])
+    check(res["status"] == "失败" and "vocab：" in res["reason"] and "progress：" not in res["reason"], "约定：vocab 3 次不过，终止 失败，原因点名 vocab", res["reason"])
     check(fk.n("v3_contract_vocab") == 3 and fk.n("v3_contract_progress") == 1 and (proj / "contracts" / "progress.md").is_file(),
           "同层别的模块照常写完（progress 1 次通过），失败的模块只重写自己", [c["tag"] for c in fk.calls])
     check(not (proj / "services").exists() and stub_calls(state) == [], "约定没全过：不生成骨架、不做模块")
     # 续跑：已通过的约定不重写
     fk2 = Fake()
     res2 = run_v3(proj, out, fk2)
-    check(res2["状态"] == "成功" and sorted(c["tag"] for c in fk2.calls) == ["v3_contract_vocab", "v3_review_vocab"], "续跑：只补写没通过的 vocab", [c["tag"] for c in fk2.calls])
+    check(res2["status"] == "成功" and sorted(c["tag"] for c in fk2.calls) == ["v3_contract_vocab", "v3_review_vocab"], "续跑：只补写没通过的 vocab", [c["tag"] for c in fk2.calls])
 
 
 def test_group_retry():
@@ -815,7 +815,7 @@ def test_group_retry():
     stub_env(state, plan={"graph": 2})
     res = run_v3(proj, out, Fake())
     calls = [c for c in stub_calls(state) if c["模块"] == "graph"]
-    check(res["状态"] == "成功" and len(calls) == 3, "graph 做了 3 轮后通过", (res["状态"], res["原因"], len(calls)))
+    check(res["status"] == "成功" and len(calls) == 3, "graph 做了 3 轮后通过", (res["status"], res["reason"], len(calls)))
     ms = [json.loads(c["models"])["plan"] for c in calls]
     check(ms == ["sonnet", "sonnet", "opus"], "末次换模型（前两轮 sonnet，第 3 轮 opus）", ms)
     check(set(json.loads(calls[2]["models"]).values()) == {"opus"}, "末次所有步骤都用 opus", calls[2]["models"])
@@ -831,7 +831,7 @@ def test_group_retry():
     t0 = time.time()
     res = run_v3(proj, out, Fake())
     calls = stub_calls(state)
-    check(res["状态"] == "失败" and "progress" in res["原因"] and "3 次" in res["原因"] and "vocab" not in res["原因"], "有模块 3 次没过：终止 失败，原因写模块名和失败原因", res["原因"][:300])
+    check(res["status"] == "失败" and "progress" in res["reason"] and "3 次" in res["reason"] and "vocab" not in res["reason"], "有模块 3 次没过：终止 失败，原因写模块名和失败原因", res["reason"][:300])
     check(sum(c["模块"] == "progress" for c in calls) == 3 and sum(c["模块"] == "vocab" for c in calls) == 1, "progress 做 3 轮，vocab 做 1 轮就过", [(c["模块"], c["轮"]) for c in calls])
     st = json.loads((proj / "plan" / "state.json").read_text(encoding="utf-8"))["模块"]
     check("vocab" in st and "graph" in st and "progress" not in st, "等组内其他模块做完：vocab 已标记完成，progress 没有", st)
@@ -844,7 +844,7 @@ def test_group_retry():
     stub_env(state, plan={"progress": 99})
     res2 = run_v3(proj, out, Fake())
     again = stub_calls(state)[n0:]
-    check(res2["状态"] == "失败" and sorted({c["模块"] for c in again}) == ["progress"], "续跑只重试没完成的模块", [(c["模块"], c["轮"]) for c in again])
+    check(res2["status"] == "失败" and sorted({c["模块"] for c in again}) == ["progress"], "续跑只重试没完成的模块", [(c["模块"], c["轮"]) for c in again])
     # 参数：最多=2 / 并发（直接改 build.zs 不是正路；这里验证 做模块组 的默认值来自声明）
     check("最多=3" in (ROOT / "tools/dslagent/verbs/v3/defs/做模块组.zs").read_text(encoding="utf-8").splitlines()[1], "做模块组 声明 最多=3 末次模型=opus 并发=3")
 
@@ -854,7 +854,7 @@ def test_cost_cap():
     proj, out, state = fresh("p"), fresh("o"), fresh("st") / "state"
     stub_env(state)
     res = run_v3(proj, out, Fake(), cost_cap=0.3)
-    check(res["状态"] == "超出预期" and "上限" in res["原因"], "花费到上限：超出预期并说明", (res["状态"], res["原因"]))
+    check(res["status"] == "超出预期" and "上限" in res["reason"], "花费到上限：超出预期并说明", (res["status"], res["reason"]))
     check(len(stub_calls(state)) < 3 or res["花费"] >= 0.3, "到上限后不再做新的模块", len(stub_calls(state)))
 
 
@@ -943,7 +943,7 @@ def test_full_regression():
         RG.full_regression(ctx3, eng3, top)
         check(False, "修不好要抛 ScriptHalt 失败")
     except ScriptHalt as e:
-        check(e.value["状态"] == "失败" and "graph" in e.value["原因"], "重做还是不过：终止 失败，原因点名 graph", e.value)
+        check(e.value["status"] == "失败" and "graph" in e.value["reason"], "重做还是不过：终止 失败，原因点名 graph", e.value)
     check(not ctx3.is_done("graph"), "修不好：graph 不再标记完成")
 
 
@@ -1134,25 +1134,25 @@ def test_plan_verbs():
     e5 = engine(p)
     e5.v3 = ctx2
     e5.run("用包 v3\n改需求 1 随便改点什么\n")
-    check(e5.halted is not None and e5.halted["状态"] == "失败" and "req_path" in e5.halted["原因"],
+    check(e5.halted is not None and e5.halted["status"] == "失败" and "req_path" in e5.halted["reason"],
           "有「改需求」但没设需求文件路径：终止失败，不是悄悄跳过", e5.halted)
     ctx3 = core.Ctx(p, out, "需求全文", None, req_path=req_file)
     e6 = engine(p)
     e6.v3 = ctx3
     e6.run("用包 v3\n改需求 99 x\n")
-    check(e6.halted is not None and "找不到第 99 节" in e6.halted["原因"], "需求文件里没有这一节：终止失败", e6.halted)
+    check(e6.halted is not None and "找不到第 99 节" in e6.halted["reason"], "需求文件里没有这一节：终止失败", e6.halted)
     e7 = engine(p)
     e7.v3 = ctx3
     e7.run("用包 v3\n新增模块 graph 说明=重名\n")
-    check(e7.halted is not None and "已经存在" in e7.halted["原因"], "新增模块重名：终止失败", e7.halted)
+    check(e7.halted is not None and "已经存在" in e7.halted["reason"], "新增模块重名：终止失败", e7.halted)
     e8 = engine(p)
     e8.v3 = ctx3
     e8.run("用包 v3\n改约定 nosuch x\n")
-    check(e8.halted is not None and "不在 plan/top.zs" in e8.halted["原因"], "改约定的模块不存在：终止失败", e8.halted)
+    check(e8.halted is not None and "不在 plan/top.zs" in e8.halted["reason"], "改约定的模块不存在：终止失败", e8.halted)
     e9 = engine(p)
     e9.v3 = ctx3
     e9.run("用包 v3\n删除模块 nosuch\n")
-    check(e9.halted is not None and "不在 plan/top.zs" in e9.halted["原因"], "删除模块不存在：终止失败", e9.halted)
+    check(e9.halted is not None and "不在 plan/top.zs" in e9.halted["reason"], "删除模块不存在：终止失败", e9.halted)
 
 
 def test_plan_script_flow():
@@ -1216,8 +1216,8 @@ def test_audit_entry():
     out = fresh("audit_out")
     fk = Fake(scripts={"v3_audit": ['[{"问题": "需求第 3 节要求的导出功能两个模块都没做", "涉及模块": ["a", "b"], "依据": "需求第 3 节"}]']})
     res = core.run_entry("核查", p, out, "需求全文", extra_vars={"任务": "", "模型": "sonnet"}, backend=fk)
-    check(res["状态"] == "成功", "核查.zs 跑成功", res)
-    ret = res.get("返回") or {}
+    check(res["status"] == "成功", "核查.zs 跑成功", res)
+    ret = res.get("returned") or {}
     check(ret.get("count") == 3, "问题清单：程序检查（a/b 路径重复）2 条 + 模型 1 条", ret)
     path = Path(p) / ret["path"]
     check(path.is_file() and path.name == "1.md", "问题清单存盘到 plan/issues/1.md", ret)
@@ -1228,7 +1228,7 @@ def test_audit_entry():
     p2, out2 = fresh("audit_p2"), fresh("audit_out2")
     fk2 = Fake(scripts={"v3_audit": ["[]"]})
     res2 = core.run_entry("核查", p2, out2, "需求全文", extra_vars={"任务": "", "模型": "sonnet"}, backend=fk2)
-    check(res2["状态"] == "成功" and (res2.get("返回") or {}).get("count") == 0, "还没有 plan/top.zs 时核查照样能跑，程序检查部分是空", res2)
+    check(res2["status"] == "成功" and (res2.get("returned") or {}).get("count") == 0, "还没有 plan/top.zs 时核查照样能跑，程序检查部分是空", res2)
 
 
 def test_modify_entry():
@@ -1257,14 +1257,14 @@ def test_modify_entry():
     res = core.run_entry("修改", p, out, req_file.read_text(encoding="utf-8"),
                           extra_vars={"问题": "最新", "任务": "", "模型": "sonnet", "次数": "3"},
                           backend=fk, req_path=req_file, module_cmd=CMD)
-    check(res["状态"] == "成功", "修改.zs 跑成功（第一次写的计划格式不对，重写一次才过）", res)
+    check(res["status"] == "成功", "修改.zs 跑成功（第一次写的计划格式不对，重写一次才过）", res)
     check(fk.n("v3_change_plan") == 2, "写修改计划调了两次（不过带问题重写）", [c["tag"] for c in fk.calls])
     check(fk.n("v3_contract_progress") == 1, "改约定：重写了一次约定，走强制问题通道", [c["tag"] for c in fk.calls])
     check(fk.n("v3_review_progress") == 0, "改约定没有调复核", [c["tag"] for c in fk.calls])
     plans = sorted((p / "plan" / "changes").glob("*.zs"), key=lambda f: int(f.stem))
     check(len(plans) == 2, "两次写修改计划都存盘了（没通过检查的那份也留着痕迹）", [f.name for f in plans])
     check(plans[-1].read_text(encoding="utf-8").strip() == GOOD_PLAN.strip(), "最后一份是通过检查、真正执行的那份", plans[-1].read_text(encoding="utf-8"))
-    check(res["原因"] == "全部模块完成", "一路跑到 build、build 自己也成功（终止 {b.状态} {b.原因} 带出来的）", res)
+    check(res["reason"] == "全部模块完成", "一路跑到 build、build 自己也成功（终止 {b.状态} {b.原因} 带出来的）", res)
 
 
 def test_modify_retries_exhausted():
@@ -1278,7 +1278,7 @@ def test_modify_retries_exhausted():
     fk = Fake(scripts={"v3_change_plan": ["这不是合法的计划格式\n"]})
     res = core.run_entry("修改", p, out, "需求全文",
                           extra_vars={"问题": "最新", "任务": "", "模型": "sonnet", "次数": "2"}, backend=fk)
-    check(res["状态"] == "失败" and "没通过检查" in res["原因"], "两次都没通过检查：终止失败", res)
+    check(res["status"] == "失败" and "没通过检查" in res["reason"], "两次都没通过检查：终止失败", res)
     check(fk.n("v3_change_plan") == 2, "正好调了 次数 次模型，不多不少", [c["tag"] for c in fk.calls])
 
 

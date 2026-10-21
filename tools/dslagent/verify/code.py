@@ -270,18 +270,18 @@ def _fix_user(project, task, gaps, before, after, test_summary=""):
 
 
 def _check_reply(rep):
-    """补改回复在通用 {结果,状态,原因} 校验（dsl_task.check_reply）之上叠加的：状态 成功 时 结果.edits 的结构。rep 是已通过通用校验的回复。"""
-    if rep["状态"] == "成功":
-        res = rep.get("结果")
+    """补改回复在通用 {result,status,reason} 校验（dsl_task.check_reply）之上叠加的：status 成功 时 result.edits 的结构。rep 是已通过通用校验的回复。"""
+    if rep["status"] == "成功":
+        res = rep.get("result")
         ed = res.get("edits") if isinstance(res, dict) else None
         if not isinstance(ed, list) or not all(isinstance(e, dict) and all(isinstance(e.get(k), str)
                                                                             for k in ("file", "old", "new")) for e in ed):
-            return "结果.edits 必须是 [{file, old, new}] 列表（都是字符串）"
+            return "result.edits 必须是 [{file, old, new}] 列表（都是字符串）"
     return None
 
 
 def dispatch_fix(M, project, system, user, tag):
-    """派 1 次补改（回复不合格重答 1 次），能套就套。返回记录 {状态, 原因, 说明, edits, 套用, 套用说明, files}。"""
+    """派 1 次补改（回复不合格重答 1 次），能套就套。返回记录 {status, reason, 说明, edits, 套用, 套用说明, files}。"""
     from tools import dsl_task as T
     rec = {"发生": True}
 
@@ -293,19 +293,19 @@ def dispatch_fix(M, project, system, user, tag):
         if bad and AG.AGENTS[tag].retry.times > 1:
             rep, bad, repaired = ask(M(system, user + f"\n\n【你上一次的回复不合格：{bad}。请严格按回复格式只输出 JSON。】", tag + "_reask"))
     except (Stop, RuntimeError) as e:
-        return {"发生": False, "原因": f"没派成：{e}"}
+        return {"发生": False, "reason": f"没派成：{e}"}
     if repaired:
         rec["repaired"] = repaired
     if bad:
-        rec.update(状态="回复不合格", 原因=bad)
+        rec.update(status="回复不合格", reason=bad)
         return rec
-    res = rep.get("结果") if isinstance(rep.get("结果"), dict) else {}
-    rec.update(状态=rep["状态"], 原因=str(rep.get("原因") or ""), 说明=str(res.get("说明") or "")[:1000])
+    res = rep.get("result") if isinstance(rep.get("result"), dict) else {}
+    rec.update(status=rep["status"], reason=str(rep.get("reason") or ""), 说明=str(res.get("说明") or "")[:1000])
     if isinstance(res.get("用例代码"), str) and res["用例代码"].strip():
         rec["用例代码"] = res["用例代码"]
     ed = res.get("edits") or []
     rec["edits"] = len(ed)
-    if rep["状态"] == "成功" and ed:
+    if rep["status"] == "成功" and ed:
         ok, msg = apply_edits(project, ed)
         if not ok:          # 整体套不上时逐条套，能套的先套上
             n_ok = sum(1 for e in ed if apply_edits(project, [e])[0])
@@ -420,7 +420,7 @@ def _boundary_model(M, project, plan_result):
     if why:                 # 没拿到用例不能当通过（引擎出错 / 额度用完 / 超时 / 空回复）
         bound["结论"] = f"未复核：{why}"
         bound["未复核"] = True
-        return {"状态": "超出预期", "原因": f"边界复核没做成：{why}"}
+        return {"status": "超出预期", "reason": f"边界复核没做成：{why}"}
     (bdir / "test_boundary_v2.py").write_text(code, encoding="utf-8")
     r = run_boundary(project, test_cmd, bdir)
     bound["第1次"] = {k: r[k] for k in ("ok", "ran", "failed_desc", "broken", "sec")}
@@ -428,27 +428,27 @@ def _boundary_model(M, project, plan_result):
     (bdir / "run1.txt").write_text(r["tail"], encoding="utf-8")
     if r["ok"]:
         bound["结论"] = f"{r['ran']} 个用例全过"
-        return {"状态": "成功", "原因": ""}
+        return {"status": "成功", "reason": ""}
     if r["broken"]:
         bound["结论"] = f"用例文件跑不起来，未复核：{r['tail'][-300:]}"
         bound["未复核"] = True
-        return {"状态": "成功", "原因": ""}
+        return {"status": "成功", "reason": ""}
     names = "、".join(r["failed_desc"])
     user = (f"【任务原文】\n{task}\n\n【改动（diff）】\n{diff}\n\n【边界用例】\n```python\n{code}```\n\n"
             f"【没过的用例和输出】\n{r['tail'][-5000:]}\n\n【改动所在函数的完整当前代码】\n{_changed_funcs(project, base, cur)}")
     t0 = time.time()
     fx = dispatch_fix(M, project, BFIX_SYS, user, "bfix")
     secs["补改"] = round(time.time() - t0, 1)
-    new_case = strip_code(fx.pop("用例代码", "")) if fx.get("用例代码") and fx.get("状态") == "成功" else ""
+    new_case = strip_code(fx.pop("用例代码", "")) if fx.get("用例代码") and fx.get("status") == "成功" else ""
     bound["补改"] = dict(fx, 改了用例=bool(new_case))
     if new_case:            # 用例自身的编程错误：换成改好的用例文件（原文件留作 test_boundary_v2.run1.py）
         (bdir / "test_boundary_v2.run1.py").write_text(code, encoding="utf-8")
         (bdir / "test_boundary_v2.py").write_text(new_case, encoding="utf-8")
     after = snapshot(project)
     if not changed(cur, after) and not new_case:
-        bound["结论"] = f"用例没过：{names}；补改没改代码（{fx.get('状态', '')}：{fx.get('原因', '')[:200]}）"
-        return {"状态": "超出预期", "原因": f"边界复核：用例 {names} 没过；补改没有改代码"
-                + (f"（补改说：{fx.get('原因', '')[:200]}）" if fx.get("原因") else "")}
+        bound["结论"] = f"用例没过：{names}；补改没改代码（{fx.get('status', '')}：{fx.get('reason', '')[:200]}）"
+        return {"status": "超出预期", "reason": f"边界复核：用例 {names} 没过；补改没有改代码"
+                + (f"（补改说：{fx.get('reason', '')[:200]}）" if fx.get("reason") else "")}
     r2 = run_boundary(project, test_cmd, bdir)
     bound["第2次"] = {k: r2[k] for k in ("ok", "ran", "failed_desc", "broken", "sec")}
     secs["第2次跑"] = r2["sec"]
@@ -457,17 +457,17 @@ def _boundary_model(M, project, plan_result):
     if not t["passed"]:
         restore(project, cur, changed(cur, after))
         bound["结论"] = f"用例 {names} 没过；补改弄坏了现有测试，已撤回"
-        return {"状态": "超出预期", "原因": f"边界复核：用例 {names} 没过；补改会让现有测试失败，已撤回补改"}
+        return {"status": "超出预期", "reason": f"边界复核：用例 {names} 没过；补改会让现有测试失败，已撤回补改"}
     if r2["ok"]:
         what = "、".join(x for x, y in (("改了代码", changed(cur, after)), ("修了用例自身的错", new_case)) if y)
         bound["结论"] = f"用例 {names} 第 1 次没过，补改（{what}）后全过"
-        return {"状态": "成功", "原因": ""}
+        return {"status": "成功", "reason": ""}
     if r2["broken"]:
         bound["结论"] = f"用例 {names} 没过；补改后用例文件跑不起来：{r2['tail'][-300:]}"
-        return {"状态": "超出预期", "原因": f"边界复核：用例 {names} 没过；补改后用例文件跑不起来"}
+        return {"status": "超出预期", "reason": f"边界复核：用例 {names} 没过；补改后用例文件跑不起来"}
     left = "、".join(r2["failed_desc"]) or names
     bound["结论"] = f"补改后用例 {left} 仍没过"
-    return {"状态": "超出预期", "原因": f"边界复核：补改后用例 {left} 仍没过"}
+    return {"status": "超出预期", "reason": f"边界复核：补改后用例 {left} 仍没过"}
 
 
 # ------------------------------------------------------------------ 6 边界复核：期望表路径
@@ -552,7 +552,7 @@ def _names(fails, cap=6):
 
 
 def _boundary_table(M, project, plan_result, exp):
-    """表路径。返回 {状态, 原因}；表执行器本身出错 / 校验后表不够用 → 返回 None（交给旧路径），原因记在 bound['表回退原因']。"""
+    """表路径。返回 {status, reason}；表执行器本身出错 / 校验后表不够用 → 返回 None（交给旧路径），原因记在 bound['表回退原因']。"""
     task, test_cmd, base = plan_result["task"], plan_result["test_cmd"], plan_result["base"]
     out, bound = plan_result["out"], plan_result["bound"]
     rows = exp["rows"]
@@ -600,7 +600,7 @@ def _boundary_table(M, project, plan_result, exp):
              for k, j in zip(kept, js)], ensure_ascii=False, indent=1), encoding="utf-8")
         if not fails:
             bound["结论"] = f"期望表 {len(kept)} 条全过（0 次模型调用）"
-            return {"状态": "成功", "原因": ""}
+            return {"status": "成功", "reason": ""}
         # ---- 判表错
         t0 = time.time()
         try:
@@ -611,7 +611,7 @@ def _boundary_table(M, project, plan_result, exp):
         if bad:
             bound["结论"] = f"未复核：期望表 {len(fails)} 条没过，判表错没做成：{bad[:300]}"
             bound["未复核"] = True
-            return {"状态": "超出预期", "原因": f"边界复核没做成：期望表 {len(fails)} 条没过，判表错没做成（{bad[:200]}）"}
+            return {"status": "超出预期", "reason": f"边界复核没做成：期望表 {len(fails)} 条没过，判表错没做成（{bad[:200]}）"}
         verd = [verdict.get(n, (BT.VERDICT_CODE, "（回复里缺这一条，按代码错处理）")) for n in range(1, len(fails) + 1)]
         wrong = {id(k) for (k, _), v in zip(fails, verd) if v[0] == BT.VERDICT_WRONG}
         bound["判表错条数"] = len(wrong)
@@ -620,7 +620,7 @@ def _boundary_table(M, project, plan_result, exp):
         left = [(k, j) for (k, j), v in zip(fails, verd) if v[0] != BT.VERDICT_WRONG]
         if not left:
             bound["结论"] = f"期望表 {len(kept)} 条，{len(fails)} 条没过但均判为期望写错（丢弃），其余全过"
-            return {"状态": "成功", "原因": ""}
+            return {"status": "成功", "reason": ""}
         # ---- bfix
         t0 = time.time()
         fx = dispatch_fix(M, project, BFIX_SYS, _bfix_table_user(task, diff, left, _changed_funcs(project, base, cur)), "bfix")
@@ -630,9 +630,9 @@ def _boundary_table(M, project, plan_result, exp):
         after = snapshot(project)
         names = _names(left)
         if not changed(cur, after):
-            bound["结论"] = f"表项 {names} 没过；补改没改代码（{fx.get('状态', '')}：{fx.get('原因', '')[:200]}）"
-            return {"状态": "超出预期", "原因": f"边界复核：表项 {names} 没过；补改没有改代码"
-                    + (f"（补改说：{fx.get('原因', '')[:200]}）" if fx.get("原因") else "")}
+            bound["结论"] = f"表项 {names} 没过；补改没改代码（{fx.get('status', '')}：{fx.get('reason', '')[:200]}）"
+            return {"status": "超出预期", "reason": f"边界复核：表项 {names} 没过；补改没有改代码"
+                    + (f"（补改说：{fx.get('reason', '')[:200]}）" if fx.get("reason") else "")}
         t0 = time.time()
         kept2 = [k for k in kept if id(k) not in wrong]
         results2, fatals2, _ = BT.run_cases(kept2, project, py, work / "after2")
@@ -646,23 +646,23 @@ def _boundary_table(M, project, plan_result, exp):
         if not t["passed"]:
             restore(project, cur, changed(cur, after))
             bound["结论"] = f"表项 {names} 没过；补改弄坏了现有测试，已撤回"
-            return {"状态": "超出预期", "原因": f"边界复核：表项 {names} 没过；补改会让现有测试失败，已撤回补改"}
+            return {"status": "超出预期", "reason": f"边界复核：表项 {names} 没过；补改会让现有测试失败，已撤回补改"}
         if fatals2:
             bound["结论"] = f"表项 {names} 没过；补改后表执行器出错，未复核：{'；'.join(fatals2)[:200]}"
             bound["未复核"] = True
-            return {"状态": "超出预期", "原因": "边界复核：补改后表执行器出错，未能复核"}
+            return {"status": "超出预期", "reason": "边界复核：补改后表执行器出错，未能复核"}
         if not left2:
             bound["结论"] = f"表项 {names} 第 1 次没过，补改（改了代码）后表全过"
-            return {"状态": "成功", "原因": ""}
+            return {"status": "成功", "reason": ""}
         bound["结论"] = f"补改后表项 {_names(left2)} 仍没过"
-        return {"状态": "超出预期", "原因": f"边界复核：补改后表项 {_names(left2)} 仍没过"}
+        return {"status": "超出预期", "reason": f"边界复核：补改后表项 {_names(left2)} 仍没过"}
     finally:
         secs["合计"] = round(time.time() - t_all, 1)
         shutil.rmtree(work, ignore_errors=True)
 
 
 def boundary(M, project, plan_result):
-    """边界复核（plan_result 见 verify/__init__.py；另用 out、bound、可选 expect_table）。返回 {状态, 原因}。
+    """边界复核（plan_result 见 verify/__init__.py；另用 out、bound、可选 expect_table）。返回 {status, reason}。
     有达标的期望表 → 表路径；无表 / 表不达标 / 表执行器出错 → 旧路径（模型写 unittest）。bound['方式'] 记 表 / 模型。"""
     bound = plan_result["bound"]
     exp = plan_result.get("expect_table") or {}

@@ -5,7 +5,7 @@
     给规划模型看什么（资料）、能用哪些动词（白名单由包生成）、怎么验收、允许写哪些路径（范围，写类动词统一拦截）、规划说明（要点 + 示例）。
     现有两个包：code（改代码：文件大纲 + code 动词 + 全量测试 / 边界复核验收）、dslproj（做 DSL 项目的一个模块：约定 + 加载检查 / 比对约定 / 跑用例验收）。
   旧路径（planner≠v2，保留、隔离在 legacy/）：固定模板 → 模型规划 → 交回兜底。v2 不 import legacy/。
-统一入口：命令行 python -m tools.dslagent run --pack <名> …（不写 --pack = 旧命令）；Python entry.run_task(project, task, pack, scope, model, out) → {状态, 原因, 花费}。
+统一入口：命令行 python -m tools.dslagent run --pack <名> …（不写 --pack = 旧命令）；Python entry.run_task(project, task, pack, scope, model, out) → {status, reason, 花费}。
 
 文件职责（tools/dslagent/）：
   __main__.py   命令行入口：run → runner.run；auto → auto.decide_auto
@@ -16,7 +16,7 @@
   guard.py      模型调用保险的常量和原因（超时 / 空闲 / 超长 / invoke 拦截 / 禁工具…），四个引擎和 Model 共用
   engines.py    按步骤选模型（parse / validate / step_of）、_Proc 进程保险、call_claude / call_codex / call_grok / call_opencode
   v2.py         v2 核心（与任务类型无关）：Model（唯一模型入口：计数 / 墙钟 / 记账 / 重试）、Client、规划（plan_read_call）、V2Engine（闸门动词由包给）、计划检查、run(pack=)、记录
-  entry.py      统一入口：run_pack（v2.run 的封装，--pack 用）、run_task(project, task, pack, scope, model, out) → {状态, 原因, 花费}
+  entry.py      统一入口：run_pack（v2.run 的封装，--pack 用）、run_task(project, task, pack, scope, model, out) → {status, reason, 花费}
   packs/        资料包（run(pack=) / --pack / DSLAGENT_PACK，缺省 code）：声明资料 / 动词 / 验收 / 范围 / 规划说明 / 计划检查（接口见 packs/__init__.py，写新包见 packs/README.md）；
                 code.py（改代码）、dslproj/（做 DSL 项目的模块：contract / project / cases + prompts/）、newproj/（新建项目固定模板）
   verify/       验收（由包给：verifier() 或 accept() 包成 simple.py；DSLAGENT_VERIFY 可显式指定）：prepare / check / fix / boundary；code.py = 全量测试、清单、旧写法残留、边界复核

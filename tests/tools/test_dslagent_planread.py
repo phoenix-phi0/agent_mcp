@@ -79,7 +79,7 @@ def t_input():
     print("一、read 的输入")
     f = RFake()
     r, p, out = go("rd_ok", f)
-    check(r["reply"]["状态"] == "成功" and r["fixed"] and "x + x" in T.util(p), "read 全流程成功（改法套上、验收过）", r.get("stop"))
+    check(r["reply"]["status"] == "成功" and r["fixed"] and "x + x" in T.util(p), "read 全流程成功（改法套上、验收过）", r.get("stop"))
     check(f.tags() == ["plan", "bound"], "没有补查（preq）这一步", f.tags())
     u = user_of(f, "plan")
     check(u.startswith("【任务原文】\n" + T.TASK) and "## 文件大纲" in u and "pkg/util.py（共" in u, "user = 任务原文 + 文件大纲", u[:400])
@@ -164,8 +164,8 @@ def t_call():
 
     f = RFake(plan="GUARD:空闲超时")
     r, p, out = go("rd_twice", f)
-    check(f.tags() == ["plan", "plan"] and r["reply"]["状态"] == "失败" and "模型没有回应" in r["reply"]["原因"]
-          and "空闲超时" in r["reply"]["原因"] and not r["changed_files"], "重试仍失败 → 状态失败、项目不动", r["reply"])
+    check(f.tags() == ["plan", "plan"] and r["reply"]["status"] == "失败" and "模型没有回应" in r["reply"]["reason"]
+          and "空闲超时" in r["reply"]["reason"] and not r["changed_files"], "重试仍失败 → 状态失败、项目不动", r["reply"])
 
     os.environ["DSLAGENT_PLAN_MODEL"] = "opus"
     try:
@@ -182,7 +182,7 @@ def t_call():
             r, p, out = T.go("rd_bad_" + bad, f)
         finally:
             os.environ.pop("DSLAGENT_PLAN_MODE")
-        check(r["reply"]["状态"] == "失败" and all(n in r["reply"]["原因"] for n in needles) and not f.log and not r["changed_files"],
+        check(r["reply"]["status"] == "失败" and all(n in r["reply"]["reason"] for n in needles) and not f.log and not r["changed_files"],
               f"DSLAGENT_PLAN_MODE={bad} → 失败、不调模型、说明已去掉 / 已移除", r["reply"])
     os.environ["DSLAGENT_PLAN_MODE"] = "read"
     try:

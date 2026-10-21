@@ -207,7 +207,7 @@ def t_accept():
     plan = ("用包 common text code\n预算 调用 2 秒 60\n设 w = 写文件 {e}\n终止 成功 写了\n")
     plan_bad = plan.replace("设 w = 写文件 {e}", '设 e = {"file": "out.txt", "content": "nope"}\n设 w = 写文件 {e}')
     plan_ok = plan.replace("设 w = 写文件 {e}", '设 e = {"file": "out.txt", "content": "ok"}\n设 w = 写文件 {e}')
-    fix = {"结果": {"edits": [{"file": "out.txt", "old": "nope", "new": "ok"}], "说明": "改成 ok"}, "状态": "成功", "原因": ""}
+    fix = {"result": {"edits": [{"file": "out.txt", "old": "nope", "new": "ok"}], "说明": "改成 ok"}, "status": "成功", "reason": ""}
     # 1 一次通过
     p = TMP / "ac1"
     p.mkdir()
@@ -230,7 +230,7 @@ def t_accept():
     # 3 补改后仍不过 → 失败
     p = TMP / "ac3"
     p.mkdir()
-    f = Fake(plan=plan_bad, fix={"结果": {"edits": [], "说明": "不会"}, "状态": "失败", "原因": "不会改"})
+    f = Fake(plan=plan_bad, fix={"result": {"edits": [], "说明": "不会"}, "status": "失败", "reason": "不会改"})
     r = V.run(p, "任务", TMP / "out_ac3", model=f, pack=pk)
     check(r["status"] == "失败" and "out.txt 里要有 ok" in r["stop"], "补改后仍不过 → 失败并给出验收问题", r["stop"])
     # 4 计划写范围外的文件：被拦（STRICT_SCOPE），计划自己看到原因
@@ -349,10 +349,10 @@ def t_entry():
     p = code_proj("en_code", BUG_TESTS)
     f = Fake(plan=PLAN_BUG, bound=BOUND)
     r = entry.run_task(p, "补上 triple", "code", model=f, test_cmd=cmd, out=TMP / "out_en_code")
-    check(set(r) >= {"状态", "原因", "花费"} and r["状态"] == "成功" and abs(r["花费"] - 0.02) < 1e-9 and r["原因"] == "", "run_task：{状态, 原因, 花费}", r)
+    check(set(r) >= {"status", "reason", "花费"} and r["status"] == "成功" and abs(r["花费"] - 0.02) < 1e-9 and r["reason"] == "", "run_task：{status, reason, 花费}", r)
     p = code_proj("en_fail", BUG_TESTS)
     r = entry.run_task(p, "补上 triple", "code", model=Fake(plan="用包 common text code\n预算 调用 2 秒 60\n终止 失败 做不到\n\n#清单\n改 pkg/util.py:double\n"), test_cmd=cmd)
-    check(r["状态"] == "失败" and "做不到" in r["原因"] and Path(r["记录目录"]).is_dir(), "run_task：失败带原因；out 缺省建临时记录目录", r)
+    check(r["status"] == "失败" and "做不到" in r["reason"] and Path(r["记录目录"]).is_dir(), "run_task：失败带原因；out 缺省建临时记录目录", r)
     try:
         entry.run_task(p, "x", "没有这个包")
         check(False, "run_task 包名不对报错")

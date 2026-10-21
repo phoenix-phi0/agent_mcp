@@ -24,7 +24,7 @@ opencode 不能做规划（engines.validate 提交时报错）。老的 full 规
   6 边界复核：verify.boundary（可选）；仍失败 → 状态 超出预期（不报成功）。code 验收有两条路：规划时给出的达标期望表（#期望表，
     在进 .zs 处理前切出，存 expect_table.json；覆盖 / 条数不达标补表 1 次）→ 程序按表调用函数核对，全过即成功、0 次模型调用，
     有失败 1 次 bound_judge 判表错再 bfix；无表 / 不达标 / 执行器出错 → 模型写 unittest 的旧路径。
-  7 回复：reply = {结果, 状态, 原因}；v2 记各步耗时、调用次数、费用（calls.json 逐次）。
+  7 回复：reply = {result, status, reason}；v2 记各步耗时、调用次数、费用（calls.json 逐次）。
 子任务回复格式：缺省 json；DSLAGENT_SUBTASK=tool 时子任务挂 dslmcp 的 dsl 工具读 / 搜 / 改文件（toolsub.py），每个子任务的结果记在 v2.子任务。
 按步骤指定模型：环境变量 DSLAGENT_MODELS（JSON，cbatch 透传 dsl_options.models）{plan, sub, fix, bound} → 模型串（补表 table_fill 归 plan，bound_judge 归 bound），见 engines.py（claude / codex / grok / opencode）；
 没写的步骤 sonnet；每次调用按 tag 选引擎（Model.spec），calls.json 逐条记 engine / model / effort，result.json 的 v2.models 记生效的四步。
@@ -587,7 +587,7 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
            "engine_used": "v2", "versions": 0, "calls": 0, "cost": 0.0, "seconds": 0, "stop": "", "dir": str(out),
            "calls_log": str(out / "calls.json"), "version_log": [], "subcalls": [], "changed_files": [], "handoff": "",
            "report": "", "v2": info}
-    state = {"状态": "失败", "原因": ""}
+    state = {"status": "失败", "reason": ""}
     accept, bound = {}, {"跑了": False}
     scope_arg = SC.parse(scope)
     scope = scope_arg
@@ -602,12 +602,12 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
         steps[name] = round(time.time() - t0, 1)
 
     if pack is None:
-        state["原因"] = pick_err
+        state["reason"] = pick_err
         return _recorded(_finish(res, out, M, steps, state, accept, bound, {}, {}, t_start), record, project, task, reads)
     cfg, cfg_err = ver.prepare(project, test_cmd, out)          # 验收开工前的准备（code：探测测试命令并设环境）
     res["test_cmd"] = cfg
     if cfg_err:
-        state["原因"] = cfg_err
+        state["reason"] = cfg_err
         return _recorded(_finish(res, out, M, steps, state, accept, bound, {}, {}, t_start), record, project, task, reads)
     test_cmd = cfg
     info["pack"] = pack.NAME
@@ -729,9 +729,9 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
             raise Stop(f"脚本报错：{err}")
         if not halted:
             raise Stop("脚本跑完没有 终止（没自报成功）")
-        if halted.get("状态") != "成功":
-            state["状态"] = "超出预期" if halted.get("状态") == "超出预期" else "失败"
-            raise Stop(f"脚本终止 {halted.get('状态')}：{str(halted.get('原因'))[:300]}")
+        if halted.get("status") != "成功":
+            state["status"] = "超出预期" if halted.get("status") == "超出预期" else "失败"
+            raise Stop(f"脚本终止 {halted.get('status')}：{str(halted.get('reason'))[:300]}")
         # ---- 5 验收
         t0 = time.time()
         cur, oos = _scope_gate(project, pack, base, scope, accept, "验收")
@@ -749,10 +749,10 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
         accept["测试摘要"] = chk["测试摘要"]
         step("5验收", t0)
         if not accept["通过"]:
-            state.update(状态="失败", 原因=chk["原因"])
+            state.update(status="失败", reason=chk["原因"])
             raise _Done()
         if oos:      # 补改后仍越界（已恢复）：不判成功
-            state.update(状态="部分成功", 原因=f"补改后仍越界改了范围外的文件（已恢复）：{'、'.join(oos)}；范围 {'、'.join(scope)}")
+            state.update(status="部分成功", reason=f"补改后仍越界改了范围外的文件（已恢复）：{'、'.join(oos)}；范围 {'、'.join(scope)}")
             raise _Done()
         # ---- 6 边界复核
         if boundary and hasattr(ver, "boundary"):
@@ -760,18 +760,18 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
             state.update(ver.boundary(M, project, pr))
             step("6边界复核", t0)
         else:
-            state.update(状态="成功", 原因="")
+            state.update(status="成功", reason="")
     except _Done:
         pass
     except Stop as e:
-        state["原因"] = str(e)
-        if state["状态"] == "成功":
-            state["状态"] = "失败"
+        state["reason"] = str(e)
+        if state["status"] == "成功":
+            state["status"] = "失败"
     except Exception as e:  # noqa: BLE001  流程自身出错不能让 cbatch 拿不到结果
-        state.update(状态="失败", 原因=f"v2 流程出错：{type(e).__name__}: {str(e)[:400]}")
+        state.update(status="失败", reason=f"v2 流程出错：{type(e).__name__}: {str(e)[:400]}")
     finally:
         SC.activate(None)
-    if state["状态"] != "成功" and not accept:
+    if state["status"] != "成功" and not accept:
         # 计划没跑成（检查没过 / 报错 / 没自报成功）：回滚到开局，项目保持原样
         now = snapshot(project, pack)
         restore(project, base, changed(base, now))
@@ -885,7 +885,7 @@ def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, sp
            "engine_used": "v2", "versions": 0, "calls": 0, "cost": 0.0, "seconds": 0, "stop": "", "dir": str(out),
            "calls_log": str(out / "calls.json"), "version_log": [], "subcalls": [], "changed_files": [], "handoff": "",
            "report": "", "v2": info}
-    state = {"状态": "失败", "原因": ""}
+    state = {"status": "失败", "reason": ""}
     base = snapshot(project, pack)
     try:
         if route_err:
@@ -906,16 +906,16 @@ def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, sp
                 try:
                     fp = MB.load_plan(from_plan, task)
                 except MB.ResumeError as e:
-                    state["原因"] = f"从已有规划开始：{e}"
-                    res.update(stop=state["原因"], status="失败", fixed=False, reply={"结果": {}, "状态": "失败", "原因": state["原因"]})
+                    state["reason"] = f"从已有规划开始：{e}"
+                    res.update(stop=state["reason"], status="失败", fixed=False, reply={"result": {}, "status": "失败", "reason": state["reason"]})
                     return res
                 info["从已有规划"] = {"目录": fp["from"], "从哪还原": fp["restored"]}
             if resume:
                 try:
                     rs = MB.restore_state(out, task)
                 except MB.ResumeError as e:         # 还原不了就原样返回：不能让失败的 _finish 把上次的 result.json / calls.json 盖掉
-                    state["原因"] = f"继续构建：{e}"
-                    res.update(stop=state["原因"], status="失败", fixed=False, reply={"结果": {}, "状态": "失败", "原因": state["原因"]})
+                    state["reason"] = f"继续构建：{e}"
+                    res.update(stop=state["reason"], status="失败", fixed=False, reply={"result": {}, "status": "失败", "reason": state["reason"]})
                     return res
                 if (out / "result.json").is_file():
                     shutil.copyfile(out / "result.json", out / f"result.run{rs['run_no'] - 1}.json")
@@ -936,7 +936,7 @@ def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, sp
             res["versions"] = 1
             if out_m["状态"] != "成功":
                 raise Stop(out_m["原因"][:800])
-            state.update(状态="成功", 原因="")
+            state.update(status="成功", reason="")
             return _finish(res, out, M, steps, state, {}, {"跑了": False}, base, snapshot(project, pack), t_start)
         if layered:
             from . import layered as LY
@@ -952,7 +952,7 @@ def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, sp
             res["versions"] = 1
             if out_l["状态"] != "成功":
                 raise Stop(out_l["原因"][:800])
-            state.update(状态="成功", 原因="")
+            state.update(status="成功", reason="")
             return _finish(res, out, M, steps, state, {}, {"跑了": False}, base, snapshot(project, pack), t_start)
         script = (pack.SPLIT_TEMPLATE if split else pack.TEMPLATE).read_text(encoding="utf-8")
         info["split"] = bool(split)
@@ -988,16 +988,16 @@ def run_newproj(req, project, out_dir, model=None, wall=None, max_calls=None, sp
             raise Stop(f"脚本报错：{err}")
         if not halted:
             raise Stop("脚本跑完没有 终止（没自报成功）")
-        if halted.get("状态") != "成功":
-            if split and str(halted.get("原因")).startswith("部分成功"):
+        if halted.get("status") != "成功":
+            if split and str(halted.get("reason")).startswith("部分成功"):
                 info["结论"] = "部分成功"
-            raise Stop(f"脚本终止 {halted.get('状态')}：{str(halted.get('原因'))[:400]}" if info.get("结论") != "部分成功" else str(halted.get("原因"))[:600])
-        state.update(状态="成功", 原因="")
+            raise Stop(f"脚本终止 {halted.get('status')}：{str(halted.get('reason'))[:400]}" if info.get("结论") != "部分成功" else str(halted.get("reason"))[:600])
+        state.update(status="成功", reason="")
         info["结论"] = "成功"
     except Stop as e:
-        state["原因"] = str(e)
+        state["reason"] = str(e)
     except Exception as e:  # noqa: BLE001  流程自身出错也要有结果
-        state["原因"] = f"newproj 流程出错：{type(e).__name__}: {str(e)[:400]}"
+        state["reason"] = f"newproj 流程出错：{type(e).__name__}: {str(e)[:400]}"
     info.setdefault("结论", "失败")
     return _finish(res, out, M, steps, state, {}, {"跑了": False}, base, snapshot(project, pack), t_start)
 
@@ -1034,9 +1034,9 @@ def _recorded(res, record, project, task, reads):
 
 def _finish(res, out, M, steps, state, accept, bound, base, now, t_start):
     ch = changed(base, now) if base is not None else []
-    res.update(fixed=state["状态"] == "成功", stop="" if state["状态"] == "成功" else state["原因"],
+    res.update(fixed=state["status"] == "成功", stop="" if state["status"] == "成功" else state["reason"],
                calls=M.n - M.n0, cost=round(M.cost, 4), seconds=round(time.time() - t_start, 1), changed_files=ch,
-               diff=diff_text(base, now, 3000) if base is not None else "", status=state["状态"])
+               diff=diff_text(base, now, 3000) if base is not None else "", status=state["status"])
     res["calls_by_purpose"] = {}
     for c in M.log[M.log_start:]:
         k = re.sub(r"\d+$|_reask$", "", c["tag"])
@@ -1044,16 +1044,16 @@ def _finish(res, out, M, steps, state, accept, bound, base, now, t_start):
     res["v2"].update(步骤秒=steps, 验收=accept, 边界复核=bound)
     tests = res["v2"].get("计划内测试") or []
     res["final_test"] = (accept.get("测试摘要") or "")[:2000]
-    res["reply"] = {"结果": {"改动文件": ch, "测试": accept.get("测试摘要", "")[:300],
+    res["reply"] = {"result": {"改动文件": ch, "测试": accept.get("测试摘要", "")[:300],
                            "边界复核": bound.get("结论", "未跑"), "步骤秒": steps, "调用": M.n - M.n0,
                            "费用": round(M.cost, 4), "测试次数": {
                                "真跑": sum(1 for x in tests if x["mode"] == "real"),
                                "跳过": sum(1 for x in tests if x["mode"] == "skipped"),
                                "复用": sum(1 for x in accept.get("测试", []) if x["方式"] == "复用")}},
-                    "状态": state["状态"], "原因": state["原因"]}
+                    "status": state["status"], "reason": state["reason"]}
     res["report"] = report(res)
     if not res["fixed"]:
-        res["handoff"] = (f"【停下原因】（v2 规划路径，状态 {state['状态']}）{state['原因']}\n"
+        res["handoff"] = (f"【停下原因】（v2 规划路径，状态 {state['status']}）{state['reason']}\n"
                           f"【它已经做的修改（相对开始时的 diff）】\n{res['diff'] or '（没有改动）'}\n"
                           f"【当前测试】\n{res['final_test'] or '（没跑到验收）'}")[:7000]
     try:
@@ -1066,10 +1066,10 @@ def _finish(res, out, M, steps, state, accept, bound, base, now, t_start):
 
 def report(res):
     r = res["reply"]
-    head = (f"DSL v2 {r['状态']}" + (f"：{r['原因']}" if r["原因"] else "")
+    head = (f"DSL v2 {r['status']}" + (f"：{r['reason']}" if r["reason"] else "")
             + f"；{res['calls']} 次模型调用，${res['cost']:.4f}，{res['seconds']}s")
-    lines = [head, "各步秒：" + "，".join(f"{k} {v}" for k, v in r["结果"]["步骤秒"].items()),
-             f"边界复核：{r['结果']['边界复核']}"]
+    lines = [head, "各步秒：" + "，".join(f"{k} {v}" for k, v in r["result"]["步骤秒"].items()),
+             f"边界复核：{r['result']['边界复核']}"]
     if res.get("changed_files"):
         lines.append("改动：" + "、".join(res["changed_files"]))
     lines.append(f"测试命令：{res['test_cmd']}")

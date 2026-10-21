@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
-"""模型 JSON 回复的确定性修复，问JSON 和 派任务 共用。只修两种，不猜内容：
+"""模型 JSON 回复的确定性修复，问JSON 和 派任务 共用。只修这些，不猜内容：
 
   括号    解析不了、括号不配平且只差末尾若干个 } / ]：扫描（忽略字符串里的括号）后补齐再解析
-  上提    子任务回复里「状态」「原因」被写进了「结果」对象里面（顶层没有 状态）：提到顶层；「思路」同理
+  旧键    子任务的顶层字段是英文 result/status/reason/thought；模型回了旧中文键
+          （结果/状态/原因/思路，含嵌套在「结果」对象里面的）一律换成英文键，不覆盖已有的英文键
+  上提    子任务回复里「status」「reason」被写进了「result」对象里面（顶层没有 status）：提到顶层；「thought」同理
 
 修不了的原样交回，由调用方走原有的校验和重问。
 """
@@ -50,46 +52,86 @@ def parse(text: str):
     return None, "", err
 
 
-def lift_status(data):
-    """{结果:{…,状态,原因}} 顶层没有 状态 → 把 状态/原因 提到顶层。返回 (data, 是否提了)。"""
-    if not isinstance(data, dict) or "状态" in data or not isinstance(data.get("结果"), dict) \
-            or "状态" not in data["结果"]:
+_KEY_MAP = {"结果": "result", "状态": "status", "原因": "reason", "思路": "thought"}
+
+
+def _norm_dict(d):
+    """一层字典的键：旧中文键（结果/状态/原因/思路）换成新英文键，有英文键的不覆盖、中文键照样去掉。
+    返回 (换名后的字典, 是否换过)。"""
+    if not isinstance(d, dict):
+        return d, False
+    changed = False
+    out = dict(d)
+    for cn, en in _KEY_MAP.items():
+        if cn in out:
+            if en not in out:
+                out[en] = out.pop(cn)
+            else:
+                del out[cn]
+            changed = True
+    return out, changed
+
+
+def normalize_keys(data):
+    """模型回复兼容旧键：顶层的 结果/状态/原因/思路 换成 result/status/reason/thought；
+    「结果」/「result」对象内部混进的 状态/原因/思路（模型嵌套错位）同样换名，供 lift_status/lift_thought 识别。
+    返回 (data, 是否换过)。"""
+    if not isinstance(data, dict):
         return data, False
-    inner = dict(data["结果"])
+    data, changed = _norm_dict(data)
+    if isinstance(data.get("result"), dict):
+        inner, inner_changed = _norm_dict(data["result"])
+        if inner_changed:
+            data = {**data, "result": inner}
+            changed = True
+    return data, changed
+
+
+def lift_status(data):
+    """{result:{…,status,reason}} 顶层没有 status → 把 status/reason 提到顶层。返回 (data, 是否提了)。"""
+    if not isinstance(data, dict) or "status" in data or not isinstance(data.get("result"), dict) \
+            or "status" not in data["result"]:
+        return data, False
+    inner = dict(data["result"])
     out = dict(data)
-    out["状态"] = inner.pop("状态")
-    if "原因" in inner and "原因" not in out:
-        out["原因"] = inner.pop("原因")
-    out["结果"] = inner
+    out["status"] = inner.pop("status")
+    if "reason" in inner and "reason" not in out:
+        out["reason"] = inner.pop("reason")
+    out["result"] = inner
     return out, True
 
 
 def lift_thought(data):
-    """{结果:{…,思路}} 顶层没有 思路 → 把 思路 提到顶层（放最前面）。返回 (data, 是否提了)。"""
-    if not isinstance(data, dict) or "思路" in data or not isinstance(data.get("结果"), dict) \
-            or "思路" not in data["结果"]:
+    """{result:{…,thought}} 顶层没有 thought → 把 thought 提到顶层（放最前面）。返回 (data, 是否提了)。"""
+    if not isinstance(data, dict) or "thought" in data or not isinstance(data.get("result"), dict) \
+            or "thought" not in data["result"]:
         return data, False
-    inner = dict(data["结果"])
-    return {"思路": inner.pop("思路"), **data, "结果": inner}, True
+    inner = dict(data["result"])
+    return {"thought": inner.pop("thought"), **data, "result": inner}, True
 
 
 def fill_shell(data):
-    """顶层直接是 {edits:[…]}（没有 结果 / 状态）→ 补成 {结果:{edits,…}, 状态:成功, 原因:""}；思路留在顶层。
+    """顶层直接是 {edits:[…]}（没有 result / status）→ 补成 {result:{edits,…}, status:成功, reason:""}；thought 留在顶层。
     只补外壳，不动、不放宽 edits 本身（edits 的校验仍在后面）。返回 (data, 是否补了)。"""
-    if not isinstance(data, dict) or "结果" in data or "状态" in data or not isinstance(data.get("edits"), list):
+    if not isinstance(data, dict) or "result" in data or "status" in data or not isinstance(data.get("edits"), list):
         return data, False
-    inner = {k: v for k, v in data.items() if k not in ("思路", "原因")}
-    out = {"思路": data["思路"]} if "思路" in data else {}
-    return {**out, "结果": inner, "状态": "成功", "原因": ""}, True
+    inner = {k: v for k, v in data.items() if k not in ("thought", "reason")}
+    out = {"thought": data["thought"]} if "thought" in data else {}
+    return {**out, "result": inner, "status": "成功", "reason": ""}, True
 
 
 def parse_reply(text: str, lift: bool = True):
-    """模型回复原文 → (data, repaired, err)：抠出 JSON 部分（去围栏 / 取最外层括号）→ parse（补括号）→ lift_status（lift=True 才做）。
-    子任务（json / tool）、补改（fix / bfix）、问JSON 都走这一个；repaired 是 ""、"补括号"、"状态上提" 或 "补括号+状态上提"。
-    问JSON 的回复格式是用户自己声明的，不做状态上提（lift=False）。"""
+    """模型回复原文 → (data, repaired, err)：抠出 JSON 部分（去围栏 / 取最外层括号）→ parse（补括号）→
+    normalize_keys（旧中文键转英文）→ lift_status（lift=True 才做）。
+    子任务（json / tool）、补改（fix / bfix）、问JSON 都走这一个；repaired 是 ""、"补括号"、"旧键转换"、
+    "状态上提" 或它们按出现顺序拼起来（"补括号+旧键转换+状态上提" 这种）。
+    问JSON 的回复格式是用户自己声明的，不做旧键转换 / 状态上提（lift=False）。"""
     from .zhipu import strip_json
     data, repaired, err = parse(strip_json(text or ""))
     if lift:
+        data, normalized = normalize_keys(data)
+        if normalized:
+            repaired = (repaired + "+" if repaired else "") + "旧键转换"
         data, lifted = lift_status(data)
         if lifted:
             repaired = (repaired + "+" if repaired else "") + "状态上提"

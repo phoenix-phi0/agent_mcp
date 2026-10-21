@@ -59,20 +59,20 @@
   设 n = 计算 {n} + 1
   设 inp.last = {last}
   设 r = 派任务 {desc} {inp} {logic} edits:列表,note:文本
-  如果 {r.状态} 等于 超出预期
-    终止 超出预期 子任务说前提不对：{r.原因}
-  否则如果 {r.状态} 等于 失败
-    设 last = 第{n}次派任务失败：{r.原因}
+  如果 {r.status} 等于 超出预期
+    终止 超出预期 子任务说前提不对：{r.reason}
+  否则如果 {r.status} 等于 失败
+    设 last = 第{n}次派任务失败：{r.reason}
     继续
   结束
-  设 res = 改文件 {r.结果}
+  设 res = 改文件 {r.result}
   如果 {res.ok} 不等于 是
     设 last = 第{n}次改法没套上：{res.msg}
     继续
   结束
   设 t = 跑测试
   如果 {t.passed} 等于 是
-    终止 成功 第 {n} 次改法通过测试：{r.结果.note}
+    终止 成功 第 {n} 次改法通过测试：{r.result.note}
   结束
   设 last = 第{n}次改了但测试没过：{t.summary}
 结束

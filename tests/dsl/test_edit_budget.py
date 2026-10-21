@@ -121,7 +121,7 @@ def test_sections(tmp):
           f"段换成空行（行号不变），#子脚本 标题结束段、后面的行留着：{rest!r}")
 
     out, eng, _ = run("终止 成功 好\n#改法 e1\n@@ 改 a.py\n<<<<<<< 原文\nx\n=======\ny\n>>>>>>> 新文")
-    check(eng.halted == {"状态": "成功", "原因": "好", "停在": "第 1 行"}, f"带段的脚本照常 终止：{eng.halted}")
+    check(eng.halted == {"status": "成功", "reason": "好", "at": "第 1 行"}, f"带段的脚本照常 终止：{eng.halted}")
 
     def err(script):
         out, _, _ = run("打印 甲\n" + script)
@@ -152,16 +152,16 @@ def test_budget(tmp):
     out, eng, m = run("预算 调用 2\n问 a = x\n打印 {a}\n问 b = y\n问 c = z\n打印 不该到这")
     check(out.endswith("[终止] 超出预期：预算用完：模型调用已用 2 次，上限 2 次，第 3 次没有发出（停在 第 5 行）")
           and "不该" not in out and len(m.calls) == 2, f"第 3 次调用不发出，按 终止 超出预期 结束：{out!r} calls={len(m.calls)}")
-    check(eng.halted and eng.halted["状态"] == "超出预期" and eng.halted["原因"].startswith("预算用完："),
+    check(eng.halted and eng.halted["status"] == "超出预期" and eng.halted["reason"].startswith("预算用完："),
           f"engine.halted：{eng.halted}")
     out, eng, m = run("预算 调用 2\n问 a = x\n问 b = y\n打印 够用")
     check(out == "够用" and eng.halted is None, f"刚好用完不算超：{out!r}")
     out, eng, m = run("设 n = 1\n预算 调用 {n} 秒 60\n问 a = x\n问 b = y")
-    check(eng.halted and "上限 1 次" in eng.halted["原因"], f"次数可以是变量，两项都写：{eng.halted}")
+    check(eng.halted and "上限 1 次" in eng.halted["reason"], f"次数可以是变量，两项都写：{eng.halted}")
     out, eng, m = run("预算 调用 1\n预算 调用 3\n问 a = x\n问 b = y\n打印 好")
     check(out == "好", f"再写一次覆盖：{out!r}")
     out, eng, m = run("问 a = x\n问 b = y\n预算 调用 1\n打印 不该")
-    check(eng.halted and eng.halted["停在"] == "第 4 行" and "已用 2 次" in eng.halted["原因"],
+    check(eng.halted and eng.halted["at"] == "第 4 行" and "已用 2 次" in eng.halted["reason"],
           f"预算前已经用超的，下一条语句就停：{eng.halted}")
     out, eng, m = run("问 a = x\n打印 {a}")
     check(out == "嗯" and eng.usage.calls == 1 and not eng.usage.limited, "不写预算照常，引擎照样计数")
@@ -171,7 +171,7 @@ def test_budget(tmp):
         return "慢"
     t0 = time.time()
     out, eng, m = run("预算 秒 1\n重复 5 次 计数 i\n  问 a = 第{i}次\n结束\n打印 不该", handler=slow)
-    check(eng.halted and "上限 1 秒" in eng.halted["原因"] and len(m.calls) == 2 and time.time() - t0 < 2.5,
+    check(eng.halted and "上限 1 秒" in eng.halted["reason"] and len(m.calls) == 2 and time.time() - t0 < 2.5,
           f"秒数用完下一条语句就停：{eng.halted} calls={len(m.calls)}")
 
     for bad, want in (("预算", "写法"), ("预算 调用 x", "「调用」后面是「x」"), ("预算 次数 3", "写法"),
@@ -185,18 +185,18 @@ def test_budget(tmp):
     # 派任务：重答也算一次
     bad = lambda p, s=None: "不是JSON"   # noqa: E731
     out, eng, m = run("用包 common\n预算 调用 1\n设 r = 派任务 做事\n打印 不该", handler=bad)
-    check(eng.halted and eng.halted["停在"] == "第 3 行" and len(m.calls) == 1,
+    check(eng.halted and eng.halted["at"] == "第 3 行" and len(m.calls) == 1,
           f"派任务的重答撞上预算：停在派任务那行，不当成子任务失败：{eng.halted} calls={len(m.calls)}")
-    ok = lambda p, s=None: json.dumps({"结果": "好", "状态": "成功", "原因": ""}, ensure_ascii=False)  # noqa: E731
+    ok = lambda p, s=None: json.dumps({"result": "好", "status": "成功", "reason": ""}, ensure_ascii=False)  # noqa: E731
     out, eng, m = run("用包 common\n预算 调用 2\n设 rs = 并行派任务 [\"甲\",\"乙\",\"丙\"] 3\n打印 不该", handler=ok)
-    check(eng.halted and "预算用完" in eng.halted["原因"] and len(m.calls) == 2 and "不该" not in out,
+    check(eng.halted and "预算用完" in eng.halted["reason"] and len(m.calls) == 2 and "不该" not in out,
           f"并行派任务里撞上预算整组结束：{eng.halted} calls={len(m.calls)}")
-    out, eng, m = run("用包 common\n预算 调用 3\n设 rs = 并行派任务 [\"甲\",\"乙\",\"丙\"] 3\n打印 {rs.2.结果}", handler=ok)
+    out, eng, m = run("用包 common\n预算 调用 3\n设 rs = 并行派任务 [\"甲\",\"乙\",\"丙\"] 3\n打印 {rs.2.result}", handler=ok)
     check(out == "好" and len(m.calls) == 3, f"够用时并行派任务照常：{out!r}")
 
     (tmp / "sub2.zs").write_text("问 a = 子1\n问 b = 子2\n返回 子脚本跑完\n", encoding="utf-8")
-    out, eng, m = run("预算 调用 2\n问 a = 主\n设 r = 执行 sub2.zs\n打印 子脚本交回 {r.状态}\n打印 不该", workdir=tmp)
-    check(eng.halted and eng.halted["停在"] == "第 4 行" and "第 3 次没有发出" in eng.halted["原因"]
+    out, eng, m = run("预算 调用 2\n问 a = 主\n设 r = 执行 sub2.zs\n打印 子脚本交回 {r.status}\n打印 不该", workdir=tmp)
+    check(eng.halted and eng.halted["at"] == "第 4 行" and "第 3 次没有发出" in eng.halted["reason"]
           and len(m.calls) == 2 and "子脚本交回" not in out,
           f"子脚本的调用算进同一份预算；子脚本里用完，回到调用方下一条也停：{eng.halted} {out!r}")
     out, eng, m = run("预算 调用 3\n问 a = 主\n设 r = 执行 sub2.zs\n打印 {r}", workdir=tmp)

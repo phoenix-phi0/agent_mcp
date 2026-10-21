@@ -50,10 +50,10 @@ def 落实修改() -> dict:
                     args["强制问题"] = entry
                 jobs.append({"脚本": "规划一份", "参数": args})
             rs = pe.并行执行(jobs, "3")
-            bad = [r for r in rs if r.get("状态") != "成功"]
+            bad = [r for r in rs if r.get("status") != "成功"]
             if bad:
-                who = (bad[0].get("参数") or {}).get("模块") or "?"
-                X.fail(f"落实修改没通过（{','.join(names)}）：{who}：{bad[0].get('原因')}")
+                who = (bad[0].get("params") or {}).get("模块") or "?"
+                X.fail(f"落实修改没通过（{','.join(names)}）：{who}：{bad[0].get('reason')}")
             written.extend(names)
     sync = _load(Path(__file__).parent / "同步顶层依赖.py")
     sync.同步顶层依赖()

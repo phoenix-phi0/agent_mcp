@@ -68,18 +68,18 @@ EDIT_BODY = """#改法 e1
 """
 EDIT = "设 r = 改文件 {e1}\n打印 {r.msg}\n" + EDIT_BODY
 EDIT_MISS = EDIT.replace("    if x < lo:", "    if x <= lo:")
-FINAL = json.dumps({"结果": {"edits": [], "说明": "pkg/util.py 的 clamp 改成 max/min"}, "状态": "成功", "原因": ""}, ensure_ascii=False)
-JSON_EDITS = json.dumps({"结果": {"edits": [{"file": "pkg/util.py", "old": "    if x < lo:\n        return lo\n    if x > hi:\n        return hi\n    return x\n",
-                                            "new": "    return max(lo, min(x, hi))\n"}], "说明": "json 兜底"}, "状态": "成功", "原因": ""},
+FINAL = json.dumps({"result": {"edits": [], "说明": "pkg/util.py 的 clamp 改成 max/min"}, "status": "成功", "reason": ""}, ensure_ascii=False)
+JSON_EDITS = json.dumps({"result": {"edits": [{"file": "pkg/util.py", "old": "    if x < lo:\n        return lo\n    if x > hi:\n        return hi\n    return x\n",
+                                            "new": "    return max(lo, min(x, hi))\n"}], "说明": "json 兜底"}, "status": "成功", "reason": ""},
                         ensure_ascii=False)
 MAIN = """用包 common text code
 设 desc = 任务：clamp改成max/min写法
 设 inp.src = pkg/util.py:1-6
 设 r = 派任务 {desc} {inp} 无 edits:列表,说明:文本
-打印 状态={r.状态}
-打印 说明={r.结果.说明}
-打印 原因={r.原因}
-设 e = 改文件 {r.结果}
+打印 状态={r.status}
+打印 说明={r.result.说明}
+打印 原因={r.reason}
+设 e = 改文件 {r.result}
 打印 套用={e.ok}
 """
 NEW = "return max(lo, min(x, hi))"

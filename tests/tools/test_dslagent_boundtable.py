@@ -285,9 +285,9 @@ def plan(table=None, head="用包 common text code\n预算 调用 4 秒 300\n", 
 
 
 BOUND_OK = "import unittest\n\nfrom pkg.util import double\n\n\nclass B(unittest.TestCase):\n    def test_zero(self):\n        \"\"\"0 的两倍还是 0\"\"\"\n        self.assertEqual(double(0), 0)\n"
-FIX_CLAMP = {"结果": {"edits": [{"file": "pkg/util.py", "old": "def clamp(x, lo, hi):\n",
+FIX_CLAMP = {"result": {"edits": [{"file": "pkg/util.py", "old": "def clamp(x, lo, hi):\n",
                                 "new": "def clamp(x, lo, hi):\n    if lo > hi:\n        raise ValueError(\"区间不对\")\n"}],
-                     "说明": "加区间检查"}, "状态": "成功", "原因": ""}
+                     "说明": "加区间检查"}, "status": "成功", "reason": ""}
 RULE = "把 pkg/util.py 里的 double 改成用加法实现（x + x），对外行为不变"
 GOOD = [{"规则": RULE, "函数": "pkg/util.py::double", "参数": {"x": 3}, "期望": 6},
         {"规则": RULE, "函数": "double", "参数": {"x": -2}, "断言": [{"类型": "int"}, {"同改前": True}]},
@@ -342,7 +342,7 @@ def t_flow():
     f = Fake()
     r, p, out = go("t_ok", f)
     b = r["v2"]["边界复核"]
-    check(r["reply"]["状态"] == "成功" and f.tags() == ["plan"] and r["calls"] == 1, "表全过 → 成功，边界复核 0 次模型调用", (f.tags(), r["reply"]))
+    check(r["reply"]["status"] == "成功" and f.tags() == ["plan"] and r["calls"] == 1, "表全过 → 成功，边界复核 0 次模型调用", (f.tags(), r["reply"]))
     check(b["方式"] == "表" and b["表条数"] == 3 and b["丢弃条数"] == 0 and b["失败条数"] == 0 and b["判表错条数"] == 0 and "跑表" in b["各段秒数"]
           and "全过" in b["结论"], "bound 记录：方式 / 表条数 / 丢弃 / 失败 / 判表错 / 各段秒数", b)
     et = json.loads((out / "expect_table.json").read_text(encoding="utf-8"))
@@ -360,7 +360,7 @@ def t_flow():
     r, p, out = go("t_wrong", f)
     b = r["v2"]["边界复核"]
     ju = next(u for t, _, u in f.log if t == "bound_judge")
-    check(r["reply"]["状态"] == "成功" and f.tags() == ["plan", "bound_judge"] and b["失败条数"] == 1 and b["判表错条数"] == 1 and "丢弃" in b["结论"],
+    check(r["reply"]["status"] == "成功" and f.tags() == ["plan", "bound_judge"] and b["失败条数"] == 1 and b["判表错条数"] == 1 and "丢弃" in b["结论"],
           "表有 1 条写错 → 判表错（1 次调用）→ 丢弃 → 成功", (f.tags(), b))
     check("【任务原文】" in ju and "规则原文：" + RULE in ju and "期望：" in ju and "def double" in ju and "实际：8" in ju,
           "判表错入参：任务原文、改动函数当前代码、失败条目（规则 / 函数 / 输入 / 期望 / 实际）", ju)
@@ -370,52 +370,52 @@ def t_flow():
     r, p, out = go("t_fix", f)
     b = r["v2"]["边界复核"]
     bu = next(u for t, _, u in f.log if t == "bfix")
-    check(r["reply"]["状态"] == "成功" and f.tags() == ["plan", "bound_judge", "bfix"] and "raise ValueError" in util(p) and b["第2次"]["失败条数"] == 0
+    check(r["reply"]["status"] == "成功" and f.tags() == ["plan", "bound_judge", "bfix"] and "raise ValueError" in util(p) and b["第2次"]["失败条数"] == 0
           and b["失败条数"] == 1 and "补改" in b["结论"], "失败 → 判代码错 → bfix 改代码 → 同一张表重跑通过 → 成功", (f.tags(), b))
     check("期望表里没过的条目" in bu and "规则原文：区间反了要报错" in bu and "不允许改用例" in bu and "def clamp" in bu, "bfix 入参是失败清单，说明不许改用例，带函数全文", bu)
     # bfix 想改用例 → 忽略
     f = Fake(plan=plan(GOOD + [CLAMP_EXC]), bound_judge=verdict((1, "代码错")),
-             bfix=dict(FIX_CLAMP, 结果=dict(FIX_CLAMP["结果"], 用例代码="import unittest\n")))
+             bfix=dict(FIX_CLAMP, result=dict(FIX_CLAMP["result"], 用例代码="import unittest\n")))
     r, p, out = go("t_case", f)
-    check(r["reply"]["状态"] == "成功" and r["v2"]["边界复核"]["补改"]["忽略用例代码"] is True and not (out / "boundary" / "test_boundary_v2.py").exists(),
+    check(r["reply"]["status"] == "成功" and r["v2"]["边界复核"]["补改"]["忽略用例代码"] is True and not (out / "boundary" / "test_boundary_v2.py").exists(),
           "表模式下 bfix 给的「用例代码」被忽略，不写用例文件")
     # 补改后仍不过
     f = Fake(plan=plan(GOOD + [CLAMP_EXC]), bound_judge=verdict((1, "代码错")),
-             bfix={"结果": {"edits": [{"file": "pkg/util.py", "old": "    return x\n", "new": "    return x  # 看过了\n"}]}, "状态": "成功", "原因": ""})
+             bfix={"result": {"edits": [{"file": "pkg/util.py", "old": "    return x\n", "new": "    return x  # 看过了\n"}]}, "status": "成功", "reason": ""})
     r, p, _ = go("t_still", f)
-    check(r["reply"]["状态"] == "超出预期" and "仍没过" in r["reply"]["原因"] and "clamp" in r["reply"]["原因"], "补改后表项仍没过 → 超出预期", r["reply"])
+    check(r["reply"]["status"] == "超出预期" and "仍没过" in r["reply"]["reason"] and "clamp" in r["reply"]["reason"], "补改后表项仍没过 → 超出预期", r["reply"])
     # 补改没改代码
-    f = Fake(plan=plan(GOOD + [CLAMP_EXC]), bound_judge=verdict((1, "代码错")), bfix={"结果": {"edits": []}, "状态": "超出预期", "原因": "任务没要求"})
+    f = Fake(plan=plan(GOOD + [CLAMP_EXC]), bound_judge=verdict((1, "代码错")), bfix={"result": {"edits": []}, "status": "超出预期", "reason": "任务没要求"})
     r, p, _ = go("t_noedit", f)
-    check(r["reply"]["状态"] == "超出预期" and "补改没有改代码" in r["reply"]["原因"], "bfix 没改代码 → 超出预期", r["reply"])
+    check(r["reply"]["status"] == "超出预期" and "补改没有改代码" in r["reply"]["reason"], "bfix 没改代码 → 超出预期", r["reply"])
     # 补改弄坏测试
     f = Fake(plan=plan(GOOD + [CLAMP_EXC]), bound_judge=verdict((1, "代码错")),
-             bfix={"结果": {"edits": [{"file": "pkg/util.py", "old": "        return hi\n", "new": "        return lo\n"}]}, "状态": "成功", "原因": ""})
+             bfix={"result": {"edits": [{"file": "pkg/util.py", "old": "        return hi\n", "new": "        return lo\n"}]}, "status": "成功", "reason": ""})
     r, p, _ = go("t_break", f)
-    check(r["reply"]["状态"] == "超出预期" and "撤回" in r["reply"]["原因"] and "return hi" in util(p) and "x + x" in util(p), "补改弄坏现有测试 → 撤回，超出预期", r["reply"])
+    check(r["reply"]["status"] == "超出预期" and "撤回" in r["reply"]["reason"] and "return hi" in util(p) and "x + x" in util(p), "补改弄坏现有测试 → 撤回，超出预期", r["reply"])
     # 判表错引擎出错 / 回复不合格
     def boom(user):
         raise RuntimeError("额度用完")
     f = Fake(plan=plan(GOOD + [WRONG]), bound_judge=boom)
     r, p, _ = go("t_jerr", f)
     b = r["v2"]["边界复核"]
-    check(r["reply"]["状态"] == "超出预期" and b.get("未复核") is True and "判表错没做成" in b["结论"] and "额度用完" in r["reply"]["原因"] and "bfix" not in f.tags()
+    check(r["reply"]["status"] == "超出预期" and b.get("未复核") is True and "判表错没做成" in b["结论"] and "额度用完" in r["reply"]["reason"] and "bfix" not in f.tags()
           and "x + x" in util(p), "判表错引擎出错 → 未复核，超出预期，不放行也不回滚", (r["reply"], b))
     f = Fake(plan=plan(GOOD + [WRONG]), bound_judge="没有数组")
     r, p, _ = go("t_jbad", f)
-    check(r["reply"]["状态"] == "超出预期" and r["v2"]["边界复核"].get("未复核") is True and f.tags().count("bound_judge") + f.tags().count("bound_judge_reask") == 2,
+    check(r["reply"]["status"] == "超出预期" and r["v2"]["边界复核"].get("未复核") is True and f.tags().count("bound_judge") + f.tags().count("bound_judge_reask") == 2,
           "判表错回复不合格 → 重问 1 次 → 仍不合格 → 未复核，超出预期", f.tags())
     f = Fake(plan=plan(GOOD + [WRONG]), bound_judge=["没有数组", verdict((1, "期望写错"))])
     r, p, _ = go("t_jre", f)
-    check(r["reply"]["状态"] == "成功" and "bound_judge_reask" in f.tags(), "判表错第一次回复不合格、重问后合格 → 照常", f.tags())
+    check(r["reply"]["status"] == "成功" and "bound_judge_reask" in f.tags(), "判表错第一次回复不合格、重问后合格 → 照常", f.tags())
     f = Fake(plan=plan(GOOD + [WRONG]), bound_judge=verdict((7, "期望写错")))
     r, p, _ = go("t_jmiss", f)
-    check(r["reply"]["状态"] == "超出预期" and "bfix" in f.tags(), "回复里缺的条目按代码错处理 → 进 bfix", f.tags())
+    check(r["reply"]["status"] == "超出预期" and "bfix" in f.tags(), "回复里缺的条目按代码错处理 → 进 bfix", f.tags())
     # 丢弃计数
     f = Fake(plan=plan(GOOD + [{"规则": "r", "函数": "nope", "参数": {}, "期望": 1}]))
     r, p, _ = go("t_drop", f)
     b = r["v2"]["边界复核"]
-    check(r["reply"]["状态"] == "成功" and b["丢弃条数"] == 1 and "函数名不在" in b["丢弃原因"][0] and f.tags() == ["plan"], "校验丢弃的条目计数，不影响结果", b)
+    check(r["reply"]["status"] == "成功" and b["丢弃条数"] == 1 and "函数名不在" in b["丢弃原因"][0] and f.tags() == ["plan"], "校验丢弃的条目计数，不影响结果", b)
     # 表执行器出错 → 旧路径
     old = BT.CHILD
     BT.CHILD = Path("/nonexistent/child.py")
@@ -425,7 +425,7 @@ def t_flow():
     finally:
         BT.CHILD = old
     b = r["v2"]["边界复核"]
-    check(r["reply"]["状态"] == "成功" and b["方式"] == "模型" and "表执行器出错" in b["表回退原因"] and f.tags() == ["plan", "bound"], "表执行器本身出错 → 旧路径（模型写 unittest）", (b, f.tags()))
+    check(r["reply"]["status"] == "成功" and b["方式"] == "模型" and "表执行器出错" in b["表回退原因"] and f.tags() == ["plan", "bound"], "表执行器本身出错 → 旧路径（模型写 unittest）", (b, f.tags()))
     # 校验后可执行的表项太少 → 旧路径
     f = Fake(plan=plan(GOOD[:1] + [{"规则": RULE, "函数": "nope", "参数": {}, "期望": 1}] * 2, cl="改 pkg/util.py:double"))
     r, p, _ = go("t_few", f)
@@ -434,11 +434,11 @@ def t_flow():
     f = Fake(plan=plan(GOOD + [{"规则": RULE, "函数": "double", "参数": {"x": 1}, "期望": 2, "断言": [{"同改前": True}]}]),
              bound_judge=verdict((1, "期望写错")))
     r, p, _ = go("t_before", f)
-    check(r["reply"]["状态"] == "成功" and f.tags() == ["plan"], "同改前 对没变行为的 double 一致 → 过（改前副本 x*2 与改后 x+x 同值）", f.tags())
+    check(r["reply"]["status"] == "成功" and f.tags() == ["plan"], "同改前 对没变行为的 double 一致 → 过（改前副本 x*2 与改后 x+x 同值）", f.tags())
     BEFORE_BAD = {"规则": "double 现在是加法", "函数": "pkg/util.py::double", "参数": {"x": 2}, "断言": [{"同改前": True}, {"类型": "str"}]}
     f = Fake(plan=plan(GOOD + [BEFORE_BAD]), bound_judge=verdict((1, "期望写错")))
     r, p, _ = go("t_before2", f)
-    check(r["reply"]["状态"] == "成功" and f.tags() == ["plan", "bound_judge"] and r["v2"]["边界复核"]["失败条数"] == 1, "同改前 + 断言不满足 → 失败 → 判表错", (f.tags(), r["v2"]["边界复核"]))
+    check(r["reply"]["status"] == "成功" and f.tags() == ["plan", "bound_judge"] and r["v2"]["边界复核"]["失败条数"] == 1, "同改前 + 断言不满足 → 失败 → 判表错", (f.tags(), r["v2"]["边界复核"]))
 
 
 def t_keep_table():
@@ -465,7 +465,7 @@ def t_plan_table():
     f = Fake(plan=plan(thin), table_fill=fill)
     r, p, out = go("p_fill", f)
     e = r["v2"]["期望表"]
-    check(f.tags() == ["plan", "table_fill"] and e["补表"] and e["达标"] and e["补表条数"] == 2 and r["v2"]["边界复核"]["方式"] == "表" and r["reply"]["状态"] == "成功",
+    check(f.tags() == ["plan", "table_fill"] and e["补表"] and e["达标"] and e["补表条数"] == 2 and r["v2"]["边界复核"]["方式"] == "表" and r["reply"]["status"] == "成功",
           "表只有 1 条 → 补表 1 次 → 达标 → 走表路径", (f.tags(), e))
     fu = next(u for t, _, u in f.log if t == "table_fill")
     fs = next(s for t, s, _ in f.log if t == "table_fill")
@@ -474,14 +474,14 @@ def t_plan_table():
     check(len(et["rows"]) == 3 and et["补表"], "expect_table.json 存补表后的表")
     f = Fake(plan=plan(thin), table_fill="补不了")
     r, p, _ = go("p_fill_bad", f)
-    check(f.tags() == ["plan", "table_fill", "bound"] and r["v2"]["期望表"]["补表错误"] and r["v2"]["边界复核"]["方式"] == "模型" and r["reply"]["状态"] == "成功",
+    check(f.tags() == ["plan", "table_fill", "bound"] and r["v2"]["期望表"]["补表错误"] and r["v2"]["边界复核"]["方式"] == "模型" and r["reply"]["status"] == "成功",
           "补表回复解析不出数组 → 当没补，表仍不达标 → 旧路径", (f.tags(), r["v2"]["期望表"]))
 
     def boom(user):
         raise RuntimeError("引擎挂了")
     f = Fake(plan=plan(thin), table_fill=boom)
     r, p, _ = go("p_fill_err", f)
-    check(r["reply"]["状态"] == "成功" and r["v2"]["边界复核"]["方式"] == "模型" and "引擎挂了" in r["v2"]["期望表"]["补表错误"], "补表引擎出错不影响计划，走旧路径", r["v2"]["期望表"])
+    check(r["reply"]["status"] == "成功" and r["v2"]["边界复核"]["方式"] == "模型" and "引擎挂了" in r["v2"]["期望表"]["补表错误"], "补表引擎出错不影响计划，走旧路径", r["v2"]["期望表"])
     f = Fake(plan=plan(thin), table_fill="[]")
     r, p, _ = go("p_fill_still", f)
     check(r["v2"]["期望表"]["达标"] is False and "表不达标" in r["v2"]["期望表"]["说明"] and f.tags().count("table_fill") == 1 and r["v2"]["边界复核"]["方式"] == "模型",
@@ -490,7 +490,7 @@ def t_plan_table():
     for nm, txt in (("p_bad", plan(None) + "#期望表\n[{坏"), ("p_empty", plan(None) + "#期望表\n[]"), ("p_obj", plan(None) + '#期望表\n{"a": 1}')):
         f = Fake(plan=txt)
         r, p, _ = go(nm, f)
-        check(r["reply"]["状态"] == "成功" and f.tags() == ["plan", "bound"] and r["v2"]["期望表"]["说明"] in ("表解析失败", "表为空", "表不是数组"),
+        check(r["reply"]["status"] == "成功" and f.tags() == ["plan", "bound"] and r["v2"]["期望表"]["说明"] in ("表解析失败", "表为空", "表不是数组"),
               f"{nm}：表坏 / 空 / 不是数组 → 记无表，计划照常通过，走旧路径", (r["v2"]["期望表"], f.tags()))
     # plan_fix：第一次计划没过检查（缺 预算），带表；重写的回复没有表 → 保留原表
     bad_head = plan(GOOD, head="用包 common text code\n")
@@ -499,7 +499,7 @@ def t_plan_table():
     f.replies["plan_fix"] = plan(None)
     r, p, out = go("p_keep", f)
     et = json.loads((out / "expect_table.json").read_text(encoding="utf-8"))
-    check(r["v2"]["重写"] is True and f.tags() == ["plan", "plan_fix"] and et["rows"] == GOOD and r["v2"]["边界复核"]["方式"] == "表" and r["reply"]["状态"] == "成功",
+    check(r["v2"]["重写"] is True and f.tags() == ["plan", "plan_fix"] and et["rows"] == GOOD and r["v2"]["边界复核"]["方式"] == "表" and r["reply"]["status"] == "成功",
           "plan_fix 重写的回复没有表 → 保留原表，边界复核照走表路径", (f.tags(), r["v2"]["期望表"]))
     fu = next(u for t, _, u in f.log if t == "plan_fix")
     check('"函数"' not in fu and "#期望表 由系统保留，你不用输出它" in fu, "plan_fix 的 user 里没有表内容，只写明表由系统保留")

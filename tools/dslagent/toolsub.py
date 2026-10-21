@@ -39,7 +39,7 @@ def _restore(workdir, base, files):
 
 
 def _fail(reason, **extra):
-    return {"结果": "", "状态": "失败", "原因": reason, **extra}
+    return {"result": "", "status": "失败", "reason": reason, **extra}
 
 
 def _edits(result):
@@ -128,15 +128,15 @@ def run(engine, task, inputs: list, logic, spec: list) -> dict:
         return dict(res, **_extra(st, t_all, [], 1), fallback_reason=fb)
     res, r = value
     files = sorted(st["改过"])
-    result = res.get("结果")
+    result = res.get("result")
     ed = _edits(result)
     if files and ed:
         result["edits"] = []                  # 工具已经改了，不再交主流程套（套会因为原文对不上而失败）
         st["丢弃edits"] = len(ed)
-    if files and res.get("状态") == "成功":
+    if files and res.get("status") == "成功":
         note = "（工具里改了：" + "、".join(files) + "）"
         if isinstance(result, str):
-            res["结果"] = result + note
+            res["result"] = result + note
         elif isinstance(result, dict):
             for k in ("说明", "note"):
                 if isinstance(result.get(k), str):

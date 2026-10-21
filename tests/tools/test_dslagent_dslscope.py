@@ -123,14 +123,14 @@ OLD_SRC = "def legacy(x):\n    return x * 2\n"
 
 
 def fixrep(edits):
-    return {"结果": {"edits": edits, "说明": "x"}, "状态": "成功", "原因": ""}
+    return {"result": {"edits": edits, "说明": "x"}, "status": "成功", "reason": ""}
 
 
 def t_scope_flow():
     print("二、范围闸（假模型流程）")
     f = T.Fake(plan=BOTH)
     r, p, out = T.go("sc_none", f)
-    check(r["reply"]["状态"] == "成功" and "x + x" in (p / "docs" / "old.py").read_text(encoding="utf-8") and "fix" not in f.tags(),
+    check(r["reply"]["status"] == "成功" and "x + x" in (p / "docs" / "old.py").read_text(encoding="utf-8") and "fix" not in f.tags(),
           "没有范围：不启用闸，行为照旧", r["reply"])
 
     f = T.Fake(plan=BOTH, fix=fixrep([]))
@@ -139,24 +139,24 @@ def t_scope_flow():
     fx = next(u for t, _, u in f.log if t == "fix")
     check((p / "docs" / "old.py").read_text(encoding="utf-8") == OLD_SRC, "越界改动恢复成改前内容")
     check("越界改动：docs/old.py" in fx and "只能改 pkg/、tests/ 内的文件" in fx and "【任务原文】" in fx, "缺口交补改，提示只能改范围内的文件", fx[-400:])
-    check(r["reply"]["状态"] == "成功" and acc["越界"] == [{"阶段": "验收", "文件": ["docs/old.py"], "范围": ["pkg/", "tests/"]}],
+    check(r["reply"]["status"] == "成功" and acc["越界"] == [{"阶段": "验收", "文件": ["docs/old.py"], "范围": ["pkg/", "tests/"]}],
           "补改后不再越界 → 成功，越界记进验收记录", (r["reply"], acc.get("越界")))
 
     f = T.Fake(plan=BOTH, fix=fixrep([{"file": "docs/old.py", "old": OLD_SRC, "new": "def legacy(x):\n    return x + 1\n"}]))
     r, p, out = T.go("sc_still", f, scope=["pkg/", "tests/"])
-    check(r["reply"]["状态"] == "部分成功" and not r["fixed"] and "补改后仍越界" in r["reply"]["原因"] and "docs/old.py" in r["reply"]["原因"],
+    check(r["reply"]["status"] == "部分成功" and not r["fixed"] and "补改后仍越界" in r["reply"]["reason"] and "docs/old.py" in r["reply"]["reason"],
           "补改后仍越界 → 部分成功并写原因", r["reply"])
     check((p / "docs" / "old.py").read_text(encoding="utf-8") == OLD_SRC and "x + x" in T.util(p), "仍越界的改动也已恢复，范围内的改动保留")
     check(len(r["v2"]["验收"]["越界"]) == 2 and "bound" not in f.tags(), "两次越界都记录；不再跑边界复核", f.tags())
 
     f = T.Fake(plan=T.PLAN_OK.replace("终止 成功", "设 z = 1\n终止 成功", 1) + "#范围\npkg/\ntests/\n", fix=fixrep([]))
     r, p, out = T.go("sc_planblock", f)
-    check(r["reply"]["状态"] == "成功" and "x + x" in T.util(p) and r["v2"]["验收"].get("越界") is None and "fix" not in f.tags(),
+    check(r["reply"]["status"] == "成功" and "x + x" in T.util(p) and r["v2"]["验收"].get("越界") is None and "fix" not in f.tags(),
           "计划 #范围 块生效（块不影响 .zs 检查）；范围内改动不拦", r["reply"])
     plan2 = BOTH + "#范围\ndocs/\n"
     f = T.Fake(plan=plan2, fix=fixrep([]))
     r, p, out = T.go("sc_planblock2", f)
-    check("x + x" not in T.util(p) or r["reply"]["状态"] != "成功" or r["v2"]["验收"].get("越界"), "计划块限定 docs/：pkg 的改动越界")
+    check("x + x" not in T.util(p) or r["reply"]["status"] != "成功" or r["v2"]["验收"].get("越界"), "计划块限定 docs/：pkg 的改动越界")
     f = T.Fake(plan=plan2, fix=fixrep([]))
     r, p, out = T.go("sc_argwin", f, scope="pkg/")
     check(r["v2"]["验收"]["越界"][0]["范围"] == ["pkg/"] and r["v2"]["验收"]["越界"][0]["文件"] == ["docs/old.py"], "参数范围优先于计划块")
@@ -179,17 +179,17 @@ def t_dsl_flow():
     fx = next((u for t, _, u in f.log if t == "fix"), "")
     acc = r["v2"]["验收"]
     check("fix" in f.tags() and "DSL 检查" in fx and "app/ui/note.ui" in fx and "乱七八糟" in fx, "坏 ui：缺口（带报错、文件）进补改入参", fx[-500:])
-    check(r["reply"]["状态"] == "成功" and acc["DSL检查"]["缺口"] and not acc["补改后DSL检查"]["缺口"], "补改修好后成功；两次检查都记进验收记录",
+    check(r["reply"]["status"] == "成功" and acc["DSL检查"]["缺口"] and not acc["补改后DSL检查"]["缺口"], "补改修好后成功；两次检查都记进验收记录",
           (r["reply"], acc.get("DSL检查")))
     f = T.Fake(plan=plan, fix=fixrep([]))
     shutil.rmtree(out, ignore_errors=True)
     p = T.make_proj("dsl_flow2")
     gen_proj(p, "app")
     r = V.run(p, "改 ui", out, test_cmd=T.TEST_CMD, model=f, boundary=False)
-    check(r["reply"]["状态"] == "失败" and "DSL 检查没过" in r["reply"]["原因"], "补改没修好 → 失败，原因写 DSL 检查", r["reply"])
+    check(r["reply"]["status"] == "失败" and "DSL 检查没过" in r["reply"]["reason"], "补改没修好 → 失败，原因写 DSL 检查", r["reply"])
     f = T.Fake()
     r, p, _ = T.go("nodsl", f)
-    check(r["reply"]["状态"] == "成功" and "DSL检查" not in r["v2"]["验收"], "只改 .py：验收里没有 DSL 检查")
+    check(r["reply"]["status"] == "成功" and "DSL检查" not in r["v2"]["验收"], "只改 .py：验收里没有 DSL 检查")
 
 
 def main():
