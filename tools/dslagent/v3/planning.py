@@ -8,6 +8,7 @@ from pathlib import Path
 
 from tools.dsl_core import ScriptHalt
 
+from .. import guard as G
 from .. import v2 as V2
 from ..packs.dslproj import contract as DC
 from . import catalog as CAT
@@ -123,7 +124,8 @@ def write(ctx, kind, req="", module="", problems="", model="sonnet"):
     user = user_text(ctx, kind, req or ctx.req, module, problems, prev)
     tag = "v3_top" if kind == "顶层" else f"v3_contract_{re.sub(r'[^A-Za-z0-9_]', '_', module)}"
     try:
-        text = ctx.M(prompt_text(PROMPT_OF[kind]), user, tag, model)
+        text = ctx.M(prompt_text(PROMPT_OF[kind]), user, tag, model,
+                     limits=G.contract_limits() if kind == "约定" else None)
     except V2.Stop as e:
         raise ScriptHalt("超出预期", str(e), "") from None
     except RuntimeError as e:
@@ -196,7 +198,7 @@ def review(ctx, module, text, req="", model="sonnet"):
         ctx.guard()
         ctx.take_call()
         try:
-            raw = ctx.M(prompt_text("review.md"), user, tag, model)
+            raw = ctx.M(prompt_text("review.md"), user, tag, model, limits=G.contract_limits())
         except V2.Stop as e:
             raise ScriptHalt("超出预期", str(e), "") from None
         except RuntimeError as e:

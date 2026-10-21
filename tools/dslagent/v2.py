@@ -135,13 +135,14 @@ class Model:
         m = model or MODEL           # 旧的透传（DSLAGENT_PLAN_MODEL）：任意串当 claude 模型名，不校验
         return {"engine": "claude", "model": m, "effort": None, "spec": m}
 
-    def __call__(self, system, user, tag, model=None):
-        """一次无工具调用；因保险触发 / rc≠0 / 空回复失败时同输入重试 1 次（计入调用数和费用，记录 retry=1 和首次失败原因）。返回回复文本。"""
+    def __call__(self, system, user, tag, model=None, limits=None):
+        """一次无工具调用；因保险触发 / rc≠0 / 空回复失败时同输入重试 1 次（计入调用数和费用，记录 retry=1 和首次失败原因）。返回回复文本。
+        limits：这次调用单独放宽的 {idle, timeout}（如约定步骤，见 guard.contract_limits）；None = 用缺省保险。"""
         try:
-            return self._text(self._call(system, user, tag, model))
+            return self._text(self._call(system, user, tag, model, limits=limits))
         except RuntimeError as e:
             reason = getattr(e, "reason", None) or str(e)
-            return self._text(self._call(system, user, tag, model, retry=reason))
+            return self._text(self._call(system, user, tag, model, retry=reason, limits=limits))
 
     @staticmethod
     def _text(r):

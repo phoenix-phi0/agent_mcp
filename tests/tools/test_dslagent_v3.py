@@ -33,6 +33,7 @@ from tools.dslagent.packs.dslproj import contract as DC           # noqa: E402
 from tools.dslagent.packs.dslproj import project as PJ            # noqa: E402
 from tools.dslagent.v3 import contracts as VC, core, planning as PL, scaffold as SF, top as VT   # noqa: E402
 from tools.dslagent import v2 as V2                                # noqa: E402
+from tools.dslagent import guard as G                               # noqa: E402
 
 SOL = ROOT / "tests" / "tools" / "fixtures" / "v3_solution"
 STUB = ROOT / "tests" / "tools" / "fixtures" / "v3_stub_module.py"
@@ -89,7 +90,7 @@ class Fake:
         self.top, self.scripts, self.calls = top, scripts or {}, []
 
     def __call__(self, system, user, tag, timeout, **kw):
-        self.calls.append({"tag": tag, "user": user, "system": system, "model": kw.get("model")})
+        self.calls.append({"tag": tag, "user": user, "system": system, "model": kw.get("model"), "idle": kw.get("idle")})
         seq = self.scripts.get(tag)
         if seq:
             n = sum(1 for c in self.calls if c["tag"] == tag)
@@ -614,6 +615,8 @@ def test_full_flow_clean():
     check("【顶层规划 plan/top.zs】" in cu and "项目 demo" in cu and "### 上游模块 graph（直接依赖，可以调用）" in cu and "用例 加边_成功" not in cu and "公开 函数 取知识点" in cu,
           "约定输入 = 需求 + top.zs + 上游已通过的约定（去掉用例）", cu[-600:])
     check(fk.n("v3_contract_") == 4 and fk.n("v3_top") == 2, "模型调用：顶层 2 次、约定 4 次（progress 重写 1 次）", [c["tag"] for c in fk.calls])
+    check(all(c["idle"] == G.CONTRACT_IDLE for c in fk.calls if c["tag"].startswith("v3_contract_")), "写约定的调用放宽了空闲超时（约定步骤 vs 普通调用）", [c["idle"] for c in fk.calls if c["tag"].startswith("v3_contract_")])
+    check(all(c["idle"] is None for c in fk.calls if c["tag"] == "v3_top"), "顶层规划的调用不放宽超时", [c["idle"] for c in fk.calls if c["tag"] == "v3_top"])
     for m in ("graph", "vocab", "progress"):
         check((proj / "contracts" / f"{m}.md").is_file() and (proj / "services" / f"{m}.zs").is_file(), f"{m}：约定和实现都在")
     check((proj / "plan" / "build.zs").read_text(encoding="utf-8").count("做模块组") == 2, "plan/build.zs 生成了（两层）")
