@@ -22,9 +22,14 @@
 只输出一个 JSON 数组，不要围栏、不要别的文字，没有问题输出 `[]`：
 
     [
-      {"issue": "一句话说清问题", "modules": "graph、vocab", "basis": "需求第 3 节 / plan/top.zs 模块 vocab 说明"},
+      {"issue": "一句话说清问题", "modules": "graph、vocab", "basis": "需求第 3 节 / plan/top.zs 模块 vocab 说明", "type": "contract"},
       ...
     ]
 
 每项：`issue`必填；`modules`用中文逗号或「、」隔开的模块名（可以是一个或多个）；`basis`写清楚判断来源（需求哪一节、
 top.zs 哪个模块说明、还是目录里的哪一行），没有依据的问题不要提。
+`type`给每条问题标类型（可省，省略按 contract）：
+- `code`：约定本身是对的，但代码（entities / services / routes / queries）写得和约定不一致，改几行代码就能对上；
+- `contract`：约定本身有问题（职责重复、缺接口、缺函数、写法含糊、偏离需求），要改约定；
+- `req`：需求有缺口或自相矛盾，要先改需求。
+拿不准就标 contract。

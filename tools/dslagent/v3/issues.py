@@ -10,8 +10,9 @@
        涉及模块：graph、vocab
        依据：需求第 3 节 / plan/top.zs 模块 vocab 说明 / 程序检查
 
-每条用「N. 」开头，后面跟缩进的「涉及模块：」「依据：」两行（都可省，是给人看的展示文字，不是键名）。
-parse_issues() 解一份清单文本回列表，条目字段名是 issue/modules/basis（模型出参与存盘前的内部表示一致；
+每条用「N. 」开头，后面跟缩进的「涉及模块：」「依据：」「类型：」三行（都可省，是给人看的展示文字，不是键名）。
+类型：code=代码和约定不一致 / contract=约定有问题 / req=需求缺口；省略时按 contract（旧清单没有这一行）。
+parse_issues() 解一份清单文本回列表，条目字段名是 issue/modules/basis/type（模型出参与存盘前的内部表示一致；
 兼容旧键 问题/涉及模块/依据，见 parse_model_issues）。
 """
 import hashlib
@@ -33,13 +34,13 @@ def issues_dir(project):
 
 def next_no(project):
     d = issues_dir(project)
-    have = [int(f.stem) for f in d.glob("*.md")] if d.is_dir() else []
+    have = [int(f.stem) for f in d.glob("*.md") if f.stem.isdigit()] if d.is_dir() else []
     return max(have, default=0) + 1
 
 
 def latest_path(project):
     d = issues_dir(project)
-    have = sorted((d.glob("*.md") if d.is_dir() else []), key=lambda f: int(f.stem))
+    have = sorted((f for f in (d.glob("*.md") if d.is_dir() else []) if f.stem.isdigit()), key=lambda f: int(f.stem))
     return have[-1] if have else None
 
 
@@ -54,7 +55,26 @@ def resolve(project, ref):
     p = Path(project) / ref if not Path(ref).is_absolute() else Path(ref)
     if not p.is_file():
         raise ValueError(f"问题清单「{ref}」不存在")
+    try:
+        p.resolve().relative_to(Path(project).resolve())
+    except ValueError:
+        raise ValueError(f"问题清单「{ref}」不在项目目录里") from None
     return p
+
+
+ISSUE_TYPES = ("code", "contract", "req")
+DEFAULT_TYPE = "contract"
+
+
+def norm_type(v):
+    """类型值规整：认 code/contract/req，也认中文别名；认不出（含空）按缺省 contract。"""
+    t = str(v or "").strip().lower()
+    if t in ISSUE_TYPES:
+        return t
+    for key, alias in (("code", ("代码", "代码问题")), ("contract", ("约定", "约定问题")), ("req", ("需求", "需求缺口"))):
+        if t in alias or any(t.startswith(a) for a in alias):
+            return key
+    return DEFAULT_TYPE
 
 
 def format_issue(i, item):
@@ -66,6 +86,9 @@ def format_issue(i, item):
     basis = item.get("basis", item.get("依据"))
     if basis:
         lines.append(f"   依据：{basis}")
+    typ = item.get("type", item.get("类型"))
+    if typ and norm_type(typ) != DEFAULT_TYPE:
+        lines.append(f"   类型：{norm_type(typ)}")
     return "\n".join(lines)
 
 
@@ -78,7 +101,7 @@ ITEM_RE = re.compile(r"^(\d+)\.\s+(.*)$")
 
 
 def parse_issues(text):
-    """问题清单文本 → [{"issue", "modules", "basis"}, …]（顺序即原序号）。"""
+    """问题清单文本 → [{"issue", "modules", "basis", "type"}, …]（顺序即原序号；没有「类型：」行的旧清单 type=contract）。"""
     out = None
     items = []
     cur = None
@@ -87,13 +110,15 @@ def parse_issues(text):
         if m:
             if cur:
                 items.append(cur)
-            cur = {"issue": m.group(2).strip(), "modules": "", "basis": ""}
+            cur = {"issue": m.group(2).strip(), "modules": "", "basis": "", "type": DEFAULT_TYPE}
             continue
         s = raw.strip()
         if cur and s.startswith("涉及模块："):
             cur["modules"] = s[len("涉及模块："):].strip()
         elif cur and s.startswith("依据："):
             cur["basis"] = s[len("依据："):].strip()
+        elif cur and s.startswith("类型："):
+            cur["type"] = norm_type(s[len("类型："):])
     if cur:
         items.append(cur)
     return items
@@ -119,7 +144,8 @@ def parse_model_issues(raw):
         issue = str(it.get("issue") or it.get("问题") or "").strip()
         if issue:
             out.append({"issue": issue, "modules": it.get("modules") or it.get("涉及模块") or "",
-                        "basis": it.get("basis") or it.get("依据") or ""})
+                        "basis": it.get("basis") or it.get("依据") or "",
+                        "type": norm_type(it.get("type") or it.get("类型"))})
     return out
 
 
@@ -129,7 +155,7 @@ def program_items(project, top):
     items = []
     for m, probs in sorted(g["按模块"].items()):
         for p in probs:
-            items.append({"issue": p, "modules": m, "basis": "程序检查"})
+            items.append({"issue": p, "modules": m, "basis": "程序检查", "type": "contract"})
     return items
 
 
@@ -211,7 +237,7 @@ def run_logic_checks(ctx, top, backend=None):
                         found = []
                 cache[m] = {"hash": todo[m], "items": [
                     {"issue": it.get("issue") or it.get("问题") or "", "modules": m,
-                     "basis": f"logic_check(疑点)：{it.get('basis') or it.get('依据') or ''}"}
+                     "basis": f"logic_check(疑点)：{it.get('basis') or it.get('依据') or ''}", "type": "contract"}
                     for it in found if isinstance(it, dict) and (it.get("issue") or it.get("问题"))]}
         cache_f.write_text(json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8")
     for m in mods:

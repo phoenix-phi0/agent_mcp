@@ -40,6 +40,7 @@ class Ctx:
         self.last_text = {}                    # (种类, 模块) → 上一次写的文本（重写时带上）
         self.rounds = {}                       # 模块 → 做了几轮
         self.pending_contracts = {}             # 模块 → 条目文本或空串（新增模块/改约定 登记，落实修改 消费后清空）
+        self.file_edits = {}                    # 模块 → {项目相对路径: 改之前的原文(None=原本不存在)}（改文件 登记；验收通过 / 恢复改动 后清掉）
         self.records = {"规划": [], "模块": [], "验收": []}
         self.t0 = time.time()
         (self.out).mkdir(parents=True, exist_ok=True)

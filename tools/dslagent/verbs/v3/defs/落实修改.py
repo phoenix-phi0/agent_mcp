@@ -2,7 +2,10 @@
 登记的空串＝走 规划一份 的正常写约定全流程含复核；改约定 登记的条目＝走强制问题通道，带「上一版+条目」只跑程序
 检查不复核）并行写/重写约定，消费完清空登记表 → 同步顶层依赖（含刷新目录）。
 没有登记过任何模块（计划里只有 改需求/删除模块）也要跑，只做 同步顶层依赖。
-返回 {"written": [模块名…]}
+最前面先验收：计划里 改文件 改过文件的模块（约定没登记要重写的），逐个跑 加载检查 + 比对约定 + 跑用例，任一不过 →
+把这份计划改过的文件全部恢复成改之前的原文，终止 失败（原因带验收原文）；全过 → 模块保持「已完成」（约定没变，hash 不变），
+不触发任何重做。约定要重写的模块（改约定/新增模块）不在这里验收，由后面的重做负责。
+返回 {"written": [模块名…], "edited": [改过文件的模块名…]}
 例如 落实修改
 """
 import importlib.util
@@ -27,6 +30,7 @@ def 落实修改() -> dict:
     import _v3ctx as X
     from tools.dslagent.v3 import planning as PL, top as VT
     c = X.ctx()
+    edited = _accept_edits(X, c)
     targets = dict(c.pending_contracts or {})
     c.pending_contracts = {}
     written = []
@@ -57,4 +61,33 @@ def 落实修改() -> dict:
             written.extend(names)
     sync = _load(Path(__file__).parent / "同步顶层依赖.py")
     sync.同步顶层依赖()
-    return {"written": written}
+    return {"written": written, "edited": edited}
+
+
+def _accept_edits(X, c):
+    """改过文件的模块（约定不重写的）立刻验收；不过就恢复这份计划改的全部文件并 终止 失败。→ 验收通过的模块名。"""
+    from tools.dslagent.packs import dslproj as DP
+    from tools.dslagent.v3 import change_plan as CP, top as VT
+    pending = set(c.pending_contracts or {})
+    todo = [m for m in sorted(c.file_edits) if m not in pending]
+    for m in sorted(set(c.file_edits) & pending):      # 约定要重写的模块：文件改动留给重做，不单独验收
+        c.file_edits.pop(m, None)
+    top_text = c.top_path().read_text(encoding="utf-8") if c.top_path().is_file() else ""
+    live = {m["名"] for m in VT.parse(top_text)[0]["模块"]} if top_text else set()
+    bad, ok = {}, []
+    for m in todo:
+        if m not in live:
+            continue
+        r = DP.accept(c.project, {"task": f"模块 {m}"})
+        c.log("验收", 模块=m, 通过=r["通过"], 说明=("改文件后验收：" + r["摘要"])[:1500])
+        if r["通过"]:
+            ok.append(m)
+        else:
+            bad[m] = r["摘要"]
+    if bad:
+        n = CP.restore_edits(c)
+        first = sorted(bad)[0]
+        X.fail(f"改文件后模块 {'、'.join(sorted(bad))} 验收没通过，已把这份计划改的 {n} 个文件全部恢复。{first}：{bad[first]}")
+    for m in ok:
+        c.file_edits.pop(m, None)
+    return ok
