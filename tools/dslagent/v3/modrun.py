@@ -63,7 +63,7 @@ def last_json(stdout):
     return None
 
 
-def run_module(ctx, module, last_fail="", model="sonnet"):
+def run_module(ctx, module, last_fail="", model="sonnet", task_text_override=None):
     ctx.guard()
     with ctx.lock:
         if module not in ctx.rounds:          # 续跑：轮号接着上一次的，不覆盖已有的记录目录
@@ -76,7 +76,7 @@ def run_module(ctx, module, last_fail="", model="sonnet"):
     rec.mkdir(parents=True)
     shutil.copytree(ctx.project, work, ignore=COPY_IGNORE)
     task = rec / "task.txt"
-    task.write_text(task_text(module, last_fail), encoding="utf-8")
+    task.write_text(task_text(module, last_fail) if task_text_override is None else task_text_override, encoding="utf-8")
     cmd = base_cmd(ctx) + ["run", "--pack", "dslproj", "--project", str(work), "--task-file", str(task), "--out", str(rec / "v2"),
                            "--wall", str(ctx.module_wall)]
     env = dict(os.environ)

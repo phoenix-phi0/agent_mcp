@@ -16,6 +16,8 @@ def 写修改计划(问题, 需求: str = "", 任务: str = "", 上次问题: st
     from tools.dslagent.v3 import change_plan as CP
     c = X.ctx()
     issues_text = CP.as_issues_text(问题)
+    c.issues_items = (问题.get("items") if isinstance(问题, dict) else 问题) if isinstance(问题, (dict, list)) else c.issues_items
+    c.task = 任务 or ""
     prev = CP.as_issues_text(上次问题) if (上次问题 or "") else ""
     if prev.strip():
         issues_text = f"{issues_text}\n\n【检查发现的问题（上一版计划没通过，逐条改掉）】\n{prev.strip()}"

@@ -16,6 +16,8 @@
   全量回归                          所有模块（含已完成的）重新跑一次验收；不过的标未完成、按依赖分层交 做一个模块 重做（带上回归原因），最多 2 轮，仍不过 终止 失败
   接口冒烟                          真起 tools.dsl_http 的 Router（Flask 测试客户端），每个接口取第一条正常用例，同一份数据上核对「直接调用」和「走 HTTP」是否一致；不过的模块同回归规则重做
 
+  修改  修改.zs                   落实修改 只对「约定文本真的变了」的模块刷新骨架并按依赖分层 改模块（修改式重做，不走 build.zs、不整模块新建）；约定没变的上下游不重做
+
 文件职责（tools/dslagent/v3/）：
   core.py       Ctx（运行上下文：项目、记录、Model、花费上限、plan/state.json）、V3Engine、run()（__main__ 的 v3 子命令）
   planning.py   写 / 检查 / 存 规划（提示词 prompts/top.md、contract.md；输入拼装；走 v2 的 Model）
@@ -26,6 +28,7 @@
   scaffold.py   生成骨架 / 生成分配
   modrun.py     做模块：起子进程跑 v2（--pack dslproj），在项目拷贝里做，范围内文件拷回
   regress.py    全量回归 / 接口冒烟 的实现（两步共用按依赖分层重做的循环）
+  modify.py     修改式重做（M2）：plan/changes/<序号>.json 旧约定与用例基线、新旧约定差异、改模块 的任务文本、未受影响用例检查
   v3.zs         流程脚本
 
 续跑规则：断了重跑同一命令。已存在且检查通过的规划（top / 约定）不重写；骨架已有的文件不覆盖；build.zs 每次按 top 重新生成；

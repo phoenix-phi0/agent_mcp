@@ -26,5 +26,7 @@ def 改约定(模块: str, 改动条目: str) -> dict:
     note = (改动条目 or "").replace("\\_", " ").strip()
     old = c.pending_contracts.get(name) or ""
     c.pending_contracts[name] = (old + ("\n" if old else "") + f"- {note}") if note else old
+    from tools.dslagent.v3 import modify as MD
+    MD.record(c, name, note)                     # 旧约定全文等存到 plan/changes/<序号>.json（约定在 落实修改 才重写）
     c.log("修改计划", 事件="改约定", 模块=name, 条目=note)
     return {"module": name}
