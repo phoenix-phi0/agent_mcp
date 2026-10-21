@@ -501,6 +501,9 @@ def check(c, name, upstream, all_modules):
                 path = st["路径"].replace("\\", "/")
                 if path.startswith("/") or any(part == ".." for part in path.split("/")):
                     probs.append(f"第 {st['行']} 行：用例 {u['名']} 的「先 文件」路径「{st['路径']}」必须是相对路径且不含 ..")
+                ext = path.rsplit(".", 1)[-1].lower() if "." in path.rsplit("/", 1)[-1] else ""
+                if ext not in ("md", "txt"):
+                    probs.append(f"第 {st['行']} 行：用例 {u['名']} 的「先 文件」路径「{st['路径']}」后缀要用 .md 或 .txt（业务函数读上传文件用 doc 包的「读文档」，它只认 pdf/docx/md/txt，用例里造得出的只有 md/txt；csv/json 读不了，一行一条记录写在 .txt 里）")
         fn = u["调用"]["目标"]
         f = fns.get(fn)
         if f is None or not f["公开"]:
