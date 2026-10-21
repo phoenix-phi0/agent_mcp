@@ -350,6 +350,27 @@ def check_project(root):
     return probs
 
 
+def check_background(lines, root, label, base=0):
+    """「后台执行 X」的 X 必须是项目里已有的 .zs 脚本（后台执行只认脚本，不认业务函数）；模块不能写 scripts/，
+    所以实际上在 services / routes 里用不了：照「设 r = 调用 模块.函数」同步调。"""
+    probs = []
+    for i, raw in enumerate(lines):
+        line = normalize(raw).strip()
+        if line.startswith("#"):
+            continue
+        head, rest = split_head(line)
+        if head != "call_bg":
+            continue
+        words = rest.split()
+        target = words[0] if words else ""
+        fname = target if target.endswith(".zs") else f"{target}.zs"
+        if not target or "{" in target or (Path(root) / fname).is_file():
+            continue
+        probs.append(f"[接口出错] {label}: 第 {base + i + 1} 行：「后台执行 {target}」找不到脚本 {fname}：后台执行只认已有的 .zs 脚本，不能后台跑业务函数，"
+                     f"模块也不能新建 scripts/。耗时的步骤改成同步：`设 r = 调用 模块.函数 键=值`")
+    return probs
+
+
 def _check_file_verbs(root, f, route):
     text = f.read_text(encoding="utf-8")
     packs = declared_packs(text)
@@ -360,6 +381,7 @@ def _check_file_verbs(root, f, route):
         lines = text.splitlines()
         probs = check_verb_calls(lines, reg, rel) if packs else []
         probs += check_table_external_verbs(lines, reg, full, packs, rel)
+        probs += check_background(lines, root, rel)
         return probs
     try:
         eps, _ports = split_endpoints(text, Path(rel))
@@ -371,6 +393,7 @@ def _check_file_verbs(root, f, route):
         if packs:
             probs += check_verb_calls(ep.body, reg, label, base=ep.line)
         probs += check_table_external_verbs(ep.body, reg, full, packs, label, base=ep.line)
+        probs += check_background(ep.body, root, label, base=ep.line)
     return probs
 
 

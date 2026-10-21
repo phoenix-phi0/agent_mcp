@@ -193,6 +193,15 @@ def main():
     probs = LC.check_project(root2)
     check(any("用到表外动词「切」" in p and "services/x.zs" in p for p in probs), f"services 文件也查：{probs}")
 
+    print("\n[十一、后台执行只认已有脚本]")
+    (root2 / "services" / "x.zs").write_text(
+        "业务 x\n  公开 函数 f a\n    后台执行 调用 g a={a}\n    返回 {a}\n  结束\n结束\n", encoding="utf-8")
+    probs = LC.check_project(root2)
+    check(any("后台执行 调用" in p and "services/x.zs" in p and "第 3 行" in p and "同步" in p for p in probs), f"后台执行跑函数 → 报：{probs}")
+    (root2 / "services" / "x.zs").write_text(
+        "业务 x\n  公开 函数 f a\n    后台执行 scripts/b.zs a={a}\n    返回 {a}\n  结束\n结束\n", encoding="utf-8")
+    check(not any("后台执行" in p for p in LC.check_project(root2)), "后台执行已有脚本 → 不报")
+
     print(f"\n{'=' * 50}\n通过 {passed}，失败 {failed}")
     return 1 if failed else 0
 
