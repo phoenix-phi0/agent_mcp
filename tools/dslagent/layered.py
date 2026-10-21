@@ -122,7 +122,7 @@ class Run:
     STEP_OF_KIND = {}                             # ask(kind=…) → 模型步骤键（modbuild：plan → mplan、gen → mgen）；layered 不分，走 sub
 
     def spent(self):
-        """熔断看的花费：Claude 侧。codex / grok / opencode 的调用费用记 0 本来就进不来，这里再按引擎过滤一道，防它们将来带上估算值。"""
+        """熔断看的花费：Claude 侧。codex / grok / opencode / goose 的调用费用记 0 本来就进不来，这里再按引擎过滤一道，防它们将来带上估算值。"""
         return sum((c.get("cost") or 0.0) for c in self.M.log[getattr(self.M, "log_start", 0):] if c.get("engine") in (None, "claude")) \
             if self.STEP_OF_KIND else self.M.cost
 

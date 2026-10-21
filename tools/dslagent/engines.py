@@ -6,8 +6,10 @@
   codex:<模型>[:<强度>]                          codex exec，强度 minimal|low|medium|high|xhigh，缺省 medium
   grok[:<强度>]                                  grok CLI，强度 low|medium|high|xhigh，缺省 low
   opencode:<provider/model>[:budget=<N>]         opencode run；budget = 思考 token 预算（正整数，只影响这次子进程），缺省不限
+  goose[:<模型>[:<强度>]]                         goose run（Goose CLI，provider 用 goose 自己配置的，如 chatgpt_codex）；模型缺省取 goose 配置，
+                                                 强度 minimal|low|medium|high|xhigh（经 CHATGPT_CODEX_REASONING_EFFORT，只对 chatgpt_codex 有意义），缺省不设
 各引擎的调用函数返回同一种 dict（text / sec / ttft / cost / usage / rc / stderr / reason / partial / num_turns / tool_calls / engine / model），
-保险（guard.py，四个引擎共用 _Proc）：首事件前静默、空闲超时、文本里的 <invoke 拦截、总超时（killpg）；失败重试在 v2.Model 里（统一 1 次）。
+保险（guard.py，五个引擎共用 _Proc）：首事件前静默、空闲超时、文本里的 <invoke 拦截、总超时（killpg）；失败重试在 v2.Model 里（统一 1 次）。
 """
 import json
 import os
@@ -30,6 +32,9 @@ CODEX_EFFORT = "medium"
 CODEX_PLAN_EFFORT = "high"        # codex 用作 plan 且模型串没写强度时的默认
 ESCALATE_ENV = "DSLAGENT_CODEX_ESCALATE"      # 设成 0 关闭「plan 默认 high、显式写 codex 的 plan_fix 升到 xhigh」
 GROK_EFFORT = "low"
+GOOSE_EFFORTS = CODEX_EFFORTS
+GOOSE_AUTH_RX = re.compile(r"\b40[13]\b|unauthori[sz]ed|not (logged|signed) in|log ?in|sign ?in|re-?authenticate|auth(entication)? (failed|error|required)|"
+                           r"token (expired|invalid|refresh)|refresh token|no provider configured|provider .*not configured", re.I)
 GROK_READ_TOOLS = ("read_file", "grep", "list_dir")      # read 规划放开的内置工具（只读）
 GROK_DISABLED = ("write,search_replace,run_terminal_command,kill_command_or_subagent,todo_write,get_command_or_subagent_output,spawn_subagent,"
                  "scheduler_create,scheduler_delete,scheduler_list,monitor,search_tool,use_tool,workflow,web_search,open_page,open_page_with_find,"
@@ -84,7 +89,15 @@ def parse(s):
         if budget:
             out["budget"] = budget
         return out
-    raise ValueError(f"模型串不认识：{s!r}。可写：sonnet / opus / haiku / claude-…、codex:<模型>[:<强度>]、grok[:<强度>]、opencode:<provider/model>[:budget=<N>]")
+    if head == "goose":
+        model, _, eff = rest.partition(":")
+        if (s != "goose" and not model) or (model and not _CODEX_RX.match(model)) or ":" in eff:
+            raise ValueError(f"goose 模型串要写成 goose[:<模型>[:<强度>]]，收到：{s!r}")
+        if eff and eff not in GOOSE_EFFORTS:
+            raise ValueError(f"goose 推理强度只能是 {'|'.join(GOOSE_EFFORTS)}，收到：{eff!r}（{s!r}）")
+        return {"engine": "goose", "model": model or None, "effort": eff or None, "spec": s}
+    raise ValueError(f"模型串不认识：{s!r}。可写：sonnet / opus / haiku / claude-…、codex:<模型>[:<强度>]、grok[:<强度>]、"
+                     f"opencode:<provider/model>[:budget=<N>]、goose[:<模型>[:<强度>]]")
 
 
 def normalize(value):
@@ -114,13 +127,13 @@ def normalize(value):
 
 
 def validate(models, subtask="json"):
-    """normalize + 组合限制：plan 要读代码，只支持 claude / codex / grok（claude / codex 挂只读 dsl 工具，grok 用自带只读工具；opencode 不能做规划）；
+    """normalize + 组合限制：plan 要读代码，只支持 claude / codex / grok / goose（claude / codex / goose 挂只读 dsl 工具，grok 用自带只读工具；opencode 不能做规划）；
     DSLAGENT_SUBTASK=tool 时 sub 只支持 claude。"""
     m = normalize(models)
     for k in ("plan", "plan_fix"):
         p = parse(m[k]) if k in m else None
-        if p and p["engine"] not in ("claude", "codex", "grok"):
-            raise ValueError(f"models.{k}={m[k]!r}：规划要读代码，只支持 claude / codex / grok，{p['engine']} 不能做规划")
+        if p and p["engine"] not in ("claude", "codex", "grok", "goose"):
+            raise ValueError(f"models.{k}={m[k]!r}：规划要读代码，只支持 claude / codex / grok / goose，{p['engine']} 不能做规划")
     s = parse(m["sub"]) if "sub" in m else None
     if s and subtask == "tool" and s["engine"] != "claude":
         raise ValueError(f"models.sub={m['sub']!r}：DSLAGENT_SUBTASK=tool 时子任务要挂 dsl 工具，只支持 claude")
@@ -180,6 +193,10 @@ def grok_bin():
     return _bin("DSLAGENT_GROK_BIN", "grok", str(Path.home() / ".grok" / "bin" / "grok"))
 
 
+def goose_bin():
+    return _bin("DSLAGENT_GOOSE_BIN", "goose", str(Path.home() / ".local" / "bin" / "goose"))
+
+
 def opencode_bin():
     from tools import obatch as OB
     return os.environ.get("DSLAGENT_OC_BIN") or OB.OPENCODE_BIN
@@ -202,7 +219,7 @@ def kill_all(why="被父流程收掉"):
 
 
 class _Proc:
-    """一次子进程调用的公共部分（claude / codex / grok / opencode 共用）：起进程（新进程组）、stdin 喂入、stderr 收集、
+    """一次子进程调用的公共部分（claude / codex / grok / opencode / goose 共用）：起进程（新进程组）、stdin 喂入、stderr 收集、
     总超时 / 首事件前静默 / 空闲超时三道 killpg、文本保险（工具调用格式）、事件落盘（events=False 不落）。"""
 
     def __init__(self, cmd, stdin_text, timeout, idle, first_cap, cwd, env, reply_path, events=True):
@@ -703,9 +720,119 @@ def call_opencode(system, user, timeout=300, reply_path=None, idle=None, model=N
             "cost": cost or 0.0, "usage": usage, "stderr": err[-500:], "reason": reason, "partial": streamed, "num_turns": n_tok,
             "tool_calls": 0, "engine": "opencode", "model": model, "subtype": None}
 
+# ------------------------------------------------------------------ goose
+
+
+def call_goose(system, user, timeout=300, reply_path=None, idle=None, model=None, effort=None, first_cap=None, mcp_config=None, max_turns=None,
+               **_ignored):
+    """goose run 单次调用（Goose CLI，provider / 登录用 goose 自己的配置，如 chatgpt_codex）。
+    提示经 stdin（-i -），--output-format stream-json（逐字流，首行之前的 banner 不是 JSON，跳过），--no-session（不落会话）、
+    --no-profile（不加载用户配置里的扩展）；system 写进临时文件经 GOOSE_SYSTEM_PROMPT_FILE_PATH 整份替换 goose 的默认系统提示；
+    模型 --model（不写 = goose 配置里的缺省），强度 → CHATGPT_CODEX_REASONING_EFFORT（不写不设），DSLAGENT_GOOSE_PROVIDER → --provider；
+    cwd 是空目录，GOOSE_DISABLE_SESSION_NAMING 关掉起名的那次额外调用。
+    不带 mcp_config：GOOSE_MODE=chat、--max-turns 1，一个扩展都不挂；goose 仍会公布内置的 load_skill，流里一出现 toolRequest 即杀（尝试调用工具）。
+    mcp_config（同 call_claude 的 mcpServers json）：只把里面的 dsl 这一个 MCP 以 --with-extension "dsl:<命令>" 挂上，GOOSE_MODE=auto（工具自动批准），
+    工具名 dsl__* 的调用不算违规、次数记进 tool_calls，其它工具调用即杀；--max-turns 用 max_turns（v2 不传 = 不限，同 codex 靠总超时兜底）。
+    回复取最后一次工具调用之后的文本；error 事件 / 内容记进 stderr，看着像登录失效的前面加一句提示。cost 记 0（订阅），goose 自报的估算放 usage.cost_est_usd。"""
+    import shlex
+    tmp, cwd = _empty_cwd("v2_goose_empty")
+    sys_file = tmp / f"v2_goose_sys_{os.getpid()}_{threading.get_ident()}_{int(time.time() * 1000)}.md"
+    sys_file.write_text(system or "", encoding="utf-8")
+    env = dict(os.environ)
+    env.update(TMPDIR=str(tmp), GOOSE_SYSTEM_PROMPT_FILE_PATH=str(sys_file), GOOSE_DISABLE_SESSION_NAMING="true",
+               GOOSE_MODE="auto" if mcp_config else "chat")
+    if model:
+        env["GOOSE_MODEL"] = model
+    if effort:
+        env["CHATGPT_CODEX_REASONING_EFFORT"] = effort
+    cmd = [goose_bin(), "run", "--no-session", "--no-profile", "--output-format", "stream-json", "-i", "-"]
+    if model:
+        cmd += ["--model", model]
+    if os.environ.get("DSLAGENT_GOOSE_PROVIDER"):
+        cmd += ["--provider", os.environ["DSLAGENT_GOOSE_PROVIDER"]]
+    if mcp_config:
+        srv = json.loads(Path(mcp_config).read_text(encoding="utf-8"))["mcpServers"]["dsl"]
+        cmd += ["--with-extension", "dsl:" + shlex.join([srv["command"], *srv.get("args", [])])]
+        if max_turns:
+            cmd += ["--max-turns", str(max_turns)]
+    else:
+        cmd += ["--max-turns", "1"]
+    try:
+        pr = _Proc(cmd, user, timeout, idle or (G.IDLE_MCP if mcp_config else G.IDLE_SEC),
+                   first_cap or int(os.environ.get("DSLAGENT_GOOSE_FIRST_CAP") or G.FIRST_CAP), cwd, env, reply_path)
+    except OSError:
+        sys_file.unlink(missing_ok=True)
+        raise
+    streamed, cur, ttft, done, mcp_n, errs = "", "", None, None, 0, []
+    for line in pr.p.stdout:
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(ev, dict):
+            continue
+        now = pr.event()
+        ty = ev.get("type")
+        if ty == "message":
+            msg = ev.get("message") or {}
+            has_text = False
+            for c in msg.get("content") or []:
+                ct = c.get("type") if isinstance(c, dict) else None
+                if ct == "text" and c.get("text") and msg.get("role") == "assistant":
+                    has_text = True
+                    pr.active(now)
+                    if ttft is None:
+                        ttft = round(now - pr.t0, 2)
+                    streamed += c["text"]
+                    cur += c["text"]
+                    pr.write_reply(c["text"])
+                    pr.text_guard(streamed)
+                elif ct in ("thinking", "reasoning", "redactedThinking", "toolResponse"):
+                    pr.active(now)
+                elif ct == "toolRequest":
+                    pr.active(now)
+                    tc = c.get("toolCall") or {}
+                    name = ((tc.get("value") or {}) if isinstance(tc, dict) else {}).get("name") or ""
+                    cur = ""
+                    if mcp_config and name.startswith("dsl__"):
+                        mcp_n += 1
+                    elif not pr.killed:
+                        pr.kill(G.R_TRY_TOOL)
+                elif ct == "error":
+                    errs.append(str(c.get("message") or json.dumps(c, ensure_ascii=False))[:500])
+            if not has_text:
+                pr.log_event(line)
+        elif ty == "error":
+            e = ev.get("error")
+            errs.append((e if isinstance(e, str) else json.dumps(e, ensure_ascii=False))[:500])
+            pr.log_event(line)
+        elif ty == "complete":
+            done = ev
+            pr.log_event(line)
+        else:
+            pr.log_event(line)
+    reason, err = pr.close()
+    sys_file.unlink(missing_ok=True)
+    rc = pr.p.returncode
+    err_msg = errs[-1] if errs else ""
+    if err_msg and err_msg not in err:
+        err = err_msg + "\n" + err
+    if rc and not reason and GOOSE_AUTH_RX.search(err):
+        err = "goose 登录失效或没配置 provider（先跑 goose configure / 重新登录再试）\n" + err
+    if err_msg and not rc and not reason:
+        rc = 1
+    if rc == 0 and not reason and done is None:
+        rc, err = 1, "goose 没有发 complete 事件\n" + err
+    d = done or {}
+    usage = {"input": d.get("input_tokens"), "output": d.get("output_tokens"), "cache_read": d.get("cache_read_input_tokens"),
+             "cache_creation": d.get("cache_write_input_tokens"), "total": d.get("total_tokens"), "cost_est_usd": d.get("cost_usd")}
+    return {"text": cur if (not reason and rc == 0) else "", "sec": round(time.time() - pr.t0, 1), "rc": rc, "ttft": ttft, "cost": 0.0,
+            "usage": usage, "stderr": err[-500:], "reason": reason, "partial": streamed, "num_turns": mcp_n + 1, "tool_calls": mcp_n,
+            "engine": "goose", "model": model, "subtype": None}
+
 
 def call(spec, system, user, timeout, **kw):
     """按 parse() 的结果调引擎。"""
-    fn = {"claude": call_claude, "codex": call_codex, "grok": call_grok, "opencode": call_opencode}[spec["engine"]]
+    fn = {"claude": call_claude, "codex": call_codex, "grok": call_grok, "opencode": call_opencode, "goose": call_goose}[spec["engine"]]
     extra = {"budget": spec["budget"]} if spec.get("budget") else {}
     return fn(system, user, timeout, model=spec["model"], **({"effort": spec["effort"]} if spec["engine"] != "claude" else {}), **extra, **kw)

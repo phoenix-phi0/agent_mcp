@@ -26,7 +26,7 @@ opencode 不能做规划（engines.validate 提交时报错）。老的 full 规
     有失败 1 次 bound_judge 判表错再 bfix；无表 / 不达标 / 执行器出错 → 模型写 unittest 的旧路径。
   7 回复：reply = {result, status, reason}；v2 记各步耗时、调用次数、费用（calls.json 逐次）。
 子任务回复格式：缺省 json；DSLAGENT_SUBTASK=tool 时子任务挂 dslmcp 的 dsl 工具读 / 搜 / 改文件（toolsub.py），每个子任务的结果记在 v2.子任务。
-按步骤指定模型：环境变量 DSLAGENT_MODELS（JSON，cbatch 透传 dsl_options.models）{plan, sub, fix, bound} → 模型串（补表 table_fill 归 plan，bound_judge 归 bound），见 engines.py（claude / codex / grok / opencode）；
+按步骤指定模型：环境变量 DSLAGENT_MODELS（JSON，cbatch 透传 dsl_options.models）{plan, sub, fix, bound} → 模型串（补表 table_fill 归 plan，bound_judge 归 bound），见 engines.py（claude / codex / grok / opencode / goose）；
 没写的步骤 sonnet；每次调用按 tag 选引擎（Model.spec），calls.json 逐条记 engine / model / effort，result.json 的 v2.models 记生效的四步。
 模型调用：claude CLI，--system-prompt 替换默认提示，--tools "" --strict-mcp-config --setting-sources "" --disable-slash-commands
 （同 plan35 proto），单轮流式；run(model=…) 可换成假模型（测试用）。

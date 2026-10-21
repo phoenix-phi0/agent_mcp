@@ -2,10 +2,10 @@
 
 保险触发 = 进程被杀，原因是下面 GUARD_REASONS 之一（R_*）；失败原因也用这些常量比较，不写字面量。
 """
-IDLE_SEC = 60            # 首 token 之后这么久没有新流事件就杀掉该次调用（claude / codex / grok）
+IDLE_SEC = 60            # 首 token 之后这么久没有新流事件就杀掉该次调用（claude / codex / grok / goose）
 IDLE_OC = 120            # opencode 整段才发事件，空闲超时比逐字流宽
-IDLE_MCP = 180           # codex 挂 MCP（工具调用慢）时的空闲超时
-FIRST_CAP = 120          # 首个事件之前最多静默这么久（四个引擎；codex / grok / opencode 可用 DSLAGENT_*_FIRST_CAP 覆盖）
+IDLE_MCP = 180           # codex / goose 挂 MCP（工具调用慢）时的空闲超时
+FIRST_CAP = 120          # 首个事件之前最多静默这么久（五个引擎；codex / grok / opencode / goose 可用 DSLAGENT_*_FIRST_CAP 覆盖）
 TOOL_MARKS = ("<invoke", "<function_calls")   # 流里出现这些 = 模型在写工具调用格式
 CALL_MAX = 300           # 单次调用总超时上限
 CALL_MIN = 30            # 剩余墙钟再少也给这么多
