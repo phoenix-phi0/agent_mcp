@@ -90,7 +90,7 @@ def test_apply():
     check(all((p / k).read_bytes() == v for k, v in before.items()) and not (p / "pkg/d.py").exists(),
           "原子：别的条目也都没套、新文件没建")
     r = apply(p, "#改法 e1\n" + blk("pkg/b.py", "y = 1", "y = 3"))
-    check(r["ok"] == "否" and "出现了 2 次" in r["msg"], f"原文不唯一：报出现次数：{r['msg']}")
+    check(r["ok"] == "否" and "出现 2 次" in r["msg"], f"原文不唯一：报出现次数：{r['msg']}")
     r = apply(p, "#改法 e1\n@@ 新建 pkg/a.py\n<<<<<<< 内容\nx\n>>>>>>> 新文\n")
     check(r["ok"] == "否" and "已存在" in r["msg"] and (p / "pkg/a.py").read_bytes() == before["pkg/a.py"],
           f"@@ 新建 不覆盖已有文件：{r['msg']}")
@@ -199,17 +199,17 @@ def test_check_plan():
     pr = probs("#改法 e1\n" + blk("pkg/a.py", "return x", "return x + 1"))
     check(pr == [], f"唯一匹配没问题：{pr}")
     pr = probs("#改法 e1\n" + blk("pkg/a.py", "没有这行", "x"))
-    check(len(pr) == 1 and "#改法 e1" in pr[0] and "第 1 处" in pr[0] and "pkg/a.py" in pr[0] and "出现 0 次" in pr[0], f"0 次：{pr}")
+    check(len(pr) == 1 and "#改法 e1" in pr[0] and "第 1 条" in pr[0] and "pkg/a.py" in pr[0] and "出现 0 次" in pr[0], f"0 次：{pr}")
     pr = probs("#改法 e1\n" + blk("pkg/m.py", "x = 0", "x = 1"))
     check(len(pr) == 1 and "出现 3 次" in pr[0] and "第 2 行" in pr[0] and "第 4 行" in pr[0] and "第 6 行" in pr[0]
           and "a = 1" in pr[0] and "b = 2" in pr[0] and "多带几行上下文" in pr[0], f"多次：次数、行号、前后各 1 行、建议：{pr}")
     pr = probs("#改法 e1\n" + blk("pkg/nope.py", "x", "y"))
-    check(len(pr) == 1 and "pkg/nope.py 不存在" in pr[0], f"文件不存在：{pr}")
+    check(len(pr) == 1 and "pkg/nope.py" in pr[0] and "没有这个文件" in pr[0], f"文件不存在：{pr}")
     pr = probs("#改法 e1\n@@ 新建 pkg/a.py\n<<<<<<< 内容\nz = 1\n>>>>>>> 新文\n")
-    check(len(pr) == 1 and "pkg/a.py 已存在" in pr[0] and "新建" in pr[0], f"新建的文件已存在：{pr}")
+    check(len(pr) == 1 and "pkg/a.py" in pr[0] and "已存在" in pr[0] and "新建" in pr[0], f"新建的文件已存在：{pr}")
     # 顺序套用：第 1 处把 B = 1 改成 B = 2，第 2 处再找 B = 1 就找不到；第 2 处找 B = 2 才对
     pr = probs("#改法 e1\n" + blk("pkg/a.py", "B = 1", "B = 2") + blk("pkg/a.py", "B = 1", "B = 3"))
-    check(len(pr) == 1 and "第 2 处" in pr[0] and "出现 0 次" in pr[0] and "前面几处改过之后" in pr[0], f"顺序套用（前一对改完再找）：{pr}")
+    check(len(pr) == 1 and "第 2 条" in pr[0] and "出现 0 次" in pr[0] and "第 1 条" in pr[0], f"顺序套用（前一对改完再找）：{pr}")
     pr = probs("#改法 e1\n" + blk("pkg/a.py", "import json", "import json\nimport os") + blk("pkg/a.py", "B = 1", "B = 2"))
     check(pr == [], f"顺序套用：前一对改变了长度，后一对照样找得到、不误报重叠：{pr}")
     # 后一对的 old 落在前一对的新文本里：改文件 顺序套用时能套上，检查也要通过

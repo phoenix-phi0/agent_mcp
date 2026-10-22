@@ -97,15 +97,12 @@ PROGRESS_SKEL = """业务 progress
 
 
 def edits_block(project, files, name="e1"):
-    """files：{相对路径: 新内容}。文件已存在 → @@ 改（原文 = 现有全文），否则 @@ 新建。返回 #改法 段文本。"""
-    out = [f"#改法 {name}"]
+    """files：{相对路径: 新内容}。文件已存在 → old = 现有全文，否则 old 空串（新建）。返回 #改法 段文本（JSON 列表）。"""
+    items = []
     for rel, new in files.items():
         f = Path(project) / rel
-        if f.is_file():
-            out += [f"@@ 改 {rel}", "<<<<<<< 原文", f.read_text(encoding="utf-8").rstrip("\n"), "=======", new.rstrip("\n"), ">>>>>>> 新文"]
-        else:
-            out += [f"@@ 新建 {rel}", "<<<<<<< 内容", new.rstrip("\n"), ">>>>>>> 新文"]
-    return "\n".join(out) + "\n"
+        items.append({"file": rel, "old": f.read_text(encoding="utf-8").rstrip("\n") if f.is_file() else "", "new": new.rstrip("\n")})
+    return f"#改法 {name}\n[\n" + ",\n".join("  " + json.dumps(x, ensure_ascii=False) for x in items) + "\n]\n"
 
 
 def solution_files(module):

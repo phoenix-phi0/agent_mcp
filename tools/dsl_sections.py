@@ -27,6 +27,7 @@ files:[{file,content}…]}（空的键不给），交给 改文件 {e1} 一次�
 split_sections 把段从脚本里拿出来，原位置换成空行（行号不变），引擎和 dslagent
 的检查共用这一份解析。
 """
+import json
 import re
 
 EDIT_HEAD = re.compile(r"^\s*#\s*改法\s+([^\W\d]\w*)\s*$")
@@ -72,7 +73,7 @@ def split_sections(text: str):
                 checklist["hint"] = checklist["hint"] or got["hint"]
             continue
         name = m.group(1)
-        obj, p = parse_edit_body(body, start + 2)
+        obj, p = parse_edit_json(body) if is_json_body(body) else parse_edit_body(body, start + 2)
         probs += [f"#改法 {name}：{x}" for x in p]
         if name in edits:
             edits[name]["edits"] += obj["edits"]
@@ -80,6 +81,35 @@ def split_sections(text: str):
         else:
             edits[name] = obj
     return "\n".join(rest), {k: compact(v) for k, v in edits.items()}, checklist, probs
+
+
+def is_json_body(body: list) -> bool:
+    """段内第一个非空、非 # 注释的行以 [ 或 { 开头 = JSON 写法（否则按 @@ 标记写法）。"""
+    for line in body:
+        s = line.strip()
+        if s and not s.startswith("#"):
+            return s[0] in "[{"
+    return False
+
+
+def parse_edit_json(body: list):
+    """「#改法」段里直接写 JSON → ({edits}, 问题列表)。内容原样 json.loads（可多行；不展开 {变量}，
+    {p} 之类就是字面文本），每条 {file, old, new, line?}，也接受 {"edits": […]} 或单条 {file, old, new}。
+    每条的细节（file 缺不缺、old 唯一不唯一）不在这里查，交给 改文件 / 核对计划 逐条报。"""
+    text = "\n".join(x for x in body if not x.strip().startswith(("#", "```")))
+    try:
+        v = json.loads(text)
+    except json.JSONDecodeError as e:
+        return {"edits": [], "files": []}, [f"JSON 解析失败（段内第 {e.lineno} 行第 {e.colno} 列）：{e.msg}"]
+    if isinstance(v, dict) and isinstance(v.get("edits"), list):
+        v = v["edits"]
+    elif isinstance(v, dict) and "file" in v:
+        v = [v]
+    if not isinstance(v, list):
+        return {"edits": [], "files": []}, ["JSON 要是 [{file, old, new, line?}, …] 列表（或 {\"edits\": […]}）"]
+    if not v:
+        return {"edits": [], "files": []}, ["JSON 列表是空的，至少要有一条改动"]
+    return {"edits": v, "files": []}, []
 
 
 def parse_edit_body(body: list, first_lineno: int = 1):
@@ -167,7 +197,9 @@ def compact(o: dict) -> dict:
 
 
 def edits_text(name: str, obj: dict) -> str:
-    """改法 → 段的原样写法（给重写提示、存档看）。"""
+    """改法 → 段的原样写法（给重写提示、存档看）。只有 edits 没有 files（JSON 写法）时写成 JSON 列表。"""
+    if (obj or {}).get("edits") and not (obj or {}).get("files") and all(isinstance(e, dict) for e in obj["edits"]):
+        return f"#改法 {name}\n" + json.dumps(obj["edits"], ensure_ascii=False, indent=1)
     out = [f"#改法 {name}"]
     for f in (obj or {}).get("files") or []:
         out += [f"@@ 新建 {f.get('file')}", "<<<<<<< 内容", str(f.get("content", "")).rstrip("\n"), ">>>>>>> 新文"]

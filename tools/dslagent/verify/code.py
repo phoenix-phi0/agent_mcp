@@ -53,40 +53,28 @@ JUDGE_SYS = AG.BOUND_JUDGE.system_text()
 
 
 def apply_edits(project, edits):
-    """全部能套才套（原子）。不改测试文件、不出项目。返回 (ok, 说明)。"""
+    """全部能套才套（原子，与 改文件 同一个套用函数 _edits.apply：old 唯一 / 多处按 line 选最近 / 全有或全无）。
+    不改测试文件、不出项目、受范围约束。返回 (ok, 说明)；失败的说明逐条写第几条、文件、原因。"""
     root = Path(project).resolve()
-    new_txt = {}
     if not isinstance(edits, list) or not edits:
         return False, "没有 edits"
-    for e in edits:
-        if not isinstance(e, dict) or not all(isinstance(e.get(k), str) for k in ("file", "old", "new")):
-            return False, f"edits 项格式不对：{str(e)[:120]}"
-        rel = e["file"][2:] if e["file"].startswith("./") else e["file"]
-        p = (root / rel).resolve()
-        if p == root or root not in p.parents:
-            return False, f"不允许改项目外的 {rel}"
+    from ..common import sandbox
+    sandbox()
+    import _edits as E
+
+    def check(rel):
         if K.is_test(rel):
-            return False, f"不允许改测试文件 {rel}"
-        why = SC.guard(rel)         # 包声明的允许改动范围（补改套用同样按它拦）
-        if why:
-            return False, why
-        cur = new_txt.get(rel, p.read_text(encoding="utf-8") if p.is_file() else None)
-        if e["old"] == "":
-            if cur is not None and cur.strip():
-                return False, f"{rel} 已存在且非空，新建文件 old 不能为空"
-            new_txt[rel] = e["new"]
-            continue
-        if cur is None:
-            return False, f"{rel} 不存在"
-        n = cur.count(e["old"])
-        if n != 1:
-            return False, f"{rel}: old 出现 {n} 次（应为 1）：{e['old'][:120]!r}"
-        new_txt[rel] = cur.replace(e["old"], e["new"], 1)
-    for rel, t in new_txt.items():
+            return f"不允许改测试文件 {rel}"
+        return SC.guard(rel) or ""      # 包声明的允许改动范围（补改套用同样按它拦）
+    texts, _, _, errs = E.apply(root, edits, check)
+    if errs:
+        return False, "\n".join(errs) + "\n整体没有套用，所有文件保持原样"
+    for rel, t in texts.items():
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(t, encoding="utf-8")
-    return True, f"已套 {len(edits)} 处，涉及 {sorted(new_txt)}"
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            f.write(t)
+    return True, f"已套 {len(edits)} 处，涉及 {sorted(texts)}"
 
 
 def _test_verb():
@@ -276,7 +264,7 @@ def _check_reply(rep):
         ed = res.get("edits") if isinstance(res, dict) else None
         if not isinstance(ed, list) or not all(isinstance(e, dict) and all(isinstance(e.get(k), str)
                                                                             for k in ("file", "old", "new")) for e in ed):
-            return "result.edits 必须是 [{file, old, new}] 列表（都是字符串）"
+            return "result.edits 必须是 [{file, old, new, line?}] 列表（file、old、new 都是字符串，line 可选整数）"
     return None
 
 
@@ -307,10 +295,6 @@ def dispatch_fix(M, project, system, user, tag):
     rec["edits"] = len(ed)
     if rep["status"] == "成功" and ed:
         ok, msg = apply_edits(project, ed)
-        if not ok:          # 整体套不上时逐条套，能套的先套上
-            n_ok = sum(1 for e in ed if apply_edits(project, [e])[0])
-            msg += f"；逐条套上 {n_ok}/{len(ed)}"
-            ok = n_ok > 0
         rec.update(套用=ok, 套用说明=msg)
     return rec
 

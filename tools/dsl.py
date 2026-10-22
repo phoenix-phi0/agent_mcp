@@ -110,6 +110,9 @@
                                运行前拿出来：{e1} = {edits:[{file,old,new}…],
                                files:[{file,content}…]}，交给 改文件 {e1}；#清单 的
                                {items, hint} 放在 engine.checklist。段写错运行前就报
+                               段内第一个有效行以 [ 或 { 开头时，整段按 JSON 解析（可多行，
+                               内容不展开 {变量}）：[{"file":…,"old":…,"new":…,"line":12}, …]
+                               → {e1} = {edits:[…]}（old 空串 = 新建；多处时 line 选最近）
 
 命名约定：变量名、脚本参数（「执行 x.zs key=值」的 key）、SQL 参数
 （.sql 里的 :limit）用英文 snake_case；关键字（设、如果、遍历、问…）、动词名、

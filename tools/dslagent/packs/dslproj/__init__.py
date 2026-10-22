@@ -5,7 +5,7 @@
 - 动词：code 包的读 / 搜 / 改 / 写 / 删文件 + dslproj 包的 加载检查 / 比对约定 / 跑用例（verbs/dslproj/）。
 - 验收 accept：加载检查无错 + 比对约定一致 + 本模块用例全过（cases.py，空库、固定时间）；有问题派 1 次补改（edits），补改后再验一次。
 - 范围 scope_for：entities/<模块>.entity、services/<模块>.zs、routes/<模块>*.zs、queries/<模块>_*.sql、tests/<模块>_*；STRICT_SCOPE，写 / 删之前就按它拦。
-- 规划说明 PLAN_SYSTEM：prompts/role.md + DSL 速查（agents/shared/cheat.md）+ prompts/verbs.md + prompts/notes.md + 示例 prompts/example.zs。
+- 规划说明 PLAN_SYSTEM：prompts/role.md + DSL 速查（agents/shared/cheat.md，其中 #改法 段换成 prompts/edits.md 的 JSON 写法）+ prompts/verbs.md + prompts/notes.md + 示例 prompts/example.zs。
 """
 import re
 from pathlib import Path
@@ -39,6 +39,9 @@ SYNTAX = _prompt("syntax.md")
 def PLAN_SYSTEM(engine=None):
     """整份规划 system：角色 + DSL 速查 + 动词 + 要点 + 示例 .zs + 输出要求。"""
     cheat = PF.shared("cheat.md").replace("用包 common text code", "用包 common text code dslproj")
+    a, b = cheat.find("### #改法 段"), cheat.find("### #清单 段")
+    if 0 <= a < b:           # 速查里是 @@ 标记写法（其它包在用）；这个包的 #改法 段写 JSON 列表
+        cheat = cheat[:a] + _prompt("edits.md") + "\n\n" + cheat[b:]
     role = _prompt("role.md")
     if engine == "grok":
         role = role.replace("- 需要时用 dsl 工具读：读片段、搜索代码、查引用；", "- 需要时用你自带的只读工具读；")
@@ -46,7 +49,7 @@ def PLAN_SYSTEM(engine=None):
                         "## 示例\n分支式规划的写法示例：只示意写法，不是答案。\n\n" + _prompt("example.zs"),
                         "## 输出\n- 只输出 .zs 脚本本身（含末尾的 #改法 段），不要代码围栏、不要解释文字\n"
                         "- 每条语句只占一行；派任务 / 问JSON 的提示词里不能换行；带空格的值先 设 成变量再写 {变量}\n"
-                        "- #改法 里的原文逐字抄自读到的文件：含缩进，不带行号前缀，在文件里唯一"])
+                        "- #改法 是 JSON 列表，里面的 old 逐字抄自读到的文件：含缩进，不带行号前缀；可能出现多次的写 line"])
 
 
 files = K.files

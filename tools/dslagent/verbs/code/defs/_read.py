@@ -21,8 +21,22 @@ MAX_CHARS = 25000
 MAX_TOTAL = 800
 
 
-def split_segs(arg):
-    return [s.strip() for s in re.split(r"[,;，；、\n]", str(arg or "")) if s.strip()]
+_GLOB = re.compile(r"^[^\s:*?]*[*?][^\s:]*$")
+
+
+def split_segs(arg, root=None):
+    """arg 切成各段；给了 root 时，只写文件的通配段（queries/graph_*.sql）展开成匹配到的文件（排序，没有匹配就留着让 one 报错）。"""
+    segs = [s.strip() for s in re.split(r"[,;，；、\n]", str(arg or "")) if s.strip()]
+    if root is None:
+        return segs
+    out = []
+    for s in segs:
+        if _GLOB.match(s) and ".." not in s and not s.startswith("/"):
+            hit = sorted(str(f.relative_to(root)) for f in Path(root).glob(s) if f.is_file())
+            out += hit or [s]
+        else:
+            out.append(s)
+    return out
 
 
 _RANGE_ONLY = re.compile(r"^:?\s*(\d+)(?:\s*[-~–—到至]\s*(\d+))?$")
@@ -102,7 +116,7 @@ def read_into(st, root, arg, tag="读片段"):
     out, got, total = [], [], 0
     step = int(st.get("step", 0)) + 1
     prev = ""
-    for s in split_segs(arg):
+    for s in split_segs(arg, root):
         if total >= MAX_TOTAL:
             out.append(f"[{tag}] 合计超过 {MAX_TOTAL} 行，后面的没读：{s}")
             continue
