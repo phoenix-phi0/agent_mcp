@@ -192,7 +192,7 @@ def test_dispatch_v2():
     check(set(r) >= {"result", "status", "reason", "role", "model", "cost", "calls", "secs", "call_id"}, "返回形状同模型角色", r)
     check(r["status"] == "ok" and r["result"] == "services/report.zs" and r["cost"] == 0.5 and r["calls"] == 4, "ok，result 是改动文件清单", r)
     check(seen[0][0] == "sonnet" and seen[0][1]["task"] == "模块 report\n补 pass_line\n", "模型 = 角色默认模型；任务文本 = 模块行 + 任务", seen[0])
-    check(seen[0][1]["scope"] == ["entities/report.entity", "services/report.zs", "routes/report*.zs", "queries/report_*.sql", "tests/report_*"],
+    check(seen[0][1]["scope"] == ["entities/report.entity", "services/report.zs", "routes/report*.zs", "queries/report_*.sql", "scripts/report_*.zs", "tests/report_*"],
           "scope = 本模块路径展开", seen[0][1]["scope"])
     rows = LG.read_rows(out)
     check(len(rows) == 1 and rows[0]["cost"] == 0.5 and rows[0]["secs"] == 3.0 and rows[0]["status"] == "ok", "花费、耗时记了账本", rows)
@@ -262,7 +262,7 @@ print(json.dumps({'fixed': os.environ.get('STUB_FIX') == '1', 'calls': 2, 'cost'
         check((proj / "services" / "other.zs").read_text(encoding="utf-8") == "原", "范围外文件不拷回")
         info = json.loads(next(Path(o).glob("agents/modify_module/m_1/v2/argv.json")).read_text(encoding="utf-8"))
         a = info["argv"]
-        check(a[a.index("--scope") + 1] == "entities/m.entity,services/m.zs,routes/m*.zs,queries/m_*.sql,tests/m_*", "--scope 传了展开后的可写范围")
+        check(a[a.index("--scope") + 1] == "entities/m.entity,services/m.zs,routes/m*.zs,queries/m_*.sql,scripts/m_*.zs,tests/m_*", "--scope 传了展开后的可写范围")
         check(json.loads(info["models"]) == {s: "sonnet" for s in EG.STEPS}, "DSLAGENT_MODELS 把默认模型设给全部 STEPS", info["models"])
         check(info["task"] == "模块 m\nt\n", "任务文件内容", info["task"])
         check(a[a.index("--pack") + 1] == "dslproj" and a[a.index("--wall") + 1] == "1800", "--pack dslproj、--wall = 单次超时")

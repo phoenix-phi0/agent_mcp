@@ -32,6 +32,10 @@
       调用 记作答 learner=u1 point_code=NOPE correct=1
       报错 404                                  # 期望业务错误码（和「得」二选一）
 
+    ## 脚本                                  # 可选：本模块的后台任务脚本（不写这段 = 没有脚本；声明了就必须有这个文件，也不许多出没声明的）
+    scripts/jobs_run.zs 入参 job_id；出错 scripts/jobs_run_fail.zs；逐项处理任务   # 路径 scripts/<模块>_<名>.zs；「入参」可省；「出错」可省；最后一段是一句话作用
+                                  # 业务函数里写库建好任务后（事务之外）`后台执行 scripts/jobs_run.zs job_id={id} on_error=scripts/jobs_run_fail.zs`
+
 ## 认证
 认证声明由程序生成（骨架写在账号模块的 routes 顶部，只有一份），约定里**任何模块都不写 `认证 …` 行**（写了会被拒）。
 负责账号的模块必须有公开函数 `核对身份 username`，返回 `{username, role}`，查不到返回空；带 `## 用例`（存在的用户返回 role、不存在返回空）。
@@ -48,7 +52,8 @@ PARAM_RE = re.compile(r"^[a-z_][a-z0-9_]*\??$")
 IDENT = r"[A-Za-z0-9_一-鿿]+"
 QCALL_RE = re.compile(rf"调用\s+({IDENT})\.({IDENT})")
 METHODS = ("GET", "POST", "PUT", "DELETE")
-SECTIONS = {"表": "表", "数据": "表", "函数": "函数", "接口": "接口", "用例": "用例"}
+SECTIONS = {"表": "表", "数据": "表", "函数": "函数", "接口": "接口", "用例": "用例", "脚本": "脚本"}
+SCRIPT_RE = re.compile(r"^scripts/([a-z][a-z0-9_]*)\.zs$")
 
 # 认证由程序生成：账号模块 = 有公开函数「核对身份」的模块
 ACCOUNT_FN = "核对身份"
@@ -171,9 +176,9 @@ def _iface_tail(tail):
 
 
 def parse(text):
-    """→ (contract, 问题)。contract = {模块, 依赖, 表, 函数, 接口, 用例}；各项带「行」。"""
+    """→ (contract, 问题)。contract = {模块, 依赖, 表, 函数, 接口, 用例, 脚本}；各项带「行」。"""
     probs = []
-    c = {"模块": None, "依赖": [], "表": [], "函数": [], "接口": [], "用例": []}
+    c = {"模块": None, "依赖": [], "表": [], "函数": [], "接口": [], "用例": [], "脚本": []}
     sec, cur = None, None
     for no, raw in enumerate(text.replace("\r", "").splitlines(), 1):
         if raw.strip().startswith("```"):
@@ -183,7 +188,7 @@ def parse(text):
             sec = SECTIONS.get(title)
             cur = None
             if sec is None:
-                probs.append(f"第 {no} 行：不认识的小节「{title}」（只有 表 / 函数 / 接口 / 用例）")
+                probs.append(f"第 {no} 行：不认识的小节「{title}」（只有 表 / 函数 / 接口 / 用例 / 脚本）")
             continue
         s = _strip_comment(raw).strip()
         if not s or s.startswith("#"):
@@ -256,9 +261,50 @@ def parse(text):
         elif sec == "用例":
             _case_line(c, s, parts, h, no, probs)
             cur = c["用例"][-1] if c["用例"] else None
+        elif sec == "脚本":
+            _script_line(c, s, no, probs)
     if not c["模块"]:
         probs.append("缺「模块 <名>」")
     return c, probs
+
+
+def _script_line(c, s, no, probs):
+    """## 脚本 的一行：scripts/<模块>_<名>.zs [入参 a,b]；[出错 scripts/<模块>_<名>_fail.zs]；<一句话作用>（分号 ；或 ; 隔开，出错可省）。"""
+    segs = [x.strip() for x in re.split(r"[；;]", s)]
+    toks = segs[0].split()
+    if not toks or not SCRIPT_RE.match(toks[0]):
+        probs.append(f"第 {no} 行：脚本写法是「scripts/<模块>_<名>.zs [入参 a,b]；[出错 scripts/<模块>_<名>_fail.zs]；一句话作用」，现在是「{s[:60]}」")
+        return
+    args = []
+    if toks[1:2] == ["入参"]:
+        args = [x for x in re.split(r"[\s,，、]+", " ".join(toks[2:])) if x]
+    elif toks[1:]:
+        probs.append(f"第 {no} 行：脚本路径后面只能写「入参 a,b」，现在是「{' '.join(toks[1:])[:40]}」")
+    bad = [a for a in args if not NAME_RE.match(a)]
+    if bad:
+        probs.append(f"第 {no} 行：脚本入参 {bad} 不合法（英文 snake）")
+    fail, note = "", []
+    for seg in segs[1:]:
+        m = re.match(r"^出错\s+(\S+)$", seg)
+        if m:
+            if fail:
+                probs.append(f"第 {no} 行：「出错」只能写一次")
+            fail = m.group(1)
+            if not SCRIPT_RE.match(fail):
+                probs.append(f"第 {no} 行：出错脚本「{fail}」写法是 scripts/<模块>_<名>.zs")
+        elif seg:
+            note.append(seg)
+    c["脚本"].append({"路径": toks[0], "入参": args, "出错": fail, "作用": "；".join(note), "行": no})
+
+
+def declared_scripts(c):
+    """约定里声明的全部脚本路径（主脚本 + 出错脚本，去重保序）。"""
+    out = []
+    for sc in c.get("脚本", []):
+        for p in (sc["路径"], sc["出错"]):
+            if p and p not in out:
+                out.append(p)
+    return out
 
 
 def _case_line(c, s, parts, h, no, probs):
@@ -360,6 +406,28 @@ def _auth_problems(c, fns):
     return probs
 
 
+def _script_problems(c, name, all_modules):
+    """## 脚本：路径要归本模块（文件名以「<本模块>_」开头，且不被更长的同前缀模块名认走）、不重复；出错脚本不能同时当主脚本。"""
+    probs, seen = [], set()
+    mods = set(all_modules) | {name}
+    mains = {sc["路径"] for sc in c.get("脚本", [])}
+    for sc in c.get("脚本", []):
+        if sc["路径"] in seen:
+            probs.append(f"第 {sc['行']} 行：脚本「{sc['路径']}」重复")
+        seen.add(sc["路径"])
+        for p in (sc["路径"], sc["出错"]):
+            if not p or not SCRIPT_RE.match(p):
+                continue
+            stem = p[len("scripts/"):-len(".zs")]
+            own = max((m for m in mods if stem.startswith(m + "_")), key=len, default=None)
+            if own != name:
+                probs.append(f"第 {sc['行']} 行：脚本「{p}」不属于本模块（文件名要以「{name}_」开头" +
+                             (f"，现在归 {own}" if own else "") + "）")
+        if sc["出错"] and sc["出错"] in mains:
+            probs.append(f"第 {sc['行']} 行：出错脚本「{sc['出错']}」不能同时是别的脚本")
+    return probs
+
+
 def check(c, name, upstream, all_modules):
     """约定检查。upstream：{上游模块名: 它的约定}（c['依赖'] 里的）；all_modules：项目全部模块名。返回问题列表。"""
     probs = []
@@ -445,6 +513,7 @@ def check(c, name, upstream, all_modules):
             if path_param not in names:
                 probs.append(f"第 {i['行']} 行：接口 {i['路径']} 声明了「上传 {i['上传']['字段']}」，但函数「{i['函数']}」没有入参「{path_param}」接收存盘路径")
     probs += _auth_problems(c, fns)
+    probs += _script_problems(c, name, all_modules)
     covered, names = set(), set()
     for u in c["用例"]:
         if u["名"] in names:

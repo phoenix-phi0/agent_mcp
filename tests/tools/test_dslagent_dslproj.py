@@ -8,6 +8,7 @@
 import json
 import inspect
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -219,10 +220,10 @@ def t_contract():
 def t_project():
     print("二、项目约定：模块名 / 范围 / 约定读取 / 依赖闭包")
     check(P.module_of("请做\n模块 graph\n补充说明") == "graph" and P.module_of("模块: progress") == "progress" and P.module_of("没有") is None, "module_of")
-    check(P.scope_globs("graph") == ["entities/graph.entity", "services/graph.zs", "routes/graph*.zs", "queries/graph_*.sql", "tests/graph_*"], "范围 = 5 类路径")
+    check(P.scope_globs("graph") == ["entities/graph.entity", "services/graph.zs", "routes/graph*.zs", "queries/graph_*.sql", "scripts/graph_*.zs", "tests/graph_*"], "范围 = 6 类路径（含 scripts/<模块>_*.zs）")
     sc = SC.parse(P.scope_globs("graph"))
-    check(all(SC.inside(x, sc) for x in ("entities/graph.entity", "services/graph.zs", "routes/graph.zs", "routes/graph_api.zs", "queries/graph_edge_insert.sql", "tests/graph_cases.zs"))
-          and not any(SC.inside(x, sc) for x in ("contracts/graph.md", "services/progress.zs", "routes/progress.zs", "queries/progress_x.sql", "entities/progress.entity")),
+    check(all(SC.inside(x, sc) for x in ("entities/graph.entity", "services/graph.zs", "routes/graph.zs", "routes/graph_api.zs", "queries/graph_edge_insert.sql", "scripts/graph_run.zs", "tests/graph_cases.zs"))
+          and not any(SC.inside(x, sc) for x in ("contracts/graph.md", "services/progress.zs", "routes/progress.zs", "queries/progress_x.sql", "entities/progress.entity", "scripts/progress_run.zs", "scripts/helper.zs")),
           "范围 glob：本模块的文件在内，contracts / 别的模块不在")
     try:
         P.require_module("没有模块行")
@@ -415,6 +416,201 @@ def t_settle():
 # ------------------------------------------------------------------ 五、验收 / 资料 / 动词
 
 
+def t_scripts():
+    print("六、模块脚本（scripts/<模块>_*.zs）：范围 / ## 脚本 约定 / 比对 / 加载检查 / 后台任务实跑")
+    from tools.dslagent import loadcheck as LC
+    BG = ROOT / "tests" / "tools" / "fixtures" / "dslproj_bg"
+
+    # ---- 范围：scripts/<m>_*.zs，同前缀按最长模块名归属
+    check("scripts/jobs_*.zs" in P.scope_globs("jobs"), "scope_globs 含 scripts/<模块>_*.zs")
+    p = TMP / "sc_scope"
+    shutil.rmtree(p, ignore_errors=True)
+    (p / "contracts").mkdir(parents=True)
+    (p / "scripts").mkdir()
+    for m in ("quiz", "quiz_knowledge", "graph"):
+        (p / "contracts" / f"{m}.md").write_text("模块 x\n", encoding="utf-8")
+    for f in ("quiz_run.zs", "quiz_knowledge_import.zs", "quiz_extra.zs", "graph_run.zs", "helper.zs"):
+        (p / "scripts" / f).write_text("# x\n", encoding="utf-8")
+    g = P.scope_globs("quiz", p)
+    check("scripts/quiz_*.zs" not in g and "scripts/quiz_run.zs" in g and "scripts/quiz_extra.zs" in g
+          and "scripts/quiz_knowledge_import.zs" not in g and not any(SC.inside("scripts/quiz_knowledge_import.zs", SC.parse([x])) for x in g if "scripts" in x),
+          "同前缀模块（quiz / quiz_knowledge）：quiz 的范围不含 quiz_knowledge 的脚本", g)
+    check(any(SC.inside("scripts/quiz_newone.zs", SC.parse([x])) for x in g) and not any(SC.inside("scripts/quiz_knowledge_new.zs", SC.parse([x])) for x in g),
+          "quiz 仍能新建 scripts/quiz_newone.zs，但新建不了 quiz_knowledge_ 开头的", g)
+    check("scripts/quiz_knowledge_*.zs" in P.scope_globs("quiz_knowledge", p) and "scripts/graph_*.zs" in P.scope_globs("graph", p), "没有同前缀模块的仍是前缀 glob")
+    check(P.scope_files(p, "quiz") == ["scripts/quiz_extra.zs", "scripts/quiz_run.zs"], "scope_files(quiz) 的脚本不含 quiz_knowledge、helper", P.scope_files(p, "quiz"))
+    check(P.scope_files(p, "quiz_knowledge") == ["scripts/quiz_knowledge_import.zs"] and P.scope_files(p, "graph") == ["scripts/graph_run.zs"], "scope_files 另两个模块")
+    mods = ["graph", "quiz", "quiz_knowledge"]
+    check(P.script_owner("quiz_knowledge_import", mods) == "quiz_knowledge" and P.script_owner("quiz_run", mods) == "quiz" and P.script_owner("helper", mods) is None,
+          "script_owner：最长模块名归属，没有前缀的无主")
+
+    # ---- ## 脚本 解析
+    c, probs = C.parse((BG / "contracts" / "jobs.md").read_text(encoding="utf-8"))
+    check(not probs and len(c["脚本"]) == 1, "fixture 约定（带 ## 脚本）解析无问题", probs)
+    sc = c["脚本"][0]
+    check(sc["路径"] == "scripts/jobs_run.zs" and sc["入参"] == ["job_id"] and sc["出错"] == "scripts/jobs_run_fail.zs" and "逐项处理" in sc["作用"],
+          "## 脚本 一行解析：路径 / 入参 / 出错 / 作用", sc)
+    check(C.declared_scripts(c) == ["scripts/jobs_run.zs", "scripts/jobs_run_fail.zs"], "declared_scripts 含出错脚本")
+    base = "模块 jobs\n## 函数\n公开 函数 f a\n## 用例\n用例 u\n  调用 f a=1\n  得 有返回\n"
+    c0, p0 = C.parse(base)
+    check(not p0 and c0["脚本"] == [] and C.check(c0, "jobs", {}, ["jobs"]) == [], "不写 ## 脚本：脚本为空，约定检查不变")
+    c1, p1 = C.parse(base + "## 脚本\nscripts/jobs_x.zs\n")
+    check(not p1 and c1["脚本"][0]["入参"] == [] and c1["脚本"][0]["出错"] == "" and c1["脚本"][0]["作用"] == "", "入参 / 出错 / 作用 都可省")
+    c2, p2 = C.parse(base + "## 脚本\nscripts/jobs_x.zs 入参 a,b;出错 scripts/jobs_x_fail.zs;做事 # 注释\n")
+    check(not p2 and c2["脚本"][0]["入参"] == ["a", "b"] and c2["脚本"][0]["出错"] == "scripts/jobs_x_fail.zs" and c2["脚本"][0]["作用"] == "做事", "半角分号、行尾注释也行", c2["脚本"])
+    for bad, why in (("jobs_x.zs", "不带 scripts/"), ("scripts/Jobs X.zs", "大写 / 空格"), ("scripts/jobs_x.zs 参数 a", "不是「入参」"), ("scripts/jobs_x.zs 入参 A", "入参非 snake"),
+                     ("scripts/jobs_x.zs；出错 helper.zs", "出错脚本写法不对")):
+        _, pb = C.parse(base + f"## 脚本\n{bad}\n")
+        check(pb, f"## 脚本 写错被指出：{why}", bad)
+
+    # ---- 约定检查：归属本模块
+    mods2 = ["jobs", "jobs_extra", "graph"]
+    for line, want in (("scripts/graph_x.zs", "不属于本模块"), ("scripts/helper.zs", "不属于本模块"),
+                       ("scripts/jobs_extra_x.zs", "归 jobs_extra"), ("scripts/jobs_x.zs；出错 scripts/graph_f.zs", "不属于本模块")):
+        cc, _ = C.parse(base + f"## 脚本\n{line}\n")
+        pr = C.check(cc, "jobs", {}, mods2)
+        check(any(want in x for x in pr), f"脚本归属检查：{line} → {want}", pr)
+    cc, _ = C.parse(base + "## 脚本\nscripts/jobs_x.zs\nscripts/jobs_x.zs\n")
+    check(any("重复" in x for x in C.check(cc, "jobs", {}, mods2)), "脚本重复声明被指出")
+    cc, _ = C.parse(base + "## 脚本\nscripts/jobs_x.zs；出错 scripts/jobs_y.zs\nscripts/jobs_y.zs\n")
+    check(any("不能同时是别的脚本" in x for x in C.check(cc, "jobs", {}, mods2)), "出错脚本不能同时是主脚本")
+    check(C.check(c, "jobs", {}, ["jobs"]) == [], "fixture 约定通过约定检查")
+
+    # ---- 比对约定：缺文件 / 多出 / 归属错；fixture 一致
+    def cmp(proj, module="jobs", mm=("jobs",)):
+        cc, _ = P.load_contract(proj, module)
+        return P.compare(proj, module, cc, list(mm))["差异"]
+    fx = TMP / "sc_fx"
+    shutil.rmtree(fx, ignore_errors=True)
+    shutil.copytree(BG, fx)
+    check(cmp(fx) == [], "fixture 项目：比对约定一致", cmp(fx))
+    (fx / "scripts" / "jobs_run_fail.zs").rename(fx / "scripts" / "jobs_run_fail.bak")
+    d = cmp(fx)
+    check(any("缺脚本 scripts/jobs_run_fail.zs" in x for x in d), "声明的出错脚本不存在 → 缺脚本", d)
+    (fx / "scripts" / "jobs_run_fail.bak").rename(fx / "scripts" / "jobs_run_fail.zs")
+    (fx / "scripts" / "jobs_run.zs").unlink()
+    check(any("缺脚本 scripts/jobs_run.zs" in x for x in cmp(fx)), "声明的主脚本不存在 → 缺脚本")
+    shutil.copy(BG / "scripts" / "jobs_run.zs", fx / "scripts" / "jobs_run.zs")
+    (fx / "scripts" / "jobs_extra_job.zs").write_text("# 没声明\n", encoding="utf-8")
+    d = cmp(fx)
+    check(any("多了约定里没有声明的脚本 scripts/jobs_extra_job.zs" in x for x in d), "scripts/<模块>_* 多出没声明的 → 差异", d)
+    (fx / "scripts" / "jobs_extra_job.zs").unlink()
+    # 别的模块的脚本不算本模块多出的；同前缀更长模块认走的也不算
+    (fx / "scripts" / "other_run.zs").write_text("# x\n", encoding="utf-8")
+    check(cmp(fx) == [], "别的前缀（other_）的脚本不算本模块多出")
+    (fx / "contracts" / "jobs_extra.md").write_text("模块 jobs_extra\n", encoding="utf-8")
+    (fx / "scripts" / "jobs_extra_x.zs").write_text("# x\n", encoding="utf-8")
+    cc, _ = P.load_contract(fx, "jobs")
+    check(P.compare(fx, "jobs", cc, ["jobs", "jobs_extra"])["差异"] == [], "同前缀更长的模块 jobs_extra 的脚本不算 jobs 多出的")
+    # 不写 ## 脚本 的旧约定：没有脚本文件时行为不变；有 scripts/<m>_* 文件则算多出
+    for m in ("graph", "progress"):
+        cc, _ = P.load_contract(SOL, m)
+        check(P.script_diffs(SOL, m, cc, ["graph", "progress"]) == [], f"旧约定 {m}（无 ## 脚本、无脚本文件）：脚本差异为空")
+    old = copy_sol("sc_old")
+    (old / "scripts").mkdir()
+    (old / "scripts" / "graph_x.zs").write_text("# x\n", encoding="utf-8")
+    cc, _ = P.load_contract(old, "graph")
+    check(any("多了约定里没有声明的脚本" in x for x in P.script_diffs(old, "graph", cc, ["graph", "progress"])), "旧约定但 scripts/graph_* 有文件 → 多出")
+    # 声明的脚本文件名归属错（约定检查会拦，这里比对也指出）
+    wrong = TMP / "sc_wrong"
+    shutil.rmtree(wrong, ignore_errors=True)
+    shutil.copytree(BG, wrong)
+    cc, _ = C.parse((BG / "contracts" / "jobs.md").read_text(encoding="utf-8").replace("scripts/jobs_run.zs 入参", "scripts/graph_run.zs 入参"))
+    (wrong / "scripts" / "graph_run.zs").write_text("# x\n", encoding="utf-8")
+    d = P.script_diffs(wrong, "jobs", cc, ["jobs", "graph"])
+    check(any("不属于本模块" in x for x in d), "声明的脚本文件名不归本模块 → 比对指出", d)
+
+    # ---- 骨架：不生成脚本；函数伪代码里的「后台执行 …」写进注释，模型照着实现
+    from tools.dslagent.v3 import scaffold as SCF
+    st = SCF.service_text("jobs", c)
+    check("# 伪代码" not in st and "事务结束之后 后台执行 scripts/jobs_run.zs job_id={job_id} on_error=scripts/jobs_run_fail.zs" in st and "scripts" not in SCF.service_text("graph", P.load_contract(SOL, "graph")[0]),
+          "骨架：services 注释里能看到后台执行伪代码；骨架不生成脚本文件")
+
+    # ---- 加载检查：执行 / 后台执行 scripts/…
+    check(LC.check_project(BG, scripts=True) == [], "fixture 项目：加载检查无问题", LC.check_project(BG, scripts=True))
+    gen_lc = TMP / "lc_gen"
+    shutil.rmtree(gen_lc, ignore_errors=True)
+    shutil.copytree(BG, gen_lc)
+    (gen_lc / "scripts" / "jobs_run.zs").unlink()
+    check(LC.check_project(gen_lc) == [] and any("找不到脚本 scripts/jobs_run.zs" in x for x in LC.check_project(gen_lc, scripts=True)),
+          "默认（生成阶段）不查脚本调用，核查阶段（scripts=True / load_problems）才查：脚本还没写出来时生成阶段不误拦")
+
+    def lc_proj(name, svc_body="", script_files=None, route=""):
+        q = TMP / name
+        shutil.rmtree(q, ignore_errors=True)
+        shutil.copytree(BG, q)
+        if svc_body:
+            t = (q / "services" / "jobs.zs").read_text(encoding="utf-8")
+            a = "    后台执行 scripts/jobs_run.zs job_id={job_id} on_error=scripts/jobs_run_fail.zs\n    返回 {\"job_id\": {job_id}}"
+            assert a in t
+            (q / "services" / "jobs.zs").write_text(t.replace(a, "    " + svc_body + "\n    返回 {\"job_id\": {job_id}}", 1), encoding="utf-8")
+        for rel, txt in (script_files or {}).items():
+            (q / rel).write_text(txt, encoding="utf-8")
+        if route:
+            (q / "routes" / "jobs.zs").write_text(route, encoding="utf-8")
+        return q
+    q = lc_proj("lc1", "后台执行 scripts/jobs_nope.zs job_id={job_id}")
+    pr = LC.check_project(q, scripts=True)
+    check(any("services/jobs.zs 函数 提交任务" in x and "找不到脚本 scripts/jobs_nope.zs" in x for x in pr), "加载检查：后台执行的脚本不存在", pr)
+    q = lc_proj("lc2", "后台执行 scripts/jobs_run.zs job_id={job_id} on_error=scripts/jobs_gone.zs")
+    pr = LC.check_project(q, scripts=True)
+    check(any("找不到on_error 脚本 scripts/jobs_gone.zs" in x for x in pr), "加载检查：on_error 指向的脚本不存在", pr)
+    q = lc_proj("lc3", "后台执行 scripts/other_run.zs job_id={job_id}", {"scripts/other_run.zs": "设 x = 1\n"})
+    pr = LC.check_project(q, scripts=True)
+    check(any("scripts/other_run.zs 不属于本模块 jobs" in x for x in pr), "加载检查：业务函数后台执行不以「<本模块>_」开头的脚本", pr)
+    q = lc_proj("lc4", "执行 scripts/graph_run.zs job_id={job_id}", {"scripts/graph_run.zs": "设 x = 1\n"})
+    (q / "contracts" / "graph.md").write_text("模块 graph\n", encoding="utf-8")
+    pr = LC.check_project(q, scripts=True)
+    check(any("它归 graph" in x and "跨模块不能执行别人的脚本" in x for x in pr), "加载检查：跨模块执行别人的脚本（执行 与 后台执行 同规则）", pr)
+    q = lc_proj("lc5", "后台执行 scripts/jobs_run.zs job_id={job_id} on_error=scripts/graph_fail.zs", {"scripts/graph_fail.zs": "设 x = 1\n"})
+    (q / "contracts" / "graph.md").write_text("模块 graph\n", encoding="utf-8")
+    check(any("on_error 脚本 scripts/graph_fail.zs 不属于本模块" in x for x in LC.check_project(q, scripts=True)), "加载检查：on_error 脚本归别的模块")
+    q = lc_proj("lc6", "", {"scripts/jobs_run.zs": "执行 scripts/jobs_nope2.zs a=1\n" + (BG / "scripts" / "jobs_run.zs").read_text(encoding="utf-8")})
+    check(any("scripts/jobs_run.zs: 第 1 行" in x and "找不到脚本 scripts/jobs_nope2.zs" in x for x in LC.check_project(q, scripts=True)), "加载检查：脚本里 执行 的脚本不存在")
+    q = lc_proj("lc7", "", route='接口 POST /jobs/x\n  后台执行 scripts/jobs_none.zs a=1\n  返回 {"ok": 1}\n结束\n')
+    check(any("routes/jobs.zs 接口 POST /jobs/x" in x and "找不到脚本 scripts/jobs_none.zs" in x for x in LC.check_project(q, scripts=True)), "加载检查：接口里 后台执行 的脚本不存在")
+    q = lc_proj("lc8", "后台执行 scripts/jobs_run.zs job_id={job_id}")
+    check(LC.check_project(q, scripts=True) == [], "on_error 可省；本模块脚本（存在、前缀对）无问题")
+    q = lc_proj("lc9", "", {"scripts/jobs_run.zs": "设 s = 调用 jobs.待处理项 job_id={job_id}\n"})
+    t = (q / "services" / "jobs.zs").read_text(encoding="utf-8").replace("公开 函数 待处理项", "函数 待处理项")
+    (q / "services" / "jobs.zs").write_text(t, encoding="utf-8")
+    pr = LC.check_project(q, scripts=True)
+    check(any("scripts/jobs_run.zs" in x and "不是公开函数" in x for x in pr), "加载检查：脚本里调本模块私有函数被拒（脚本只能调公开函数）", pr)
+    keys = P.load_problems(lc_proj("lc10", "后台执行 scripts/jobs_nope.zs a=1"), "jobs", ["jobs"])
+    check(any("找不到脚本" in x for x in keys), "load_problems（核查阶段）带出本模块脚本调用的问题", keys)
+    kg_like = TMP / "lc_legacy"
+    shutil.rmtree(kg_like, ignore_errors=True)
+    (kg_like / "scripts").mkdir(parents=True)
+    (kg_like / "routes").mkdir()
+    (kg_like / "scripts" / "pick.zs").write_text("设 x = 1\n", encoding="utf-8")
+    (kg_like / "routes" / "a.zs").write_text('接口 POST /a/x\n  执行 scripts/pick.zs k=1\n  后台执行 scripts/pick.zs k=2\n  返回 {"ok": 1}\n结束\n', encoding="utf-8")
+    check(LC.check_project(kg_like, scripts=True) == [], "不属于任何模块的老项目（无 services / contracts）：执行 / 后台执行 scripts/ 只查存在，无问题")
+
+    # ---- 实跑（不调模型）：业务函数里后台执行脚本、脚本调本模块函数、on_error 记失败、跑用例 settle 等后台完成
+    r = CS.run(BG, "jobs")
+    check(r["全过"] and r["总数"] == 17, "fixture 17 条用例全过：提交→后台逐项处理→某项为空记失败原因；任务级出错走 on_error；重试", r["原因"])
+    names = {u["名"] for u in c["用例"]}
+    check({"提交任务_全成功", "提交任务_某项为空记失败原因", "提交任务_任务级出错走on_error", "重试失败项_失败项重新处理"} <= names, "覆盖后台完成 / 失败项 / on_error / 重试用例")
+    # 用例的期望没有 settle 就对不上：把脚本里的处理去掉，后台跑完后库里仍是待处理 → 用例要判失败（证明不是碰巧对上）
+    brk = TMP / "sc_brk"
+    shutil.rmtree(brk, ignore_errors=True)
+    shutil.copytree(BG, brk)
+    (brk / "scripts" / "jobs_run.zs").write_text("设 s = 调用 jobs.开始 job_id={job_id}\n", encoding="utf-8")
+    r2 = CS.run(brk, "jobs")
+    check(not r2["全过"] and any(f["名"] == "提交任务_全成功" for f in r2["失败"]), "脚本不处理各项 → 用例失败（后台真的在跑，不是同步碰巧对）", r2["原因"][:300])
+    # 脚本里调私有函数：运行期同样被拒，on_error 把任务标失败
+    prv = TMP / "sc_prv"
+    shutil.rmtree(prv, ignore_errors=True)
+    shutil.copytree(BG, prv)
+    t = (prv / "services" / "jobs.zs").read_text(encoding="utf-8").replace("公开 函数 开始", "函数 开始")
+    (prv / "services" / "jobs.zs").write_text(t, encoding="utf-8")
+    cp = (prv / "contracts" / "jobs.md").read_text(encoding="utf-8").replace("公开 函数 开始", "函数 开始")
+    cp = re.sub(r"(?ms)^用例 开始_[^\n]*\n.*?(?=^用例 |\Z)", "", cp)
+    (prv / "contracts" / "jobs.md").write_text(cp.rstrip() + "\n", encoding="utf-8")
+    r3 = CS.run(prv, "jobs")
+    check(any(f["名"] == "提交任务_全成功" for f in r3["失败"]), "脚本调私有函数「开始」：运行期被拒，任务不会完成（用例失败）", r3["原因"][:300])
+
+
 def t_accept_materials():
     print("五、验收 / 资料 / 规划说明 / 动词")
     for m in ("graph", "progress"):
@@ -605,6 +801,7 @@ def main():
         t_mock_json()
         t_case_files()
         t_settle()
+        t_scripts()
         t_accept_materials()
         t_flow()
     finally:

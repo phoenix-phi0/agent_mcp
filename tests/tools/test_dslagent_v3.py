@@ -1588,7 +1588,7 @@ def test_f1_modrun_scope():
     check("routes/quiz*.zs" not in g and "routes/quiz.zs" in g and "routes/quiz_extra.zs" in g and "routes/quiz_knowledge.zs" not in g,
           "scope_globs(quiz, project)：精确列自己的 routes 文件，不含 quiz_knowledge", g)
     check("routes/quiz_knowledge*.zs" in PJ.scope_globs("quiz_knowledge", p) and "routes/graph*.zs" in PJ.scope_globs("graph", p), "没有同前缀模块的仍是前缀 glob")
-    check(PJ.scope_globs("quiz") == ["entities/quiz.entity", "services/quiz.zs", "routes/quiz*.zs", "queries/quiz_*.sql", "tests/quiz_*"], "不给 project 时与原来一致")
+    check(PJ.scope_globs("quiz") == ["entities/quiz.entity", "services/quiz.zs", "routes/quiz*.zs", "queries/quiz_*.sql", "scripts/quiz_*.zs", "tests/quiz_*"], "不给 project 时只比原来多 scripts/<模块>_*.zs")
     check(PJ.scope_files(p, "quiz") == ["routes/quiz.zs", "routes/quiz_extra.zs"], "scope_files(quiz) 不含 quiz_knowledge", PJ.scope_files(p, "quiz"))
     from tools.dslagent.packs import dslproj as DP
     check(DP.scope_for("模块 quiz\n", p) == g, "dslproj.scope_for（STRICT_SCOPE 的范围）同一套归属")

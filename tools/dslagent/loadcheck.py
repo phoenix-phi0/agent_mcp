@@ -132,6 +132,60 @@ def call_sites(lines, funcs=None):
     return out
 
 
+def exec_sites(lines):
+    """脚本行里 `执行` / `后台执行` 一个 scripts/… 脚本的语句：[(下标, 后台?, 目标, {键: 值原文})]。
+    目标里有 {变量} 的不收（运行时才知道）；业务调用（模块.函数）、同目录脚本名不收。"""
+    out = []
+    for i, raw in enumerate(lines):
+        line = normalize(raw).strip()
+        if not line or line.startswith("#"):
+            continue
+        head, rest = split_head(line)
+        if head == "set":
+            _, sep, value = rest.partition("=")
+            if not sep:
+                continue
+            head, rest = split_head(value.strip())
+        if head not in ("call", "call_bg"):
+            continue
+        target, tail, _on_err = parse_call_text(rest)
+        if not target.startswith("scripts/") or "{" in target:
+            continue
+        out.append((i, head == "call_bg", target, {m.group(1).strip(): m.group(2).strip() for m in CALL_PARAM_RE.finditer(tail)}))
+    return out
+
+
+def script_module(target, modules):
+    """scripts/<名>.zs 按文件名前缀归哪个模块（「<模块>_」开头，取最长）；没有返回 None。"""
+    stem = Path(target).stem
+    return max((m for m in modules if stem.startswith(m + "_")), key=len, default=None)
+
+
+def check_script_calls(lines, root, caller, modules, label, base=0):
+    """`执行` / `后台执行` 的目标是 scripts/… 时：脚本存在；`后台执行` 的 on_error 脚本存在；目标脚本归调用方所在模块
+    （文件名以「<调用方模块>_」开头；跨模块不许执行别人的脚本，只能调对方的公开函数）。调用方不属于任何模块（caller 为 None）时只查存在。
+    只在加载检查 / 核查阶段用，不在生成阶段拦（8c7dba1）。"""
+    probs = []
+    for i, bg, target, params in exec_sites(lines):
+        where = f"[接口出错] {label}: 第 {base + i + 1} 行："
+        targets = [(target, "脚本")]
+        if bg and params.get("on_error", "").strip():
+            targets.append((params["on_error"].strip(), "on_error 脚本"))
+        for t, what in targets:
+            if "{" in t:
+                continue
+            if not (Path(root) / t).is_file():
+                probs.append(f"{where}找不到{what} {t}")
+                continue
+            if caller is None:
+                continue
+            own = script_module(t, modules)
+            if own != caller:
+                probs.append(f"{where}{what} {t} 不属于本模块 {caller}（脚本文件名要以「{caller}_」开头）"
+                             + (f"，它归 {own}：跨模块不能执行别人的脚本，只能调它的公开函数" if own else ""))
+    return probs
+
+
 def check_calls(lines, svc, caller, in_func, label, funcs=None, base=0):
     """业务调用的静态检查，规则和运行时同一套（Services.lookup / check_args）。
     返回报错原话列表；label 是「文件 函数 / 接口」这段定位，base 是 lines[0] 在文件里的行号偏移。"""
@@ -316,8 +370,11 @@ def check_file(path, rel=None):
     return check_text(path.read_text(encoding="utf-8"), rel, not (path.parent.name == "scripts" or "/scripts/" in str(rel)))
 
 
-def check_project(root):
-    """全项目加载：scan_routes（接口重复、块不配对）+ 每个接口块 + scripts/*.zs 逐个解析。返回问题列表。"""
+def check_project(root, scripts=False):
+    """全项目加载：scan_routes（接口重复、块不配对）+ 每个接口块 + scripts/*.zs 逐个解析。返回问题列表。
+    scripts=True 再查 `执行` / `后台执行` 的 scripts/… 目标（check_project_scripts：脚本存在、on_error 存在、归本模块）——
+    只在核查阶段（dslproj 的 加载检查 / project.load_problems）开，生成阶段（骨架、v2 逐步生成）不开：脚本是后写的，
+    生成中途拦只会误拦（H1 8c7dba1 的教训）。"""
     root = Path(root)
     probs = []
     routes = root / "routes"
@@ -347,6 +404,41 @@ def check_project(root):
         for f in sorted(sdir.rglob("*.zs")) if sdir.is_dir() else []:
             lines = f.read_text(encoding="utf-8").splitlines()
             probs += check_calls(lines, svc, None, False, str(f.relative_to(root)))
+    if scripts:
+        probs += check_project_scripts(root)
+    return probs
+
+
+def check_project_scripts(root):
+    """全项目 `执行` / `后台执行` scripts/… 的静态检查（见 check_script_calls）：接口 / 业务函数 / scripts 三处。
+    模块名取 services/*.zs 与 contracts/*.md；调用方模块：接口按文件名 routes/<模块>*.zs、业务函数是所在模块、
+    脚本按文件名前缀 scripts/<模块>_*.zs（对不上任何模块的 = 调用方未知，只查存在）。"""
+    root = Path(root)
+    modules = {f.stem for f in (root / "services").glob("*.zs")} if (root / "services").is_dir() else set()
+    modules |= {f.stem for f in (root / "contracts").glob("*.md")} if (root / "contracts").is_dir() else set()
+    probs = []
+    routes = root / "routes"
+    for f in sorted(routes.rglob("*.zs")) if routes.is_dir() else []:
+        rel = str(f.relative_to(root))
+        caller = max((m for m in modules if f.stem.startswith(m)), key=len, default=None)
+        try:
+            eps, _ports = split_endpoints(f.read_text(encoding="utf-8"), Path(rel))
+        except DSLError:
+            continue
+        for ep in eps:
+            probs += check_script_calls(ep.body, root, caller, modules,
+                                        f"{rel} 接口 {ep.method} {ep.path}（文件第 {ep.line} 行起）", base=ep.line)
+    sdir = root / "services"
+    if sdir.is_dir() and any(sdir.glob("*.zs")):
+        svc = Services(sdir)
+        for mod in svc.modules.values():
+            for fn in mod.funcs.values():
+                probs += check_script_calls(mod.lines[fn.start:fn.end], root, mod.name, modules,
+                                            f"{mod.rel} 函数 {fn.name}", base=fn.start)
+    scdir = root / "scripts"
+    for f in sorted(scdir.rglob("*.zs")) if scdir.is_dir() else []:
+        probs += check_script_calls(f.read_text(encoding="utf-8").splitlines(), root, script_module(f.name, modules), modules,
+                                    str(f.relative_to(root)))
     return probs
 
 

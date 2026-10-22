@@ -1,0 +1,13 @@
+实体 jobs_task 任务
+  字段 title 文本 必填 任务标题
+  字段 status 文本 必填 状态
+  字段 error 文本 失败原因
+结束
+
+实体 jobs_item 任务项
+  字段 task_id 整数 必填 索引 所属任务
+  字段 body 文本 原文
+  字段 result 文本 结果
+  字段 status 文本 必填 状态
+  字段 error 文本 失败原因
+结束

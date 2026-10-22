@@ -1,7 +1,7 @@
 """dslproj 的项目约定：目录布局、任务里的模块名、范围、约定读取与比对。
 
 布局（项目根下）：contracts/<模块>.md 约定（冻结，不在范围内，模型改不了）、entities/<模块>.entity、services/<模块>.zs、
-routes/<模块>*.zs（文件名以模块名开头）、queries/<模块>_*.sql、tests/<模块>_*。
+routes/<模块>*.zs（文件名以模块名开头）、queries/<模块>_*.sql、scripts/<模块>_*.zs（后台任务脚本，命名即归属）、tests/<模块>_*。
 任务文本的写法：含一行「模块 <名>」（其余文字是补充说明）；模块名是 contracts/ 里的文件名（英文 snake）。
 """
 import re
@@ -29,21 +29,39 @@ def require_module(task):
     return m
 
 
+def script_owner(stem, modules):
+    """scripts/<stem>.zs 属于哪个模块：文件名以「<模块>_」开头，取最长的模块名；没有返回 None。"""
+    return max((m for m in modules if stem.startswith(m + "_")), key=len, default=None)
+
+
+def script_files(project, module, modules):
+    """scripts/ 下属于该模块的脚本文件：scripts/<模块>_*.zs，按最长模块名归属（quiz 不认 scripts/quiz_knowledge_x.zs）。"""
+    sd = Path(project) / "scripts"
+    return [f for f in sorted(sd.glob("*.zs")) if script_owner(f.stem, modules) == module] if sd.is_dir() else []
+
+
 def scope_globs(module, project=None):
-    """该模块允许写 / 删的路径（scope.py 的 glob）。给了 project 时 routes 按「最长模块名归属」（同 route_files）收窄：
-    别的模块名以本模块名开头（quiz 与 quiz_knowledge）时，routes/quiz*.zs 会吞掉对方的文件，改成 routes/<模块>.zs + 已有的、归本模块的文件。"""
+    """该模块允许写 / 删的路径（scope.py 的 glob）。给了 project 时 routes / scripts 按「最长模块名归属」（同 route_files / script_files）收窄：
+    别的模块名以本模块名开头（quiz 与 quiz_knowledge）时，routes/quiz*.zs 会吞掉对方的文件，改成 routes/<模块>.zs + 已有的、归本模块的文件；
+    scripts/quiz_*.zs 同理，改成 scripts/quiz_[!k]*.zs（k = 对方模块名在「quiz_」后的首字母，glob 不能写排除整个前缀，宁可少给）+ 已有的、归本模块的脚本。"""
     routes = [f"routes/{module}*.zs"]
+    scripts = [f"scripts/{module}_*.zs"]
     if project is not None:
         mods = sorted(set(all_modules(project)) | {module})
         if any(m != module and m.startswith(module) for m in mods):
             routes = [f"routes/{module}.zs"] + [f"routes/{f.name}" for f in route_files(project, module, mods) if f.stem != module]
-    return [f"entities/{module}.entity", f"services/{module}.zs", *routes, f"queries/{module}_*.sql", f"tests/{module}_*"]
+        firsts = sorted({m[len(module) + 1] for m in mods if m != module and m.startswith(module + "_") and len(m) > len(module) + 1})
+        if firsts:
+            scripts = [f"scripts/{module}_[!{''.join(firsts)}]*.zs"] + [f"scripts/{f.name}" for f in script_files(project, module, mods)]
+    return [f"entities/{module}.entity", f"services/{module}.zs", *routes, f"queries/{module}_*.sql", *scripts, f"tests/{module}_*"]
 
 
 def scope_files(root, module):
     """root 下现有的、属于该模块范围的文件（相对路径，排序）；routes 按最长模块名归属。"""
     root = Path(root)
-    return sorted({str(f.relative_to(root)) for g in scope_globs(module, root) for f in root.glob(g) if f.is_file()})
+    mods = sorted(set(all_modules(root)) | {module})
+    return sorted({str(f.relative_to(root)) for g in scope_globs(module, root) for f in root.glob(g)
+                   if f.is_file() and (f.parent.name != "scripts" or script_owner(f.stem, mods) == module)})
 
 
 def contract_path(project, module):
@@ -177,8 +195,26 @@ def _auth_summary(g):
     return " / ".join(parts)
 
 
+def script_diffs(project, module, contract, modules):
+    """约定「## 脚本」与 scripts/ 的差异：声明的脚本文件必须存在（含出错脚本）、scripts/<模块>_* 不得多出没声明的、
+    声明的脚本要归本模块（文件名以「<模块>_」开头且不被更长的同前缀模块名认走）。不写「## 脚本」= 没有声明，此时 scripts/<模块>_* 也不该有。"""
+    diffs = []
+    declared = C.declared_scripts(contract)
+    mods = sorted(set(modules) | {module})
+    for p in declared:
+        if not (Path(project) / p).is_file():
+            diffs.append(f"缺脚本 {p}（约定「## 脚本」里声明了）")
+        elif script_owner(p[len("scripts/"):-len(".zs")], mods) != module:
+            diffs.append(f"脚本 {p} 不属于本模块（文件名要以「{module}_」开头，且不被同前缀的更长模块名认走）")
+    for f in script_files(project, module, mods):
+        rel = f"scripts/{f.name}"
+        if rel not in declared:
+            diffs.append(f"多了约定里没有声明的脚本 {rel}（约定「## 脚本」里没写它；要么在约定里声明，要么删掉）")
+    return diffs
+
+
 def compare(project, module, contract, modules):
-    """实际文件与约定是否一致：业务文件（模块名 / 依赖 / 每个函数的名字、公开与否、入参顺序与可选）、接口（方法 + 路径存在、只调约定里那个函数）、
+    """实际文件与约定是否一致：脚本（约定「## 脚本」）、业务文件（模块名 / 依赖 / 每个函数的名字、公开与否、入参顺序与可选）、接口（方法 + 路径存在、只调约定里那个函数）、
     约定里的表在 entities/<模块>.entity 里都有。返回 {"一致": bool, "差异": [文字]}。"""
     from tools.dsl_http import split_endpoints
     from tools.dsl_service import ServiceProblem, parse_module
@@ -247,6 +283,7 @@ def compare(project, module, contract, modules):
     for (m, p) in by:
         diffs.append(f"多了约定里没有的接口 {m} {p}")
     diffs += _auth_diffs(project, module, contract, modules)
+    diffs += script_diffs(project, module, contract, modules)
     ef = project / "entities" / f"{module}.entity"
     ents = set(re.findall(r"^\s*实体\s+(\S+)", ef.read_text(encoding="utf-8"), re.M)) if ef.is_file() else set()
     for t in contract["表"]:
@@ -260,7 +297,8 @@ def compare(project, module, contract, modules):
 
 
 def load_problems(project, module, modules):
-    """加载检查（loadcheck.check_project）里属于该模块文件的问题。"""
+    """加载检查（loadcheck.check_project，含 执行 / 后台执行 scripts/… 的检查）里属于该模块文件（含它的脚本）的问题。"""
     from tools.dslagent import loadcheck
-    keys = [f"services/{module}.zs"] + [f"routes/{f.name}" for f in route_files(project, module, modules)]
-    return [p for p in loadcheck.check_project(project) if any(k in p for k in keys)]
+    keys = ([f"services/{module}.zs"] + [f"routes/{f.name}" for f in route_files(project, module, modules)]
+            + [f"scripts/{f.name}" for f in script_files(project, module, modules)])
+    return [p for p in loadcheck.check_project(project, scripts=True) if any(k in p for k in keys)]
