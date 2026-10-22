@@ -718,6 +718,21 @@ def t_content():
     check(any("content/{m}/b.jsonl" in x and "不是本模块的内容文件目录" in x for x in pr), "路径带 {变量} 但前缀在 {变量} 就断了（content/{m}/）→ 问题", pr)
     pr = lc("lw7", "设 f = content/cards/b.jsonl\n设 w = 写JSONL {f} {a}")
     check(any("整个是变量" in x for x in pr), "整个路径是变量（核不了归属）→ 问题", pr)
+    check(lc("mv1", "设 m = 移动文件 content/cards/a.jsonl content/cards/a.withdrawn.jsonl\n移动文件 content/cards/{d}/a.jsonl content/cards/{d}/b.jsonl") == [],
+          "移动文件 源和目标都在本模块 content/<本模块>/ 下（含不带 设、带 {变量}）通过")
+    pr = lc("mv2", "设 m = 移动文件 content/cards/a.jsonl content/other/a.jsonl")
+    check(any("移动文件" in x and "content/other/a.jsonl" in x and "不是本模块的内容文件目录" in x for x in pr), "移动文件 目标在别的模块 → 问题", pr)
+    pr = lc("mv3", "设 m = 移动文件 content/other/a.jsonl content/cards/a.jsonl")
+    check(any("移动文件" in x and "content/other/a.jsonl" in x for x in pr), "移动文件 源在别的模块 → 问题", pr)
+    pr = lc("mv4", "设 m = 移动文件 content/cards/a.jsonl data/a.jsonl")
+    check(any("移动文件" in x and "不在 content/cards/ 下" in x for x in pr), "移动文件 目标在 content/ 外 → 问题", pr)
+    pr = lc("mv5", "设 m = 移动文件 uploads/a.jsonl content/cards/a.jsonl")
+    check(any("移动文件" in x and "不在 content/cards/ 下" in x for x in pr), "移动文件 源在 content/ 外 → 问题", pr)
+    # 比对约定：移动文件 的源和目标都按「写」算，约定没声明就是差异
+    q = proj("ct_mv", svc=lambda s: s.replace("cards.jsonl content/cards/cards.withdrawn.jsonl", "cards.jsonl content/cards/moved.jsonl", 1))
+    cc_, _ = C.parse((q / "contracts" / "cards.md").read_text(encoding="utf-8"))
+    r = P.compare(q, "cards", cc_, ["cards"])
+    check(not r["一致"] and any("content/cards/moved.jsonl" in d and "没有在约定「## 内容文件」里声明" in d for d in r["差异"]), "比对约定：移动文件 的目标路径没声明 → 差异", r["差异"])
     pr = lc("lw8", "设 w = 写JSONL content/cards/../other/b.jsonl {a}")
     check(any("不能含 .." in x for x in pr), "路径含 .. → 问题", pr)
     pr = lc("lw9", "读JSONL rows = content/other/x.jsonl")
@@ -743,6 +758,33 @@ def t_content():
     (kg_like / "routes" / "a.zs").write_text('接口 POST /a/x\n  用包 data\n  设 w = 写JSONL content/series.jsonl {k}\n  读JSONL r = content/words.jsonl\n  返回 {"ok": 1}\n结束\n', encoding="utf-8")
     check(LC.check_project(kg_like, scripts=True) == [], "不属于任何模块的老项目：不查内容文件路径")
 
+    # ---- 移动文件 动词本身（verbs/data/_verbs.py:181）
+    from tools import packs as PK
+    mw = TMP / "mv_ws"
+    shutil.rmtree(mw, ignore_errors=True)
+    (mw / "content" / "m").mkdir(parents=True)
+    (mw / "content" / "m" / "a.jsonl").write_text('{"k": 1}\n{"k": 2}\n', encoding="utf-8")
+
+    def mv(*a):
+        return PK.call_verb_text("移动文件", *a, packs=["data"], workspace=mw)
+    check(mv("content/m/a.jsonl", "content/m/a.withdrawn.jsonl") == "是" and not (mw / "content/m/a.jsonl").exists()
+          and (mw / "content/m/a.withdrawn.jsonl").read_text(encoding="utf-8") == '{"k": 1}\n{"k": 2}\n', "移动文件：成功返回是，源消失、目标内容一致")
+    check(mv("content/m/none.jsonl", "content/m/x.jsonl") == "否" and not (mw / "content/m/x.jsonl").exists(), "移动文件：源不存在返回否（与 删文件 一致）")
+    (mw / "content/m/b.jsonl").write_text("new\n", encoding="utf-8")
+    check(mv("content/m/b.jsonl", "content/m/a.withdrawn.jsonl") == "是" and (mw / "content/m/a.withdrawn.jsonl").read_text(encoding="utf-8") == "new\n", "移动文件：目标已存在被覆盖")
+    (mw / "content/m/c.jsonl").write_text("c\n", encoding="utf-8")
+    check(mv("content/m/c.jsonl", "content/m/deep/er/c.jsonl") == "是" and (mw / "content/m/deep/er/c.jsonl").is_file(), "移动文件：目标父目录自动建")
+    for src, dst, why in (("content/m/deep/er/c.jsonl", "../out.jsonl", "目标越界"), ("../x.jsonl", "content/m/x.jsonl", "源越界"),
+                          ("content/m/deep", "content/m/deep2", "源是目录")):
+        try:
+            out = mv(src, dst)
+        except ValueError as e:
+            out = str(e)
+        else:
+            out = "未报错：" + out
+        check(("越界" in out or "目录" in out) and not out.startswith("未报错"), f"移动文件：{why}报错", out)
+    check((mw / "content/m/deep/er/c.jsonl").is_file() and (mw / "content/m/deep").is_dir() and not (mw.parent / "out.jsonl").exists(), "移动文件：报错时没动任何文件")
+
     # ---- 实跑（不调模型）：保存→写文件→按文件重灌库；读回核对；撤下挪文件；跑用例在临时 workspace 不污染项目
     before = sorted(str(f.relative_to(CT)) for f in CT.rglob("*"))
     r = CS.run(CT, "cards")
@@ -761,7 +803,7 @@ def t_content():
     brk = proj("ct_brk", svc=lambda s: s.replace("    设 w = 写JSONL content/cards/cards.jsonl {rows}\n", "", 1))
     r2 = CS.run(brk, "cards")
     check(not r2["全过"] and any(f["名"] == "读回卡片_文件内容" for f in r2["失败"]), "保存函数不写文件 → 读回用例失败（文件真的在被核对）", r2["原因"][:200])
-    brk2 = proj("ct_brk2", svc=lambda s: s.replace("      设 d = 删文件 content/cards/cards.jsonl\n", "", 1))
+    brk2 = proj("ct_brk2", svc=lambda s: s.replace("      设 m = 移动文件 content/cards/cards.jsonl content/cards/cards.withdrawn.jsonl\n", "", 1))
     r3 = CS.run(brk2, "cards")
     check(not r3["全过"] and any(f["名"] == "撤下全部_文件已挪走" for f in r3["失败"]), "撤下函数不删旧文件 → 「文件已挪走」用例失败", r3["原因"][:200])
     # 接口冒烟用的内容快照 / 还原

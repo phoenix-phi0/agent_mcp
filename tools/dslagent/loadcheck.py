@@ -186,13 +186,13 @@ def check_script_calls(lines, root, caller, modules, label, base=0):
     return probs
 
 
-CONTENT_WRITE_HEADS = ("写JSONL", "写JSON", "删文件")
+CONTENT_WRITE_HEADS = ("写JSONL", "写JSON", "删文件", "移动文件")
 CONTENT_READ_HEADS = {"load_jsonl": "读JSONL", "load_json": "读JSON", "load": "读取", "读文本行": "读文本行", "读CSV": "读CSV",
                       "读YAML": "读YAML", "存在": "存在", "列文件": "列文件", "列目录": "列目录", "遍历文件": "遍历文件"}
 
 
 def content_sites(lines):
-    """脚本行里读写文件的语句：[(下标, 写?, 动词, 路径原文)]。写 = 写JSONL / 写JSON / 删文件（data 包动词，第一个参数是路径）；
+    """脚本行里读写文件的语句：[(下标, 写?, 动词, 路径原文)]。写 = 写JSONL / 写JSON / 删文件（data 包动词，第一个参数是路径）/ 移动文件（源和目标两个路径都算写，各出一条）；
     读 = 读JSONL / 读JSON / 读取 语句（`读JSONL 变量 = 路径`）和 读文本行 / 读CSV / 读YAML / 存在 / 列文件 / 列目录 / 遍历文件（第一个参数是路径）。
     路径只取原文（可含 {变量}），整个是变量（空前缀）的也收，由检查决定怎么算。"""
     out = []
@@ -208,7 +208,10 @@ def content_sites(lines):
             head, rest = split_head(value.strip())
         if head in CONTENT_WRITE_HEADS:
             toks = rest.split()
-            if toks:
+            if head == "移动文件":
+                for t in toks[:2]:
+                    out.append((i, True, head, t.removeprefix("源=").removeprefix("目标=")))
+            elif toks:
                 out.append((i, True, head, toks[0].removeprefix("文件=")))
         elif head in CONTENT_READ_HEADS:
             if head in ("load_jsonl", "load_json", "load"):
@@ -228,7 +231,7 @@ def path_prefix(path):
 
 def check_content_paths(lines, caller, label, base=0):
     """内容文件的路径规则（模块拥有自己的 content/<模块>/，库是它的投影）：
-    写（写JSONL / 写JSON / 删文件）的路径字面量必须以 content/<本模块>/ 开头（含 {变量} 只核 { 之前的前缀；整个是变量的核不了，也算问题：
+    写（写JSONL / 写JSON / 删文件 / 移动文件 的源和目标）的路径字面量必须以 content/<本模块>/ 开头（含 {变量} 只核 { 之前的前缀；整个是变量的核不了，也算问题：
     路径要直接写在语句里）；写别的模块的目录或 content/ 以外都不行。读别的模块的 content/ 也不行（要数据调对方的公开函数）；读 content/ 以外的不管。
     调用方不属于任何模块（caller 为 None）不查。只在加载检查 / 核查阶段用，不在生成阶段拦。"""
     if caller is None:

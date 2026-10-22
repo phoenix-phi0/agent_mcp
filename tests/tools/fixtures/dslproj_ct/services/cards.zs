@@ -59,8 +59,7 @@
     如果 {has} 等于 是
       读JSONL rows = content/cards/cards.jsonl
       设 n = 条数 {rows}
-      设 w = 写JSONL content/cards/cards.withdrawn.jsonl {rows}
-      设 d = 删文件 content/cards/cards.jsonl
+      设 m = 移动文件 content/cards/cards.jsonl content/cards/cards.withdrawn.jsonl
     结束
     设 x = 写库 app.db cards_card_clear
     返回 {"withdrawn": {n}}

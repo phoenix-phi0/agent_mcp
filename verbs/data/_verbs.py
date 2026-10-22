@@ -24,6 +24,7 @@
 
 import csv
 import json
+import os
 from pathlib import Path
 
 # 加载时注入
@@ -171,6 +172,23 @@ def register(reg, workspace):
         if not f.is_file():
             return "否"
         f.unlink()
+        return "是"
+
+    @reg.verb("把工作目录里的一个文件挪到新路径：移动文件 <源> <目标>。只挪文件不挪目录（源是目录报错）；"
+              "两个路径都限工作目录内（越界报错）；源不存在返回「否」（与 删文件 一致）；"
+              "目标的父目录不存在就建；目标已存在则覆盖（os.replace，同一文件系统内原子）；成功返回「是」。"
+              "例如 移动文件 content/cards/x.jsonl content/cards/x.withdrawn.jsonl")
+    def 移动文件(源: str, 目标: str) -> str:
+        s = safe(源)
+        d = safe(目标)
+        if s.is_dir():
+            raise ValueError(f"移动文件：{源} 是目录，只移动文件")
+        if not s.is_file():
+            return "否"
+        if d.is_dir():
+            raise ValueError(f"移动文件：目标 {目标} 是目录，目标要写成文件路径")
+        d.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(s, d)
         return "是"
 
     # ------------------------------------------------------------------

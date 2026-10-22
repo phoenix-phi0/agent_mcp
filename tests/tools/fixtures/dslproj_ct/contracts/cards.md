@@ -25,7 +25,7 @@
   伪代码 读 content/cards/cards.jsonl 与 cards.withdrawn.jsonl：是否存在、各有几条
 公开 函数 撤下全部
   返回 {withdrawn}
-  伪代码 cards.jsonl 存在则读出来写到 cards.withdrawn.jsonl 再删旧文件；清空库；返回撤下的条数
+  伪代码 cards.jsonl 存在则用 移动文件 挪到 cards.withdrawn.jsonl；清空库；返回撤下的条数
 
 ## 接口
 POST /cards/save -> 保存卡片
