@@ -48,7 +48,7 @@ def main(argv=None):
     n.add_argument("--from-plan", default=None, metavar="旧输出目录", help="（只对 --modular）读回旧运行的顶层规划与层次×模块（plan/top.zs、plan/layers.zs；旧版 JSON 目录也读，转成 DSL 规划文件；再不行从 result.json 与 calls/ 还原），跳过这两步，在新的 project / --out 里从数据层做起")
     v = sp.add_parser("v3", help="v3 流程（v3/v3.zs）：顶层规划 → 约定 → 骨架 → 分配 → 按层做模块；断了重跑同一命令即续跑；"
                        "action=build2 是最小主干新建流程（build2.zs，刻意不含接口冒烟）；action=audit/change 改走 核查.zs / 修改.zs（核查出问题清单 / 按问题清单改代码），缺省 build 是原来的新建流程")
-    v.add_argument("action", nargs="?", choices=("build", "build2", "audit", "change", "audit2", "change2"), default="build")
+    v.add_argument("action", nargs="?", choices=("build", "build2", "audit", "change", "audit2", "change2", "fix2"), default="build")
     v.add_argument("--req", required=True, help="需求文件")
     v.add_argument("--project", required=True, help="项目目录（不存在就建）")
     v.add_argument("--out", required=True, help="记录目录：每步产物、检查结果、重写次数、每个模块的 v2 记录目录、花费")
@@ -58,7 +58,8 @@ def main(argv=None):
     v.add_argument("--module-wall", type=int, default=1800, help="做一个模块时 v2 子进程的墙钟秒数")
     v.add_argument("--task", default=None, help="（audit / change）这一轮要完成的具体任务，不写就是纯核查 / 按问题清单改")
     v.add_argument("--issues", default="latest", help="（change）读哪份问题清单：路径或 latest（默认最新一份）")
-    v.add_argument("--llm", default="sonnet", help="（audit / change）调模型用的模型名")
+    v.add_argument("--llm", default="sonnet", help="（audit / change / audit2 / fix2）调模型用的模型名")
+    v.add_argument("--rounds", type=int, default=5, help="（fix2）核查→修改最多几轮")
     ag = sp.add_parser("agents", help="子 agent 管理：角色登记表、调度层账本")
     agsp = ag.add_subparsers(dest="agents_cmd", required=True)
     st = agsp.add_parser("stats", help="按角色 / 按模型统计调用数、成功率、平均轮数、花费、用时")
@@ -77,8 +78,9 @@ def main(argv=None):
             raise SystemExit(143)
         signal.signal(signal.SIGTERM, on_term)
         req_text = Path(a.req).read_text(encoding="utf-8")
-        if a.action in ("audit2", "change2"):   # 最小主干：audit2.zs / change2.zs
-            extra = {"issues": a.issues} if a.action == "change2" else {"llm": a.llm}
+        if a.action in ("audit2", "change2", "fix2"):   # 最小主干：audit2.zs / change2.zs / fix2.zs（循环：核查→改）
+            extra = ({"issues": a.issues} if a.action == "change2"
+                     else {"llm": a.llm, "rounds": a.rounds} if a.action == "fix2" else {"llm": a.llm})
             res = V3.run_entry(a.action, a.project, a.out, req_text, extra_vars=extra,
                                cost_cap=a.cost_cap, **({"wall": a.wall} if a.wall else {}), module_wall=a.module_wall)
             print(json.dumps({k: res.get(k) for k in ("status", "reason", "at", "花费", "用时", "模型调用", "returned")}, ensure_ascii=False))

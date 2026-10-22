@@ -1720,7 +1720,7 @@ def test_trunk2_entries():
     r = res.get("returned") or {}
     ag = [c for c in fk.calls if c["tag"] == "v3_agent_modify_module"]
     check(res["status"] == "成功" and len(ag) == 1 and ag[0]["user"].split("\n")[0] == "模块 graph", "change2：module_issue 只派 issues 里的模块 graph 一次", [c["tag"] for c in fk.calls])
-    check(set(r) == {"changed", "failed", "regression"} and len(r["changed"]) == 1 and r["failed"] == [], "change2 返回 {changed, failed, regression}", r)
+    check(set(r) == {"changed", "failed"} and len(r["changed"]) == 1 and r["failed"] == [], "change2 返回 {changed, failed}（不跑回归）", r)
     aj.write_text(json.dumps({"result": "ok"}), encoding="utf-8")
     fk = Fake()
     res = core.run_entry("change2", p, fresh("c2_out"), "需求", backend=fk, module_cmd=CMD)
@@ -1733,6 +1733,96 @@ def test_trunk2_entries():
     cp = subprocess.run([sys.executable, "-m", "tools.dslagent", "v3", "audit2", "--req", str(rq), "--project", str(fresh("a2_cli_p")), "--out", str(fresh("a2_cli_o"))],
                         cwd=ROOT, capture_output=True, text=True)
     check(cp.returncode == 0 and '"result": "ok"' in cp.stdout, "CLI audit2 空项目能跑（result ok）", cp.stdout + cp.stderr)
+
+
+def test_change2_fix2():
+    print("修改2 按模块分组只做一轮；修复2 循环 核查→改（假模型）")
+    import subprocess
+    p = project_with_contracts(("graph", "vocab", "progress"))
+    (p / "plan").mkdir(exist_ok=True)
+    (p / "plan" / "top.zs").write_text(TOP3, encoding="utf-8")
+    SF.gen_skeleton(p, VT.load(TOP3))
+    stub_env(fresh("f2_st") / "state")
+    aj = p / "plan" / "audit2.json"
+
+    def put(result, issues=None, **kw):
+        d = {"result": result, **kw}
+        if issues is not None:
+            d["issues"] = issues
+        aj.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+
+    def c2(fk):
+        res = core.run_entry("change2", p, fresh("c2_out"), "需求", backend=fk, module_cmd=CMD)
+        return res, [c for c in fk.calls if c["tag"] == "v3_agent_modify_module"]
+
+    put("module_issue", [{"module": "graph", "issue": "少接口甲", "basis": "contracts/graph.md"},
+                         {"module": "graph", "issue": "状态码错乙", "basis": "services/graph.zs"}])
+    fk = Fake(scripts={"v3_agent_modify_module": ["改好了"]})
+    res, ag = c2(fk)
+    check(res["status"] == "成功" and len(ag) == 1, "同模块两条问题只派一次", [c["user"][:30] for c in ag])
+    u = ag[0]["user"]
+    check(all(s in u for s in ("少接口甲", "contracts/graph.md", "状态码错乙", "services/graph.zs"))
+          and "只改与这些问题有关的地方，其他函数不动；约定不能改。" in u, "任务文本列出该模块全部问题（问题+依据）+ 约束", u)
+    put("module_issue", [{"module": "graph", "issue": "甲", "basis": "a"}, {"module": "vocab", "issue": "乙", "basis": "b"},
+                         {"module": "graph", "issue": "丙", "basis": "c"}])
+    fk = Fake(scripts={"v3_agent_modify_module": ["改好了"]})
+    res, ag = c2(fk)
+    r = res.get("returned") or {}
+    check(len(ag) == 2 and sorted(c["user"].split("\n")[0] for c in ag) == ["模块 graph", "模块 vocab"]
+          and "甲" in ag[0]["user"] and "丙" in ag[0]["user"] and "乙" not in ag[0]["user"], "两个模块各派一次，各自只带自己的问题", [c["user"] for c in ag])
+    check(len(r.get("changed") or []) == 2 and r.get("failed") == [], "返回 changed 两个、failed 空", r)
+    put("contract_issue", [{"module": "graph", "issue": "x", "basis": "y"}])
+    fk = Fake()
+    res, ag = c2(fk)
+    check(res["status"] == "失败" and not ag and "回到规划" in res["reason"], "contract_issue 终止、不派", res)
+    put("unchecked", unchecked=[{"module": "graph", "reason": "超时"}])
+    fk = Fake()
+    res, ag = c2(fk)
+    check(res["status"] == "失败" and not ag, "unchecked 终止、不派", res)
+    put("ok")
+    fk = Fake()
+    res, ag = c2(fk)
+    check(res["status"] == "成功" and not ag and fk.calls == [], "ok 不派", res)
+
+    # fix2：audit2 写 plan/audit2.json 之后 change2 读它；派任务的 tag 按调用顺序编号（dsl01…），每轮核查 3 个模块 → 第 k 轮是 dsl(3k-2)…dsl(3k)
+    def fix(rounds_replies, rounds=5):
+        sc = {"v3_agent_modify_module": ["改好了"]}
+        for k in range(1, 16):               # 没写的轮数/模块 = ok
+            sc[f"dsl{k:02d}"] = [a2_reply("ok")]
+        for ri, rr in enumerate(rounds_replies):
+            for mi, rep in rr.items():
+                sc[f"dsl{ri * 3 + mi:02d}"] = [rep]
+        fk = Fake(scripts=sc)
+        res = core.run_entry("fix2", p, fresh("f2_out"), "需求", extra_vars={"llm": "sonnet", "rounds": rounds}, backend=fk, module_cmd=CMD)
+        return res, fk
+
+    issue = a2_reply("module_issue", "少接口", "services/vocab.zs")
+    p = full_project()           # 全量回归要过：用完整项目
+    (p / "plan").mkdir(exist_ok=True)
+    (p / "plan" / "top.zs").write_text(TOP3, encoding="utf-8")
+    SF.gen_skeleton(p, VT.load(TOP3))
+    res, fk = fix([])
+    check(res["status"] == "成功" and fk.n("v3_agent_modify_module") == 0 and "第 1 轮" in res["reason"], "fix2：一开始就 ok，一轮就停、不改", res)
+    res, fk = fix([{2: issue}])
+    ag = [c for c in fk.calls if c["tag"] == "v3_agent_modify_module"]
+    check(res["status"] == "成功" and len(ag) == 1 and fk.n("dsl") == 6 and "第 2 轮" in res["reason"] and "vocab" in res["reason"],
+          "fix2：一轮修好就停（核查 2 轮 × 3 模块、改 1 次），信息带轮数和改了哪个模块", res)
+    res, fk = fix([{2: issue}, {2: issue}, {2: issue}], rounds=3)
+    check(res["status"] == "失败" and fk.n("v3_agent_modify_module") == 3 and fk.n("dsl") == 9 and "3 轮用完" in res["reason"]
+          and "少接口" in res["reason"], "fix2：轮数用完终止，带最后一次核查结果", res)
+    res, fk = fix([{1: a2_reply("contract_issue", "约定矛盾", "contracts/graph.md")}])
+    check(res["status"] == "失败" and fk.n("v3_agent_modify_module") == 0 and "约定" in res["reason"] and "约定矛盾" in res["reason"],
+          "fix2：contract_issue 终止、不改", res)
+    bad = json.dumps({"result": {}, "status": "失败", "reason": "超时"}, ensure_ascii=False)
+    res, fk = fix([{3: bad}, {1: bad}])      # 派任务失败会重试一次，重试也失败
+    check(res["status"] == "失败" and fk.n("v3_agent_modify_module") == 0 and "没核查成" in res["reason"], "fix2：unchecked 终止、不改", res)
+    cp = subprocess.run([sys.executable, "-m", "tools.dslagent", "v3", "-h"], cwd=ROOT, capture_output=True, text=True)
+    check("fix2" in cp.stdout, "CLI v3 -h 列出 fix2")
+    rq = fresh("f2_req") / "r.md"
+    rq.write_text("需求", encoding="utf-8")
+    cp = subprocess.run([sys.executable, "-m", "tools.dslagent", "v3", "fix2", "--req", str(rq), "--project", str(fresh("f2_cli_p")), "--out", str(fresh("f2_cli_o")), "--rounds", "2"],
+                        cwd=ROOT, capture_output=True, text=True)
+    check(cp.returncode == 0 and "第 1 轮核查通过" in cp.stdout, "CLI fix2 空项目能跑（一轮 ok）", cp.stdout + cp.stderr)
 
 
 def calls_for(state, mod):
@@ -1838,6 +1928,7 @@ if __name__ == "__main__":
         test_audit_entry()
         test_modify_entry()
         test_trunk2_entries()
+        test_change2_fix2()
         test_build2_trunk()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
