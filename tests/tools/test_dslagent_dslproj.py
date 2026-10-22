@@ -324,6 +324,15 @@ def t_cases():
     r = CS.run(SOL, "progress", now="2030-05-06 07:08:09")
     check(not r["全过"] and any("记作答_答对" == f["名"] and "没有" in f["原因"] for f in r["失败"]), "now 可调：换时间后依赖 2026-01-01 的用例失败（说明时间确实被固定）", r)
     check("DSL_NOW" not in os.environ, "跑完恢复 DSL_NOW 环境变量")
+    r = CS.run(SOL, "progress")
+    check(r["全过"], "未设 DSL_NOW 时默认固定为 2026-01-01，用例确定", r)
+    os.environ["DSL_NOW"] = "2030-05-06 07:08:09"
+    try:
+        r = CS.run(SOL, "progress")
+        check(not r["全过"], "环境已设 DSL_NOW 时不覆盖（沿用 2030，依赖 2026-01-01 的用例失败）", r)
+        check(os.environ.get("DSL_NOW") == "2030-05-06 07:08:09", "已设的 DSL_NOW 跑完原样保留")
+    finally:
+        os.environ.pop("DSL_NOW", None)
     # 失败原因：去掉成环检查
     p = copy_sol("cs_nocycle")
     t = (p / "services" / "graph.zs").read_text(encoding="utf-8")
