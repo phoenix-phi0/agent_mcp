@@ -197,7 +197,7 @@
 
 角色 logic_check
   用途: 对新写 / 重写的约定找伪代码逻辑漏洞（疑点并入核查问题清单，由修改规划决定采不采纳）
-  默认模型: codex:gpt-6-luna:medium
+  默认模型: goose:gpt-6-luna:medium
   回退模型: sonnet
   工具: 无
   可读范围: 约定
@@ -210,7 +210,7 @@
 
 角色 summarize
   用途: 通用助手：把过长原文压缩成要点
-  默认模型: codex:gpt-6-luna:low
+  默认模型: goose:gpt-6-luna:low
   回退模型: sonnet
   工具: 无
   可读范围: 原文
@@ -223,7 +223,7 @@
 
 角色 classify
   用途: 通用助手：给原文分类（返回一个标签）
-  默认模型: codex:gpt-6-luna:low
+  默认模型: goose:gpt-6-luna:low
   回退模型: sonnet
   工具: 无
   可读范围: 原文,候选标签
@@ -236,7 +236,7 @@
 
 角色 extract
   用途: 通用助手：从原文抽取结构化字段
-  默认模型: codex:gpt-6-luna:medium
+  默认模型: goose:gpt-6-luna:medium
   回退模型: sonnet
   工具: 无
   可读范围: 原文,要抽取的字段
@@ -249,7 +249,7 @@
 
 角色 prescreen
   用途: 通用助手：初筛（这份材料值不值得交给主模型细看）
-  默认模型: codex:gpt-6-luna:medium
+  默认模型: goose:gpt-6-luna:medium
   回退模型: sonnet
   工具: 无
   可读范围: 原文,筛选标准

@@ -82,11 +82,11 @@ def test_real_registry():
     check(not missing, "spec 要求的全部角色都登记了", missing)
     probs = R.check_roles(rm)
     check(probs == [], "真实登记表校验没有问题", probs)
-    check(rm["logic_check"]["默认模型"].startswith("codex:") and "luna" in rm["logic_check"]["默认模型"],
-          "logic_check 默认模型是 codex luna", rm["logic_check"]["默认模型"])
+    check(rm["logic_check"]["默认模型"].startswith("goose:") and "luna" in rm["logic_check"]["默认模型"],
+          "logic_check 默认模型是 goose luna", rm["logic_check"]["默认模型"])
     check(rm["logic_check"]["回退模型"] == "sonnet", "logic_check 回退 sonnet")
     for h in ("summarize", "classify", "extract", "prescreen"):
-        check(rm[h]["默认模型"].startswith("codex:") and "luna" in rm[h]["默认模型"] and rm[h]["回退模型"] == "sonnet",
+        check(rm[h]["默认模型"].startswith("goose:") and "luna" in rm[h]["默认模型"] and rm[h]["回退模型"] == "sonnet",
               f"助手 {h} 默认 luna、回退 sonnet", rm[h])
 
 
@@ -133,11 +133,11 @@ def fake_backend(replies):
 def test_dispatch_ok():
     print("派代理：正常成功")
     out = fresh()
-    backend = fake_backend({"codex:gpt-6-luna:medium": [{"text": '[{"问题":"漏了锁","依据":"x"}]', "cost": 0.01, "rc": 0}]})
+    backend = fake_backend({"goose:gpt-6-luna:medium": [{"text": '[{"问题":"漏了锁","依据":"x"}]', "cost": 0.01, "rc": 0}]})
     r = R.dispatch_agent("logic_check", "检查这份约定", {"约定": "模块 a\n..."}, out_dir=out, backend=backend)
     check(r["status"] == "ok", "status=ok", r)
     check(json.loads(r["result"])[0]["问题"] == "漏了锁", "拿到了模型回复的内容", r)
-    check(r["model"] == "codex:gpt-6-luna:medium", "用了角色默认模型", r)
+    check(r["model"] == "goose:gpt-6-luna:medium", "用了角色默认模型", r)
     rows = LG.read_rows(out)
     check(len(rows) == 1 and rows[0]["role"] == "logic_check" and rows[0]["status"] == "ok", "账本记了一条", rows)
 
@@ -146,7 +146,7 @@ def test_dispatch_fallback():
     print("派代理：回复不合格回退")
     out = fresh()
     backend = fake_backend({
-        "codex:gpt-6-luna:medium": [{"text": "不是 json", "cost": 0.01, "rc": 0}],
+        "goose:gpt-6-luna:medium": [{"text": "不是 json", "cost": 0.01, "rc": 0}],
         "sonnet": [{"text": '[]', "cost": 0.02, "rc": 0}],
     })
     r = R.dispatch_agent("logic_check", "", {"约定": "x"}, out_dir=out, backend=backend)
@@ -160,7 +160,7 @@ def test_dispatch_both_fail():
     print("派代理：默认和回退都不合格")
     out = fresh()
     backend = fake_backend({
-        "codex:gpt-6-luna:medium": [{"text": "x", "cost": 0.0, "rc": 0}],
+        "goose:gpt-6-luna:medium": [{"text": "x", "cost": 0.0, "rc": 0}],
         "sonnet": [{"text": "", "cost": 0.0, "rc": 0}],
     })
     r = R.dispatch_agent("logic_check", "", {"约定": "x"}, out_dir=out, backend=backend)
@@ -285,7 +285,7 @@ def test_dispatch_budget():
     out = fresh()
     # check_budget 在调用前按「已经花了多少」把关（不是扣完才查），所以第 1、2 次都还在 0.2 预算内会放过，
     # 第 3 次一看已经花了 0.30（≥0.2）就直接拦住，不再调模型。
-    backend = fake_backend({"codex:gpt-6-luna:low": [{"text": "摘要", "cost": 0.15}]})
+    backend = fake_backend({"goose:gpt-6-luna:low": [{"text": "摘要", "cost": 0.15}]})
     r1 = R.dispatch_agent("summarize", "", {"原文": "x" * 100}, out_dir=out, backend=backend)
     check(r1["status"] == "ok", "第一次没超预算", r1)
     r2 = R.dispatch_agent("summarize", "", {"原文": "y" * 100}, out_dir=out, backend=backend)
@@ -298,7 +298,7 @@ def test_dispatch_budget():
 def test_parallel_dispatch():
     print("并行派代理")
     out = fresh()
-    backend = fake_backend({"codex:gpt-6-luna:medium": [{"text": "[]", "cost": 0.01}]})
+    backend = fake_backend({"goose:gpt-6-luna:medium": [{"text": "[]", "cost": 0.01}]})
     items = [{"角色": "logic_check", "任务": "", "入参": {"约定": f"m{i}"}} for i in range(5)]
     rs = R.parallel_dispatch_agents(items, out_dir=out, backend=backend)
     check(len(rs) == 5 and all(r["status"] == "ok" for r in rs), "五个全成功", rs)
