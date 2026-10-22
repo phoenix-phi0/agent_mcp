@@ -46,8 +46,8 @@
     认证 角色 teacher 教师        角色代号 + 中文名（403 时用），同一模块可写多行
     认证 角色 student 学生 拒绝 教师账号不参与学习，请用学生账号
 
-只有写了「认证 …」的模块才会被当成登录相关模块；接口行可以在 `-> 函数` 之后加一个 `公开` 或 `角色 <代号>`
-（跟 dsl_http.py 接口行上的「角色 x」/「只许 x」一样，没写「认证」就都不生效）。
+认证在整个项目里只由负责登录 / 账号的那个模块写一次；其它模块的约定头部不写任何「认证 …」；接口行可以在 `-> 函数` 之后加一个 `公开` 或 `角色 <代号>`
+（跟 dsl_http.py 接口行上的「角色 x」/「只许 x」一样，认证只在账号模块写一次，其它模块不写认证行、只标接口行）。
 
 parse(text) -> (contract, 问题)；check(contract, name, upstream, all_modules) -> 问题（含「多余依赖」：声明的依赖在伪代码「调用 X.f」
 和用例「先 调用 X.f」里都没出现）；heads(contract) -> 函数头文本；hash_of(text)。
@@ -364,14 +364,10 @@ def params(fn):
 
 
 def _auth_problems(c, fns):
-    """认证声明本身的检查：身份变量要是某个公开函数的入参（否则路由层注入了也没人收）；没声明认证时角色表不该有内容（防写了角色没启用）。"""
+    """认证声明本身的检查：没声明认证时角色表不该有内容（防写了角色没启用）。
+    认证在项目里只由账号模块（owner）写一次：「身份」变量不要求是本模块的入参（owner 自己可以没有），其它模块只在接口行标 公开 / 角色。"""
     probs = []
     auth = c["认证"]
-    if auth["身份"]:
-        var, _default = auth["身份"]
-        used = any(var in [p.rstrip("?") for p in f["入参"]] for f in c["函数"] if f["公开"])
-        if not used:
-            probs.append(f"「认证 身份 {var} …」声明了，但没有一个公开函数把「{var}」写成入参（路由层按这个名字注入，函数要收它）")
     if auth["角色"] and not (auth["必须"] or auth["可选"]):
         probs.append("头部写了「认证 角色 …」，但没有「认证 必须」或「认证 可选」，角色检查不会生效")
     return probs
@@ -380,7 +376,6 @@ def _auth_problems(c, fns):
 def check(c, name, upstream, all_modules):
     """约定检查。upstream：{上游模块名: 它的约定}（c['依赖'] 里的）；all_modules：项目全部模块名。返回问题列表。"""
     probs = []
-    auth = c["认证"]
     if c["模块"] != name:
         probs.append(f"「模块」写的是 {c['模块']!r}，应该是 {name}")
     for d in c["依赖"]:
@@ -457,10 +452,6 @@ def check(c, name, upstream, all_modules):
         f = fns.get(i["函数"])
         if f is None or not f["公开"]:
             probs.append(f"第 {i['行']} 行：接口 {i['路径']} 调的函数「{i['函数']}」不是本模块的公开函数")
-        if i["角色"] and i["角色"] not in auth["角色"]:
-            probs.append(f"第 {i['行']} 行：接口 {i['路径']} 的「角色 {i['角色']}」没有在头部用「认证 角色 {i['角色']} <中文名>」声明")
-        if (i["角色"] or i["公开"]) and not (auth["必须"] or auth["可选"]):
-            probs.append(f"第 {i['行']} 行：接口 {i['路径']} 写了「{'公开' if i['公开'] else '角色 ' + i['角色']}」，但头部没有「认证 必须」或「认证 可选」，这行不会生效")
         if i["上传"] and f is not None:
             path_param = f"{i['上传']['字段']}_path"
             names = [p.rstrip("?") for p in f["入参"]]

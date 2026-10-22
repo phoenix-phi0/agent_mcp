@@ -245,11 +245,11 @@ def test_auth_contract():
     top = {"模块": [{"名": "account", "依赖": []}]}
     check(DC.check(c, "account", {}, ["account"]) == [], "account 约定整体检查通过", DC.check(c, "account", {}, ["account"]))
 
-    # 接口角色没有被「认证 角色」声明 → 拒
+    # 接口角色不再要求本模块用「认证 角色」声明（认证只在账号模块写一次，其它模块只标接口行）
     bad = text.replace("GET /account/whoami -> 我的角色 角色 teacher", "GET /account/whoami -> 我的角色 角色 principal", 1)
     bc, _ = DC.parse(bad)
     probs = DC.check(bc, "account", {}, ["account"])
-    check(any("没有在头部用「认证 角色 principal" in x for x in probs), "接口的角色没有被「认证 角色」声明 → 拒", probs)
+    check(not any("认证 角色 principal" in x for x in probs), "接口的角色本模块没声明 → 不再拒（交给账号模块的认证）", probs)
     # 公开和角色同时写 → 拒（解析阶段就报）
     _, pprobs = DC.parse(text.replace("GET /account/whoami -> 我的角色 角色 teacher", "GET /account/whoami -> 我的角色 公开 角色 teacher", 1))
     check(any("不能同时写「公开」和「角色」" in x for x in pprobs), "接口同时写 公开 和 角色 → 解析报问题", pprobs)
@@ -257,14 +257,13 @@ def test_auth_contract():
     no_auth = "\n".join(l for l in text.splitlines() if not l.startswith("认证")) + "\n"
     nc, _ = DC.parse(no_auth)
     nprobs = DC.check(nc, "account", {}, ["account"])
-    check(any("没有「认证 必须」或「认证 可选」，这行不会生效" in x for x in nprobs), "去掉头部认证声明，接口的 角色/公开 不会生效 → 提示", nprobs)
-    # 「认证 身份」声明的变量没有被任何公开函数收为入参 → 拒
+    check(nprobs == [], "去掉头部认证声明（非 owner 模块）：接口的 角色/公开 照样通过约定检查", nprobs)
+    # owner 的「认证 身份」变量不要求是本模块公开函数的入参（owner 自己可以没有 learner 入参）
     bad2 = text.replace("公开 函数 我的角色 who", "公开 函数 我的角色 somebody", 1).replace("who=1", "x=1")
     bad2 = bad2.replace("按 username=who 查", "按 username=somebody 查", 1)
     b2c, b2probs = DC.parse(bad2)
     check(not b2probs, "改参数名之后格式仍然合法（先确认这步没引入别的解析问题）", b2probs)
-    check(any("没有一个公开函数把「who」写成入参" in x for x in DC.check(b2c, "account", {}, ["account"])),
-          "「认证 身份 who …」声明了，但没有公开函数收 who 这个入参 → 拒")
+    check(not any("认证 身份" in x for x in DC.check(b2c, "account", {}, ["account"])), "「认证 身份 who …」声明了但本模块没有函数收 who → owner 不因此被拒", DC.check(b2c, "account", {}, ["account"]))
     # 「认证 必须」和「认证 可选」不能同时写
     _, both_probs = DC.parse("模块 x\n认证 必须\n认证 可选\n## 函数\n公开 函数 f a\n")
     check(any("不能同时写" in x for x in both_probs), "认证 必须 和 认证 可选 同时写 → 拒", both_probs)
@@ -299,6 +298,78 @@ def test_auth_contract():
     (p / "routes" / "account.zs").write_text(routes_text.replace("接口 GET /account/whoami 角色 teacher", "接口 GET /account/whoami 公开", 1), encoding="utf-8")
     cmp3 = PJ.compare(p, "account", c2, ["account"])
     check(any("约定「公开」是 False，实际是 True" in x for x in cmp3["差异"]), "接口的 公开/角色 和约定不一致 → 比对约定报差异", cmp3["差异"])
+
+
+NOTES_CONTRACT = """模块 notes
+依赖 无
+
+## 函数
+公开 函数 我的笔记 who
+  返回 {owner}
+  伪代码 返回 {"owner": who}
+
+## 接口
+GET /notes/mine -> 我的笔记 角色 student
+
+## 用例
+用例 我的笔记_有
+  调用 我的笔记 who=u1
+  得 owner=u1
+"""
+NOTES_SERVICE = """业务 notes
+  公开 函数 我的笔记 who
+    返回 {"owner": "{who}"}
+  结束
+结束
+"""
+
+
+def test_auth_owner_only():
+    print("方案 A：认证只在账号模块（owner）写一次；其它模块不写认证行、只标接口 角色——约定检查过、骨架只有 owner 带认证头、冒烟 / 403 仍按角色")
+    import sqlite3
+    from tools.dslagent.v3 import regress as RG
+    p = auth_project("auth_owner_only")
+    (p / "contracts" / "notes.md").write_text(NOTES_CONTRACT, encoding="utf-8")
+    (p / "services" / "notes.zs").write_text(NOTES_SERVICE, encoding="utf-8")
+    nc, nprobs = DC.parse(NOTES_CONTRACT)
+    check(nprobs == [] and nc["认证"]["可选"] is False and nc["认证"]["核对"] is None, "notes 约定不写任何认证行，解析无问题", (nprobs, nc["认证"]))
+    check(DC.check(nc, "notes", {}, ["account", "notes"]) == [], "非 owner 模块不写认证、接口标 角色 student → 约定检查通过", DC.check(nc, "notes", {}, ["account", "notes"]))
+    r = SF.gen_skeleton(p, VT.load("项目 demo\n模块 account\n模块 notes\n"))
+    check(r["问题"] == [], "两个模块骨架生成加载检查过", r)
+    ra = (p / "routes" / "account.zs").read_text(encoding="utf-8")
+    rn = (p / "routes" / "notes.zs").read_text(encoding="utf-8")
+    with_auth = [f.name for f in (p / "routes").glob("*.zs") if any(l.startswith("认证 ") for l in f.read_text(encoding="utf-8").splitlines())]
+    check(with_auth == ["account.zs"] and "接口 GET /notes/mine 角色 student" in rn, "routes 里只有 owner 的 account.zs 有认证头，notes 只有接口行的角色", (with_auth, rn))
+    c2, _ = PJ.load_contract(p, "notes")
+    cmp = PJ.compare(p, "notes", c2, ["account", "notes"])
+    check(cmp["一致"] and not cmp["差异"], "notes 比对约定一致（没声明认证就不比认证）", cmp)
+    results, notes = RG.run_smoke(p, ["account", "notes"])
+    check(results == {"account": (True, ""), "notes": (True, "")}, "冒烟：notes 的 student 接口按角色走不登录 401 + student 账号登录通过", (results, notes))
+    # 角色 403：teacher 账号调 notes 的 student 接口
+    from tools.dsl_http import Router, auth_config
+    ws = fresh("auth_owner_ws")
+    shutil.rmtree(ws)
+    shutil.copytree(p, ws)
+    con = sqlite3.connect(ws / "app.db")
+    con.execute("CREATE TABLE account_user(id INTEGER PRIMARY KEY, username TEXT NOT NULL, password_hash TEXT, role TEXT NOT NULL)")
+    con.commit()
+    con.close()
+    auth = auth_config(ws / "routes")
+    client = Router(ws / "routes", ws, ws / "sessions", real=False, login=True).app().test_client()
+    check(client.get("/notes/mine", query_string={"who": "u1"}).status_code == 401, "不登录调 notes 的 student 接口 → 401")
+    u, pw = RG._make_actor(ws, ws / "app.db", auth, "teacher")
+    RG._login_cookie(client, ws, u, pw, None)
+    check(client.get("/notes/mine", query_string={"who": "u1"}).status_code == 403, "teacher 登录调 student 接口 → 403")
+    c3 = Router(ws / "routes", ws, ws / "sessions", real=False, login=True).app().test_client()
+    u2, pw2 = RG._make_actor(ws, ws / "app.db", auth, "student")
+    RG._login_cookie(c3, ws, u2, pw2, None)
+    check(c3.get("/notes/mine", query_string={"who": "u1"}).status_code == 200, "student 登录调 student 接口 → 200")
+    # 冒烟 mods[:1] 兜底：核对查询缺失且没有 owner 时，挂到声明了认证的模块（不是任意第一个模块）
+    (p / "queries" / "account_by_name.sql").unlink()
+    ct = (p / "contracts" / "account.md").read_text(encoding="utf-8").replace("认证 核对 app.db account_by_name", "认证 核对 app.db other_q", 1)
+    (p / "contracts" / "account.md").write_text(ct, encoding="utf-8")      # 约定的核对与 routes 不一致 → 找不到 owner
+    results2, _ = RG.run_smoke(p, ["notes", "account"])
+    check(not results2["account"][0] and results2["notes"][0], "缺核对查询：失败挂在声明了认证的 account，不挂第一个模块 notes", results2)
 
 
 def test_prompt_example():
@@ -1505,6 +1576,7 @@ if __name__ == "__main__":
         test_smoke_actor_failures()
         test_contract_check()
         test_auth_contract()
+        test_auth_owner_only()
         test_prompt_example()
         test_skeleton_build_state()
         test_learner_record_scaffold()

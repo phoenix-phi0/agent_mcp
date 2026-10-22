@@ -327,7 +327,8 @@ def smoke_detail(project, mods):
             q = auth["check"][1]
             if not (ws / "queries" / f"{q}.sql").is_file():
                 owners = [m for m, c in contracts.items() if list(c["认证"]["核对"] or []) == list(auth["check"])]
-                for m in owners or mods[:1]:
+                declared = [m for m, c in contracts.items() if c["认证"]["必须"] or c["认证"]["可选"] or c["认证"]["核对"]]
+                for m in owners or declared or mods[:1]:
                     reasons.setdefault(m, []).append(_missing_query_reason(q))
         for m, c in contracts.items():
             for iface in c["接口"]:
