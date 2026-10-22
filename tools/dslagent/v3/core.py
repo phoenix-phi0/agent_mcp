@@ -164,7 +164,7 @@ def run(req, project, out, stop_after=None, backend=None, cost_cap=None, wall=WA
     eng.vars.update({"req": req, "project": str(project), "stop_after": stop})
     res, err = {"status": "成功", "reason": "", "at": ""}, None
     try:
-        eng.run((HERE / f"{script}.zs" if script else V3_ZS).read_text(encoding="utf-8"))
+        eng.run_file(HERE / f"{script}.zs" if script else V3_ZS)   # 文件跑：脚本里的「执行」先找同级目录
         if eng.halted is not None:
             res = dict(eng.halted)
     except Exception as e:  # noqa: BLE001  引擎 / 动词出错：记成失败，不往外抛
@@ -196,7 +196,7 @@ def run_entry(script, project, out, req, extra_vars=None, backend=None, cost_cap
     eng.vars.update({"req": req, "syntax": syntax, **(extra_vars or {})})
     res, err = {"status": "成功", "reason": "", "at": ""}, None
     try:
-        eng.run((HERE / f"{script}.zs").read_text(encoding="utf-8"))
+        eng.run_file(HERE / f"{script}.zs")
         if eng.halted is not None:
             res = dict(eng.halted)
         elif eng.returned:

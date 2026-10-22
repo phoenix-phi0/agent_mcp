@@ -69,7 +69,10 @@
                                除数是 0 报错。{变量} 的值只当一个数，转不了就报错
                                （不拼进算式里重新解析）。单独一行「计算 …」打印结果
     事务 库 … 结束             块内的写入要么全成要么全败
-    执行 sub.zs key=值          独立作用域，key 在子脚本里就是 {key}
+    执行 sub.zs key=值          独立作用域，key 在子脚本里就是 {key}。找脚本：先在
+                               正在跑的这个脚本文件所在目录（同级）里找，同名时同级优先，
+                               再按工作目录找；字符串脚本没有同级目录；同级只认该目录内
+                               的文件（.. 跳出去的不算）。子脚本里再「执行」，同级 = 子脚本自己的目录
     调用 模块.函数 键=值 [出错时 e]
                                业务层（services/<模块>.zs，见 dsl_service）：调公开函数；
                                报错 404 文字 抛业务错误，接口层回 {"error": 文字} + 码
@@ -360,6 +363,9 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
         # 「用包」之后转严格模式：不认识的动词名报错，不当文本
         self.strict_verbs = False
         self._depth = _depth
+        # 正在跑的脚本文件所在目录（run_file / 「执行」子脚本时设；字符串脚本为 None）：
+        # 「执行」先在这里找同级脚本，见 _find_sibling
+        self.script_dir: Path | None = None
 
         # 值可以是 str，也可以是读文件或动词返回的 dict / list
         self.vars: dict = {}
@@ -726,6 +732,7 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
         p = Path(path)
         if not p.is_absolute():
             p = self.workdir / p
+        self.script_dir = p.resolve().parent
         return self.run(p.read_text(encoding="utf-8"), params=params)
 
     @staticmethod
@@ -1220,17 +1227,32 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
 
         expanded_name = self.expand(name)
         fname = expanded_name if expanded_name.endswith(".zs") else f"{expanded_name}.zs"
-        path = self._safe_path(fname)
-        if not path.is_file():
-            raise DSLError(f"找不到脚本：{self._rel(path)}")
+        path = self._find_sibling(fname)
+        if path is None:
+            path = self._safe_path(fname)
+            if not path.is_file():
+                raise DSLError(f"找不到脚本：{self._rel(path)}")
 
         sub = self._sub_engine()
+        sub.script_dir = path.parent
         sub.vars.update(params)
         text = sub.run(path.read_text(encoding="utf-8"))
         if sub.halted is not None:
             # 子脚本「终止」了：交给调用方的是 {status, reason, at}，at 带上脚本名（照「执行」里写的）
             sub.halted["at"] = f"{self.expand(fname)} {sub.halted['at']}"
         self._deliver(sub.returned[0] if sub.returned else text, assign_to)
+
+    def _find_sibling(self, fname: str) -> Path | None:
+        """「执行」先找正在跑的脚本文件所在目录（同级）下的脚本，只读、只认该目录内的文件。
+
+        字符串脚本没有同级目录；写到目录外（..）的不算同级，交给 workdir 查找去报错。
+        """
+        if self.script_dir is None:
+            return None
+        p = (self.script_dir / fname).resolve()
+        if self.script_dir not in p.parents or not p.is_file():
+            return None
+        return p
 
     def _do_halt(self, rest: str, lineno: int) -> None:
         """终止 成功|失败|超出预期 原因 —— 见 dsl_core.ScriptHalt。"""
