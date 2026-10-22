@@ -36,6 +36,11 @@
     scripts/jobs_run.zs 入参 job_id；出错 scripts/jobs_run_fail.zs；逐项处理任务   # 路径 scripts/<模块>_<名>.zs；「入参」可省；「出错」可省；最后一段是一句话作用
                                   # 业务函数里写库建好任务后（事务之外）`后台执行 scripts/jobs_run.zs job_id={id} on_error=scripts/jobs_run_fail.zs`
 
+    ## 内容文件                              # 可选：本模块拥有的内容文件（源数据；库是它的投影）。不写这段 = 本模块不写内容文件
+    content/notes2/cards.jsonl 字段 no,front,back；写：本模块函数 保存卡片,撤下全部；读：本模块函数 按文件重灌,读回卡片；教师保存的卡片，库按它重灌
+                                  # 路径 content/<本模块>/<路径>.jsonl（或 .json），路径里可含 {变量}；「字段」可省；「写」「读」列本模块的函数名（没有就不写那一段）；最后一段是一句话作用
+                                  # 函数里只能 写JSONL / 写JSON / 删文件 本模块的 content/<本模块>/ 下的路径，且要在这段里有声明
+
 ## 认证
 认证声明由程序生成（骨架写在账号模块的 routes 顶部，只有一份），约定里**任何模块都不写 `认证 …` 行**（写了会被拒）。
 负责账号的模块必须有公开函数 `核对身份 username`，返回 `{username, role}`，查不到返回空；带 `## 用例`（存在的用户返回 role、不存在返回空）。
@@ -52,8 +57,9 @@ PARAM_RE = re.compile(r"^[a-z_][a-z0-9_]*\??$")
 IDENT = r"[A-Za-z0-9_一-鿿]+"
 QCALL_RE = re.compile(rf"调用\s+({IDENT})\.({IDENT})")
 METHODS = ("GET", "POST", "PUT", "DELETE")
-SECTIONS = {"表": "表", "数据": "表", "函数": "函数", "接口": "接口", "用例": "用例", "脚本": "脚本"}
+SECTIONS = {"表": "表", "数据": "表", "函数": "函数", "接口": "接口", "用例": "用例", "脚本": "脚本", "内容文件": "内容文件"}
 SCRIPT_RE = re.compile(r"^scripts/([a-z][a-z0-9_]*)\.zs$")
+CONTENT_RE = re.compile(r"^content/([a-z][a-z0-9_]*)/([A-Za-z0-9_{}./-]+\.(?:jsonl|json))$")   # 内容文件路径：content/<模块>/…（.jsonl / .json，可含 {变量}）
 
 # 认证由程序生成：账号模块 = 有公开函数「核对身份」的模块
 ACCOUNT_FN = "核对身份"
@@ -176,9 +182,9 @@ def _iface_tail(tail):
 
 
 def parse(text):
-    """→ (contract, 问题)。contract = {模块, 依赖, 表, 函数, 接口, 用例, 脚本}；各项带「行」。"""
+    """→ (contract, 问题)。contract = {模块, 依赖, 表, 函数, 接口, 用例, 脚本, 内容文件}；各项带「行」。"""
     probs = []
-    c = {"模块": None, "依赖": [], "表": [], "函数": [], "接口": [], "用例": [], "脚本": []}
+    c = {"模块": None, "依赖": [], "表": [], "函数": [], "接口": [], "用例": [], "脚本": [], "内容文件": []}
     sec, cur = None, None
     for no, raw in enumerate(text.replace("\r", "").splitlines(), 1):
         if raw.strip().startswith("```"):
@@ -188,7 +194,7 @@ def parse(text):
             sec = SECTIONS.get(title)
             cur = None
             if sec is None:
-                probs.append(f"第 {no} 行：不认识的小节「{title}」（只有 表 / 函数 / 接口 / 用例 / 脚本）")
+                probs.append(f"第 {no} 行：不认识的小节「{title}」（只有 表 / 函数 / 接口 / 用例 / 脚本 / 内容文件）")
             continue
         s = _strip_comment(raw).strip()
         if not s or s.startswith("#"):
@@ -263,6 +269,8 @@ def parse(text):
             cur = c["用例"][-1] if c["用例"] else None
         elif sec == "脚本":
             _script_line(c, s, no, probs)
+        elif sec == "内容文件":
+            _content_line(c, s, no, probs)
     if not c["模块"]:
         probs.append("缺「模块 <名>」")
     return c, probs
@@ -295,6 +303,37 @@ def _script_line(c, s, no, probs):
         elif seg:
             note.append(seg)
     c["脚本"].append({"路径": toks[0], "入参": args, "出错": fail, "作用": "；".join(note), "行": no})
+
+
+def _content_line(c, s, no, probs):
+    """## 内容文件 的一行：content/<模块>/<路径>.jsonl [字段 a,b,c]；[写：本模块函数 X,Y]；[读：本模块函数 Z]；<一句话作用>（分号 ；或 ; 隔开）。"""
+    segs = [x.strip() for x in re.split(r"[；;]", s)]
+    toks = segs[0].split()
+    if not toks or not toks[0].startswith("content/"):
+        probs.append(f"第 {no} 行：内容文件写法是「content/<模块>/<路径>.jsonl [字段 a,b,c]；写：本模块函数 X,Y；读：本模块函数 Z；一句话作用」，现在是「{s[:60]}」")
+        return
+    fields = []
+    if toks[1:2] == ["字段"]:
+        fields = [x for x in re.split(r"[\s,，、]+", " ".join(toks[2:])) if x]
+    elif toks[1:]:
+        probs.append(f"第 {no} 行：内容文件路径后面只能写「字段 a,b,c」，现在是「{' '.join(toks[1:])[:40]}」")
+    bad = [a for a in fields if not NAME_RE.match(a)]
+    if bad:
+        probs.append(f"第 {no} 行：内容文件字段 {bad} 不合法（英文 snake）")
+    writers, readers, note = [], [], []
+    for seg in segs[1:]:
+        m = re.match(r"^(写|读)\s*[:：]\s*(?:本模块函数\s*)?(.*)$", seg)
+        if m:
+            names = [x for x in re.split(r"[\s,，、]+", m.group(2)) if x and x != "无"]
+            (writers if m.group(1) == "写" else readers).extend(names)
+        elif seg:
+            note.append(seg)
+    c["内容文件"].append({"路径": toks[0], "字段": fields, "写": writers, "读": readers, "作用": "；".join(note), "行": no})
+
+
+def declared_content(c):
+    """约定里声明的内容文件路径（保序）。"""
+    return [x["路径"] for x in c.get("内容文件", [])]
 
 
 def declared_scripts(c):
@@ -428,6 +467,29 @@ def _script_problems(c, name, all_modules):
     return probs
 
 
+def _content_problems(c, name):
+    """## 内容文件：路径以 content/<本模块>/ 开头、后缀 .jsonl / .json、不含 ..、不重复；写 / 读列的函数要是本模块的函数。"""
+    probs, seen = [], set()
+    fnames = {f["名"] for f in c["函数"]}
+    for x in c.get("内容文件", []):
+        p = x["路径"]
+        if p in seen:
+            probs.append(f"第 {x['行']} 行：内容文件「{p}」重复")
+        seen.add(p)
+        m = CONTENT_RE.match(p)
+        if ".." in p.split("/") or p.count("{") != p.count("}"):
+            probs.append(f"第 {x['行']} 行：内容文件路径「{p}」不合法（不能含 ..，{{}} 要成对）")
+        elif not m:
+            probs.append(f"第 {x['行']} 行：内容文件路径「{p}」写法是 content/{name}/<路径>.jsonl（后缀只能是 .jsonl 或 .json）")
+        elif m.group(1) != name:
+            probs.append(f"第 {x['行']} 行：内容文件「{p}」不属于本模块（路径要以 content/{name}/ 开头；别的模块的内容文件不能碰，要数据就调对方的公开函数）")
+        for what in ("写", "读"):
+            for fn in x[what]:
+                if fn not in fnames:
+                    probs.append(f"第 {x['行']} 行：内容文件「{p}」的「{what}」里写了函数「{fn}」，本模块没有这个函数")
+    return probs
+
+
 def check(c, name, upstream, all_modules):
     """约定检查。upstream：{上游模块名: 它的约定}（c['依赖'] 里的）；all_modules：项目全部模块名。返回问题列表。"""
     probs = []
@@ -514,6 +576,7 @@ def check(c, name, upstream, all_modules):
                 probs.append(f"第 {i['行']} 行：接口 {i['路径']} 声明了「上传 {i['上传']['字段']}」，但函数「{i['函数']}」没有入参「{path_param}」接收存盘路径")
     probs += _auth_problems(c, fns)
     probs += _script_problems(c, name, all_modules)
+    probs += _content_problems(c, name)
     covered, names = set(), set()
     for u in c["用例"]:
         if u["名"] in names:

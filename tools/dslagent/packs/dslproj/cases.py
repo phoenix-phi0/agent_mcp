@@ -131,10 +131,36 @@ def clear_case_files(ws, u):
                 pass
 
 
+def reset_content(ws, module):
+    """清掉 ws 里本模块及其上游的 content/<模块>/（内容文件是业务函数运行时写的源数据，用例和库一样从空开始，不让上一个用例留下的文件影响下一个）。
+    ws 是跑用例的临时拷贝，清的不是项目里的文件。"""
+    try:
+        mods = P.closure(ws, module)
+    except Exception:  # noqa: BLE001
+        mods = [module]
+    for m in set(mods) | {module}:
+        shutil.rmtree(Path(ws) / "content" / m, ignore_errors=True)
+
+
+def snapshot_content(ws):
+    """ws/content/ 下全部文件 → {相对路径: 字节}，配合 restore_content 在同一份种子上多次调用（接口冒烟：直接调用后再走 HTTP）。"""
+    base = Path(ws) / "content"
+    return {str(f.relative_to(base)): f.read_bytes() for f in base.rglob("*") if f.is_file()} if base.is_dir() else {}
+
+
+def restore_content(ws, snap):
+    shutil.rmtree(Path(ws) / "content", ignore_errors=True)
+    for rel, data in snap.items():
+        f = Path(ws) / "content" / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(data)
+
+
 def seed_case(ws, sql, module, u):
     """按 sql 建空库（ws/app.db）+ 用例 u 的「先」步骤造数据（插行 / 调公开函数 / 造文件）→ "" 或失败原因。
     跑用例、接口冒烟都靠它造「同一份数据」的起点，接口冒烟额外把造好的库文件另存一份，在同一份数据上
-    分别跑「直接调用」和「走 HTTP」。"""
+    分别跑「直接调用」和「走 HTTP」。先清空本模块及上游的 content/<模块>/（reset_content），再造「先 文件」。"""
+    reset_content(ws, module)
     why = write_case_files(ws, u)
     if why:
         return why

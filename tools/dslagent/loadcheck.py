@@ -186,6 +186,72 @@ def check_script_calls(lines, root, caller, modules, label, base=0):
     return probs
 
 
+CONTENT_WRITE_HEADS = ("写JSONL", "写JSON", "删文件")
+CONTENT_READ_HEADS = {"load_jsonl": "读JSONL", "load_json": "读JSON", "load": "读取", "读文本行": "读文本行", "读CSV": "读CSV",
+                      "读YAML": "读YAML", "存在": "存在", "列文件": "列文件", "列目录": "列目录", "遍历文件": "遍历文件"}
+
+
+def content_sites(lines):
+    """脚本行里读写文件的语句：[(下标, 写?, 动词, 路径原文)]。写 = 写JSONL / 写JSON / 删文件（data 包动词，第一个参数是路径）；
+    读 = 读JSONL / 读JSON / 读取 语句（`读JSONL 变量 = 路径`）和 读文本行 / 读CSV / 读YAML / 存在 / 列文件 / 列目录 / 遍历文件（第一个参数是路径）。
+    路径只取原文（可含 {变量}），整个是变量（空前缀）的也收，由检查决定怎么算。"""
+    out = []
+    for i, raw in enumerate(lines):
+        line = normalize(raw).strip()
+        if not line or line.startswith("#"):
+            continue
+        head, rest = split_head(line)
+        if head == "set":
+            _, sep, value = rest.partition("=")
+            if not sep:
+                continue
+            head, rest = split_head(value.strip())
+        if head in CONTENT_WRITE_HEADS:
+            toks = rest.split()
+            if toks:
+                out.append((i, True, head, toks[0].removeprefix("文件=")))
+        elif head in CONTENT_READ_HEADS:
+            if head in ("load_jsonl", "load_json", "load"):
+                _, sep, value = rest.partition("=")
+                toks = value.split() if sep else []
+            else:
+                toks = rest.split()
+            if toks:
+                out.append((i, False, CONTENT_READ_HEADS[head], toks[0].removeprefix("文件=").removeprefix("路径=")))
+    return out
+
+
+def path_prefix(path):
+    """路径里第一个 {变量} 之前的字面量部分（没有变量就是整条路径）。"""
+    return path.split("{", 1)[0]
+
+
+def check_content_paths(lines, caller, label, base=0):
+    """内容文件的路径规则（模块拥有自己的 content/<模块>/，库是它的投影）：
+    写（写JSONL / 写JSON / 删文件）的路径字面量必须以 content/<本模块>/ 开头（含 {变量} 只核 { 之前的前缀；整个是变量的核不了，也算问题：
+    路径要直接写在语句里）；写别的模块的目录或 content/ 以外都不行。读别的模块的 content/ 也不行（要数据调对方的公开函数）；读 content/ 以外的不管。
+    调用方不属于任何模块（caller 为 None）不查。只在加载检查 / 核查阶段用，不在生成阶段拦。"""
+    if caller is None:
+        return []
+    own = f"content/{caller}/"
+    probs = []
+    for i, is_write, verb, path in content_sites(lines):
+        pre = path_prefix(path)
+        where = f"[接口出错] {label}: 第 {base + i + 1} 行："
+        if ".." in path.replace("\\", "/").split("/"):
+            probs.append(f"{where}{verb} 的路径「{path}」不能含 ..")
+        elif is_write and not pre.startswith(own):
+            if not pre:
+                probs.append(f"{where}{verb} 的路径「{path}」整个是变量，核不了归属；路径要直接写成 {own}<路径>（变量只放在后面）")
+            elif pre.startswith("content/"):
+                probs.append(f"{where}{verb} 写的「{path}」不是本模块的内容文件目录（本模块只能写 {own} 下的文件；别的模块的内容文件要它自己的公开函数去写）")
+            else:
+                probs.append(f"{where}{verb} 写的「{path}」不在 {own} 下（业务层只能写本模块自己的内容文件 {own}…）")
+        elif not is_write and pre.startswith("content/") and not pre.startswith(own):
+            probs.append(f"{where}{verb} 读的「{path}」不是本模块的内容文件（读别的模块的 content/ 不允许，要数据调对方的公开函数）")
+    return probs
+
+
 def check_calls(lines, svc, caller, in_func, label, funcs=None, base=0):
     """业务调用的静态检查，规则和运行时同一套（Services.lookup / check_args）。
     返回报错原话列表；label 是「文件 函数 / 接口」这段定位，base 是 lines[0] 在文件里的行号偏移。"""
@@ -372,7 +438,8 @@ def check_file(path, rel=None):
 
 def check_project(root, scripts=False):
     """全项目加载：scan_routes（接口重复、块不配对）+ 每个接口块 + scripts/*.zs 逐个解析。返回问题列表。
-    scripts=True 再查 `执行` / `后台执行` 的 scripts/… 目标（check_project_scripts：脚本存在、on_error 存在、归本模块）——
+    scripts=True 再查 `执行` / `后台执行` 的 scripts/… 目标（check_project_scripts：脚本存在、on_error 存在、归本模块）和
+    写 / 读内容文件的路径（写只能写 content/<本模块>/ 下，读不能读别的模块的 content/）——
     只在核查阶段（dslproj 的 加载检查 / project.load_problems）开，生成阶段（骨架、v2 逐步生成）不开：脚本是后写的，
     生成中途拦只会误拦（H1 8c7dba1 的教训）。"""
     root = Path(root)
@@ -410,7 +477,7 @@ def check_project(root, scripts=False):
 
 
 def check_project_scripts(root):
-    """全项目 `执行` / `后台执行` scripts/… 的静态检查（见 check_script_calls）：接口 / 业务函数 / scripts 三处。
+    """全项目 `执行` / `后台执行` scripts/… 的静态检查（见 check_script_calls）和内容文件路径检查（见 check_content_paths）：接口 / 业务函数 / scripts 三处。
     模块名取 services/*.zs 与 contracts/*.md；调用方模块：接口按文件名 routes/<模块>*.zs、业务函数是所在模块、
     脚本按文件名前缀 scripts/<模块>_*.zs（对不上任何模块的 = 调用方未知，只查存在）。"""
     root = Path(root)
@@ -426,19 +493,22 @@ def check_project_scripts(root):
         except DSLError:
             continue
         for ep in eps:
-            probs += check_script_calls(ep.body, root, caller, modules,
-                                        f"{rel} 接口 {ep.method} {ep.path}（文件第 {ep.line} 行起）", base=ep.line)
+            label = f"{rel} 接口 {ep.method} {ep.path}（文件第 {ep.line} 行起）"
+            probs += check_script_calls(ep.body, root, caller, modules, label, base=ep.line)
+            probs += check_content_paths(ep.body, caller, label, base=ep.line)
     sdir = root / "services"
     if sdir.is_dir() and any(sdir.glob("*.zs")):
         svc = Services(sdir)
         for mod in svc.modules.values():
             for fn in mod.funcs.values():
-                probs += check_script_calls(mod.lines[fn.start:fn.end], root, mod.name, modules,
-                                            f"{mod.rel} 函数 {fn.name}", base=fn.start)
+                label = f"{mod.rel} 函数 {fn.name}"
+                probs += check_script_calls(mod.lines[fn.start:fn.end], root, mod.name, modules, label, base=fn.start)
+                probs += check_content_paths(mod.lines[fn.start:fn.end], mod.name, label, base=fn.start)
     scdir = root / "scripts"
     for f in sorted(scdir.rglob("*.zs")) if scdir.is_dir() else []:
-        probs += check_script_calls(f.read_text(encoding="utf-8").splitlines(), root, script_module(f.name, modules), modules,
-                                    str(f.relative_to(root)))
+        lines, caller = f.read_text(encoding="utf-8").splitlines(), script_module(f.name, modules)
+        probs += check_script_calls(lines, root, caller, modules, str(f.relative_to(root)))
+        probs += check_content_paths(lines, caller, str(f.relative_to(root)))
     return probs
 
 

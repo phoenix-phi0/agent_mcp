@@ -611,6 +611,181 @@ def t_scripts():
     check(any(f["名"] == "提交任务_全成功" for f in r3["失败"]), "脚本调私有函数「开始」：运行期被拒，任务不会完成（用例失败）", r3["原因"][:300])
 
 
+def t_content():
+    print("七、模块内容文件（content/<模块>/…）：## 内容文件 约定 / 比对 / 写路径加载检查 / 临时 workspace 实跑")
+    from tools.dslagent import loadcheck as LC
+    CT = ROOT / "tests" / "tools" / "fixtures" / "dslproj_ct"
+
+    # ---- 范围：content/<模块>/** 不进写入范围（运行期写盘不经 STRICT_SCOPE，模型也不用建这些文件）
+    check(not any("content" in g for g in P.scope_globs("cards")), "scope_globs 不含 content/（内容文件是运行期写出来的，不是模型写的代码）", P.scope_globs("cards"))
+    SC.activate(P.scope_globs("cards"))
+    try:
+        check(SC.guard("content/cards/cards.jsonl") != "" and SC.guard("services/cards.zs") == "", "STRICT_SCOPE 只拦构建阶段 code 包的写（scope.guard）：模型写 content/ 被拦，写 services 放行")
+    finally:
+        SC.activate(None)
+
+    # ---- ## 内容文件 解析
+    c, probs = C.parse((CT / "contracts" / "cards.md").read_text(encoding="utf-8"))
+    check(not probs and len(c["内容文件"]) == 2, "fixture 约定（带 ## 内容文件）解析无问题", probs)
+    x = c["内容文件"][0]
+    check(x["路径"] == "content/cards/cards.jsonl" and x["字段"] == ["card_no", "front", "back"] and x["写"] == ["保存卡片", "撤下全部"]
+          and x["读"] == ["按文件重灌", "读回卡片", "撤下全部"] and "库按它重灌" in x["作用"], "## 内容文件 一行解析：路径 / 字段 / 写 / 读 / 作用", x)
+    check(C.declared_content(c) == ["content/cards/cards.jsonl", "content/cards/cards.withdrawn.jsonl"], "declared_content")
+    check(C.check(c, "cards", {}, ["cards"]) == [], "fixture 约定检查无问题")
+    base = "模块 cards\n## 函数\n公开 函数 f a\n公开 函数 g\n## 用例\n用例 u\n  调用 f a=1\n  得 有返回\n用例 u2\n  调用 g\n  得 有返回\n"
+    c0, p0 = C.parse(base)
+    check(not p0 and c0["内容文件"] == [] and C.check(c0, "cards", {}, ["cards"]) == [], "不写 ## 内容文件：为空，约定检查不变")
+    c1, p1 = C.parse(base + "## 内容文件\ncontent/cards/a.jsonl\n")
+    check(not p1 and c1["内容文件"][0]["字段"] == [] and c1["内容文件"][0]["写"] == [] and c1["内容文件"][0]["作用"] == "" and C.check(c1, "cards", {}, ["cards"]) == [], "字段 / 写 / 读 / 作用 都可省")
+    c2, p2 = C.parse(base + "## 内容文件\ncontent/cards/{deck}/a.json 字段 a;写:f;读:无;作用 # 注释\n")
+    check(not p2 and c2["内容文件"][0]["写"] == ["f"] and c2["内容文件"][0]["读"] == [] and C.check(c2, "cards", {}, ["cards"]) == [], "半角分号冒号、读：无、路径带 {变量}、.json、行尾注释", c2["内容文件"])
+    for bad, why in (("cards/a.jsonl", "不带 content/"), ("content/cards/a.jsonl 列 a", "不是「字段」"), ("content/cards/a.jsonl 字段 A", "字段非 snake"),
+                     ("content/cards/a.jsonl；写：本模块函数 f；写：本模块函数 g", None)):
+        cb, pb = C.parse(base + f"## 内容文件\n{bad}\n")
+        pk = pb + C.check(cb, "cards", {}, ["cards"])
+        check(why is None or pk, f"## 内容文件 写错被指出：{why}", bad)
+    for line, want in (("content/other/a.jsonl", "不属于本模块"), ("content/cards2/a.jsonl", "不属于本模块"), ("data/a.jsonl", "内容文件写法是"),
+                       ("content/cards/a.md", "后缀只能是 .jsonl 或 .json"), ("content/cards/a.txt", "后缀只能是"), ("content/cards/../x/a.jsonl", "不能含 .."),
+                       ("content/cards/a.jsonl；写：本模块函数 nope", "没有这个函数"), ("content/cards/a.jsonl；读：本模块函数 nope", "没有这个函数")):
+        cc, pc = C.parse(base + f"## 内容文件\n{line}\n")
+        pk = pc + C.check(cc, "cards", {}, ["cards"])
+        check(any(want in q for q in pk), f"约定检查：{line} → {want}", pk)
+    cd, _ = C.parse(base + "## 内容文件\ncontent/cards/a.jsonl\ncontent/cards/a.jsonl\n")
+    check(any("重复" in q for q in C.check(cd, "cards", {}, ["cards"])), "约定检查：内容文件路径重复")
+
+    # ---- 比对约定：代码里写 / 读的本模块 content 路径要在 ## 内容文件 里声明
+    def proj(name, svc=None, contract=None):
+        q = TMP / name
+        shutil.rmtree(q, ignore_errors=True)
+        shutil.copytree(CT, q)
+        if svc:
+            (q / "services" / "cards.zs").write_text(svc((q / "services" / "cards.zs").read_text(encoding="utf-8")), encoding="utf-8")
+        if contract:
+            (q / "contracts" / "cards.md").write_text(contract((q / "contracts" / "cards.md").read_text(encoding="utf-8")), encoding="utf-8")
+        return q
+
+    def cmp(q):
+        cc, _ = C.parse((q / "contracts" / "cards.md").read_text(encoding="utf-8"))
+        return P.compare(q, "cards", cc, ["cards"])
+    r = cmp(CT)
+    check(r["一致"] and r["差异"] == [] and r["提示"] == [], "fixture 比对一致、没有提示", r)
+    q = proj("ct_c1", svc=lambda s: s.replace("content/cards/cards.withdrawn.jsonl", "content/cards/other.jsonl", 1))
+    r = cmp(q)
+    check(not r["一致"] and any("content/cards/other.jsonl" in d and "没有在约定「## 内容文件」里声明" in d and "读回卡片" in d for d in r["差异"]), "函数里写了约定没声明的内容文件 → 差异", r["差异"])
+    q = proj("ct_c2", contract=lambda s: re.sub(r"(?m)^content/cards/cards\.withdrawn\.jsonl.*\n", "", s))
+    r = cmp(q)
+    check(not r["一致"] and any("cards.withdrawn.jsonl" in d for d in r["差异"]), "约定少声明了一个文件（代码在读写）→ 差异", r["差异"])
+    q = proj("ct_c3", contract=lambda s: s.replace("## 用例", "content/cards/unused.jsonl 字段 a；备用\n\n## 用例", 1))
+    r = cmp(q)
+    check(r["一致"] and any("unused.jsonl" in h and "写它" in h for h in r["提示"]) and any("unused.jsonl" in h and "读它" in h for h in r["提示"]),
+          "声明了但没有任何函数写 / 读 → 只记提示，不判不一致", r)
+    q = proj("ct_c4", svc=lambda s: s.replace("content/cards/cards.jsonl {rows}", "content/cards/{deck}.jsonl {rows}", 1),
+             contract=lambda s: s.replace("content/cards/cards.jsonl 字段", "content/cards/{deck}.jsonl 字段", 1))
+    r = cmp(q)
+    check(not any("{deck}" in d for d in r["差异"]), "路径带 {变量}：和约定里同样带 {变量} 的声明对得上", r["差异"])
+    q = proj("ct_c5", svc=lambda s: s.replace("content/cards/cards.jsonl {rows}", "content/cards/{deck}/all.jsonl {rows}", 1))
+    r = cmp(q)
+    check(any("{deck}/all.jsonl" in d for d in r["差异"]), "路径带 {变量}：前缀不在任何声明下 → 差异", r["差异"])
+    old = TMP / "ct_old"
+    shutil.rmtree(old, ignore_errors=True)
+    shutil.copytree(SOL, old)
+    ms = P.all_modules(old)
+    okc = all(P.compare(old, m, P.load_contract(old, m)[0], ms)["一致"] for m in ms)
+    check(okc and not P.content_uses(old, ms[0], ms), "旧约定（无 ## 内容文件、代码不碰 content/）：比对行为不变", ms)
+    check(P.compare(old, ms[0], P.load_contract(old, ms[0])[0], ms)["提示"] == [], "旧约定没有内容文件提示")
+
+    # ---- 加载检查：写路径规则
+    def lc(name, body, module="cards", extra=None):
+        q = proj(name)
+        sv = (q / "services" / "cards.zs").read_text(encoding="utf-8")
+        sv = sv.rstrip()[:-len("结束")].rstrip() + "\n\n  公开 函数 额外 a\n" + "".join(f"    {ln}\n" for ln in body.splitlines()) + "    返回 {\"ok\": 1}\n  结束\n结束\n"
+        (q / "services" / "cards.zs").write_text(sv, encoding="utf-8")
+        for rel, txt in (extra or {}).items():
+            (q / rel).parent.mkdir(parents=True, exist_ok=True)
+            (q / rel).write_text(txt, encoding="utf-8")
+        return LC.check_project(q, scripts=True)
+    check(LC.check_project(CT, scripts=True) == [], "fixture 加载检查无问题（本模块写 / 读 / 删自己的 content 路径）")
+    check(lc("lw1", "设 w = 写JSONL content/cards/b.jsonl {a}\n设 w = 写JSON content/cards/c.json {a}\n设 d = 删文件 content/cards/b.jsonl\n写JSONL content/cards/d.jsonl {a}") == [],
+          "本模块 content/<本模块>/ 下的 写JSONL / 写JSON / 删文件（含不带 设 的写法）通过")
+    check(lc("lw2", "设 w = 写JSONL content/cards/{a}/x.jsonl {a}") == [], "路径带 {变量} 且前缀是 content/<本模块>/ 通过")
+    pr = lc("lw3", "设 w = 写JSONL content/other/b.jsonl {a}")
+    check(any("services/cards.zs 函数 额外" in x and "写JSONL" in x and "不是本模块的内容文件目录" in x for x in pr), "写别的模块的 content/ 目录 → 问题", pr)
+    pr = lc("lw4", "设 w = 写JSON data/out.json {a}")
+    check(any("写JSON" in x and "不在 content/cards/ 下" in x for x in pr), "写 content/ 以外的路径 → 问题", pr)
+    pr = lc("lw5", "设 d = 删文件 uploads/x.pdf")
+    check(any("删文件" in x and "不在 content/cards/ 下" in x for x in pr), "删 content/ 以外的文件 → 问题", pr)
+    pr = lc("lw6", "设 w = 写JSONL content/{m}/b.jsonl {a}")
+    check(any("content/{m}/b.jsonl" in x and "不是本模块的内容文件目录" in x for x in pr), "路径带 {变量} 但前缀在 {变量} 就断了（content/{m}/）→ 问题", pr)
+    pr = lc("lw7", "设 f = content/cards/b.jsonl\n设 w = 写JSONL {f} {a}")
+    check(any("整个是变量" in x for x in pr), "整个路径是变量（核不了归属）→ 问题", pr)
+    pr = lc("lw8", "设 w = 写JSONL content/cards/../other/b.jsonl {a}")
+    check(any("不能含 .." in x for x in pr), "路径含 .. → 问题", pr)
+    pr = lc("lw9", "读JSONL rows = content/other/x.jsonl")
+    check(any("读JSONL" in x and "读别的模块的 content/ 不允许" in x for x in pr), "读别的模块的 content/（读JSONL 语句）→ 问题", pr)
+    pr = lc("lw10", "读JSON r = content/other/x.json\n设 e = 存在 content/other/x.json\n设 l = 列文件 content/other")
+    check(sum("读别的模块的 content/ 不允许" in x for x in pr) == 3, "读别的模块的 content/（读JSON / 存在 / 列文件）都报", pr)
+    check(lc("lw11", "读JSONL rows = uploads/x.jsonl\n设 e = 存在 data/x.md") == [], "读 content/ 以外的路径不管")
+    check(lc("lw12", "读JSONL rows = {f}") == [], "读的路径整个是变量：不查")
+    pr = lc("lw13", "", extra={"scripts/cards_run.zs": "用包 data\n设 w = 写JSONL content/other/x.jsonl {a}\n写JSONL content/cards/ok.jsonl {a}\n读JSONL r = content/other/y.jsonl\n"})
+    check(any("scripts/cards_run.zs: 第 2 行" in x and "不是本模块的内容文件目录" in x for x in pr) and any("scripts/cards_run.zs: 第 4 行" in x and "读别的模块" in x for x in pr)
+          and not any("scripts/cards_run.zs: 第 3 行" in x for x in pr), "脚本里同样检查：写别的模块、读别的模块报，写本模块不报", pr)
+    qr = proj("lw14")
+    (qr / "routes" / "cards.zs").write_text('接口 POST /cards/x\n  设 w = 写JSONL content/other/b.jsonl {a}\n  返回 {"ok": 1}\n结束\n', encoding="utf-8")
+    check(any("routes/cards.zs 接口 POST /cards/x" in x and "不是本模块的内容文件目录" in x for x in LC.check_project(qr, scripts=True)), "接口里写别的模块的 content/ 也报")
+    q = proj("lw15")
+    (q / "services" / "cards.zs").write_text((q / "services" / "cards.zs").read_text(encoding="utf-8").replace("content/cards/cards.jsonl {rows}", "content/other/cards.jsonl {rows}", 1), encoding="utf-8")
+    kp = P.load_problems(q, "cards", ["cards"])
+    check(any("写JSONL" in x for x in kp), "load_problems（核查阶段）带出本模块写路径的问题", kp)
+    check(not any("写JSONL" in x for x in LC.check_project(q)), "生成阶段（scripts=False，默认）不查内容文件路径，不误拦")
+    kg_like = TMP / "ct_legacy"
+    shutil.rmtree(kg_like, ignore_errors=True)
+    (kg_like / "routes").mkdir(parents=True)
+    (kg_like / "routes" / "a.zs").write_text('接口 POST /a/x\n  用包 data\n  设 w = 写JSONL content/series.jsonl {k}\n  读JSONL r = content/words.jsonl\n  返回 {"ok": 1}\n结束\n', encoding="utf-8")
+    check(LC.check_project(kg_like, scripts=True) == [], "不属于任何模块的老项目：不查内容文件路径")
+
+    # ---- 实跑（不调模型）：保存→写文件→按文件重灌库；读回核对；撤下挪文件；跑用例在临时 workspace 不污染项目
+    before = sorted(str(f.relative_to(CT)) for f in CT.rglob("*"))
+    r = CS.run(CT, "cards")
+    after = sorted(str(f.relative_to(CT)) for f in CT.rglob("*"))
+    check(r["全过"] and r["总数"] == 10, "fixture 10 条用例全过：保存 / 覆盖 / 读回 / 按文件重灌 / 撤下 / 撤下后重灌", r["原因"])
+    check(before == after and not (CT / "content").exists(), "跑用例后项目里没有 content/（文件写在临时 workspace，不污染项目）")
+    ws = TMP / "ct_ws"
+    shutil.rmtree(ws, ignore_errors=True)
+    shutil.copytree(CT, ws)
+    sql = CS.build_sql(ws, ["cards"])
+    u1 = next(u for u in c["用例"] if u["名"] == "保存卡片_写文件并重灌库")
+    check(CS.run_case(ws, sql, "cards", u1) == "" and (ws / "content" / "cards" / "cards.jsonl").is_file(), "run_case 后文件在临时 workspace 里（用例之间靠 reset_content 清）")
+    rows = [json.loads(l) for l in (ws / "content" / "cards" / "cards.jsonl").read_text(encoding="utf-8").splitlines()]
+    check(rows == [{"card_no": "C1", "front": "猫", "back": "cat"}, {"card_no": "C2", "front": "狗", "back": "dog"}], "文件内容 = 保存的两张卡片（JSONL 一行一条）", rows)
+    # 不写文件（保存函数只写库）→ 读回用例判失败；文件没写 / 没重灌都不会碰巧过
+    brk = proj("ct_brk", svc=lambda s: s.replace("    设 w = 写JSONL content/cards/cards.jsonl {rows}\n", "", 1))
+    r2 = CS.run(brk, "cards")
+    check(not r2["全过"] and any(f["名"] == "读回卡片_文件内容" for f in r2["失败"]), "保存函数不写文件 → 读回用例失败（文件真的在被核对）", r2["原因"][:200])
+    brk2 = proj("ct_brk2", svc=lambda s: s.replace("      设 d = 删文件 content/cards/cards.jsonl\n", "", 1))
+    r3 = CS.run(brk2, "cards")
+    check(not r3["全过"] and any(f["名"] == "撤下全部_文件已挪走" for f in r3["失败"]), "撤下函数不删旧文件 → 「文件已挪走」用例失败", r3["原因"][:200])
+    # 接口冒烟用的内容快照 / 还原
+    snap = CS.snapshot_content(ws)
+    (ws / "content" / "cards" / "cards.jsonl").write_text("x\n", encoding="utf-8")
+    (ws / "content" / "cards" / "new.jsonl").write_text("y\n", encoding="utf-8")
+    CS.restore_content(ws, snap)
+    check(sorted(snap) == ["cards/cards.jsonl"] and not (ws / "content" / "cards" / "new.jsonl").exists() and len(rows) == 2
+          and (ws / "content" / "cards" / "cards.jsonl").read_text(encoding="utf-8").count("\n") == 2, "snapshot_content / restore_content 还原到种子状态（接口冒烟直接调用后再走 HTTP 用）")
+    u2 = next(u for u in c["用例"] if u["名"] == "读回卡片_没有文件_上个用例的文件不留")
+    check(CS.run_case(ws, sql, "cards", u2) == "", "下一个用例开始前内容文件被清空（空库一样从空开始）")
+    # 上游模块的 content 也一并清（用例的上游调用留下的文件不影响下一个用例）
+    up = TMP / "ct_up"
+    shutil.rmtree(up, ignore_errors=True)
+    (up / "contracts").mkdir(parents=True)
+    (up / "contracts" / "a.md").write_text("模块 a\n", encoding="utf-8")
+    (up / "contracts" / "b.md").write_text("模块 b\n依赖 a\n", encoding="utf-8")
+    for m in ("a", "b", "c"):
+        (up / "content" / m).mkdir(parents=True)
+        (up / "content" / m / "x.jsonl").write_text("1\n", encoding="utf-8")
+    CS.reset_content(up, "b")
+    check(not (up / "content" / "a").exists() and not (up / "content" / "b").exists() and (up / "content" / "c" / "x.jsonl").exists(), "reset_content 清本模块和上游，不碰无关模块")
+
+
 def t_accept_materials():
     print("五、验收 / 资料 / 规划说明 / 动词")
     for m in ("graph", "progress"):
@@ -802,6 +977,7 @@ def main():
         t_case_files()
         t_settle()
         t_scripts()
+        t_content()
         t_accept_materials()
         t_flow()
     finally:

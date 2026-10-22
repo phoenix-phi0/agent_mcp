@@ -1,0 +1,5 @@
+实体 cards_card 卡片
+  字段 card_no 文本 必填 编号
+  字段 front 文本 正面
+  字段 back 文本 背面
+结束

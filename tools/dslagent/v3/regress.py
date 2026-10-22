@@ -207,6 +207,7 @@ def _smoke_one_inner(ws, sql, module, iface, case, notes, auth, login, login_ep)
         return f"{tag}：造数据失败：{why}"
     db = Path(ws) / "app.db"
     seed = db.read_bytes()
+    seed_content = K.snapshot_content(ws)
     try:
         eng = K.make_engine(ws)
         r, err = K.call(eng, module, case["调用"]["目标"], case["调用"]["参数"], "smoke")
@@ -220,6 +221,7 @@ def _smoke_one_inner(ws, sql, module, iface, case, notes, auth, login, login_ep)
 
     def restore_seed():
         db.write_bytes(seed)
+        K.restore_content(ws, seed_content)
         for suf in ("-wal", "-shm", "-journal"):
             try:
                 Path(str(db) + suf).unlink()

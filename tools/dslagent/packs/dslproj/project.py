@@ -2,6 +2,7 @@
 
 布局（项目根下）：contracts/<模块>.md 约定（冻结，不在范围内，模型改不了）、entities/<模块>.entity、services/<模块>.zs、
 routes/<模块>*.zs（文件名以模块名开头）、queries/<模块>_*.sql、scripts/<模块>_*.zs（后台任务脚本，命名即归属）、tests/<模块>_*。
+内容文件 content/<模块>/**（模块的源数据，业务函数运行期写）不在写入范围里：模型写的是代码，内容文件是代码运行出来的，STRICT_SCOPE 不拦运行期写盘（见 scope.guard 只在 reason.check / apply_edits 里调用）。
 任务文本的写法：含一行「模块 <名>」（其余文字是补充说明）；模块名是 contracts/ 里的文件名（英文 snake）。
 """
 import re
@@ -213,9 +214,74 @@ def script_diffs(project, module, contract, modules):
     return diffs
 
 
+def _path_re(declared):
+    """约定里声明的内容文件路径 → 正则：{变量} 当通配（可匹配含 {变量} 的写法）。"""
+    return re.compile("".join(".+" if x.startswith("{") else re.escape(x) for x in re.split(r"(\{[^}]*\})", declared) if x))
+
+
+def _declared_match(declared, path):
+    """代码里的内容文件路径 path 是否落在约定声明的路径 declared 上：两边的 {变量} 都当通配，任一边的通配能匹配另一边的原文就算。"""
+    return bool(_path_re(declared).fullmatch(path) or _path_re(path).fullmatch(declared))
+
+
+def content_uses(project, module, modules):
+    """本模块的业务函数 / 接口 / 脚本里读写本模块内容文件的地方：[(写?, 动词, 路径原文, 位置文字)]，只收路径前缀在 content/<本模块>/ 下的
+    （别的模块的 content/、content/ 以外的由加载检查报，这里不重复）。"""
+    from tools.dsl_http import split_endpoints
+    from tools.dsl_service import ServiceProblem, parse_module
+    from tools.dslagent import loadcheck as L
+    project = Path(project)
+    own = f"content/{module}/"
+    out = []
+
+    def add(lines, where):
+        for _i, w, verb, path in L.content_sites(lines):
+            if L.path_prefix(path).startswith(own):
+                out.append((w, verb, path, where))
+    sf = project / "services" / f"{module}.zs"
+    if sf.is_file():
+        try:
+            mod = parse_module(sf.read_text(encoding="utf-8"), sf, f"services/{module}.zs")
+        except ServiceProblem:
+            mod = None
+        for fn in (mod.funcs.values() if mod else []):
+            add(mod.lines[fn.start:fn.end], f"函数「{fn.name}」")
+    for f in route_files(project, module, modules):
+        try:
+            eps, _ports = split_endpoints(f.read_text(encoding="utf-8"), Path(f"routes/{f.name}"))
+        except Exception:  # noqa: BLE001
+            continue
+        for ep in eps:
+            add(ep.body, f"routes/{f.name} 接口 {ep.method} {ep.path}")
+    for f in script_files(project, module, modules):
+        add(f.read_text(encoding="utf-8").splitlines(), f"scripts/{f.name}")
+    return out
+
+
+def content_diffs(project, module, contract, modules):
+    """约定「## 内容文件」与代码的差异 → (差异, 提示)。差异：函数 / 接口 / 脚本里读写的本模块内容文件路径（含只写了 { 之前前缀的）在约定里没有声明。
+    提示（不算不一致）：声明了但没有任何函数 / 接口 / 脚本写它，或声明了但没有任何地方读它（只写不读也许是给外部用的，只提示）。"""
+    uses = content_uses(project, module, modules)
+    declared = C.declared_content(contract)
+    diffs, hints, seen = [], [], set()
+    for w, verb, path, where in uses:
+        ok = any(_declared_match(d, path) for d in declared)
+        if not ok and (path, where) not in seen:
+            seen.add((path, where))
+            diffs.append(f"{where} {verb} 的内容文件「{path}」没有在约定「## 内容文件」里声明")
+    for d in declared:
+        hit = [(w, v) for w, v, path, _ in uses if _declared_match(d, path)]
+        if not any(w for w, _ in hit):
+            hints.append(f"约定声明了内容文件 {d}，但没有任何函数 / 接口 / 脚本写它")
+        if not any(not w for w, _ in hit):
+            hints.append(f"约定声明了内容文件 {d}，但没有任何函数 / 接口 / 脚本读它")
+    return diffs, hints
+
+
 def compare(project, module, contract, modules):
     """实际文件与约定是否一致：脚本（约定「## 脚本」）、业务文件（模块名 / 依赖 / 每个函数的名字、公开与否、入参顺序与可选）、接口（方法 + 路径存在、只调约定里那个函数）、
-    约定里的表在 entities/<模块>.entity 里都有。返回 {"一致": bool, "差异": [文字]}。"""
+    约定里的表在 entities/<模块>.entity 里都有、内容文件（代码里读写的本模块 content/<模块>/ 路径都要在约定「## 内容文件」里声明）。
+    返回 {"一致": bool, "差异": [文字], "提示": [文字]}；提示不算不一致（声明了的内容文件没人写 / 没人读）。"""
     from tools.dsl_http import split_endpoints
     from tools.dsl_service import ServiceProblem, parse_module
     project = Path(project)
@@ -284,6 +350,8 @@ def compare(project, module, contract, modules):
         diffs.append(f"多了约定里没有的接口 {m} {p}")
     diffs += _auth_diffs(project, module, contract, modules)
     diffs += script_diffs(project, module, contract, modules)
+    c_diffs, hints = content_diffs(project, module, contract, modules)
+    diffs += c_diffs
     ef = project / "entities" / f"{module}.entity"
     ents = set(re.findall(r"^\s*实体\s+(\S+)", ef.read_text(encoding="utf-8"), re.M)) if ef.is_file() else set()
     for t in contract["表"]:
@@ -293,7 +361,7 @@ def compare(project, module, contract, modules):
         from tools.migrate import switch_on
         if not switch_on(project / "routes"):
             diffs.append("模块有「学习记录」标注的表，但 routes/ 下没有「迁移 只加」声明（应由生成骨架写出 routes/_project.zs）")
-    return {"一致": not diffs, "差异": diffs}
+    return {"一致": not diffs, "差异": diffs, "提示": hints}
 
 
 def load_problems(project, module, modules):
