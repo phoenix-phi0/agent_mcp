@@ -20,9 +20,20 @@ DSL 一行一句，没有换行字面量；要改的代码原文却是多行的�
     新建 pkg/util.py
     提示 先改 add 再补 util
 
+改整个函数时不用抄原文：「@@ 改 路径 函数 名」下只写一块新函数（没有 =======），
+程序按函数头找到这个函数（.zs 到同缩进的 结束，.py 到缩进回落）整段换掉；同一个标题下
+写 原文 / ======= / 新文 则只在这个函数里找原文（锚点，原文在函数里唯一即可）：
+
+    @@ 改 services/report.zs 函数 学生详情
+    <<<<<<< 新函数
+      公开 函数 学生详情 student
+        …完整的新函数…
+      结束
+    >>>>>>> 新文
+
 同一个「@@ 改」下可以连写多对 <<<<<<< / ======= / >>>>>>>。段从标题行到下一个
 「#改法 / #清单 / #子脚本」标题或文末。脚本里 {e1} 就是 {edits:[{file,old,new}…],
-files:[{file,content}…]}（空的键不给），交给 改文件 {e1} 一次套全部条目。
+files:[{file,content}…]}（点名函数的条目多一个 func 键；空的键不给），交给 改文件 {e1} 一次套全部条目。
 
 split_sections 把段从脚本里拿出来，原位置换成空行（行号不变），引擎和 dslagent
 的检查共用这一份解析。
@@ -32,7 +43,7 @@ import re
 EDIT_HEAD = re.compile(r"^\s*#\s*改法\s+([^\W\d]\w*)\s*$")
 LIST_HEAD = re.compile(r"^\s*#\s*清单\s*$")
 SECTION_HEAD = re.compile(r"^\s*#\s*(?:(?:子脚本|改法)\s+\S+|清单\s*$)")
-BLOCK_HEAD = re.compile(r"^@@\s*(改|新建)\s+(\S+)\s*$")
+BLOCK_HEAD = re.compile(r"^@@\s*(改|新建)\s+(\S+)(?:\s+函数[\s:：=]\s*(\S+)(?:\s.*)?)?\s*$")
 LIST_ITEM = re.compile(r"^\s*(?:[-*]\s*)?(改|修改|新建|删|删除)\s+[`「'\"]?([\w./\-]+\.\w+)"
                        r"(?::([A-Za-z_][\w.]*|\d+\s*[-~]\s*\d+))?")
 LIST_HINT = re.compile(r"^\s*(?:[-*]\s*)?提示[:：\s]\s*(.+)$")
@@ -97,13 +108,13 @@ def parse_edit_body(body: list, first_lineno: int = 1):
         if m:
             if cur and not cur[2]:
                 probs.append(f"第 {cur[3]} 行：@@ {cur[0]} {cur[1]} 下面没有 <<<<<<< 块")
-            cur = [m.group(1), m.group(2), 0, at]
+            cur = [m.group(1), m.group(2), 0, at, m.group(3) or ""]
             i += 1
             continue
         if line.startswith("<<<<<<<"):
             if cur is None:
                 probs.append(f"第 {at} 行：<<<<<<< 前面缺「@@ 改 文件」或「@@ 新建 文件」")
-                cur = ["改", "", 0, at]
+                cur = ["改", "", 0, at, ""]
             cur[2] += 1
             a, b, mode = [], [], "a"
             i += 1
@@ -118,8 +129,17 @@ def parse_edit_body(body: list, first_lineno: int = 1):
             i += 1
             if cur[0] == "新建":
                 files.append({"file": cur[1], "content": "\n".join(a) + ("\n" if a else "")})
+            elif cur[4] and (mode != "b" or not "\n".join(a).strip()):
+                body_new = "\n".join(a if mode != "b" else b)
+                if not body_new.strip():
+                    probs.append(f"第 {at} 行起的块：{cur[1]} 函数 {cur[4]} 的新函数是空的")
+                else:
+                    edits.append({"file": cur[1], "func": cur[4], "old": "", "new": body_new})
             elif mode != "b":
-                probs.append(f"第 {at} 行起的块：{cur[1]} 的 <<<<<<< 和 >>>>>>> 之间缺 =======")
+                probs.append(f"第 {at} 行起的块：{cur[1]} 的 <<<<<<< 和 >>>>>>> 之间缺 ======="
+                             "（整个函数重写就在 @@ 改 行后写「函数 名」，块里只写新函数）")
+            elif cur[4]:
+                edits.append({"file": cur[1], "func": cur[4], "old": "\n".join(a), "new": "\n".join(b)})
             elif not "\n".join(a).strip():
                 probs.append(f"第 {at} 行起的块：{cur[1]} 的原文是空的（@@ 改 要写原文；新文件用 @@ 新建）")
             else:
@@ -172,6 +192,10 @@ def edits_text(name: str, obj: dict) -> str:
     for f in (obj or {}).get("files") or []:
         out += [f"@@ 新建 {f.get('file')}", "<<<<<<< 内容", str(f.get("content", "")).rstrip("\n"), ">>>>>>> 新文"]
     for e in (obj or {}).get("edits") or []:
-        out += [f"@@ 改 {e.get('file')}", "<<<<<<< 原文", str(e.get("old", "")), "=======", str(e.get("new", "")),
+        fn = f" 函数 {e['func']}" if e.get("func") else ""
+        if fn and not str(e.get("old") or "").strip():
+            out += [f"@@ 改 {e.get('file')}{fn}", "<<<<<<< 新函数", str(e.get("new", "")), ">>>>>>> 新文"]
+            continue
+        out += [f"@@ 改 {e.get('file')}{fn}", "<<<<<<< 原文", str(e.get("old", "")), "=======", str(e.get("new", "")),
                 ">>>>>>> 新文"]
     return "\n".join(out)
