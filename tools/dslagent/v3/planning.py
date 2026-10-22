@@ -14,7 +14,7 @@ from ..packs.dslproj import contract as DC
 from . import catalog as CAT
 from . import contracts as VC
 from . import top as VT
-from .core import prompt_text
+from .core import prompt_text, syntax_text
 
 KINDS = ("顶层", "约定")
 PROMPT_OF = {"顶层": "top.md", "约定": "contract.md"}
@@ -85,6 +85,15 @@ def without_cases(text):
     return "\n".join(out).rstrip() + "\n"
 
 
+def syntax_part(ctx):
+    """种类=约定 的写 / 复核材料里附的项目写法说明（与 run_entry 注入的 syntax 同一份）；没有就不带。"""
+    syntax = syntax_text(ctx).strip()
+    if not syntax:
+        return []
+    return ["【项目写法说明（与核查用的同一份）】\n" + syntax
+            + "\n\n约定里写的接口、认证、表、查询都必须是附上的项目写法说明里支持的写法。"]
+
+
 def user_text(ctx, kind, req, module="", problems="", prev=""):
     parts = [f"【需求】\n{(req or '').strip()}"]
     if kind == "顶层":
@@ -96,6 +105,7 @@ def user_text(ctx, kind, req, module="", problems="", prev=""):
         top = current_top(ctx)
         mine = next(m for m in top["模块"] if m["名"] == module)
         top_text = ctx.top_path().read_text(encoding="utf-8").strip()
+        parts.extend(syntax_part(ctx))
         parts.append(f"【顶层规划 plan/top.zs】\n{top_text}")
         parts.append(f"【本次要写的模块】\n模块 {module}\n依赖 {' '.join(mine['依赖']) or '无'}")
         ups = []
@@ -182,6 +192,7 @@ def review_user(ctx, module, text, req):
         parts.append("【项目接口目录 plan/catalog.md（只读参考：按 top.zs 的分工判断——需求里的事如果已经在别的模块的"
                       "公开函数 / 接口里找得到，不算本模块缺失；反过来同一件事被两个模块各做一份，在问题里指出）】\n"
                       + cat.read_text(encoding="utf-8").strip())
+    parts.extend(syntax_part(ctx))
     parts.append(f"【模块 {module} 的约定】\n{VT.clean(text).strip()}")
     return "\n\n".join(parts)
 

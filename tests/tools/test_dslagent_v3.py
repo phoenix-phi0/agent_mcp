@@ -786,6 +786,39 @@ def test_full_flow_clean():
     check("【你上次写的内容】" in u and "不在本模块的「依赖」里" in u and "依赖 无" in u, "续跑重写时输入带盘上那份约定和检查问题", u[-500:])
 
 
+def test_contract_syntax():
+    print("写约定 / 复核带项目写法说明")
+    syn = (core.PROMPTS / core.SYNTAX_NAME).read_text(encoding="utf-8").strip()
+    must = "约定里写的接口、认证、表、查询都必须是附上的项目写法说明里支持的写法。"
+    proj, out, state = fresh("p"), fresh("o"), fresh("st") / "state"
+    stub_env(state)
+    fk = Fake()
+    res = run_v3(proj, out, fk, stop_after="contract")
+    check(res["status"] == "成功", "带写法说明时流程照常成功", res["status"])
+    cs = [c for c in fk.calls if c["tag"].startswith("v3_contract_")]
+    rs = [c for c in fk.calls if c["tag"].startswith("v3_review_")]
+    check(cs and all(syn in c["user"] and must in c["user"] for c in cs), "写约定的提示词含写法说明全文和那一句")
+    check(rs and all(syn in c["user"] and must in c["user"] for c in rs), "复核约定的提示词含写法说明全文和那一句")
+    tops = [c for c in fk.calls if c["tag"] == "v3_top"]
+    check(tops and all(syn not in c["user"] for c in tops), "顶层规划不带写法说明")
+    # 文件不存在：照旧不带，记日志
+    old = core.PROMPTS
+    core.PROMPTS = fresh("c_noprompts")
+    for f in old.glob("*.md"):
+        if f.name != core.SYNTAX_NAME:
+            (core.PROMPTS / f.name).write_text(f.read_text(encoding="utf-8"), encoding="utf-8")
+    try:
+        proj2, out2 = fresh("p"), fresh("o")
+        fk2 = Fake()
+        res2 = run_v3(proj2, out2, fk2, stop_after="contract")
+    finally:
+        core.PROMPTS = old
+    cs2 = [c for c in fk2.calls if c["tag"].startswith(("v3_contract_", "v3_review_"))]
+    check(res2["status"] == "成功" and cs2 and all("【项目写法说明" not in c["user"] and must not in c["user"] for c in cs2),
+          "写法说明文件不存在：照旧不带，流程成功", res2["status"])
+    check(res2["记录"].get("语法说明"), "不存在时记日志", res2["记录"].keys())
+
+
 def test_review():
     print("约定对照需求复核")
     bad = '{"passed": false, "issues": ["需求第九节要求讲解调模型回答，约定改成了模板"]}'
@@ -1783,6 +1816,7 @@ if __name__ == "__main__":
         test_engine_bits()
         test_full_flow_clean()
         test_review()
+        test_contract_syntax()
         test_catalog()
         test_global_check()
         test_global_check_flow()

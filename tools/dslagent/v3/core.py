@@ -19,6 +19,7 @@ from . import contracts as VC
 HERE = Path(__file__).resolve().parent
 V3_ZS = HERE / "v3.zs"
 PROMPTS = HERE / "prompts"
+SYNTAX_NAME = "project_syntax.md"
 MAX_CALLS = 2000          # Model 自己的总调用上限放得很宽；真正的上限是 v3.zs 里的「预算」
 WALL = 36000
 STOP_KINDS = {"top": "顶层", "contract": "约定", "build": "build", "顶层": "顶层", "约定": "约定"}
@@ -26,6 +27,15 @@ STOP_KINDS = {"top": "顶层", "contract": "约定", "build": "build", "顶层":
 
 def prompt_text(name):
     return (PROMPTS / name).read_text(encoding="utf-8").strip()
+
+
+def syntax_text(ctx=None):
+    """项目 DSL 写法说明全文；文件不存在或为空 → 空串（有 ctx 时记日志）。"""
+    f = PROMPTS / SYNTAX_NAME
+    text = f.read_text(encoding="utf-8") if f.is_file() else ""
+    if not text and ctx is not None:
+        ctx.log("语法说明", 说明=f"{SYNTAX_NAME} 不存在或为空，不带写法说明（syntax 注入空串）")
+    return text
 
 
 class Ctx:
@@ -182,10 +192,7 @@ def run_entry(script, project, out, req, extra_vars=None, backend=None, cost_cap
     ctx = Ctx(project, out, req, M, cost_cap=cost_cap, module_cmd=module_cmd, module_wall=module_wall)
     eng = V3Engine(client=V2.Client(M), workdir=project, verbose=False, verbs_root=C.VERBS)
     eng.v3, ctx.usage = ctx, eng.usage
-    syn_file = PROMPTS / "project_syntax.md"
-    syntax = syn_file.read_text(encoding="utf-8") if syn_file.is_file() else ""
-    if not syntax:
-        ctx.log("语法说明", 说明=f"{syn_file.name} 不存在或为空，syntax 注入空串")
+    syntax = syntax_text(ctx)
     eng.vars.update({"req": req, "syntax": syntax, **(extra_vars or {})})
     res, err = {"status": "成功", "reason": "", "at": ""}, None
     try:
