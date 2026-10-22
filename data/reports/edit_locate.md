@@ -94,3 +94,33 @@
   1. 让 goose 引擎看不到用户的 `~/.claude/skills`，比如照 iso 的做法隔离 HOME；或者在 mcp 模式下放行 load_skill。否则高强度会 3/3 被杀。
   2. goose 剩下的主要失败是把 `#改法` 写在脚本前面，导致后面的语句被吞。可以在 autoclose 或 strip_prose 里加一个修复：把 `#改法` 段后面的语句挪回主脚本。
 - 成本：sonnet $0.32（0.2297 + 0.0494 + 0.0408）。goose 走工作账号订阅，不计费（goose 估算每次约 $0.003）。
+
+## 追加：失败的 goose 计划交回 plan_fix 能救回几份（2026-10-22 16:18–17:05 JST，未跑完）
+
+- 脚本：`/workspace/dslagent_exp/edit_locate/fixrun.py`，结果逐条写在 `fix/<组>_<case>.json`。
+- 按真实 v2 路径走，用的是 feat/edit-locate 的代码：strip_prose / autoclose → `v2.check` → plan_autofix → `prompts.fix_prompt`（plan_fix 模板）→ goose（system = `plan_system(dslproj, "goose")`，挂只读 dsl MCP）。
+- 用 iso 模式，每个 case 最多 3 轮。无输出（overloaded）不算一轮，最多重试 25 次，每次间隔 45 秒。
+- 第一版脚本把无输出也算成一轮，那批结果放在 `fix/discard/`，只作为补充数据。
+- 四个 case 是 goose_0、goose_1、goose_2、goose_iso_0。分两组：def（默认强度，跟原 run 一致）和 high（高强度对照）。
+
+| case | 原失败原因 | def | high |
+|---|---|---|---|
+| goose_0 | `#改法` 写在脚本前面，后面的语句被吞进段里 | 第 1 轮通过 | 第 1 轮通过 |
+| goose_1 | old 不唯一 + old 以「结束」开头找不到 | r1 仍失败（第 7 处 old 在函数 学生详情 内找不到，开头「结束」）；r2 因 overloaded 重试 25 次仍无输出；r3 未跑完。discard 那批的 r2 也是同一个错误 | r1 同样的错误（discard 那批，r2/r3 无输出） |
+| goose_2 | old 出现 2 次（`设 acc = 调用 account.学生列表`） | 未跑到 | 未跑到 |
+| goose_iso_0 | 同 goose_0（`#改法` 写在前面） | 未跑到 | 未跑到 |
+
+- plan_autofix 在这几份上都没修到东西（autofix=0）。
+
+### 阻塞情况
+
+- 约 16:35 起，OpenAI 端持续返回 `server_is_overloaded`，连「只回数字 7」这样的小请求也 3/3 失败。
+- 另外，机器在等待期间会休眠，后台任务也跟着停。
+- 任务还挂在后台，会按 def → high 的顺序继续跑。def_goose_1.json 是部分结果，脚本跳过已存在的 json，要重跑就先删掉它。
+
+### 目前的结论
+
+- 能救的：结构类错误（`#改法` 位置不对）一轮就能修好，2/2。
+- 救不了的：内容类错误（goose_1 的 old「结束」）连续 2–3 次给同样的反馈，goose 照样犯同样的错，多给几轮也没用。
+- 建议：goose 的 plan_fix 保持 1 轮（现在的默认值），最多 2 轮。与其加轮数，不如改反馈文字（比如给出函数里实际的结尾几行），或者加程序修复（把被吞的语句挪回主脚本）。
+- 轮数在 `tools/dslagent/agents.py` 第 108 行 `PLAN = _agent("plan.md", …, rewrites=1)`，v2 用 `for k in range(1 + AG.PLAN.rewrites)` 读它（v2.py 约 647 行）。plan.md 前言里的「重写 1 次」只是说明文字。
