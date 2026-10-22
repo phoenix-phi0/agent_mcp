@@ -83,6 +83,72 @@ def _numbered(text):
     return "\n".join(f"{i:4d}| {l}" for i, l in enumerate(text.splitlines(), 1))
 
 
+FIX_TOTAL = 150000      # 补改入参里本模块文件的总字数预算；全文超了才改成「报错行前后各 FIX_CTX 行」
+FIX_CTX = 30
+_LINE_NO = re.compile(r"第\s*(\d+)(?:\s*[-~–—到至]\s*(\d+))?\s*行|行\s*(\d+)|:(\d+)(?:-(\d+))?\b")
+
+
+def _error_lines(rel, probs, n):
+    """验收问题里指向 rel 的行号（问题里点名了别的文件的不算；没点名文件的问题算给每个文件）。"""
+    out = set()
+    for p in probs:
+        p = str(p)
+        named = re.findall(r"[\w./-]+\.(?:zs|entity|sql|md)\b", p)
+        if named and rel not in named and not any(rel.endswith("/" + x) or x.endswith("/" + rel) for x in named):
+            continue
+        for m in _LINE_NO.finditer(p):
+            a = int(m.group(1) or m.group(3) or m.group(4))
+            b = int(m.group(2) or m.group(5) or a)
+            for i in range(a, min(b, a + 200) + 1):
+                if 1 <= i <= n:
+                    out.add(i)
+    return sorted(out)
+
+
+def _windows(lines, errs, ctx=FIX_CTX):
+    """行号集合 → 各自前后 ctx 行合并后的区间 [(起, 止)]。"""
+    wins = []
+    for i in errs:
+        a, b = max(1, i - ctx), min(len(lines), i + ctx)
+        if wins and a <= wins[-1][1] + 1:
+            wins[-1] = (wins[-1][0], max(b, wins[-1][1]))
+        else:
+            wins.append((a, b))
+    return wins
+
+
+def fix_files_text(project, module, probs, total=FIX_TOTAL):
+    """补改入参里的「本模块现有文件」：总字数不超 total 就每个文件全文（带行号，不截）；超了，较小的文件仍给全文，
+    大文件只给报错行前后各 FIX_CTX 行（没有行号可依就给开头）并标明省略了哪几行。"""
+    files = []
+    for rel, _ in current_files(project, module):
+        f = Path(project) / rel
+        if f.is_file():
+            files.append((rel, f.read_text(encoding="utf-8", errors="replace").splitlines()))
+    sizes = {rel: sum(len(l) + 8 for l in ls) for rel, ls in files}
+    full = sum(sizes.values()) <= total
+    out = []
+    for rel, ls in files:
+        n = len(ls)
+        if full or sizes[rel] <= total // max(len(files), 1):
+            body = "\n".join(f"{i:4d}| {l}" for i, l in enumerate(ls, 1))
+            out.append(f"### {rel}（共 {n} 行，全文）\n```\n{body}\n```")
+            continue
+        errs = _error_lines(rel, probs, n)
+        wins = _windows(ls, errs) if errs else [(1, min(n, 150))]
+        parts, prev = [], 0
+        for a, b in wins:
+            if a > prev + 1:
+                parts.append(f"      …（略第 {prev + 1}-{a - 1} 行）")
+            parts += [f"{i:4d}| {ls[i - 1]}" for i in range(a, b + 1)]
+            prev = b
+        if prev < n:
+            parts.append(f"      …（略第 {prev + 1}-{n} 行）")
+        why = "报错行前后各 %d 行" % FIX_CTX if errs else "开头（问题里没有行号）"
+        out.append(f"### {rel}（共 {n} 行，文件太长，只给{why}；old 只能抄下面出现的行）\n```\n" + "\n".join(parts) + "\n```")
+    return "\n\n".join(out) or "（还没有文件）"
+
+
 def catalog_text(project):
     """plan/catalog.md（v3 的接口目录，程序生成）；没有就返回 None。做模块 / 补改带上它当只读参考，不是本模块的约定。"""
     f = Path(project) / "plan" / "catalog.md"
@@ -173,11 +239,11 @@ def accept(project, ctx):
 
 
 def fix_input(project, ctx, probs):
-    """补改入参：任务 + 约定 + 上游公开函数头 + 本模块与全部上游的 entities 原文 + 验收问题 + 本模块现有文件（全文，上限 40000 字）+ 写法速查。"""
+    """补改入参：任务 + 约定 + 上游公开函数头 + 本模块与全部上游的 entities 原文 + 验收问题 + 本模块现有文件（全文；总量超预算时大文件只给报错行前后各 30 行）+ 写法速查。"""
     module = P.module_of(ctx["task"])
     c, text = P.load_contract(project, module)
     ups = [f"### {d}\n{C.public_heads(C.parse(P.contract_path(project, d).read_text(encoding='utf-8'))[0])}" for d in c["依赖"]]
-    cur = "\n\n".join(f"### {rel}\n```\n{_numbered(t)}\n```" for rel, t in current_files(project, module)) or "（还没有文件）"
+    cur = fix_files_text(project, module, probs)
     parts = [f"【任务原文】\n{ctx['task']}", f"【本模块约定（不能改）】\n{text.strip()}",
              "【上游模块公开函数】\n" + ("\n\n".join(ups) or "（无）"),
              "【本模块与全部上游的 entities 原文】\n" + entities_text(project, module),

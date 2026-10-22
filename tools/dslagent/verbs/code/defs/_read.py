@@ -5,6 +5,8 @@ plan3：
   + 「文件共 N 行，太长请指定区间」+ 该文件的 def/class 行号清单。
 - 多段写法里没写文件名的段（「40-60」「:40-60」「40」）沿用前一段的文件。
 - 每段字数上限放宽到 MAX_CHARS（装得下 500 行）；写了区间的段仍是每段 ≤ MAX_LINES 行。
+- 段后加「:全文」（文件:全文，可配 * 通配）= 整个文件全部行，不受 500 / 120 行限制（每个文件 ≤ FULL_CHARS 字，
+  超了在末尾说明读到哪、怎么接着读）；补改要看报错行原文时用它。
 - 每次读写一行到状态目录的 verb_log.jsonl（统计整文件读取用）。
 """
 
@@ -19,6 +21,8 @@ WHOLE_MAX = 500        # 只写文件名：≤ 这么多行整份返回
 BIG_HEAD = 120         # 只写文件名、文件更长：返回前这么多行 + 函数/类清单
 MAX_CHARS = 25000
 MAX_TOTAL = 800
+FULL_CHARS = 80000     # 「文件:全文」每个文件的字数上限（补改要看全文，不按 500 行 / 120 行截）
+FULL_SUFFIX = re.compile(r"[:：](?:全文|全)$")
 
 
 _GLOB = re.compile(r"^[^\s:*?]*[*?][^\s:]*$")
@@ -31,9 +35,11 @@ def split_segs(arg, root=None):
         return segs
     out = []
     for s in segs:
-        if _GLOB.match(s) and ".." not in s and not s.startswith("/"):
-            hit = sorted(str(f.relative_to(root)) for f in Path(root).glob(s) if f.is_file())
-            out += hit or [s]
+        full = FULL_SUFFIX.search(s)
+        g = s[:full.start()] if full else s
+        if _GLOB.match(g) and ".." not in g and not g.startswith("/"):
+            hit = sorted(str(f.relative_to(root)) for f in Path(root).glob(g) if f.is_file())
+            out += [h + ":全文" for h in hit] if full and hit else (hit or [s])
         else:
             out.append(s)
     return out
@@ -52,6 +58,10 @@ def outline(lines):
 
 
 def one(root, seg, resolve, prev_file=""):
+    fm = FULL_SUFFIX.search(seg)
+    full = bool(fm)
+    if full:
+        seg = seg[:fm.start()]
     m0 = _RANGE_ONLY.match(seg)
     if m0:
         if not prev_file:
@@ -76,16 +86,18 @@ def one(root, seg, resolve, prev_file=""):
     a = max(a, 1)
     if a > n:
         return None, f"{f} 只有 {n} 行"
-    big = whole and n > WHOLE_MAX
-    if whole:
-        line_cap = BIG_HEAD if big else WHOLE_MAX
+    big = whole and n > WHOLE_MAX and not full
+    if full:
+        line_cap, char_cap = n, FULL_CHARS
+    elif whole:
+        line_cap, char_cap = (BIG_HEAD if big else WHOLE_MAX), MAX_CHARS
     else:
-        line_cap = MAX_LINES
+        line_cap, char_cap = MAX_LINES, MAX_CHARS
     want = min(b, n)
     out, chars, end = [], 0, a - 1
     for i in range(a, want + 1):
         row = f"{i:4d}| {lines[i - 1]}"
-        if i - a + 1 > line_cap or chars + len(row) + 1 > MAX_CHARS:
+        if i - a + 1 > line_cap or chars + len(row) + 1 > char_cap:
             break
         out.append(row)
         chars += len(row) + 1
@@ -98,7 +110,7 @@ def one(root, seg, resolve, prev_file=""):
     elif end < want:
         note = f"\n（第 {end} 行后省略，需要再读 {f}:{end + 1}-{want}）"
     return {"file": f, "a": a, "b": end, "body": "\n".join(out), "trunc": note,
-            "total": n, "whole": whole, "big": big}, ""
+            "total": n, "whole": whole, "big": big, "full": full}, ""
 
 
 def _log(root, rec):
@@ -117,7 +129,7 @@ def read_into(st, root, arg, tag="读片段"):
     step = int(st.get("step", 0)) + 1
     prev = ""
     for s in split_segs(arg, root):
-        if total >= MAX_TOTAL:
+        if total >= MAX_TOTAL and not FULL_SUFFIX.search(s):
             out.append(f"[{tag}] 合计超过 {MAX_TOTAL} 行，后面的没读：{s}")
             continue
         snip, err = one(root, s, resolve, prev)
@@ -138,7 +150,8 @@ def read_into(st, root, arg, tag="读片段"):
             st["stats"]["trunc"] += 1
         got.append(_notes.add_snip(st, snip["file"], snip["a"], snip["b"], snip["body"], step,
                                    snip["trunc"], _notes.funcs_of(root, snip["file"], snip["a"], snip["b"])))
-        total += snip["b"] - snip["a"] + 1
+        if not snip["full"]:
+            total += snip["b"] - snip["a"] + 1
         head = "（整个文件）" if snip["whole"] and not snip["big"] and snip["b"] == snip["total"] else ""
         out.append(f'{snip["file"]} {snip["a"]}-{snip["b"]}（共 {snip["total"]} 行）{head}：\n'
                    f'{snip["body"]}{snip["trunc"]}')

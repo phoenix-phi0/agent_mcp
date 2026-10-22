@@ -95,10 +95,20 @@ def _read_range(workdir: Path, name: str, start, end) -> str:
         return f"[读不到 {ref}：{why}，文件共 {len(lines)} 行]"
     note = f"（要求到第 {b} 行，文件只有 {len(lines)} 行，读到末尾）\n" if b > len(lines) else ""
     b = min(b, len(lines))
+    if start is None and end is None:
+        # 整份：按 MAX_LINES 分段全部给出，不丢后半段
+        blocks = []
+        for lo in range(1, len(lines) + 1, MAX_LINES):
+            hi = min(lo + MAX_LINES - 1, len(lines))
+            body = "\n".join(f"{i:4d}| {lines[i - 1]}" for i in range(lo, hi + 1))
+            blocks.append(f"（{name} 第 {lo}-{hi} 行，共 {len(lines)} 行）\n{body}")
+        return "\n".join(blocks)
+    cut = ""
     if b - a + 1 > MAX_LINES:
+        cut = f"\n（区间超过 {MAX_LINES} 行，只给到第 {a + MAX_LINES - 1} 行；要看后面请另写 {name}:{a + MAX_LINES}-{b}）"
         b = a + MAX_LINES - 1
     body = "\n".join(f"{i:4d}| {lines[i - 1]}" for i in range(a, b + 1))
-    return f"{note}（{name} 第 {a}-{b} 行，共 {len(lines)} 行）\n{body}"
+    return f"{note}（{name} 第 {a}-{b} 行，共 {len(lines)} 行）\n{body}{cut}"
 
 
 def _inline_refs(workdir: Path, text: str) -> list:

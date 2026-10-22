@@ -13,7 +13,7 @@
   终止 成功 {m} 的加载检查、比对约定、跑用例都通过
 结束
 # 有问题：三份报告 + 现有文件交给子任务补改一轮
-设 files = 读片段 entities/graph.entity,services/graph.zs,routes/graph*.zs,queries/graph_*.sql
+设 files = 读片段 entities/graph.entity:全文,services/graph.zs:全文,routes/graph*.zs:全文,queries/graph_*.sql:全文
 设 inp.files = {files}
 设 inp.加载检查 = {c.problems}
 设 inp.比对约定 = {d.diffs}
