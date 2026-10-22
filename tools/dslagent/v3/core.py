@@ -138,7 +138,7 @@ def ctx_of(engine=None):
     return c
 
 
-def run(req, project, out, stop_after=None, backend=None, cost_cap=None, wall=WALL, module_cmd=None, module_wall=1800, script=None):
+def run(req, project, out, stop_after=None, backend=None, cost_cap=None, wall=WALL, module_cmd=None, module_wall=1800, script=None, skip=None):
     """跑 v3.zs（script 给了就跑 v3/ 下那个顶层脚本，如 build2，不带 .zs）。req：需求文本；backend：假模型（测试用）；module_cmd：替换「做模块」起的子进程命令（测试用）。
     → {status, reason, at, 花费, 用时, 记录…}，同时写 out/result.json。"""
     project, out = Path(project), Path(out)
@@ -161,7 +161,7 @@ def run(req, project, out, stop_after=None, backend=None, cost_cap=None, wall=WA
     ctx = Ctx(project, out, req, M, cost_cap=cost_cap, module_cmd=module_cmd, module_wall=module_wall)
     eng = V3Engine(client=V2.Client(M), workdir=project, verbose=False, verbs_root=C.VERBS)
     eng.v3, ctx.usage = ctx, eng.usage
-    eng.vars.update({"req": req, "project": str(project), "stop_after": stop})
+    eng.vars.update({"req": req, "project": str(project), "stop_after": stop, **({"skip": skip} if skip else {})})
     res, err = {"status": "成功", "reason": "", "at": ""}, None
     try:
         eng.run_file(HERE / f"{script}.zs" if script else V3_ZS)   # 文件跑：脚本里的「执行」先找同级目录

@@ -1947,6 +1947,59 @@ def test_build2_trunk():
     check("执行 plan/build.zs" in (ROOT / "tools" / "dslagent" / "v3" / "v3.zs").read_text(encoding="utf-8"), "v3.zs 仍然执行 plan/build.zs（不变）")
 
 
+def test_build2_isolate_failures():
+    print("build2.zs：一个模块失败只拦依赖它的模块（直接 / 间接），其余照做；skip 参数；有失败 / 跳过不跑全量回归")
+    import tools.dslagent.v3.regress as RG
+    top5 = TOP3 + "模块 extra 依赖 vocab\n模块 extra2 依赖 extra\n"
+
+    def derived(name, dep):
+        t = contract_text("progress").replace("progress", name).replace("依赖 graph", f"依赖 graph {dep}", 1)
+        return t.replace("  伪代码 调用 graph.", f"  伪代码 调用 {dep}.记作答 learner=learner point_code=point_code correct=correct\n  伪代码 调用 graph.", 1)
+    sc = {"v3_top": [top5], "v3_contract_extra": [derived("extra", "vocab")], "v3_contract_extra2": [derived("extra2", "extra")]}
+    real_reg, reg_calls = RG.audit_regression, []
+
+    def reg(c, t):
+        reg_calls.append(1)
+        return {"count": 0, "items": [], "failed": [], "failed_text": "", "summary": ""}
+    RG.audit_regression = reg
+    try:
+        # 1. 中间层 vocab 一直不过：progress 照做，extra / extra2 因依赖跳过，终止 失败，原因三类清单齐全，不跑全量回归
+        proj, out, state = fresh("p"), fresh("o"), fresh("st") / "state"
+        stub_env(state, plan={"vocab": 99})
+        res = run_v3(proj, out, Fake(scripts=sc), script="build2")
+        r = res["reason"]
+        check(res["status"] == "失败" and "失败的模块：vocab：" in r and "被跳过的模块：extra：因依赖vocab失败或被跳过而跳过；extra2：因依赖extra失败或被跳过而跳过；" in r
+              and "已完成的模块：graph、progress、" in r, "vocab 失败：失败 / 跳过（含间接）/ 已完成三类清单都在原因里", r)
+        check(len(calls_for(state, "vocab")) == 3 and len(calls_for(state, "progress")) == 1 and not calls_for(state, "extra") and not calls_for(state, "extra2"),
+              "vocab 做满 3 次；不依赖它的 progress 照做；extra / extra2 一次都没做", [(c["模块"], c["轮"]) for c in stub_calls(state)])
+        check(not reg_calls, "有失败 / 跳过：不跑全量回归")
+        # 2. skip=vocab：vocab 不做，extra / extra2 跳过，graph / progress 照做
+        proj, out, state = fresh("p"), fresh("o"), fresh("st") / "state"
+        stub_env(state)
+        res = run_v3(proj, out, Fake(scripts=sc), script="build2", skip="vocab")
+        r = res["reason"]
+        check(res["status"] == "失败" and "失败的模块：被跳过的模块：vocab：按skip参数跳过；extra：因依赖vocab" in r and "extra2：因依赖extra" in r and "已完成的模块：graph、progress、" in r,
+              "skip=vocab：vocab 按参数跳过，下游 extra / extra2 跟着跳过", r)
+        check({c["模块"] for c in stub_calls(state)} == {"graph", "progress"} and not reg_calls, "只做了 graph / progress，没跑全量回归", [(c["模块"], c["轮"]) for c in stub_calls(state)])
+        # 3. skip 里空项 / 多个：skip=progress,extra2 → 只这两个跳过，其余成功后仍因有跳过而不跑回归
+        proj, out, state = fresh("p"), fresh("o"), fresh("st") / "state"
+        stub_env(state)
+        res = run_v3(proj, out, Fake(scripts=sc), script="build2", skip="progress, extra2")
+        check(res["status"] == "失败" and "progress：按skip参数跳过" in res["reason"] and "extra2：按skip参数跳过" in res["reason"]
+              and {c["模块"] for c in stub_calls(state)} == {"graph", "vocab", "extra"}, "skip 多个模块（逗号 + 空格）都生效", res["reason"])
+        # 4. 续跑：同一项目再跑 skip=extra,extra2：已完成的 graph / vocab 不重做，progress 补做，仍有跳过 → 失败且不跑回归
+        stub_env(state)
+        res = run_v3(proj, out, Fake(scripts=sc), script="build2", skip="extra,extra2")
+        check(res["status"] == "失败" and "graph（已完成）" in res["reason"] and "progress" in res["reason"] and not reg_calls
+              and len(calls_for(state, "graph")) == 1 and len(calls_for(state, "vocab")) == 1 and len(calls_for(state, "progress")) == 1,
+              "续跑：已完成的不重做，skip 的模块仍跳过，不跑全量回归", res["reason"])
+    finally:
+        RG.audit_regression = real_reg
+    import subprocess
+    cp = subprocess.run([sys.executable, "-m", "tools.dslagent", "v3", "-h"], cwd=ROOT, capture_output=True, text=True)
+    check("--skip" in cp.stdout, "CLI v3 -h 列出 --skip")
+
+
 if __name__ == "__main__":
     try:
         test_top()
@@ -1989,6 +2042,7 @@ if __name__ == "__main__":
         test_trunk2_entries()
         test_change2_fix2()
         test_build2_trunk()
+        test_build2_isolate_failures()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n通过 {PASS}，失败 {FAIL}")

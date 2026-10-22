@@ -56,6 +56,7 @@ def main(argv=None):
     v.add_argument("--cost-cap", type=float, default=None, help="花费上限（美元），达到就以「超出预期」结束")
     v.add_argument("--wall", type=int, default=None, help="整个流程的墙钟秒数（缺省 36000）")
     v.add_argument("--module-wall", type=int, default=1800, help="做一个模块时 v2 子进程的墙钟秒数")
+    v.add_argument("--skip", default=None, help="（build2）逗号隔开的模块名：直接跳过不做，依赖它们的模块也跳过（续跑时先跳过已知会失败的模块）")
     v.add_argument("--task", default=None, help="（audit / change）这一轮要完成的具体任务，不写就是纯核查 / 按问题清单改")
     v.add_argument("--issues", default="latest", help="（change）读哪份问题清单：路径或 latest（默认最新一份）")
     v.add_argument("--llm", default="sonnet", help="（audit / change / audit2 / fix2）调模型用的模型名")
@@ -99,7 +100,7 @@ def main(argv=None):
             return 0 if res["status"] == "成功" else 1
         res = V3.run(req_text, a.project, a.out, stop_after=a.stop_after, cost_cap=a.cost_cap,
                      **({"wall": a.wall} if a.wall else {}), module_wall=a.module_wall,
-                     **({"script": "build2"} if a.action == "build2" else {}))
+                     **({"script": "build2"} if a.action == "build2" else {}), **({"skip": a.skip} if a.skip else {}))
         print(json.dumps({k: res.get(k) for k in ("status", "reason", "at", "花费", "用时", "模型调用")}, ensure_ascii=False))
         return 0 if res["status"] == "成功" else 1
     if a.cmd == "newproj":
