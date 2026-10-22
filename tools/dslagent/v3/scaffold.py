@@ -174,20 +174,20 @@ REDO_FILE = "plan/redo_failed.zs"
 # 全部重做通过 返回 通过；有模块没过 终止 失败（调用方拿到 {status, reason}）
 REDO_TEXT = """# 重做检查查出不过的模块（由「生成分配」生成，程序生成不调模型）：build.zs 里 全量回归 / 接口冒烟 各调一次。
 # 先记验收 否，再按依赖分层重做：同一层并行，直接调 做一个模块（不看「已完成」：state 里可能还记着通过，但检查已经说它不过），起始原因 = 检查查出的原因。
-# 参数：检查 failed layers   （检查 = 全量回归|接口冒烟；failed = 检查结果的 failed 列表；layers = 依赖分层）
+# 参数：check failed layers   （check = 全量回归|接口冒烟；failed = 检查结果的 failed 列表；layers = 依赖分层）
 用包 common v3 text
 遍历 f 于 {failed}
-  设 m = 记验收 {f.module} 否 {检查}：{f.reason}
+  设 m = 记验收 {f.module} 否 {check}：{f.reason}
 结束
-遍历 组 于 {layers}
-  设 mods = 按正则切分 {组} [,，、\\s]+
+遍历 group 于 {layers}
+  设 mods = 按正则切分 {group} [,，、\\s]+
   设 jobs = 解析JSON []
   遍历 m 于 {mods}
     遍历 f 于 {failed}
       如果 {f.module} 等于 {m}
         设 job = 解析JSON {"脚本":"做一个模块","参数":{"最多":"3","末次模型":"opus"}}
         设 job.参数.模块 = {m}
-        设 job.参数.起始原因 = {检查}发现问题：{f.reason}
+        设 job.参数.起始原因 = {check}发现问题：{f.reason}
         设 jobs = 列表加项 {jobs} {job}
       结束
     结束
@@ -195,7 +195,7 @@ REDO_TEXT = """# 重做检查查出不过的模块（由「生成分配」生成
   设 res = 并行执行 {jobs} 并发=3
   设 s = 汇总失败 {res}
   如果 {s.count} 大于 0
-    终止 {s.status} {检查}重做未通过：{s.reason}
+    终止 {s.status} {check}重做未通过：{s.reason}
   结束
 结束
 返回 {"status":"通过"}
@@ -204,7 +204,7 @@ REDO_TEXT = """# 重做检查查出不过的模块（由「生成分配」生成
 # 检查 → 有不过的模块 → 交 plan/redo_failed.zs 按依赖分层重做 → 再检查；第 2 次检查仍不过 终止 失败
 CHECK_BLOCK = """设 rs = {verb}
 如果 {rs.count} 大于 0
-  设 r = 执行 plan/redo_failed 检查={verb} failed={rs.failed} layers={layers}
+  设 r = 执行 plan/redo_failed check={verb} failed={rs.failed} layers={layers}
   如果 {r.status} 不等于 通过
     终止 {r.status} {r.reason}
   结束

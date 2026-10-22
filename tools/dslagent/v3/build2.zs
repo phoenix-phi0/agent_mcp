@@ -13,12 +13,12 @@
   终止 成功 停在分配脚本
 结束
 设 layers = 依赖分层
-遍历 组 于 {layers}
-  做模块组 {组}
+遍历 group 于 {layers}
+  做模块组 {group}
 结束
 设 rs = 全量回归
 如果 {rs.count} 大于 0
-  设 r = 执行 plan/redo_failed 检查=全量回归 failed={rs.failed} layers={layers}
+  设 r = 执行 plan/redo_failed check=全量回归 failed={rs.failed} layers={layers}
   如果 {r.status} 不等于 通过
     终止 {r.status} {r.reason}
   结束

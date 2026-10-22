@@ -1807,9 +1807,15 @@ def test_change2_fix2():
     ag = [c for c in fk.calls if c["tag"] == "v3_agent_modify_module"]
     check(res["status"] == "成功" and len(ag) == 1 and fk.n("dsl") == 6 and "第 2 轮" in res["reason"] and "vocab" in res["reason"],
           "fix2：一轮修好就停（核查 2 轮 × 3 模块、改 1 次），信息带轮数和改了哪个模块", res)
-    res, fk = fix([{2: issue}, {2: issue}, {2: issue}], rounds=3)
-    check(res["status"] == "失败" and fk.n("v3_agent_modify_module") == 3 and fk.n("dsl") == 9 and "3 轮用完" in res["reason"]
-          and "少接口" in res["reason"], "fix2：轮数用完终止，带最后一次核查结果", res)
+    res, fk = fix([{2: issue}, {2: issue}, {2: issue}, {2: issue}], rounds=3)
+    check(res["status"] == "失败" and fk.n("v3_agent_modify_module") == 3 and fk.n("dsl") == 12 and "改了 3 轮" in res["reason"]
+          and "少接口" in res["reason"], "fix2：改满 3 轮后再核查 1 次（核查 4 次 × 3 模块、改 3 次）仍有问题 → 失败，带最后一次核查结果", res)
+    res, fk = fix([{2: issue}], rounds=1)
+    check(res["status"] == "成功" and fk.n("v3_agent_modify_module") == 1 and fk.n("dsl") == 6 and "第 2 轮" in res["reason"],
+          "fix2：rounds=1 改一次后再核查，ok → 成功", res)
+    res, fk = fix([{2: issue}, {2: issue}], rounds=1)
+    check(res["status"] == "失败" and fk.n("v3_agent_modify_module") == 1 and fk.n("dsl") == 6 and "少接口" in res["reason"],
+          "fix2：rounds=1 改一次后再核查仍有问题 → 失败且带最后结果、不再改", res)
     res, fk = fix([{1: a2_reply("contract_issue", "约定矛盾", "contracts/graph.md")}])
     check(res["status"] == "失败" and fk.n("v3_agent_modify_module") == 0 and "约定" in res["reason"] and "约定矛盾" in res["reason"],
           "fix2：contract_issue 终止、不改", res)
