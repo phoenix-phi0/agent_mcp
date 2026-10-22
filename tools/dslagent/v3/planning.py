@@ -108,12 +108,17 @@ def user_text(ctx, kind, req, module="", problems="", prev=""):
         parts.extend(syntax_part(ctx))
         parts.append(f"【顶层规划 plan/top.zs】\n{top_text}")
         parts.append(f"【本次要写的模块】\n模块 {module}\n依赖 {' '.join(mine['依赖']) or '无'}")
+        if mine.get("提供"):
+            parts.append("【本模块必须提供的公开函数（top.zs 里「提供」写的，别的模块要调用；约定里每个都必须有，且写成「公开 函数」，函数名一字不差）】\n"
+                         + "\n".join(f"- {f}" for f in mine["提供"]))
         ups = []
         for d in mine["依赖"]:
             f = VC.path_of(ctx.project, d)
             if f.is_file():
                 ups.append(f"### 上游模块 {d}（直接依赖，可以调用）\n```\n{without_cases(f.read_text(encoding='utf-8')).strip()}\n```")
-        parts.append("【上游模块的约定（已通过检查并冻结，不能改；只能调用其中写了「公开」的函数）】\n" + ("\n\n".join(ups) if ups else "（本模块没有依赖）"))
+        provided = [f"- 模块 {d} 提供：{' '.join(m['提供'])}" for d in mine["依赖"] for m in top["模块"] if m["名"] == d and m.get("提供")]
+        parts.append("【上游模块的约定（已通过检查并冻结，不能改；跨模块只能调上游约定里写了「公开」的函数，上游提供的见顶层「提供」）】\n"
+                     + ("\n".join(provided) + "\n\n" if provided else "") + ("\n\n".join(ups) if ups else "（本模块没有依赖）"))
         brief = CAT.brief_index(ctx.project, top_text, exclude={module, *mine["依赖"]})
         parts.append("【项目接口目录：除上面直接依赖外，其它已有约定的模块一行概要（只读参考，不能直接调用；"
                       "需要调用就把它加进「依赖」，之后会给到它的约定全文）】\n" + (brief or "（没有别的模块）"))

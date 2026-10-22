@@ -62,8 +62,22 @@ def check(text, name, top, project):
         if t["名"] != name and not t["名"].startswith(name + "_"):
             probs.append(f"第 {t['行']} 行：表名「{t['名']}」要以「{name}_」开头（各模块的表不重名）")
     probs += optional_empty(c)
+    probs += provides_missing(c, name, top)
     seen = set()
     return [p for p in probs if not (p in seen or seen.add(p))]
+
+
+def provides_missing(c, name, top):
+    """top.zs 里本模块「提供」的函数，约定里必须都有且是「公开 函数」。→ 问题列表。"""
+    mine = next((m for m in top["模块"] if m["名"] == name), None)
+    fns = {f["名"]: f for f in c["函数"]}
+    probs = []
+    for fn in (mine or {}).get("提供", []):
+        if fn not in fns:
+            probs.append(f"top.zs 里模块「{name}」提供「{fn}」（别的模块要调用），但约定里没有这个函数：请加「公开 函数 {fn} …」")
+        elif not fns[fn]["公开"]:
+            probs.append(f"top.zs 里模块「{name}」提供「{fn}」（别的模块要调用），约定里它不是公开函数：请改成「公开 函数 {fn} …」")
+    return probs
 
 
 def optional_empty(c):

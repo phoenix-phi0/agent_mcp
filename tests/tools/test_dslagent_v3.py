@@ -819,6 +819,58 @@ def test_contract_syntax():
     check(res2["记录"].get("语法说明"), "不存在时记日志", res2["记录"].keys())
 
 
+def test_provides():
+    print("顶层「提供」：解析 / 检查 / 写约定提示词 / 约定检查")
+    t = "项目 demo\n模块 graph 提供 取知识点,列知识点   # 图\n模块 vocab 依赖 graph 提供 查词\n模块 progress 依赖 graph vocab\n"
+    top, probs = VT.parse(t)
+    check(probs == [] and VT.check(t) == [], "带提供的 top 通过检查", (probs, VT.check(t)))
+    mods = {m["名"]: m for m in top["模块"]}
+    check(mods["graph"]["提供"] == ["取知识点", "列知识点"] and mods["vocab"]["提供"] == ["查词"] and mods["progress"]["提供"] == [],
+          "解析出各模块的提供", mods)
+    check(mods["vocab"]["依赖"] == ["graph"] and mods["graph"]["依赖"] == [], "提供不影响依赖解析", mods)
+    check(VT.parse("项目 d\n模块 a 提供 x, y，z\n")[0]["模块"][0]["提供"] == ["x", "y", "z"], "逗号（含中文逗号）和空格都能隔开")
+    p = VT.check("项目 d\n模块 a 提供 列学生,列学生\n")
+    check(any("重复" in x and "列学生" in x for x in p), "同一模块内提供重复被查出", p)
+    p = VT.check("项目 d\n模块 a 提供 列-学生\n")
+    check(any("不合法" in x for x in p), "提供的函数名格式不合法被查出", p)
+    p = VT.check("项目 d\n模块 b\n模块 a 提供 x 依赖 b\n")
+    check(any("之后" in x for x in p), "提供写在依赖之前被查出", p)
+    old = "项目 demo\n模块 a  # 说明\n模块 b 依赖 a\n"
+    ot = VT.parse(old)[0]
+    check(VT.check(old) == [] and all(m["提供"] == [] for m in ot["模块"]) and [m["依赖"] for m in ot["模块"]] == [[], ["a"]],
+          "没有提供的旧 top.zs 行为不变", ot)
+    check(VT.sync_deps(t, {"progress": ["graph"]}).count("提供") == 2 and "提供 取知识点,列知识点" in VT.sync_deps(t, {"graph": []}),
+          "同步依赖保留提供")
+    check("vocab 依赖 graph 提供 查词" in VT.sync_deps(t, {"vocab": ["graph"]}), "同步依赖后提供还在依赖之后")
+    # 约定检查：graph 约定里的公开函数 取知识点 存在；要求提供不存在的函数 / 非公开函数
+    proj = project_with_contracts()
+    topx = VT.load(TOP3.replace("模块 graph ", "模块 graph 提供 取知识点,列学生 ", 1))
+    probs = VC.check(contract_text("graph"), "graph", topx, proj)
+    check(len(probs) == 1 and "列学生" in probs[0] and "没有这个函数" in probs[0], "约定缺提供的函数被拒", probs)
+    priv = contract_text("graph").replace("公开 函数 取知识点", "函数 取知识点", 1)
+    probs = VC.check(priv, "graph", VT.load(TOP3.replace("模块 graph ", "模块 graph 提供 取知识点 ", 1)), proj)
+    check(any("取知识点" in x and "不是公开函数" in x for x in probs), "提供的函数不是公开函数被拒", probs)
+    ok = VC.check(contract_text("graph"), "graph", VT.load(TOP3.replace("模块 graph ", "模块 graph 提供 取知识点 ", 1)), proj)
+    check(ok == [], "约定含全部提供的公开函数通过", ok)
+    check(VC.check(contract_text("graph"), "graph", VT.load(TOP3), proj) == [], "没有提供的 top：约定检查不变")
+    # 写约定提示词
+    ctx = core.Ctx(proj, fresh("out"), "x", None)
+    ctx.top_path().parent.mkdir(parents=True, exist_ok=True)
+    ctx.top_path().write_text("项目 demo\n模块 graph 提供 取知识点,列学生\n模块 vocab 依赖 graph\n", encoding="utf-8")
+    u = PL.user_text(ctx, "约定", "需求", "graph")
+    check("必须提供的公开函数" in u and "- 取知识点" in u and "- 列学生" in u, "写 graph 约定的提示词含提供列表", u[-600:])
+    u2 = PL.user_text(ctx, "约定", "需求", "vocab")
+    check("必须提供的公开函数" not in u2 and "模块 graph 提供：取知识点 列学生" in u2 and "上游提供的见顶层" in u2,
+          "写下游约定：不含自己的硬要求，说明上游提供的见顶层", u2[-900:])
+    ctx.top_path().write_text("项目 demo\n模块 graph\n模块 vocab 依赖 graph\n", encoding="utf-8")
+    u3 = PL.user_text(ctx, "约定", "需求", "graph")
+    check("必须提供的公开函数" not in u3, "没有提供时提示词不带硬要求", u3[-300:])
+    syn = (core.PROMPTS / core.SYNTAX_NAME).read_text(encoding="utf-8")
+    check("账号模块提供公开函数 核对身份 username" in syn, "写法说明认证一节有核对身份那句")
+    check("提供" in (core.PROMPTS / "top.md").read_text(encoding="utf-8") and "核对身份" in (core.PROMPTS / "top.md").read_text(encoding="utf-8"),
+          "顶层提示词要求写 提供 和账号模块提供核对身份")
+
+
 def test_review():
     print("约定对照需求复核")
     bad = '{"passed": false, "issues": ["需求第九节要求讲解调模型回答，约定改成了模板"]}'
@@ -1913,6 +1965,7 @@ if __name__ == "__main__":
         test_full_flow_clean()
         test_review()
         test_contract_syntax()
+        test_provides()
         test_catalog()
         test_global_check()
         test_global_check_flow()

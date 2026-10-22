@@ -5,6 +5,10 @@
     模块 vocab 依赖 graph      # 单词库
     模块 progress 依赖 graph vocab
 
+模块行可在 依赖 之后加可选的「提供 <函数名>,<函数名>…」：本模块要给别的模块调用的公开函数（中文业务函数名），写上游约定时按它做硬要求。
+    模块 account                提供 列学生,核对身份
+    模块 notes 依赖 account     提供 统计笔记数
+
 parse(text) -> (top, 问题)，top = {"项目", "模块": [{"名", "依赖", "行"}]}；check(text) -> 问题列表；layers(top) -> 依赖分层；
 sync_deps(text, want) -> 按 {模块名: [依赖…]} 改写各「模块」行的依赖子句（保留注释、不改模块名），给「同步顶层依赖」动词用。
 """
@@ -12,7 +16,8 @@ import re
 
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 SPLIT_RE = re.compile(r"[\s,，、]+")
-MODULE_RE = re.compile(r"^模块\s+(\S+)(?:\s+依赖\s+(.+))?$")
+MODULE_RE = re.compile(r"^模块\s+(\S+)(?:\s+依赖\s+(.+?))?(?:\s+提供\s+(.+))?$")
+FN_RE = re.compile(r"^[A-Za-z0-9_一-鿿]+$")
 
 
 def clean(text):
@@ -47,10 +52,14 @@ def parse(text):
             continue
         m = MODULE_RE.match(s)
         if not m:
-            probs.append(f"第 {no} 行：只能写「项目 <名>」和「模块 <名> [依赖 甲 乙]」（说明写成 # 注释），现在是「{s[:40]}」")
+            probs.append(f"第 {no} 行：只能写「项目 <名>」和「模块 <名> [依赖 甲 乙] [提供 函数,函数]」（说明写成 # 注释），现在是「{s[:40]}」")
             continue
         deps = [d for d in SPLIT_RE.split(m.group(2) or "") if d and d != "无"]
-        top["模块"].append({"名": m.group(1), "依赖": list(dict.fromkeys(deps)), "行": no})
+        provides = [f for f in SPLIT_RE.split(m.group(3) or "") if f]
+        if "依赖" in provides:
+            probs.append(f"第 {no} 行：「提供」要写在「依赖」之后")
+            provides = [f for f in provides if f != "依赖"]
+        top["模块"].append({"名": m.group(1), "依赖": list(dict.fromkeys(deps)), "提供": provides, "行": no})
     return top, probs
 
 
@@ -98,6 +107,14 @@ def check(text):
             probs.append(f"第 {m['行']} 行：模块「{m['名']}」重复")
         names[m["名"]] = m["依赖"]
     for m in top["模块"]:
+        seen = set()
+        for f in m["提供"]:
+            if not FN_RE.match(f):
+                probs.append(f"第 {m['行']} 行：模块「{m['名']}」提供的函数名「{f}」不合法（只能是中文 / 字母 / 数字 / 下划线）")
+            elif f in seen:
+                probs.append(f"第 {m['行']} 行：模块「{m['名']}」提供的函数「{f}」重复")
+            seen.add(f)
+    for m in top["模块"]:
         for d in m["依赖"]:
             if d == m["名"]:
                 probs.append(f"第 {m['行']} 行：模块「{d}」依赖了自己")
@@ -134,6 +151,8 @@ def sync_deps(text, want):
         deps = want[m.group(1)]
         if deps:
             new_code += " 依赖 " + " ".join(deps)
+        if m.group(3):
+            new_code += " 提供 " + m.group(3).strip()
         out.append(new_code + ("  " + comment if comment else ""))
     return "\n".join(out) + "\n"
 
