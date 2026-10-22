@@ -146,6 +146,9 @@ def parse_edit_body(body: list, first_lineno: int = 1):
                 edits.append({"file": cur[1], "old": "\n".join(a), "new": "\n".join(b)})
             continue
         s = line.strip()
+        if line.startswith(">>>>>>>") and _prev_close(body, i):
+            i += 1          # 紧跟在块结尾后面又多写了一行 >>>>>>>（模型常见的重复收尾）：没有内容，忽略
+            continue
         if s and not s.startswith("#") and not s.startswith("```"):
             probs.append(f"第 {at} 行：#改法 段里认不出这一行「{s[:40]}」（段内只能写 @@ 改/新建 和 "
                          f"<<<<<<< … >>>>>>> 块；#改法 段要写在脚本末尾）")
@@ -153,6 +156,14 @@ def parse_edit_body(body: list, first_lineno: int = 1):
     if cur and not cur[2]:
         probs.append(f"第 {cur[3]} 行：@@ {cur[0]} {cur[1]} 下面没有 <<<<<<< 块")
     return {"edits": edits, "files": files}, probs
+
+
+def _prev_close(body, i):
+    """body[i] 之前最近的非空行是不是 >>>>>>>（块刚收尾）。"""
+    for k in range(i - 1, -1, -1):
+        if body[k].strip():
+            return body[k].startswith(">>>>>>>")
+    return False
 
 
 def parse_checklist(body: list) -> dict:

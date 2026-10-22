@@ -179,6 +179,10 @@ def test_parse():
     check(len(pr) == 1 and "缺 =======" in pr[0] and "函数 名" in pr[0], f"旧写法缺 ======= 照旧报错，并提示函数写法：{pr}")
     _, _, _, pr = S.split_sections("#改法 e1\n@@ 改 pkg/m.py 函数 helper\n<<<<<<< 新函数\n\n>>>>>>> 新文\n")
     check(len(pr) == 1 and "新函数是空的" in pr[0], f"新函数为空报错：{pr}")
+    _, secs, _, pr = S.split_sections("#改法 e1\n" + blk("pkg/m.py", "a", "b") + ">>>>>>> 新文\n\n#清单\n改 pkg/m.py\n")
+    check(pr == [] and len(secs["e1"]["edits"]) == 1, f"块结尾后重复的一行 >>>>>>> 忽略：{pr}")
+    _, secs, _, pr = S.split_sections("#改法 e1\n@@ 改 pkg/m.py\n>>>>>>> 新文\n")
+    check(any("认不出" in x for x in pr), f"不是紧跟块结尾的 >>>>>>> 照旧报错：{pr}")
     _, secs, _, pr = S.split_sections("#改法 e1\n@@ 改 pkg/m.py 函数: helper\n<<<<<<< 新函数\ndef helper(x):\n    return 2\n>>>>>>> 新文\n")
     check(pr == [] and secs["e1"]["edits"][0]["func"] == "helper", "「函数: 名」写法也认")
 
