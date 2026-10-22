@@ -1635,6 +1635,19 @@ def test_trunk2_entries():
     check(json.loads((p / "plan" / "audit2.json").read_text(encoding="utf-8")) == {"result": "ok"}, "plan/audit2.json 存盘")
     first = fk.calls[0]["user"]
     check("plan/top.zs" in first and "contracts/" in first, "派任务入参带约定 + 代码 + plan/top.zs", first[:300])
+    syn = (ROOT / "tools" / "dslagent" / "v3" / "prompts" / "project_syntax.md").read_text(encoding="utf-8")
+    check(syn.strip() in first, "audit2 派任务入参含项目写法说明全文", len(first))
+    check("判断依据以附上的项目写法说明为准" in first, "audit2 描述带“以写法说明为准”")
+    import re as _re
+    check(not _re.search(r"\.(?:entity|zs|sql|md):\d+-\d+", "\n".join(c["user"] for c in fk.calls if c["tag"].startswith("dsl")).replace(syn, "")),
+          "audit2 入参的文件清单不含「文件:起-止」分段引用")
+    old_prompts, core.PROMPTS = core.PROMPTS, fresh("a2_noprompts")
+    try:
+        res0, ret0, fk0 = run_audit2(p, allok)
+    finally:
+        core.PROMPTS = old_prompts
+    check(res0["status"] == "成功" and syn.strip()[:40] not in fk0.calls[0]["user"] and res0["记录"].get("语法说明"),
+          "说明文件不存在：syntax 注入空串并记日志，audit2 照常跑", res0.get("记录"))
 
     mix = dict(allok, dsl01=[a2_reply("contract_issue", "约定自相矛盾", "contracts/graph.md")], dsl02=[a2_reply("module_issue", "少接口", "services/vocab.zs")])
     res, ret, fk = run_audit2(p, mix)

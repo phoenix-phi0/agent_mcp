@@ -182,7 +182,11 @@ def run_entry(script, project, out, req, extra_vars=None, backend=None, cost_cap
     ctx = Ctx(project, out, req, M, cost_cap=cost_cap, module_cmd=module_cmd, module_wall=module_wall)
     eng = V3Engine(client=V2.Client(M), workdir=project, verbose=False, verbs_root=C.VERBS)
     eng.v3, ctx.usage = ctx, eng.usage
-    eng.vars.update({"req": req, **(extra_vars or {})})
+    syn_file = PROMPTS / "project_syntax.md"
+    syntax = syn_file.read_text(encoding="utf-8") if syn_file.is_file() else ""
+    if not syntax:
+        ctx.log("语法说明", 说明=f"{syn_file.name} 不存在或为空，syntax 注入空串")
+    eng.vars.update({"req": req, "syntax": syntax, **(extra_vars or {})})
     res, err = {"status": "成功", "reason": "", "at": ""}, None
     try:
         eng.run((HERE / f"{script}.zs").read_text(encoding="utf-8"))

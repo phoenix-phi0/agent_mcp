@@ -1,6 +1,6 @@
 # 核查2：全量回归 + 每个有代码的模块派一次 派任务（约定 + 代码 + 顶层规划）→ 汇总成一个 result 存 plan/audit2.json 并返回。
 # result 按优先级：contract_issue（有约定问题，issues 只放约定问题）> module_issue（模块问题 + 回归不过）> unchecked（有模块没核查成）> ok。
-# 参数：req（保留给 CLI，这里用不上）llm=sonnet
+# 参数：req（保留给 CLI，这里用不上）llm=sonnet；syntax 由 run_entry 注入（prompts/project_syntax.md 全文）
 用包 common v3 text code
 模型 {llm}
 设 b = 全量回归
@@ -9,8 +9,9 @@
 设 mod = 解析JSON []
 设 un = 解析JSON []
 遍历 x 于 {b.code_modules}
-  设 desc = 这是用中文DSL写的后端项目的模块「{x.module}」：contracts 下是约定（设计），其余是代码，另附顶层规划。判断它部署运行后能不能按需求工作。约定本身有错 result 填 contract_issue，约定没错但代码有错填 module_issue，都没有填 ok；有问题时 issue 写问题，basis 写哪个文件哪一处。
+  设 desc = 这是用中文DSL写的后端项目的模块「{x.module}」：contracts 下是约定（设计），其余是代码，另附顶层规划。判断它部署运行后能不能按需求工作。判断依据以附上的项目写法说明为准，说明里写了的规则（参数含义、支持与不支持的写法）都要核对。约定本身有错 result 填 contract_issue，约定没错但代码有错填 module_issue，都没有填 ok；有问题时 issue 写问题，basis 写哪个文件哪一处。
   设 fl = 列表加项 {x.files} plan/top.zs
+  设 fl = 列表加项 {fl} {syntax}
   设 r = 派任务 {desc} {fl} {lg} result:ok|module_issue|contract_issue,issue?:文本,basis?:文本
   如果 {r.status} 不等于 成功
     设 u.module = {x.module}
