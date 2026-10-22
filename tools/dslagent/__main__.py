@@ -47,8 +47,8 @@ def main(argv=None):
     n.add_argument("--no-contract", action="store_true", help="（只对 --modular）不先约定接口：回到逐文件规划、按下层真实文件对接的老做法；缺省先约定接口（CONTRACTS.md）再按约定实现，实现后试调一轮")
     n.add_argument("--from-plan", default=None, metavar="旧输出目录", help="（只对 --modular）读回旧运行的顶层规划与层次×模块（plan/top.zs、plan/layers.zs；旧版 JSON 目录也读，转成 DSL 规划文件；再不行从 result.json 与 calls/ 还原），跳过这两步，在新的 project / --out 里从数据层做起")
     v = sp.add_parser("v3", help="v3 流程（v3/v3.zs）：顶层规划 → 约定 → 骨架 → 分配 → 按层做模块；断了重跑同一命令即续跑；"
-                       "action=audit/change 改走 核查.zs / 修改.zs（核查出问题清单 / 按问题清单改代码），缺省 build 是原来的新建流程")
-    v.add_argument("action", nargs="?", choices=("build", "audit", "change", "audit2", "change2"), default="build")
+                       "action=build2 是最小主干新建流程（build2.zs，刻意不含接口冒烟）；action=audit/change 改走 核查.zs / 修改.zs（核查出问题清单 / 按问题清单改代码），缺省 build 是原来的新建流程")
+    v.add_argument("action", nargs="?", choices=("build", "build2", "audit", "change", "audit2", "change2"), default="build")
     v.add_argument("--req", required=True, help="需求文件")
     v.add_argument("--project", required=True, help="项目目录（不存在就建）")
     v.add_argument("--out", required=True, help="记录目录：每步产物、检查结果、重写次数、每个模块的 v2 记录目录、花费")
@@ -96,7 +96,8 @@ def main(argv=None):
             print(json.dumps({k: res.get(k) for k in ("status", "reason", "at", "花费", "用时", "模型调用", "returned")}, ensure_ascii=False))
             return 0 if res["status"] == "成功" else 1
         res = V3.run(req_text, a.project, a.out, stop_after=a.stop_after, cost_cap=a.cost_cap,
-                     **({"wall": a.wall} if a.wall else {}), module_wall=a.module_wall)
+                     **({"wall": a.wall} if a.wall else {}), module_wall=a.module_wall,
+                     **({"script": "build2"} if a.action == "build2" else {}))
         print(json.dumps({k: res.get(k) for k in ("status", "reason", "at", "花费", "用时", "模型调用")}, ensure_ascii=False))
         return 0 if res["status"] == "成功" else 1
     if a.cmd == "newproj":

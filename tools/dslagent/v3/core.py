@@ -128,8 +128,8 @@ def ctx_of(engine=None):
     return c
 
 
-def run(req, project, out, stop_after=None, backend=None, cost_cap=None, wall=WALL, module_cmd=None, module_wall=1800):
-    """跑 v3.zs。req：需求文本；backend：假模型（测试用）；module_cmd：替换「做模块」起的子进程命令（测试用）。
+def run(req, project, out, stop_after=None, backend=None, cost_cap=None, wall=WALL, module_cmd=None, module_wall=1800, script=None):
+    """跑 v3.zs（script 给了就跑 v3/ 下那个顶层脚本，如 build2，不带 .zs）。req：需求文本；backend：假模型（测试用）；module_cmd：替换「做模块」起的子进程命令（测试用）。
     → {status, reason, at, 花费, 用时, 记录…}，同时写 out/result.json。"""
     project, out = Path(project), Path(out)
     project.mkdir(parents=True, exist_ok=True)
@@ -154,7 +154,7 @@ def run(req, project, out, stop_after=None, backend=None, cost_cap=None, wall=WA
     eng.vars.update({"req": req, "project": str(project), "stop_after": stop})
     res, err = {"status": "成功", "reason": "", "at": ""}, None
     try:
-        eng.run(V3_ZS.read_text(encoding="utf-8"))
+        eng.run((HERE / f"{script}.zs" if script else V3_ZS).read_text(encoding="utf-8"))
         if eng.halted is not None:
             res = dict(eng.halted)
     except Exception as e:  # noqa: BLE001  引擎 / 动词出错：记成失败，不往外抛

@@ -1689,6 +1689,70 @@ def test_trunk2_entries():
     check(cp.returncode == 0 and '"result": "ok"' in cp.stdout, "CLI audit2 空项目能跑（result ok）", cp.stdout + cp.stderr)
 
 
+def calls_for(state, mod):
+    return [c for c in stub_calls(state) if c["模块"] == mod]
+
+
+def test_build2_trunk():
+    print("build2.zs 最小主干：顶层 → 约定 → 骨架 → 分配 → 按层做模块 → 全量回归；不跑接口冒烟、不做规划层核查；回归不过按层重做 2 轮上限")
+    import tools.dslagent.v3.regress as RG
+    zc = (ROOT / "tools" / "dslagent" / "v3" / "build2.zs").read_text(encoding="utf-8")
+    body = "\n".join(l for l in zc.split("\n") if not l.startswith("#"))
+    check("接口冒烟" not in body and "规划核查" not in body and "全量回归" in body, "build2.zs 正文没有接口冒烟 / 规划核查，有全量回归")
+    check("最小主干" in zc.split("\n")[0] and "不含接口冒烟" in zc.split("\n")[0], "头注释写明最小主干、刻意不含冒烟")
+    real_smoke, real_reg = RG.audit_smoke, RG.audit_regression
+    smoke_calls, reg_calls = [], []
+
+    def no_smoke(c, t):
+        smoke_calls.append(1)
+        raise AssertionError("build2 不该调接口冒烟")
+    RG.audit_smoke = no_smoke
+    try:
+        # 1. 全过：成功结束，没有冒烟，没有规划层核查
+        proj, out, state = fresh("p"), fresh("o"), fresh("st") / "state"
+        stub_env(state)
+        fk = Fake(scripts={"v3_top": [TOP3]})
+        res = run_v3(proj, out, fk, script="build2")
+        check(res["status"] == "成功" and res["reason"] == "全部模块完成" and not smoke_calls, "全过：成功结束，没调接口冒烟", {k: res[k] for k in ("status", "reason", "输出")})
+        check(fk.n("dsl") == 0, "没有规划层核查的调用", [c["tag"] for c in fk.calls])
+        check({r["模块"] for r in res["记录"]["模块"]} == {"graph", "vocab", "progress"}, "三个模块都做了", res["记录"]["模块"])
+
+        # 2. 回归第 1 次 graph 不过：按层重做 graph，第 2 次过 → 成功
+        proj, out, state = fresh("p"), fresh("o"), fresh("st") / "state"
+        stub_env(state)
+
+        def reg1(c, t):
+            reg_calls.append(1)
+            if len(reg_calls) == 1:
+                return {"count": 1, "items": [], "failed": [{"module": "graph", "reason": "假的回归失败"}], "failed_text": "graph：假的回归失败", "summary": ""}
+            return {"count": 0, "items": [], "failed": [], "failed_text": "", "summary": ""}
+        RG.audit_regression = reg1
+        res = run_v3(proj, out, Fake(scripts={"v3_top": [TOP3]}), script="build2")
+        check(res["status"] == "成功" and len(reg_calls) == 2 and not smoke_calls, "回归不过 → 重做 → 再回归过：成功", {k: res[k] for k in ("status", "reason")})
+        check(len(calls_for(state, "graph")) == 2 and len(calls_for(state, "vocab")) == 1, "只重做 graph 一次，别的模块不碰", stub_calls(state))
+        check("全量回归发现问题" in (out / "task_graph.txt").read_text(encoding="utf-8") if (out / "task_graph.txt").is_file() else True, "任务带回归原因")
+
+        # 3. 回归一直不过：只重做 1 轮，第 2 次检查仍不过 → 失败
+        proj, out, state = fresh("p"), fresh("o"), fresh("st") / "state"
+        stub_env(state)
+        reg_calls.clear()
+
+        def reg2(c, t):
+            reg_calls.append(1)
+            return {"count": 1, "items": [], "failed": [{"module": "graph", "reason": "假的回归失败"}], "failed_text": "graph：假的回归失败", "summary": ""}
+        RG.audit_regression = reg2
+        res = run_v3(proj, out, Fake(scripts={"v3_top": [TOP3]}), script="build2")
+        check(res["status"] == "失败" and "全量回归两轮仍未通过" in res["reason"] and len(reg_calls) == 2 and len(calls_for(state, "graph")) == 2,
+              "回归一直不过：2 轮上限（检查 2 次、重做 1 轮），终止 失败", {k: res[k] for k in ("status", "reason")})
+        check(not smoke_calls, "全程没调接口冒烟")
+    finally:
+        RG.audit_smoke, RG.audit_regression = real_smoke, real_reg
+    import subprocess
+    cp = subprocess.run([sys.executable, "-m", "tools.dslagent", "v3", "-h"], cwd=ROOT, capture_output=True, text=True)
+    check("build2" in cp.stdout, "CLI v3 -h 列出 build2")
+    check("执行 plan/build.zs" in (ROOT / "tools" / "dslagent" / "v3" / "v3.zs").read_text(encoding="utf-8"), "v3.zs 仍然执行 plan/build.zs（不变）")
+
+
 if __name__ == "__main__":
     try:
         test_top()
@@ -1727,6 +1791,7 @@ if __name__ == "__main__":
         test_audit_entry()
         test_modify_entry()
         test_trunk2_entries()
+        test_build2_trunk()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n通过 {PASS}，失败 {FAIL}")
