@@ -14,11 +14,19 @@
     返回 {"ok": 1}
   结束
 
-  公开 函数 我的角色 who
-    设 row = 查一行 app.db account_user_by_username username={who}
+  公开 函数 我的角色 learner
+    设 row = 查一行 app.db account_user_by_username username={learner}
     如果 {row} 为空
       报错 404 没有这个用户
     结束
     返回 {"role": "{row.role}"}
+  结束
+
+  公开 函数 核对身份 username
+    设 row = 查一行 app.db account_user_by_username username={username}
+    如果 {row} 为空
+      返回 ""
+    结束
+    返回 {"username": "{row.username}", "role": "{row.role}"}
   结束
 结束

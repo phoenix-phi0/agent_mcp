@@ -2,7 +2,6 @@
 
     模块 progress
     依赖 graph                              # 没有依赖写「依赖 无」（或不写这行）
-    认证 身份 learner 默认 me                 # 可选：写法、解析跟 tools/dsl_http.py 的路由顶层认证声明一致（见下）
 
     ## 表                                   # 本模块拥有的表（只记表名和字段，实体文件由模型写，比对只看表是否建了）
     表 answer
@@ -33,21 +32,10 @@
       调用 记作答 learner=u1 point_code=NOPE correct=1
       报错 404                                  # 期望业务错误码（和「得」二选一）
 
-## 认证 / 角色（可选，只写在打算要登录 / 分角色的模块约定头部；没有登录需求的模块不写这些行）
-写法跟 `tools/dsl_http.py` 的路由顶层认证声明逐字一致（那是真正解析、生效的地方；约定里写一样的话只是把设计意图记下来，
-`project.compare` 核对两边一致）：
-
-    认证 必须                     一直要登录，只有标了「公开」的接口例外
-    认证 可选                     默认不要登录；多人部署时启动参数开登录才等同「认证 必须」
-    认证 核对 app.db user_auth    每个请求按 queries/user_auth.sql 核对一次（停用 / 删号立即生效），查到的 role 列注入成 current_role
-    认证 身份 learner 默认 me     注入「这是谁的数据」：开登录时是 current_user（请求体同名字段盖不掉），没开登录是请求体的
-                                  learner 字段（缺省 me）；这个变量名必须和它对应的公开函数入参同名——路由层按这个名字直接
-                                  注入，函数本身仍然把它当一个普通必填入参收，不自己去兜底取当前用户
-    认证 角色 teacher 教师        角色代号 + 中文名（403 时用），同一模块可写多行
-    认证 角色 student 学生 拒绝 教师账号不参与学习，请用学生账号
-
-认证在整个项目里只由负责登录 / 账号的那个模块写一次；其它模块的约定头部不写任何「认证 …」；接口行可以在 `-> 函数` 之后加一个 `公开` 或 `角色 <代号>`
-（跟 dsl_http.py 接口行上的「角色 x」/「只许 x」一样，认证只在账号模块写一次，其它模块不写认证行、只标接口行）。
+## 认证
+认证声明由程序生成（骨架写在账号模块的 routes 顶部，只有一份），约定里**任何模块都不写 `认证 …` 行**（写了会被拒）。
+负责账号的模块必须有公开函数 `核对身份 username`，返回 `{username, role}`，查不到返回空；带 `## 用例`（存在的用户返回 role、不存在返回空）。
+接口行可以在 `-> 函数` 之后加 `公开` 或 `角色 <代号>`；需要当前用户的函数把 learner / current_user / auth_mode 写成普通入参。
 
 parse(text) -> (contract, 问题)；check(contract, name, upstream, all_modules) -> 问题（含「多余依赖」：声明的依赖在伪代码「调用 X.f」
 和用例「先 调用 X.f」里都没出现）；heads(contract) -> 函数头文本；hash_of(text)。
@@ -62,54 +50,52 @@ QCALL_RE = re.compile(rf"调用\s+({IDENT})\.({IDENT})")
 METHODS = ("GET", "POST", "PUT", "DELETE")
 SECTIONS = {"表": "表", "数据": "表", "函数": "函数", "接口": "接口", "用例": "用例"}
 
-# 认证声明：写法、解析跟 tools/dsl_http.py 的路由顶层认证声明逐字一致（见该文件开头「认证」一节）
-AUTH_RE = re.compile(r"^认证\s+必须\s*$")
-AUTH_OPTIONAL_RE = re.compile(r"^认证\s+可选\s*$")
-AUTH_CHECK_RE = re.compile(r"^认证\s+核对\s+(\S+)\s+(\S+)\s*$")
-AUTH_IDENTITY_RE = re.compile(r"^认证\s+身份\s+([A-Za-z_]\w*)\s+默认\s+(\S+)\s*$")
-AUTH_ROLE_RE = re.compile(r"^认证\s+角色\s+(\S+)\s+(\S+)(?:\s+拒绝\s+(.+?))?\s*$")
+# 认证由程序生成：账号模块 = 有公开函数「核对身份」的模块
+ACCOUNT_FN = "核对身份"
+ROLE_LABELS = {"teacher": "教师", "student": "学生"}
 # 接口行：<方法> <路径> -> <函数>，后面跟任意顺序的标记：上传 <字段> [类型 <扩展名,…>] [上限 <大小>]、公开、角色 <代号>
 IFACE_HEAD_RE = re.compile(r"^(\w+)\s+(\S+)\s*(?:->|→)\s*(\S+)(.*)$")
 UPLOAD_SIZE_RE = re.compile(r"^\d+(?:\.\d+)?(?:B|KB|MB|GB)?$", re.I)
 
 
-def auth_of(text):
-    """顶层（小节之前）的认证声明 → {mandatory, optional, check, identity, roles, deny}；同一种声明写了不一样的几行记进「问题」。"""
-    probs = []
-    mandatory = optional = False
-    check = identity = None
-    roles, deny = {}, {}
-    seen = {}
-    for no, raw in enumerate(text.replace("\r", "").splitlines(), 1):
-        if raw.strip().startswith("##"):
-            break
-        s = _strip_comment(raw).strip()
-        if not s or not s.startswith("认证"):
-            continue
-        if AUTH_RE.match(s):
-            mandatory = True
-        elif AUTH_OPTIONAL_RE.match(s):
-            optional = True
-        elif (m := AUTH_CHECK_RE.match(s)):
-            g = m.groups()
-            if seen.setdefault("核对", g) != g:
-                probs.append(f"第 {no} 行：「认证 核对」写了不一样的几行")
-            check = g
-        elif (m := AUTH_IDENTITY_RE.match(s)):
-            g = m.groups()
-            if seen.setdefault("身份", g) != g:
-                probs.append(f"第 {no} 行：「认证 身份」写了不一样的几行")
-            identity = g
-        elif (m := AUTH_ROLE_RE.match(s)):
-            code, label, reason = m.groups()
-            roles[code] = label
-            if reason:
-                deny[code] = reason
-        else:
-            probs.append(f"第 {no} 行：不认识的认证写法「{s}」（只有 必须 / 可选 / 核对 / 身份 / 角色）")
-    if mandatory and optional:
-        probs.append("「认证 必须」和「认证 可选」不能同时写")
-    return {"必须": mandatory, "可选": optional, "核对": check, "身份": identity, "角色": roles, "拒绝": deny}, probs
+def account_modules(contracts):
+    """{模块: 约定} → 有公开函数「核对身份」的模块名（按名字排序）。"""
+    return sorted(m for m, c in contracts.items() if any(f["名"] == ACCOUNT_FN and f["公开"] for f in c["函数"]))
+
+
+def role_codes(contracts):
+    """全项目接口行里出现过的角色代号（按代号排序，保证生成和比对一致）。"""
+    return sorted({i["角色"] for c in contracts.values() for i in c["接口"] if i["角色"]})
+
+
+def auth_block(contracts):
+    """→ (账号模块 或 None, 认证行列表)。有账号模块才有认证块；没有账号模块返回 (None, [])。"""
+    owners = account_modules(contracts)
+    if not owners:
+        return None, []
+    owner = owners[0]
+    lines = ["认证 可选", f"认证 核对 {owner}.{ACCOUNT_FN}", "认证 身份 learner 默认 me"]
+    for code in role_codes(contracts):
+        lines.append(f"认证 角色 {code} {ROLE_LABELS.get(code, code)}")
+    return owner, lines
+
+
+def auth_problems(contracts):
+    """跨模块的认证约定问题 → {模块: [问题]}：有接口标了角色但没有账号模块；多个模块都有「核对身份」。"""
+    out = {}
+    owners = account_modules(contracts)
+    if not owners:
+        for m, c in contracts.items():
+            roles = sorted({i["角色"] for i in c["接口"] if i["角色"]})
+            if roles:
+                out.setdefault(m, []).append(
+                    f"接口标了角色 {'、'.join(roles)}，但项目里没有任何模块提供公开函数「{ACCOUNT_FN} username」"
+                    f"（认证由程序生成，要求负责账号的模块有这个函数，返回 {{username, role}}，查不到返回空）")
+    elif len(owners) > 1:
+        for m in owners:
+            out.setdefault(m, []).append(
+                f"模块 {'、'.join(owners)} 都有公开函数「{ACCOUNT_FN}」，只能由一个账号模块提供")
+    return out
 
 
 def normalize(text):
@@ -185,11 +171,9 @@ def _iface_tail(tail):
 
 
 def parse(text):
-    """→ (contract, 问题)。contract = {模块, 依赖, 表, 函数, 接口, 用例, 认证}；各项带「行」。"""
+    """→ (contract, 问题)。contract = {模块, 依赖, 表, 函数, 接口, 用例}；各项带「行」。"""
     probs = []
     c = {"模块": None, "依赖": [], "表": [], "函数": [], "接口": [], "用例": []}
-    c["认证"], auth_probs = auth_of(text)
-    probs += auth_probs
     sec, cur = None, None
     for no, raw in enumerate(text.replace("\r", "").splitlines(), 1):
         if raw.strip().startswith("```"):
@@ -213,9 +197,9 @@ def parse(text):
                 rest = [x for x in re.split(r"[\s,，、]+", " ".join(parts[1:])) if x and x != "无"]
                 c["依赖"] = list(dict.fromkeys(rest))
             elif h == "认证":
-                pass            # 已经由 auth_of 整体解析过，这里只是不要报「小节之前只能写…」
+                probs.append(f"第 {no} 行：认证由程序生成，约定里不写（删掉这行）；账号模块提供公开函数「{ACCOUNT_FN} username」即可")
             else:
-                probs.append(f"第 {no} 行：小节之前只能写「模块 <名>」「依赖 …」「认证 …」，现在是「{s[:40]}」")
+                probs.append(f"第 {no} 行：小节之前只能写「模块 <名>」「依赖 …」，现在是「{s[:40]}」")
         elif sec == "表":
             if h == "表":
                 if len(parts) not in (2, 3) or (len(parts) == 3 and parts[2] != "学习记录"):
@@ -364,12 +348,15 @@ def params(fn):
 
 
 def _auth_problems(c, fns):
-    """认证声明本身的检查：没声明认证时角色表不该有内容（防写了角色没启用）。
-    认证在项目里只由账号模块（owner）写一次：「身份」变量不要求是本模块的入参（owner 自己可以没有），其它模块只在接口行标 公开 / 角色。"""
+    """「核对身份」的形状：必须是公开函数、入参恰好是 username（返回 {username, role}、查不到返回空由用例覆盖）。"""
+    f = fns.get(ACCOUNT_FN)
+    if f is None:
+        return []
     probs = []
-    auth = c["认证"]
-    if auth["角色"] and not (auth["必须"] or auth["可选"]):
-        probs.append("头部写了「认证 角色 …」，但没有「认证 必须」或「认证 可选」，角色检查不会生效")
+    if not f["公开"]:
+        probs.append(f"函数「{ACCOUNT_FN}」必须是公开函数（认证核对要从路由层调它）")
+    if [p.rstrip("?") for p in f["入参"]] != ["username"] or any(p.endswith("?") for p in f["入参"]):
+        probs.append(f"函数「{ACCOUNT_FN}」的入参必须恰好是一个必填的 username，现在是 {' '.join(f['入参']) or '（无）'}")
     return probs
 
 

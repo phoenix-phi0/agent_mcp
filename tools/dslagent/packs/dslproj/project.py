@@ -110,37 +110,71 @@ def route_files(project, module, modules):
 CALL_IN_ROUTE = re.compile(r"调用\s+(?:([A-Za-z0-9_一-鿿]+)\.)?([A-Za-z0-9_一-鿿]+)")
 
 
-def _auth_diffs(project, module, contract, modules):
-    """约定头部「认证 …」与本模块 routes 文件顶层实际写的认证声明是否一致（dsl_http.auth_config 的同一套解析）。
-    没声明认证的模块两边都该是空的；两边都没写就不比，省得给不相关的模块报一堆「约定是（无）」。"""
+def _all_contracts(project, module, contract, modules):
+    """{模块: 约定}：modules 里读得到、解析得过的 contracts/<m>.md，本模块用传进来的这份。"""
+    out = {}
+    for m in modules:
+        f = Path(project) / "contracts" / f"{m}.md"
+        if f.is_file():
+            c, probs = C.parse(f.read_text(encoding="utf-8"))
+            if not probs:
+                out[m] = c
+    out[module] = contract
+    return out
+
+
+def _auth_parsed(root):
+    """auth_config 的解析结果里和认证声明有关的几项（比对用）。"""
     from tools.dsl_http import auth_config
-    want = contract["认证"]
-    if not (want["必须"] or want["可选"] or want["角色"]):
-        return []                 # 这个模块的约定没打算要登录 / 角色，不比对实际文件（可能项目里别的模块开了登录）
+    g = auth_config(root)
+    return {"必须": bool(g["mandatory"]), "可选": bool(g["optional"]), "核对": g["check"], "核对函数": g["check_fn"],
+            "身份": g["identity"], "角色": g["roles"], "拒绝": g["deny"]}
+
+
+def _auth_diffs(project, module, contract, modules):
+    """本模块 routes 文件顶层实际写的认证声明 与 程序生成的那份是否一致：账号模块（有公开函数「核对身份」的模块）应等于
+    contract.auth_block 生成的认证块，其他模块一条认证行都不该有。"""
+    from tools.dsl import DSLError
+    owner, lines = C.auth_block(_all_contracts(project, module, contract, modules))
+    want_lines = lines if owner == module else []
     files = route_files(Path(project), module, modules)
     if not files:
-        return [f"约定写了「认证 …」，但 routes/{module}*.zs 还没有文件"]
+        return [f"账号模块 {module} 的 routes/{module}*.zs 还没有文件，应有认证块：{' / '.join(want_lines)}"] if want_lines else []
     import tempfile
-    diffs = []
     # auth_config 按整个目录扫 .zs：只把属于本模块的几个文件拷到一个干净的临时目录里扫，不跟别的模块的声明混
     with tempfile.TemporaryDirectory() as td:
         tdp = Path(td)
         for f in files:
             (tdp / f.name).write_text(f.read_text(encoding="utf-8"), encoding="utf-8")
-        got = auth_config(tdp)
-    if bool(got["mandatory"]) != bool(want["必须"]):
-        diffs.append(f"约定「认证 必须」是 {bool(want['必须'])}，routes/{module}*.zs 实际是 {bool(got['mandatory'])}")
-    if bool(got["optional"]) != bool(want["可选"]):
-        diffs.append(f"约定「认证 可选」是 {bool(want['可选'])}，routes/{module}*.zs 实际是 {bool(got['optional'])}")
-    want_check = tuple(want["核对"]) if want["核对"] else None
-    if got["check"] != want_check:
-        diffs.append(f"约定「认证 核对」是 {want_check or '（无）'}，routes/{module}*.zs 实际是 {got['check'] or '（无）'}")
-    want_identity = tuple(want["身份"]) if want["身份"] else None
-    if got["identity"] != want_identity:
-        diffs.append(f"约定「认证 身份」是 {want_identity or '（无）'}，routes/{module}*.zs 实际是 {got['identity'] or '（无）'}")
-    if got["roles"] != want["角色"]:
-        diffs.append(f"约定「认证 角色」是 {want['角色'] or '（无）'}，routes/{module}*.zs 实际是 {got['roles'] or '（无）'}")
-    return diffs
+        try:
+            got = _auth_parsed(tdp)
+        except DSLError as e:
+            return [f"routes/{module}*.zs 的认证声明写得不一致：{e}"]
+    with tempfile.TemporaryDirectory() as td:
+        (Path(td) / "w.zs").write_text("\n".join(want_lines) + "\n", encoding="utf-8")
+        want = _auth_parsed(Path(td))
+    if got == want:
+        return []
+    if not want_lines:
+        return [f"routes/{module}*.zs 里不该有认证行（认证只在账号模块 routes 里由程序生成一份），实际有：{_auth_summary(got)}"]
+    return [f"routes/{module}*.zs 的认证块和程序生成的不一致：应是 {' / '.join(want_lines)}；实际是 {_auth_summary(got) or '（没有）'}"]
+
+
+def _auth_summary(g):
+    parts = []
+    if g["必须"]:
+        parts.append("认证 必须")
+    if g["可选"]:
+        parts.append("认证 可选")
+    if g["核对"]:
+        parts.append("认证 核对 " + " ".join(g["核对"]))
+    if g["核对函数"]:
+        parts.append("认证 核对 " + ".".join(g["核对函数"]))
+    if g["身份"]:
+        parts.append("认证 身份 " + " 默认 ".join(g["身份"]))
+    for code, label in g["角色"].items():
+        parts.append(f"认证 角色 {code} {label}" + (f" 拒绝 {g['拒绝'][code]}" if code in g["拒绝"] else ""))
+    return " / ".join(parts)
 
 
 def compare(project, module, contract, modules):

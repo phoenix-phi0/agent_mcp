@@ -6,7 +6,7 @@
             「同一份数据」各跑一次「直接调用」与「走 HTTP」，核对状态码与返回是否一致（结构不同算失败，
             值不同但结构一样只记备注——大概率是随机 / 时间字段）。只报告。
 
-            多人模式（任一模块约定头部写了「认证 必须」或「认证 可选」）：起 Router 时 login=True；非公开接口
+            多人模式（生成的 routes 里有「认证 必须」或「认证 可选」，即项目有账号模块）：起 Router 时 login=True；非公开接口
             先核对「不登录 401」，再按接口要求的角色补一个有这个角色的调用人账号登录，带着登录态再跑一次 HTTP
             （见 _make_actor / _login_cookie）。调用人账号只用来发请求，不是用例里本来就有的数据行。
 
@@ -108,24 +108,41 @@ def _missing_query_reason(q):
     return f"认证核对指的查询 {q}.sql 不存在，真实路由必 500"
 
 
+def _actor_table(contract):
+    """账号模块约定 ## 表 里含 username / role 的表名（优先两个都有的）；没有返回 None。"""
+    tabs = [(t["名"], {f["名"] for f in t["字段"]}) for t in contract["表"]]
+    for want in ({"username", "role"}, {"username"}):
+        for name, cols in tabs:
+            if want <= cols:
+                return name
+    return None
+
+
 def _make_actor(ws, db_path, auth, role):
-    """造一个调用人账号（表在 认证 核对 指的库里——第一个参数，相对 ws；列至少有 username / password_hash，
-    有角色要求再加 role 列；其他 NOT NULL 且无默认值的列补占位值）。→ (username, password)；造不出抛 ActorError。
+    """造一个调用人账号（列至少有 username / password_hash，有角色要求再加 role 列；其他 NOT NULL 且无默认值的列补占位值）。
+    → (username, password)；造不出抛 ActorError。
+    表：「认证 核对 模块.函数」写法（auth["actor_table"] 是账号模块约定 ## 表 里含 username/role 的表，库是 app.db）；
+    旧写法「认证 核对 库 查询名」在查询文本里取 FROM 的表名，库是第一个参数（相对 ws）。
     没有「认证 核对」时登录只认签名令牌，不查库——只要不需要角色，随便一个用户名都能登录（跟真实路由行为一致）。"""
     import random
 
     username = f"{ACTOR_PREFIX}_{role or 'any'}_{random.randrange(10 ** 9)}"
     password = "smoke_pw_1"
-    if not auth["check"]:
+    if auth.get("check_fn"):
+        db_name, table = "app.db", auth.get("actor_table")
+        if table is None:
+            raise ActorError(f"账号模块 {auth['check_fn'][0]} 的约定 ## 表 里没有含 username 的表，造不出调用人账号")
+    elif not auth["check"]:
         if role:
             raise ActorError(f"接口要求角色「{role}」，但项目没有「认证 核对」，查不到调用人的角色")
         return username, password
-    db_name, q = auth["check"]
-    table = _auth_table(ws, auth["check"])
-    if table is None:
-        if not (Path(ws) / "queries" / f"{q}.sql").is_file():
-            raise ActorError(_missing_query_reason(q), missing_query=True)
-        raise ActorError(f"认证核对的查询 {q}.sql 里找不到 FROM 表名，造不出调用人账号")
+    else:
+        db_name, q = auth["check"]
+        table = _auth_table(ws, auth["check"])
+        if table is None:
+            if not (Path(ws) / "queries" / f"{q}.sql").is_file():
+                raise ActorError(_missing_query_reason(q), missing_query=True)
+            raise ActorError(f"认证核对的查询 {q}.sql 里找不到 FROM 表名，造不出调用人账号")
     db_file = Path(ws) / db_name
     if not db_file.is_file():
         raise ActorError(f"认证核对指的库文件 {db_name} 不存在（第一个参数要是库文件名，如 app.db）")
@@ -319,16 +336,18 @@ def smoke_detail(project, mods):
             except P.ProjError as e:
                 reasons.setdefault(m, []).append(f"约定加载失败：{e}")
         from tools.dsl_http import auth_config
-        auth = auth_config(ws / "routes")
+        auth = dict(auth_config(ws / "routes"))
+        if auth["check_fn"] and auth["check_fn"][0] in contracts:
+            auth["actor_table"] = _actor_table(contracts[auth["check_fn"][0]])
         login = bool(auth["mandatory"] or auth["optional"])
         login_ep = _login_endpoint(contracts) if login else None
         _check_migrate(ws, sql, contracts, reasons)
         if login and auth["check"]:
             q = auth["check"][1]
             if not (ws / "queries" / f"{q}.sql").is_file():
-                owners = [m for m, c in contracts.items() if list(c["认证"]["核对"] or []) == list(auth["check"])]
-                declared = [m for m, c in contracts.items() if c["认证"]["必须"] or c["认证"]["可选"] or c["认证"]["核对"]]
-                for m in owners or declared or mods[:1]:
+                owners = [m for m in mods if any("认证 核对" in f.read_text(encoding="utf-8")
+                                                 for f in P.route_files(ws, m, mods))]
+                for m in owners or mods[:1]:
                     reasons.setdefault(m, []).append(_missing_query_reason(q))
         for m, c in contracts.items():
             for iface in c["接口"]:

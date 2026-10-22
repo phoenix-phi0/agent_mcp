@@ -107,6 +107,12 @@ GET 的查询参数也注入。
                                   查不到（停用了、删了）就当没登录——令牌本身
                                   无状态，靠这一步让停用立即生效。查到的行里
                                   role 列注入成 {current_role}
+    认证 核对 account.核对身份    函数写法（参数只有一个、含点号）：每个请求认出 cookie
+                                  里的人之后，调业务函数 <模块>.<函数> username=<用户>
+                                  （与接口里「调用 模块.函数」同一套）。返回非空
+                                  对象 = 该用户信息，role 字段注入成 {current_role}；
+                                  返回空或报 404 = 当没登录；函数不存在或出错回
+                                  500 和说明。函数须是公开函数
     认证 身份 learner 默认 me     注入「这个请求是谁的数据」：开着登录时是
                                   {current_user}，请求体里同名的字段一律盖掉
                                   （{learner} 和 {request.learner} 都是），前端
@@ -171,6 +177,8 @@ AUTH_RE = re.compile(r"^认证\s+必须\s*$")
 AUTH_OPTIONAL_RE = re.compile(r"^认证\s+可选\s*$")
 # 认证 核对 app.db user_auth —— 每个请求按用户名再查一次（停用立即生效、拿角色）
 AUTH_CHECK_RE = re.compile(r"^认证\s+核对\s+(\S+)\s+(\S+)\s*$")
+# 认证 核对 account.核对身份 —— 函数写法：调业务函数 模块.函数 username=用户
+AUTH_CHECK_FN_RE = re.compile(r"^认证\s+核对\s+([^\s.]+)\.([^\s.]+)\s*$")
 # 认证 身份 learner 默认 me —— 注入「这是谁的数据」
 AUTH_IDENTITY_RE = re.compile(r"^认证\s+身份\s+([A-Za-z_]\w*)\s+默认\s+(\S+)\s*$")
 # 认证 角色 teacher 教师 —— 角色的中文名，403 的说明里用
@@ -322,10 +330,15 @@ def top_level_matches(root: Path, pattern) -> list:
     return out
 
 
+class AuthCheckError(DSLError):
+    """「认证 核对 模块.函数」调用失败（函数不存在、出错、返回值不对）：请求回 500。"""
+
+
 def auth_config(root: Path) -> dict:
     """读路由目录里的认证声明。见文件开头「认证」一节。
 
     返回 {"mandatory", "optional", "check": (库, 查询名) 或 None,
+          "check_fn": (模块, 函数) 或 None,
           "identity": (变量名, 单人默认值) 或 None, "roles": {角色: 中文名}}
     同一种声明写了两次不一样的，报错——哪个算数全看扫描顺序的话，查起来很难。
     """
@@ -336,10 +349,14 @@ def auth_config(root: Path) -> dict:
             raise DSLError(f"「认证 {what}」写了不一样的几行：{sorted(vals)}")
         return ms[0].groups() if ms else None
 
+    check, check_fn = one(AUTH_CHECK_RE, "核对"), one(AUTH_CHECK_FN_RE, "核对")
+    if check and check_fn:
+        raise DSLError("「认证 核对」查询写法和函数写法只能写一种")
     return {
         "mandatory": top_level_flag(root, AUTH_RE),
         "optional": top_level_flag(root, AUTH_OPTIONAL_RE),
-        "check": one(AUTH_CHECK_RE, "核对"),
+        "check": check,
+        "check_fn": check_fn,
         "identity": one(AUTH_IDENTITY_RE, "身份"),
         "roles": {m.group(1): m.group(2) for m in top_level_matches(root, AUTH_ROLE_RE)},
         "deny": {m.group(1): m.group(3) for m in top_level_matches(root, AUTH_ROLE_RE)
@@ -487,6 +504,7 @@ class Router:
                            "（这个项目没有登录功能，先 py -m gen auth 项目/）")
         self.auth_required = cfg["mandatory"] or (cfg["optional"] and bool(login))
         self.auth_check = cfg["check"]
+        self.auth_check_fn = cfg["check_fn"]
         self.identity = cfg["identity"]
         self.role_labels = cfg["roles"]
         self.role_deny = cfg["deny"]
@@ -773,6 +791,8 @@ class Router:
         """
         if not user:
             return None
+        if self.auth_check_fn:
+            return self._check_user_fn(user)
         if not self.auth_check:
             return {}
         import sqlite3
@@ -794,6 +814,39 @@ class Router:
         finally:
             con.close()
         return dict(row) if row is not None else None
+
+    def _check_user_fn(self, user: str):
+        """「认证 核对 模块.函数」：调业务函数 username=<用户>。返回非空对象是用户信息，
+        空或 404 当没登录（None）；函数不存在、不是公开函数、出错都抛 AuthCheckError。"""
+        from .db_errors import find_client_error
+        mod, fn = self.auth_check_fn
+        engine = DSLEngine(
+            self._client(),
+            workdir=self.workspace,
+            verbose=self.verbose,
+            verbs=packs.registry(DEFAULT_PACKS, self.workspace),
+            verbs_root=packs.verbs_root(),
+        )
+        engine.vars["_auth_user"] = user
+        try:
+            self.services.refresh()
+            engine.services = self.services
+            engine.svc_module = None
+            engine.in_func = False
+            engine._do_service_call(mod, fn, "username={_auth_user}", "", 0,
+                                    assign_to="_auth_info")
+        except Exception as e:  # noqa: BLE001
+            ce = find_client_error(e)
+            if ce is not None and getattr(ce, "status", None) == 404:
+                return None
+            raise AuthCheckError(f"「认证 核对」调用 {mod}.{fn} 失败：{e}") from e
+        info = engine.vars.get("_auth_info")
+        if isinstance(info, dict) and info:
+            return info
+        if info in (None, "", {}, []) or (
+                isinstance(info, str) and info.strip() in ('""', "''", "{}", "[]", "null", "None", "空")):
+            return None
+        raise AuthCheckError(f"「认证 核对」{mod}.{fn} 返回的不是对象：{info!r}")
 
     def _apply_auth(self, resp, auth) -> None:
         """按动词的要求设或删登录 cookie。
@@ -828,7 +881,10 @@ class Router:
         info = None
         stale = False
         if user:
-            info = self.check_user(user)
+            try:
+                info = self.check_user(user)
+            except AuthCheckError as e:
+                return jsonify({"error": str(e)}), 500
             if info is None:
                 # 令牌是真的，但人停用了或删了：当没登录，顺手把 cookie 删掉
                 user, stale = "", True

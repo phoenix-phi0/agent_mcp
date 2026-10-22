@@ -50,23 +50,12 @@ def service_text(name, c):
     return "\n".join(lines) + "\n"
 
 
-def auth_header(c):
-    """约定头部的「认证 …」声明原样搬到 routes 文件顶层（写法与 tools/dsl_http.py 的路由顶层认证声明一致，
-    那边才是真正解析生效的地方）。没有「认证」声明的模块返回空串。"""
-    a = c["认证"]
-    if not (a["必须"] or a["可选"]):
+def auth_header(name, contracts):
+    """账号模块（有公开函数「核对身份」的模块）的 routes 顶部认证块，由程序生成、全项目只有一份；其他模块返回空串。
+    contracts：{模块: 约定}（全项目）。写法与 tools/dsl_http.py 的路由顶层认证声明一致，那边才是真正解析生效的地方。"""
+    owner, lines = VC.C.auth_block(contracts)
+    if owner != name:
         return ""
-    lines = ["认证 必须" if a["必须"] else "认证 可选"]
-    if a["核对"]:
-        lines.append("认证 核对 " + " ".join(a["核对"]))
-    if a["身份"]:
-        var, default = a["身份"]
-        lines.append(f"认证 身份 {var} 默认 {default}")
-    for code, label in a["角色"].items():
-        line = f"认证 角色 {code} {label}"
-        if code in a["拒绝"]:
-            line += f" 拒绝 {a['拒绝'][code]}"
-        lines.append(line)
     return "\n".join(lines) + "\n\n"
 
 
@@ -99,9 +88,9 @@ def _upload_lines(i, req, opt):
     return lines
 
 
-def route_text(name, c):
+def route_text(name, c, contracts=None):
     fns = {f["名"]: f for f in c["函数"]}
-    header = auth_header(c)
+    header = auth_header(name, contracts if contracts is not None else {name: c})
     out = [header] if header else []
     for i in c["接口"]:
         f = fns[i["函数"]]
@@ -135,12 +124,15 @@ def gen_skeleton(project, top, never_built=None):
         rec = {}
     if not isinstance(rec, dict):
         rec = {}
+    contracts = {}
+    for m in top["模块"]:
+        try:
+            contracts[m["名"]] = VC.load(project, m["名"])[0]
+        except FileNotFoundError:
+            raise ValueError(f"缺约定 contracts/{m['名']}.md") from None
     for m in top["模块"]:
         name = m["名"]
-        try:
-            c, _ = VC.load(project, name)
-        except FileNotFoundError:
-            raise ValueError(f"缺约定 contracts/{name}.md") from None
+        c = contracts[name]
         probs = VC.C.parse(VC.path_of(project, name).read_text(encoding="utf-8"))[1]
         if probs:
             raise ValueError(f"contracts/{name}.md 解析不过：{probs[0]}")
@@ -150,7 +142,7 @@ def gen_skeleton(project, top, never_built=None):
         stale = bool(never_built and never_built(name) and rec.get(name) and rec.get(name) != chash)
         rec[name] = chash
         for rel, text in ((f"entities/{name}.entity", entity_text(c)), (f"services/{name}.zs", service_text(name, c)),
-                          (f"routes/{name}.zs", route_text(name, c))):
+                          (f"routes/{name}.zs", route_text(name, c, contracts))):
             if not text.strip():
                 continue
             f = project / rel
