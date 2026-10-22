@@ -1570,6 +1570,50 @@ def test_modify_entry():
     check(not bad, "修改.zs 里没有旧流程的动词 / 文件", bad)
 
 
+def test_trunk2_entries():
+    print("核查2 / 修改2（最小主干）：核查2 只调全量回归、不冒烟不派任务；修改2 只派点名模块、最后跑回归、不冒烟；CLI 子命令")
+    za = (ROOT / "tools" / "dslagent" / "v3" / "audit2.zs").read_text(encoding="utf-8")
+    zc = (ROOT / "tools" / "dslagent" / "v3" / "change2.zs").read_text(encoding="utf-8")
+    check("全量回归" in za and "接口冒烟" not in za.split("\n", 3)[-1] and "派任务" not in za.split("\n", 3)[-1] and "全局检查" not in za.split("\n", 3)[-1], "audit2.zs 正文只有全量回归 + 存问题清单")
+    check("接口冒烟" not in "\n".join(l for l in zc.split("\n") if not l.startswith("#")), "change2.zs 正文没有接口冒烟")
+    p = fresh("a2_p")
+    (p / "plan").mkdir(parents=True)
+    (p / "plan" / "top.zs").write_text("项目 demo\n模块 a\n模块 b\n", encoding="utf-8")
+    (p / "contracts").mkdir()
+    (p / "contracts" / "a.md").write_text(DUP_A, encoding="utf-8")
+    (p / "contracts" / "b.md").write_text(DUP_B, encoding="utf-8")
+    fk = Fake()
+    res = core.run_entry("audit2", p, fresh("a2_out"), "需求", backend=fk)
+    ret = res.get("returned") or {}
+    check(res["status"] == "成功" and set(ret) == {"count", "path"} and (Path(p) / ret["path"]).is_file(), "audit2 跑成功，返回 {count, path}，清单存盘", res)
+    check(fk.calls == [], "audit2 不调模型（不派任务）", [c["tag"] for c in fk.calls])
+    seen = [r.get("verb") or r.get("事件") for r in res.get("记录", [])] if isinstance(res.get("记录"), list) else []
+    check("接口冒烟" not in str(res.get("记录")) and "全局检查" not in str(res.get("记录")), "audit2 记录里没有冒烟 / 全局检查", seen)
+    p = project_with_contracts(("graph", "vocab", "progress"))
+    (p / "plan").mkdir(exist_ok=True)
+    (p / "plan" / "top.zs").write_text(TOP3, encoding="utf-8")
+    SF.gen_skeleton(p, VT.load(TOP3))
+    state = fresh("c2_st") / "state"
+    stub_env(state)
+    (p / "plan" / "issues").mkdir(parents=True)
+    (p / "plan" / "issues" / "1.md").write_text("# 问题清单 1\n\n1. graph 少一个接口\n   涉及模块：graph\n   依据：contracts/graph.md\n", encoding="utf-8")
+    fk = Fake(scripts={"v3_agent_modify_module": ["改好了"]})
+    res = core.run_entry("change2", p, fresh("c2_out"), "需求", extra_vars={"issues": "latest"}, backend=fk, module_cmd=CMD)
+    r = res.get("returned") or {}
+    ag = [c for c in fk.calls if c["tag"] == "v3_agent_modify_module"]
+    check(res["status"] == "成功" and len(ag) == 1 and ag[0]["user"].split("\n")[0] == "模块 graph", "change2 只派点名模块 graph 一次", [c["tag"] for c in fk.calls])
+    check(set(r) == {"changed", "failed", "regression"} and len(r["changed"]) == 1 and r["failed"] == [], "change2 返回 {changed, failed, regression}", r)
+    check("接口冒烟" not in str(res.get("记录")), "change2 没跑接口冒烟")
+    import subprocess
+    cp = subprocess.run([sys.executable, "-m", "tools.dslagent", "v3", "-h"], cwd=ROOT, capture_output=True, text=True)
+    check("audit2" in cp.stdout and "change2" in cp.stdout, "CLI v3 -h 列出 audit2 / change2")
+    rq = fresh("a2_req") / "r.md"
+    rq.write_text("需求", encoding="utf-8")
+    cp = subprocess.run([sys.executable, "-m", "tools.dslagent", "v3", "audit2", "--req", str(rq), "--project", str(fresh("a2_cli_p")), "--out", str(fresh("a2_cli_o"))],
+                        cwd=ROOT, capture_output=True, text=True)
+    check(cp.returncode == 0 and '"count": 0' in cp.stdout, "CLI audit2 空项目能跑（count 0）", cp.stdout + cp.stderr)
+
+
 if __name__ == "__main__":
     try:
         test_top()
@@ -1607,6 +1651,7 @@ if __name__ == "__main__":
         test_f1_parallel_agents()
         test_audit_entry()
         test_modify_entry()
+        test_trunk2_entries()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n通过 {PASS}，失败 {FAIL}")
