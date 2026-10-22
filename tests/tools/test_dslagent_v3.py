@@ -1570,40 +1570,74 @@ def test_modify_entry():
     check(not bad, "修改.zs 里没有旧流程的动词 / 文件", bad)
 
 
+def a2_reply(result, issue="", basis=""):
+    r = {"result": result}
+    if issue:
+        r.update(issue=issue, basis=basis)
+    return json.dumps({"result": r, "status": "成功", "reason": ""}, ensure_ascii=False)
+
+
+def run_audit2(p, scripts):
+    fk = Fake(scripts=scripts)
+    res = core.run_entry("audit2", p, fresh("a2_out"), "需求", extra_vars={"llm": "sonnet"}, backend=fk)
+    return res, res.get("returned") or {}, fk
+
+
 def test_trunk2_entries():
-    print("核查2 / 修改2（最小主干）：核查2 只调全量回归、不冒烟不派任务；修改2 只派点名模块、最后跑回归、不冒烟；CLI 子命令")
-    za = (ROOT / "tools" / "dslagent" / "v3" / "audit2.zs").read_text(encoding="utf-8")
+    print("核查2 / 修改2：核查2 每个有代码的模块派一次、只回一个 result（contract_issue > module_issue > unchecked > ok）；修改2 contract_issue 终止、module_issue 只派 issues")
+    p = full_project()
+    (p / "plan").mkdir(exist_ok=True)
+    (p / "plan" / "top.zs").write_text(TOP3, encoding="utf-8")
+    allok = {f"dsl0{k}": [a2_reply("ok")] for k in (1, 2, 3)}
+    res, ret, fk = run_audit2(p, allok)
+    check(res["status"] == "成功" and ret == {"result": "ok"} and fk.n("dsl") == 3, "全 ok：{result: ok}，每个有代码的模块派一次", (ret, [c["tag"] for c in fk.calls]))
+    check(json.loads((p / "plan" / "audit2.json").read_text(encoding="utf-8")) == {"result": "ok"}, "plan/audit2.json 存盘")
+    first = fk.calls[0]["user"]
+    check("plan/top.zs" in first and "contracts/" in first, "派任务入参带约定 + 代码 + plan/top.zs", first[:300])
+
+    mix = dict(allok, dsl01=[a2_reply("contract_issue", "约定自相矛盾", "contracts/graph.md")], dsl02=[a2_reply("module_issue", "少接口", "services/vocab.zs")])
+    res, ret, fk = run_audit2(p, mix)
+    check(ret.get("result") == "contract_issue" and len(ret["issues"]) == 1 and ret["issues"][0]["issue"] == "约定自相矛盾"
+          and set(ret["issues"][0]) == {"module", "issue", "basis"}, "有约定问题：contract_issue，issues 只含约定问题", ret)
+
+    res, ret, fk = run_audit2(p, dict(allok, dsl02=[a2_reply("module_issue", "少接口", "services/vocab.zs")]))
+    check(ret.get("result") == "module_issue" and [i["issue"] for i in ret["issues"]] == ["少接口"] and ret["issues"][0]["module"], "只有模块问题：module_issue", ret)
+
+    broken = (p / "services" / "graph.zs").read_text(encoding="utf-8")
+    (p / "services" / "graph.zs").write_text(broken.replace("报错 404 没有这个知识点", "报错 400 没有这个知识点", 1), encoding="utf-8")
+    res, ret, fk = run_audit2(p, allok)
+    check(ret.get("result") == "module_issue" and any(i["basis"] == "全量回归" and i["module"] == "graph" for i in ret["issues"]), "回归不过：module_issue，条目 basis=全量回归", ret)
+    (p / "services" / "graph.zs").write_text(broken, encoding="utf-8")
+
+    bad = json.dumps({"result": {}, "status": "失败", "reason": "超时"}, ensure_ascii=False)
+    res, ret, fk = run_audit2(p, dict(allok, dsl03=[bad]))
+    check(ret.get("result") == "unchecked" and len(ret["unchecked"]) == 1 and ret["unchecked"][0]["reason"], "子任务失败：不当 ok，result=unchecked", ret)
+    res, ret, fk = run_audit2(p, dict(allok, dsl03=[bad], dsl02=[a2_reply("module_issue", "少接口", "x")]))
+    check(ret.get("result") == "module_issue" and len(ret["unchecked"]) == 1, "有模块问题时 result 仍是 module_issue，同时带 unchecked", ret)
+
     zc = (ROOT / "tools" / "dslagent" / "v3" / "change2.zs").read_text(encoding="utf-8")
-    check("全量回归" in za and "接口冒烟" not in za.split("\n", 3)[-1] and "派任务" not in za.split("\n", 3)[-1] and "全局检查" not in za.split("\n", 3)[-1], "audit2.zs 正文只有全量回归 + 存问题清单")
     check("接口冒烟" not in "\n".join(l for l in zc.split("\n") if not l.startswith("#")), "change2.zs 正文没有接口冒烟")
-    p = fresh("a2_p")
-    (p / "plan").mkdir(parents=True)
-    (p / "plan" / "top.zs").write_text("项目 demo\n模块 a\n模块 b\n", encoding="utf-8")
-    (p / "contracts").mkdir()
-    (p / "contracts" / "a.md").write_text(DUP_A, encoding="utf-8")
-    (p / "contracts" / "b.md").write_text(DUP_B, encoding="utf-8")
-    fk = Fake()
-    res = core.run_entry("audit2", p, fresh("a2_out"), "需求", backend=fk)
-    ret = res.get("returned") or {}
-    check(res["status"] == "成功" and set(ret) == {"count", "path"} and (Path(p) / ret["path"]).is_file(), "audit2 跑成功，返回 {count, path}，清单存盘", res)
-    check(fk.calls == [], "audit2 不调模型（不派任务）", [c["tag"] for c in fk.calls])
-    seen = [r.get("verb") or r.get("事件") for r in res.get("记录", [])] if isinstance(res.get("记录"), list) else []
-    check("接口冒烟" not in str(res.get("记录")) and "全局检查" not in str(res.get("记录")), "audit2 记录里没有冒烟 / 全局检查", seen)
     p = project_with_contracts(("graph", "vocab", "progress"))
     (p / "plan").mkdir(exist_ok=True)
     (p / "plan" / "top.zs").write_text(TOP3, encoding="utf-8")
     SF.gen_skeleton(p, VT.load(TOP3))
     state = fresh("c2_st") / "state"
     stub_env(state)
-    (p / "plan" / "issues").mkdir(parents=True)
-    (p / "plan" / "issues" / "1.md").write_text("# 问题清单 1\n\n1. graph 少一个接口\n   涉及模块：graph\n   依据：contracts/graph.md\n", encoding="utf-8")
+    aj = p / "plan" / "audit2.json"
+    aj.write_text(json.dumps({"result": "contract_issue", "issues": [{"module": "graph", "issue": "约定矛盾", "basis": "contracts/graph.md"}]}, ensure_ascii=False), encoding="utf-8")
     fk = Fake(scripts={"v3_agent_modify_module": ["改好了"]})
-    res = core.run_entry("change2", p, fresh("c2_out"), "需求", extra_vars={"issues": "latest"}, backend=fk, module_cmd=CMD)
+    res = core.run_entry("change2", p, fresh("c2_out"), "需求", backend=fk, module_cmd=CMD)
+    check(res["status"] == "失败" and "回到规划" in res["reason"] and fk.calls == [], "change2：contract_issue 终止、不派任何代理", res)
+    aj.write_text(json.dumps({"result": "module_issue", "issues": [{"module": "graph", "issue": "少一个接口", "basis": "contracts/graph.md"}]}, ensure_ascii=False), encoding="utf-8")
+    res = core.run_entry("change2", p, fresh("c2_out"), "需求", backend=fk, module_cmd=CMD)
     r = res.get("returned") or {}
     ag = [c for c in fk.calls if c["tag"] == "v3_agent_modify_module"]
-    check(res["status"] == "成功" and len(ag) == 1 and ag[0]["user"].split("\n")[0] == "模块 graph", "change2 只派点名模块 graph 一次", [c["tag"] for c in fk.calls])
+    check(res["status"] == "成功" and len(ag) == 1 and ag[0]["user"].split("\n")[0] == "模块 graph", "change2：module_issue 只派 issues 里的模块 graph 一次", [c["tag"] for c in fk.calls])
     check(set(r) == {"changed", "failed", "regression"} and len(r["changed"]) == 1 and r["failed"] == [], "change2 返回 {changed, failed, regression}", r)
-    check("接口冒烟" not in str(res.get("记录")), "change2 没跑接口冒烟")
+    aj.write_text(json.dumps({"result": "ok"}), encoding="utf-8")
+    fk = Fake()
+    res = core.run_entry("change2", p, fresh("c2_out"), "需求", backend=fk, module_cmd=CMD)
+    check(res["status"] == "成功" and fk.calls == [], "change2：ok 直接返回，不派", res)
     import subprocess
     cp = subprocess.run([sys.executable, "-m", "tools.dslagent", "v3", "-h"], cwd=ROOT, capture_output=True, text=True)
     check("audit2" in cp.stdout and "change2" in cp.stdout, "CLI v3 -h 列出 audit2 / change2")
@@ -1611,7 +1645,7 @@ def test_trunk2_entries():
     rq.write_text("需求", encoding="utf-8")
     cp = subprocess.run([sys.executable, "-m", "tools.dslagent", "v3", "audit2", "--req", str(rq), "--project", str(fresh("a2_cli_p")), "--out", str(fresh("a2_cli_o"))],
                         cwd=ROOT, capture_output=True, text=True)
-    check(cp.returncode == 0 and '"count": 0' in cp.stdout, "CLI audit2 空项目能跑（count 0）", cp.stdout + cp.stderr)
+    check(cp.returncode == 0 and '"result": "ok"' in cp.stdout, "CLI audit2 空项目能跑（result ok）", cp.stdout + cp.stderr)
 
 
 if __name__ == "__main__":

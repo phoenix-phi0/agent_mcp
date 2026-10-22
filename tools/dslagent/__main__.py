@@ -78,7 +78,7 @@ def main(argv=None):
         signal.signal(signal.SIGTERM, on_term)
         req_text = Path(a.req).read_text(encoding="utf-8")
         if a.action in ("audit2", "change2"):   # 最小主干：audit2.zs / change2.zs
-            extra = {"issues": a.issues} if a.action == "change2" else {}
+            extra = {"issues": a.issues} if a.action == "change2" else {"llm": a.llm}
             res = V3.run_entry(a.action, a.project, a.out, req_text, extra_vars=extra,
                                cost_cap=a.cost_cap, **({"wall": a.wall} if a.wall else {}), module_wall=a.module_wall)
             print(json.dumps({k: res.get(k) for k in ("status", "reason", "at", "花费", "用时", "模型调用", "returned")}, ensure_ascii=False))
