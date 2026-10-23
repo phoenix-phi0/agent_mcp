@@ -20,7 +20,7 @@ def 并行派代理(组: list) -> list:
     backend, v2_backend = X.agent_backends(c)
     from tools.dslagent.v3 import modrun as MR
     results = R.parallel_dispatch_agents(组 or [], out_dir=c.out, backend=backend, parent_id=str(c.out),
-                                         project=c.project, module_cmd=MR.base_cmd(c), v2_backend=v2_backend)
+                                         project=c.project, module_cmd=MR.base_cmd(c), v2_backend=v2_backend, mlog=c.M)
     cost = sum(r.get("cost") or 0.0 for r in results)
     with c.lock:
         c.module_cost += cost

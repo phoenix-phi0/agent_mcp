@@ -20,7 +20,7 @@ def 派代理(角色: str, 任务: str = "", 入参: dict = None, 格式: str = 
     backend, v2_backend = X.agent_backends(c, f"v3_agent_{角色}")
     from tools.dslagent.v3 import modrun as MR
     r = R.dispatch_agent(角色, 任务, 入参, 格式 or None, out_dir=c.out, backend=backend, parent_id=str(c.out),
-                         project=c.project, module_cmd=MR.base_cmd(c), v2_backend=v2_backend)
+                         project=c.project, module_cmd=MR.base_cmd(c), v2_backend=v2_backend, mlog=c.M)
     with c.lock:
         c.module_cost += r.get("cost") or 0.0
     c.log("派代理", 角色=角色, 状态=r["status"], 原因=(r.get("reason") or "")[:200], 花费=r.get("cost"))

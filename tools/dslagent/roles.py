@@ -208,8 +208,9 @@ def _reply_ok(fmt, text):
 
 
 def dispatch_agent(role_name, task="", inputs=None, fmt=None, *, out_dir, backend=None, parent_id=None,
-                    ledger=None, roles_map=None, budget=None, project=None, module_cmd=None, v2_backend=None):
+                    ledger=None, roles_map=None, budget=None, project=None, module_cmd=None, v2_backend=None, mlog=None):
     """`派代理 角色 任务 入参? 格式?` 的 Python 实现。返回 {result, status, reason, role, model, cost, calls, secs}。
+    mlog：v2.Model（v3 流程把 ctx.M 传进来）——按角色回退时补一条进 calls.json（不传就不补）。
     status：ok（成功）/ fail（角色不存在、入参越范围、两次都没拿到合格回复）/ over（预算超了，没调模型）。
     角色「执行方式: v2」时不调一次模型，而是在 project 的拷贝里起一次完整 v2 运行（_dispatch_v2；project / module_cmd /
     v2_backend 只给这种角色用，v2_backend 测试注入，缺省起子进程）。"""
@@ -219,14 +220,14 @@ def dispatch_agent(role_name, task="", inputs=None, fmt=None, *, out_dir, backen
         reason = f"角色「{role_name}」没有登记"
         led.record(role=role_name, status="fail", reason=reason, parent_id=parent_id)
         return {"result": "", "status": "fail", "reason": reason, "role": role_name, "model": None,
-                "cost": 0.0, "calls": 0, "secs": 0.0}
+                "cost": 0.0, "calls": 0, "secs": 0.0, "fallback": False}
     role = rm[role_name]
     try:
         _check_scope(role_name, role, inputs)
     except ValueError as e:
         led.record(role=role_name, status="fail", reason=str(e), parent_id=parent_id)
         return {"result": "", "status": "fail", "reason": str(e), "role": role_name, "model": None,
-                "cost": 0.0, "calls": 0, "secs": 0.0}
+                "cost": 0.0, "calls": 0, "secs": 0.0, "fallback": False}
 
     role_budget = budget if budget is not None else (None if (role.get("预算") in (None, "", "无")) else float(role["预算"]))
     try:
@@ -234,11 +235,11 @@ def dispatch_agent(role_name, task="", inputs=None, fmt=None, *, out_dir, backen
     except LG.BudgetExceeded as e:
         led.record(role=role_name, status="over", reason=str(e), parent_id=parent_id)
         return {"result": "", "status": "over", "reason": str(e), "role": role_name, "model": None,
-                "cost": 0.0, "calls": 0, "secs": 0.0}
+                "cost": 0.0, "calls": 0, "secs": 0.0, "fallback": False}
 
     timeout = float(role.get("单次超时") or 300)
     if role.get("执行方式") == "v2":
-        return _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, module_cmd, v2_backend, timeout, out_dir)
+        return _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, module_cmd, v2_backend, timeout, out_dir, mlog=mlog)
     system = _prompt_text(role.get("提示词文件"))
     user = _user_text(task, inputs)
     call = backend or (lambda spec, s, u, tmo: EG.call(spec, s, u, tmo))
@@ -260,8 +261,13 @@ def dispatch_agent(role_name, task="", inputs=None, fmt=None, *, out_dir, backen
     ok, used_fallback = _ok(r), False
     if not ok and role.get("回退模型"):
         used_fallback = True
+        first_spec, first_r = spec, r
         spec, r = _attempt("回退模型")
         ok = _ok(r)
+        if mlog is not None:      # 回退不落在 calls.json 里就是静默换模型：补一条（实际 engine/model + 原因）
+            mlog.note_agent(f"agent_{role_name}", spec,
+                            f"角色 {role_name} 默认模型 {first_spec['spec']} 失败（{first_r.get('reason') or '回复不合格'}），按回退模型重试",
+                            cost=r.get("cost") or 0.0, secs=r.get("sec") or 0.0)
 
     status, reason = ("ok", "") if ok else ("fail", r.get("reason") or "回复不合格")
     row = led.record(role=role_name, model=spec["spec"], effort=spec.get("effort"), parent_id=parent_id,
@@ -269,7 +275,7 @@ def dispatch_agent(role_name, task="", inputs=None, fmt=None, *, out_dir, backen
                       num_turns=r.get("num_turns"), fallback=used_fallback)
     return {"result": r.get("text") or "", "status": status, "reason": reason, "role": role_name,
             "model": spec["spec"], "cost": r.get("cost") or 0.0, "calls": 1, "secs": r.get("sec") or 0.0,
-            "call_id": row["call_id"]}
+            "call_id": row["call_id"], "fallback": used_fallback}
 
 
 # ------------------------------------------------------------------ 执行方式 v2
@@ -333,11 +339,11 @@ def _run_v2_subprocess(spec, req):
     return out
 
 
-def _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, module_cmd, v2_backend, timeout, out_dir):
+def _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, module_cmd, v2_backend, timeout, out_dir, mlog=None):
     def _fail(reason, spec=None):
         led.record(role=role_name, status="fail", reason=reason, parent_id=parent_id, model=spec)
         return {"result": "", "status": "fail", "reason": reason, "role": role_name, "model": spec,
-                "cost": 0.0, "calls": 0, "secs": 0.0}
+                "cost": 0.0, "calls": 0, "secs": 0.0, "fallback": False}
     module = str((inputs or {}).get("模块") or "").strip()
     if not module:
         return _fail("执行方式 v2 的角色，入参里要有「模块」")
@@ -356,9 +362,14 @@ def _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, mod
     cost, secs, calls = cost + (r.get("cost") or 0.0), secs + (r.get("sec") or 0.0), calls + (r.get("calls") or 0)
     if not r.get("started", True) and role.get("回退模型"):       # 没跑起来 / 引擎错误（不是验收失败）：回退模型再起一次
         used_fallback = True
+        first_stop = str(r.get("stop") or "没跑起来").strip()[:200]
         spec = resolve_model(role_name, "回退模型", rm)
         r = run(spec["spec"], req)
         cost, secs, calls = cost + (r.get("cost") or 0.0), secs + (r.get("sec") or 0.0), calls + (r.get("calls") or 0)
+        if mlog is not None:      # 回退不落在 calls.json 里就是静默换模型：补一条（实际 engine/model + 原因）
+            mlog.note_agent(f"agent_{role_name}", spec,
+                            f"角色 {role_name} v2 子进程没跑起来（{first_stop}），按回退模型重试",
+                            cost=r.get("cost") or 0.0, secs=r.get("sec") or 0.0)
     ok = bool(r.get("fixed"))
     reason = "" if ok else (str(r.get("stop") or "v2 验收没过").strip()[:V2_STOP_MAX])
     status = "ok" if ok else "fail"
@@ -366,11 +377,12 @@ def _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, mod
                       status=status, reason=reason, num_turns=calls, fallback=used_fallback)
     files = r.get("files") or []
     return {"result": ", ".join(files) if ok else "", "status": status, "reason": reason, "role": role_name,
-            "model": spec["spec"], "cost": cost, "calls": calls, "secs": round(secs, 2), "call_id": row["call_id"]}
+            "model": spec["spec"], "cost": cost, "calls": calls, "secs": round(secs, 2), "call_id": row["call_id"],
+            "fallback": used_fallback}
 
 
 def parallel_dispatch_agents(items, *, out_dir, backend=None, parent_id=None, roles_map=None, max_workers=None,
-                             project=None, module_cmd=None, v2_backend=None):
+                             project=None, module_cmd=None, v2_backend=None, mlog=None):
     """`并行派代理` 的 Python 实现：items 是 [{角色, 任务?, 入参?, 格式?, parent_id?}, …]，共用一份账本；
     并发数缺省 DSLAGENT_AGENT_CONCURRENCY（没设 = 4），超了排队（线程池天然排队）。按入参原序返回结果列表。
     project / module_cmd / v2_backend 原样转给每个 dispatch_agent（执行方式=v2 的角色要用，与单个 派代理 一致）。"""
@@ -380,5 +392,5 @@ def parallel_dispatch_agents(items, *, out_dir, backend=None, parent_id=None, ro
         futs = [ex.submit(dispatch_agent, it["角色"], it.get("任务", ""), it.get("入参"), it.get("格式"),
                            out_dir=out_dir, backend=backend, parent_id=it.get("parent_id", parent_id),
                            ledger=led, roles_map=roles_map, project=project, module_cmd=module_cmd,
-                           v2_backend=v2_backend) for it in items]
+                           v2_backend=v2_backend, mlog=mlog) for it in items]
         return [f.result() for f in futs]

@@ -122,7 +122,7 @@ class Model:
         (self.out / "calls").mkdir(parents=True, exist_ok=True)
 
     def spec(self, tag, model=None, step=None):
-        """这次调用用的 {engine, model, effort, spec}：DSLAGENT_MODELS 里写了该步骤就用它，否则 model 参数（旧的规划模型透传），再否则 sonnet。
+        """这次调用用的 {engine, model, effort, spec}：DSLAGENT_MODELS 里写了该步骤就用它，否则 model 参数（完整模型串按 engines.parse，不认识的当 claude 模型名透传），再否则 sonnet。
         step 显式给（modbuild 的 mplan / mgen）时按它选；这两步没写就跟 sub 走。"""
         step = step or engines.step_of(tag)
         s = self.routes.get(step) if step else None
@@ -132,6 +132,11 @@ class Model:
             return engines.plan_effort(engines.parse(s or engines.DEFAULT), tag)
         if s:
             return engines.plan_effort(engines.parse(s), tag)
+        if model:
+            try:      # 「模型 X」/「问 … 用 X」给的是完整模型串时按它走（engines.parse 认的 goose:… / codex:… / grok / opencode:… / claude-…）
+                return engines.parse(model)
+            except ValueError:
+                pass   # 不认识的串保持旧行为：当 claude 模型名透传，不校验
         m = model or MODEL           # 旧的透传（DSLAGENT_PLAN_MODEL）：任意串当 claude 模型名，不校验
         return {"engine": "claude", "model": m, "effort": None, "spec": m}
 
@@ -156,6 +161,21 @@ class Model:
     def tool_call(self, system, user, tag, mcp_config, max_turns=6, model=None, read_cwd=None):
         """一次带工具的多轮调用：claude / codex 挂 mcp_config（dslmcp），grok 且给了 read_cwd 用自带只读工具。返回 backend 的 dict（含 failed / call_n）。"""
         return self._call(system, user, tag, model, tools={"mcp_config": mcp_config, "max_turns": max_turns, "read_cwd": read_cwd})
+
+    def note_agent(self, tag, spec, why, cost=0.0, secs=0.0):
+        """不经 _call 的模型调用（派代理 这类直接走 engines.call / 子进程的）补一条进 calls.json（self.log）：
+        目前只补按角色回退到「回退模型」的那次——正常那次在调度层账本 agents.jsonl 里，不重复记。
+        记实际 engine/model 和「回退」原因；编号（self.n）照加（调用真的发生过），花费不重复记（调度方已并入自己的账）。"""
+        with self.lock:
+            self.n += 1
+            n = self.n
+            rec = {"n": n, "tag": tag, "sec": secs or 0.0, "cost": cost or 0.0, "rc": None,
+                   "engine": spec["engine"], "model": _rec_model(spec), "effort": spec.get("effort"),
+                   "sys_chars": 0, "user_chars": 0, "t_start": round(time.time(), 3), "回退": why}
+            if self.run_no:
+                rec["run"] = self.run_no
+            self.log.append(rec)
+        return rec
 
     def _call(self, system, user, tag, model=None, retry=None, tools=None, step=None, limits=None):
         with self.lock:
@@ -314,7 +334,7 @@ class Client:
             self.k += 1
             k = self.k
         try:
-            return self.M(system or SUB_SYS, prompt, f"dsl{k:02d}")
+            return self.M(system or SUB_SYS, prompt, f"dsl{k:02d}", model=model)   # model 透传（脚本「模型 X」/ 问…用 X）
         except Stop as e:
             raise RuntimeError(str(e)) from None
 
@@ -351,11 +371,11 @@ class Client:
 
     def chat(self, prompt, system=None, temperature=None, model=None, **kw):
         msgs = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
-        return self.chat_messages(msgs)
+        return self.chat_messages(msgs, model=model)
 
     def chat_json(self, prompt, system=None, temperature=None, model=None, **kw):
         from tools.zhipu import strip_json
-        return json.loads(strip_json(self.chat(prompt, system=system)))
+        return json.loads(strip_json(self.chat(prompt, system=system, model=model)))
 
 
 # ------------------------------------------------------------------ 项目快照 / 改法 / 测试
