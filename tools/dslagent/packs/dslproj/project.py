@@ -282,7 +282,8 @@ def compare(project, module, contract, modules):
     """实际文件与约定是否一致：脚本（约定「## 脚本」）、业务文件（模块名 / 依赖 / 每个函数的名字、公开与否、入参顺序与可选）、接口（方法 + 路径存在、只调约定里那个函数）、
     约定里的表在 entities/<模块>.entity 里都有、约定里明确写出的唯一声明在实体里有对应旗标（单列「唯一」旗标 / 多列「唯一 a b」行，
     声明的识别规则见 contract.unique_decls）、内容文件（代码里读写的本模块 content/<模块>/ 路径都要在约定「## 内容文件」里声明）。
-    返回 {"一致": bool, "差异": [文字], "提示": [文字]}；提示不算不一致（声明了的内容文件没人写 / 没人读）。"""
+    返回 {"一致": bool, "差异": [文字], "提示": [文字]}；提示不算不一致（声明了的内容文件没人写 / 没人读，
+    以及自由文本入参的用例没覆盖空格 / 换行，见 C.text_space_problems）。"""
     from tools.dsl_http import split_endpoints
     from tools.dsl_service import ServiceProblem, parse_module
     project = Path(project)
@@ -353,6 +354,7 @@ def compare(project, module, contract, modules):
     diffs += script_diffs(project, module, contract, modules)
     c_diffs, hints = content_diffs(project, module, contract, modules)
     diffs += c_diffs
+    hints += C.text_space_problems(contract)      # 自由文本入参的空格 / 换行覆盖提示（不算不一致，K19a 起从 C.check 挪到这里）
     ef = project / "entities" / f"{module}.entity"
     etext = ef.read_text(encoding="utf-8") if ef.is_file() else ""
     ents = set(re.findall(r"^\s*实体\s+(\S+)", etext, re.M)) if etext else set()

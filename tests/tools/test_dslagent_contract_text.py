@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-"""约定检查的「自由文本入参要有带空格 / 换行的用例」（K16c 2a）：模块有自由文本入参的公开函数
-    （content / title / *_path / *_text 这些名字），而所有用例的值都不含空格、也不含字面 \n → 报一条；
+"""自由文本入参要有带空格 / 换行的用例（K16c 2a 定规则，K19a 改）：模块有自由文本入参的公开函数
+    （content / title / *_text 这些名字；*_path / keyword 等已收窄掉），而所有用例的值都不含空格、
+    也不含字面 \n → compare 出一条**提示**（不算问题、不拦约定加载；C.check 不再报）；
     「先 文件 内容=…」（可带空格）或任何值里的字面 \n 都算覆盖。不调模型。
 
     cd /workspace/agent_mcp && .venv/bin/python tests/tools/test_dslagent_contract_text.py
@@ -116,29 +117,42 @@ GET /note/list -> 列出
 c = mk(t)
 check(one(c) == "", "私有函数的 content 不触发", t)
 
-# 7. *_path 入参（文件文本）触发；「先 文件 内容」带 \n 覆盖
+# 7. *_path 是路径、不是用户写的自由文本（K19a 收窄）→ 不触发；*_text 结尾仍触发，「先 文件 内容」带 \n 算覆盖
 t = BASE.replace("公开 函数 保存 content", "公开 函数 导入 file_path") \
        .replace("  content 文本 内容", "  title 文本 标题") \
        .replace("  伪代码 往 note_item 插入一行 content", "  伪代码 读 file_path 按\n  伪代码 往 note_item 插入各行 title") \
        .replace("  调用 保存 content=你好", "  先 文件 in/a.txt 内容=甲\\n乙\n  调用 导入 file_path=in/a.txt")
-check(one(mk(t)) == "", "*_path 入参 + 先 文件 内容带 \\n → 不报", t)
-t2 = t.replace("内容=甲\\n乙", "内容=甲")
-p = one(mk(t2))
-check("file_path" in p, "*_path 入参无覆盖 → 报", p)
+check(one(mk(t)) == "", "*_path 入参（file_path）不再触发", t)
+t2 = t.replace("file_path", "prompt_text").replace("内容=甲\\n乙", "内容=甲")
+check(one(mk(t2)) != "", "*_text 结尾入参（prompt_text）无覆盖 → 提示", t2)
+t3 = t2.replace("内容=甲", "内容=甲\\n乙")
+check(one(mk(t3)) == "", "*_text 入参 + 先 文件 内容带 \\n → 覆盖", t3)
 
 # 8. 可选入参 content? 也算自由文本
 t = BASE.replace("公开 函数 保存 content", "公开 函数 保存 content?").replace("content=你好", "content=你好")
 p = one(mk(t))
 check("content" in p, "可选 content? 无覆盖 → 报", p)
 
-# 9. check() 全量里包含这条（不是孤立的函数）
+# 9. K19a 起不再拦：C.check 的问题列表里没有这条；compare 的「提示」里有、差异里没有
 c = mk(BASE)
 allp = C.check(c, "note", {}, ["note"])
-check(any("自由文本" in x for x in allp), "C.check 汇总里出现", allp)
+check(not any("自由文本" in x for x in allp), "C.check 不再报自由文本（K19a 起是提示）", allp)
+from tools.dslagent.packs.dslproj import project as P  # noqa: E402
+d = TMP / "proj_text"
+(d / "contracts").mkdir(parents=True, exist_ok=True)
+(d / "contracts" / "note.md").write_text(BASE, encoding="utf-8")
+r = P.compare(d, "note", c, ["note"])
+check(any("自由文本" in x for x in r.get("提示", [])), "compare 的提示里出现", r.get("提示"))
+check(not any("自由文本" in x for x in r.get("差异", [])), "compare 的差异里不出现（不算不一致）", r.get("差异"))
 
 # 10. 「先 数据」的值里带字面 \n 也算覆盖
 t = BASE.replace("  调用 保存 content=你好", "  先 数据 note_item content=a\\nb\n  调用 保存 content=你好")
 check(one(mk(t)) == "", "先 数据 值带 \\n → 不报", t)
+
+# 11. K19a 收窄名单：source / license / keyword / keywords / tone / word_text 不再算自由文本
+t = BASE.replace("公开 函数 保存 content", "公开 函数 保存 source license keyword?") \
+       .replace("  调用 保存 content=你好", "  调用 保存 source=model license=z keyword=k1")
+check(one(mk(t)) == "", "source / license / keyword 不触发（K19a 收窄）", t)
 
 print(f"\nRan {PASS + FAIL} checks: {PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

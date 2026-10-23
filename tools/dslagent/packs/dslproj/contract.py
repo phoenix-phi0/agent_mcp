@@ -63,13 +63,15 @@ SECTIONS = {"表": "表", "数据": "表", "函数": "函数", "接口": "接口
 SCRIPT_RE = re.compile(r"^scripts/([a-z][a-z0-9_]*)\.zs$")
 CONTENT_RE = re.compile(r"^content/([a-z][a-z0-9_]*)/([A-Za-z0-9_{}./-]+\.(?:jsonl|json))$")   # 内容文件路径：content/<模块>/…（.jsonl / .json，可含 {变量}）
 
-# 自由文本入参：这些名字（或 *_path / *_text 结尾）装的是标题、内容、原因、备注这类用户随意写的文本，
-# 用例要覆盖「值带空格 / 换行也原样保存」（见 text_space_problems）。
+# 自由文本入参：这些名字（或 *_text 结尾）装的是标题、内容、原因、备注这类用户随意写的文本，
+# 用例要覆盖「值带空格 / 换行也原样保存」（见 text_space_problems；K19a 起只是提示，不拦约定加载）。
+# 名单只收「用户写的整段文本」：路径（*_path，如 file_path）、检索关键词（keyword / keywords，
+# teacher_rules 等还会把关键词里的空白规整掉）、来源 / 版权等标识（source / license，实际取值是
+# model、S1 这类代号）、语气枚举（tone）、单词本身（word_text）跟空格覆盖关系不大，K19a 起不收。
 FREE_TEXT_PARAMS = {
     "content", "title", "body", "text", "reason", "note", "notes", "desc", "description",
     "summary", "comment", "remark", "answer", "reply", "message", "question", "explanation",
-    "detail", "details", "memo", "intro", "source", "license", "sentence", "keyword",
-    "keywords", "tone", "recent_text", "must_info", "word_text",
+    "detail", "details", "memo", "intro", "sentence", "recent_text", "must_info",
 }
 
 # 认证由程序生成：账号模块 = 有公开函数「核对身份」的模块
@@ -612,7 +614,6 @@ def check(c, name, upstream, all_modules):
     probs += _auth_problems(c, fns)
     probs += _script_problems(c, name, all_modules)
     probs += _content_problems(c, name)
-    probs += text_space_problems(c)
     covered, names = set(), set()
     for u in c["用例"]:
         if u["名"] in names:
@@ -652,9 +653,9 @@ def check(c, name, upstream, all_modules):
 
 
 def _free_text_params(f):
-    """函数入参里的自由文本参数名（去掉 ? 后按 FREE_TEXT_PARAMS / *_path / *_text 认）。"""
+    """函数入参里的自由文本参数名（去掉 ? 后按 FREE_TEXT_PARAMS / *_text 认；*_path 是路径，不算自由文本）。"""
     return [p.rstrip("?") for p in f["入参"]
-            if p.rstrip("?") in FREE_TEXT_PARAMS or p.rstrip("?").endswith(("_path", "_text"))]
+            if p.rstrip("?") in FREE_TEXT_PARAMS or p.rstrip("?").endswith("_text")]
 
 
 def _case_values(c):
@@ -673,8 +674,10 @@ def _case_values(c):
 
 
 def text_space_problems(c):
-    """自由文本入参的空格 / 换行覆盖（K16c 2a）：模块有接收自由文本的公开函数，而所有用例的值
-    都不含空格、也不含字面 \\n（换行的唯一写法）→ 报一条。用例语法里「调用 / 先 数据 / 得 / 库」的值
+    """自由文本入参的空格 / 换行覆盖**提示**（K16c 2a 定的规则；K19a 起从 C.check 的拦截问题挪到
+    project.compare 的「提示」，不算问题、不拦约定加载 / 跑用例 / 核查，在 比对约定 动词的 hints
+    和验收摘要里可见）：模块有接收自由文本的公开函数，而所有用例的值
+    都不含空格、也不含字面 \\n（换行的唯一写法）→ 提示一条。用例语法里「调用 / 先 数据 / 得 / 库」的值
     按空白切开、不能带空格，只有「先 文件 内容=…」能带空格（\\n 还原成真换行），所以文本带空格走文件、
     不能走文件的入参值里写字面 \\n，都算覆盖。"""
     fns = [(f, p) for f in c["函数"] if f["公开"] for p in _free_text_params(f)]

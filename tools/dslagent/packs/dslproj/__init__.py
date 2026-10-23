@@ -235,6 +235,9 @@ def accept(project, ctx):
         probs.append(f"跑用例：{r['原因']}")
     summary = (f"加载检查 {len(load)} 条问题；比对约定 {'一致' if cmp['一致'] else str(len(cmp['差异'])) + ' 条差异'}；"
                f"用例 {r['总数'] - len(r['失败'])}/{r['总数']} 通过")
+    hints = [h for h in (cmp.get("提示") or []) if h]     # 提示不算问题、不影响通过（K19a：自由文本空格覆盖提示从这里露面）
+    if hints:
+        summary += "；比对约定提示：" + "；".join(hints)
     return {"通过": not probs, "问题": probs, "摘要": summary + ("\n" + "\n".join(probs) if probs else "")}
 
 
