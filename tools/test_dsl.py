@@ -595,7 +595,7 @@ def test_ask_json():
     # 解析失败要报错，不能静默给空对象——那样条件判断会一路走到「否则」
     c = JsonClient(ValueError("模型没有返回合法 JSON。最后一次回复：胡说"))
     out, _ = run("问JSON d = x\n打印 {d.意图}", c)
-    check("解析失败报错", "DSLError" in out and "合法 JSON" in out, True)
+    check("解析失败报错", "ModelOutputError" in out and "合法 JSON" in out, True)
 
 
 def test_tools():

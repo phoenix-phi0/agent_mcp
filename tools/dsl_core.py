@@ -154,6 +154,36 @@ class BizError(ClientError):
     """
 
 
+class ModelOutputError(DSLError):
+    """模型返回的内容不合格（JSON 解析失败、缺字段、类型不对）：是模型输出的问题，
+    不是脚本写错。问JSON 这类「问模型要结构」的语句在解析 / 校验失败时抛它。
+
+    继承 DSLError：没被接住时和普通脚本错误待遇一样（往上抛、接口层照旧），
+    引擎的逐行兜底也不会再把它包一层。带 status / message 是给业务层的
+    「出错时」用的——分类时认出它就当业务错误接住（tools/dsl_service.py 的
+    _do_service_call），{e.code} {e.error} 跟 报错 4xx 的一个待遇。码用 502：
+    模型是上游服务，它回的货不合格，不是脚本写错了。
+    """
+
+    def __init__(self, message: str, status: int = 502):
+        super().__init__(message)
+        self.message = message
+        self.status = status
+
+
+def find_model_output_error(exc):
+    """顺着错误链找 ModelOutputError（跟 db_errors.find_client_error 一个找法：
+    引擎和业务层会一层层包，原来的异常挂在 __cause__ / __context__ 上）。
+    没有就回 None。"""
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        if isinstance(exc, ModelOutputError):
+            return exc
+        seen.add(id(exc))
+        exc = exc.__cause__ or exc.__context__
+    return None
+
+
 class ScriptReturn(Exception):
     """「返回」抛出来的，不是错误——run() 接住它当正常结束。
 

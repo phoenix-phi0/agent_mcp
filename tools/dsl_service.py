@@ -51,7 +51,7 @@ from pathlib import Path
 from .db_errors import find_client_error
 from .dsl_core import (
     BIZ_ERR_RE, BLOCK_OPENERS, CALL_PARAM_RE, BizError, DSLError, ScriptReturn,
-    check_name, normalize, split_head,
+    check_name, find_model_output_error, normalize, split_head,
 )
 
 DEFAULT_MAX_DEPTH = 32
@@ -480,6 +480,13 @@ class ServiceMixin:
             ce = find_client_error(e)
             if ce is not None and on_err:
                 self._swallow(on_err, ce, assign_to)
+                return
+            # 模型返回的内容不合格（问JSON 解析失败 / 缺字段 / 类型不对）也是
+            # 「这一单没做成」，不是脚本写错：一样让 出错时 接住，不接时照原样
+            # 往上抛（还是 DSLError，接口层待遇不变）
+            mo = find_model_output_error(e)
+            if mo is not None and on_err:
+                self._swallow(on_err, mo, assign_to)
                 return
             elif isinstance(e, DSLError):
                 raise DSLError(f"业务 {label}（{module.rel}）: {e}") from e

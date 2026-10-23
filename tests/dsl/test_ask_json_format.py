@@ -110,8 +110,8 @@ def main():
     out, m = run("设 x = 1\n问JSON r = 判断 格式 action:合格|重做\n打印 到不了",
                  ['{"action":"差"}'] * 5)
     check(len(m.calls) == 3, f"默认重问 2 次，总共 3 次：{len(m.calls)}")
-    check(out.startswith("DSLError") and "第 2 行：问JSON 格式不对：" in out,
-          f"用完报错带行号：{out[:60]}")
+    check(out.startswith("ModelOutputError") and "第 2 行：问JSON 格式不对：" in out,
+          f"用完报错带行号（模型输出错，不再是普通 DSLError）：{out[:60]}")
     check("action 只能是 合格 或 重做，你回了 差" in out, "报错里有问题列表")
     check('最后一次回复：{"action":"差"}' in out, "报错里有最后一次回复")
     check("到不了" not in out, "脚本停了")

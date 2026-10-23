@@ -43,8 +43,9 @@ from pathlib import Path
 from . import config
 from . import json_repair as _jr
 from .dsl_core import (ATTACH_RE, DEFAULT_TOOL_ROUNDS, DSLError,
-                       MAX_CALL_DEPTH, MODEL_ID_RE, MODEL_RE, RETRY_RE,
-                       TOOLS_RE, UNEXPANDED_RE, to_text)
+                       MAX_CALL_DEPTH, MODEL_ID_RE, ModelOutputError,
+                       MODEL_RE, RETRY_RE, TOOLS_RE, UNEXPANDED_RE,
+                       to_text)
 
 
 # ----------------------------------------------------------------------
@@ -478,7 +479,9 @@ class ModelMixin:
                 prompt, system=self.system, temperature=self.temperature,
                 model=model or self.model)
         except ValueError as e:
-            raise DSLError(f"第 {lineno + 1} 行：{e}") from e
+            # 模型没有返回合法 JSON：模型输出的问题，抛 ModelOutputError
+            # 让「出错时」接得住（消息原文不变）
+            raise ModelOutputError(f"第 {lineno + 1} 行：{e}") from e
         self.store(name, result)
         self._last_result = to_text(result)
 
@@ -515,8 +518,10 @@ class ModelMixin:
                     {"role": "assistant", "content": last},
                     {"role": "user", "content": _REASK.format(
                         "；".join(feedback))}]
-        raise DSLError(f"第 {lineno + 1} 行：问JSON 格式不对："
-                       f"{'；'.join(problems)}；最后一次回复：{last[:200]}")
+        # 模型回的内容不合格（不是合法 JSON / 缺字段 / 类型不对）：
+        # 模型输出的问题，抛 ModelOutputError 让「出错时」接得住（消息原文不变）
+        raise ModelOutputError(f"第 {lineno + 1} 行：问JSON 格式不对："
+                               f"{'；'.join(problems)}；最后一次回复：{last[:200]}")
 
     def _do_stream(self, rest: str) -> None:
         """流式 X = 提示词 —— 边生成边打印，最后把整段存进变量。"""
