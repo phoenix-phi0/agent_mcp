@@ -141,6 +141,15 @@ _CALLABLE = {
     "cxbatch.wait":     ("tools.cxbatch", "wait"),
     "cxbatch.jobs":     ("tools.cxbatch", "jobs"),
     "cxbatch.cancel":   ("tools.cxbatch", "cancel"),
+    # GSBatch：同样的批量，执行端换成 Goose 的无头模式（goose run）。默认
+    # zai_low + glm-5.3-flash + effort low；goose 没有沙箱，auto 下工具自动批准，
+    # 单次上限 10 条——见 gsbatch.py 模块文档。
+    "gsbatch.describe": ("tools.gsbatch", "describe"),
+    "gsbatch.submit":   ("tools.gsbatch", "submit"),
+    "gsbatch.status":   ("tools.gsbatch", "status"),
+    "gsbatch.wait":     ("tools.gsbatch", "wait"),
+    "gsbatch.jobs":     ("tools.gsbatch", "jobs"),
+    "gsbatch.cancel":   ("tools.gsbatch", "cancel"),
     # Colab 上启动 vLLM。默认 Qwen2.5-Coder-3B-Instruct-AWQ。
     # 新名字要重启 zmcp 才进白名单；tools 源码改了用 tool_call reset=true。
     "colabvllm.describe": ("tools.colab_vllm", "describe"),
