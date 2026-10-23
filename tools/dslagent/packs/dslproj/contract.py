@@ -63,6 +63,15 @@ SECTIONS = {"表": "表", "数据": "表", "函数": "函数", "接口": "接口
 SCRIPT_RE = re.compile(r"^scripts/([a-z][a-z0-9_]*)\.zs$")
 CONTENT_RE = re.compile(r"^content/([a-z][a-z0-9_]*)/([A-Za-z0-9_{}./-]+\.(?:jsonl|json))$")   # 内容文件路径：content/<模块>/…（.jsonl / .json，可含 {变量}）
 
+# 自由文本入参：这些名字（或 *_path / *_text 结尾）装的是标题、内容、原因、备注这类用户随意写的文本，
+# 用例要覆盖「值带空格 / 换行也原样保存」（见 text_space_problems）。
+FREE_TEXT_PARAMS = {
+    "content", "title", "body", "text", "reason", "note", "notes", "desc", "description",
+    "summary", "comment", "remark", "answer", "reply", "message", "question", "explanation",
+    "detail", "details", "memo", "intro", "source", "license", "sentence", "keyword",
+    "keywords", "tone", "recent_text", "must_info", "word_text",
+}
+
 # 认证由程序生成：账号模块 = 有公开函数「核对身份」的模块
 ACCOUNT_FN = "核对身份"
 ROLE_LABELS = {"teacher": "教师", "student": "学生"}
@@ -603,6 +612,7 @@ def check(c, name, upstream, all_modules):
     probs += _auth_problems(c, fns)
     probs += _script_problems(c, name, all_modules)
     probs += _content_problems(c, name)
+    probs += text_space_problems(c)
     covered, names = set(), set()
     for u in c["用例"]:
         if u["名"] in names:
@@ -639,6 +649,43 @@ def check(c, name, upstream, all_modules):
         if f["公开"] and f["名"] not in covered:
             probs.append(f"第 {f['行']} 行：公开函数「{f['名']}」一条验收用例都没有（## 用例）")
     return probs
+
+
+def _free_text_params(f):
+    """函数入参里的自由文本参数名（去掉 ? 后按 FREE_TEXT_PARAMS / *_path / *_text 认）。"""
+    return [p.rstrip("?") for p in f["入参"]
+            if p.rstrip("?") in FREE_TEXT_PARAMS or p.rstrip("?").endswith(("_path", "_text"))]
+
+
+def _case_values(c):
+    """用例里出现过的全部 k=v 值（调用 / 先 数据 / 先 调用 / 得 / 库 的值，以及「先 文件」的内容）。"""
+    for u in c["用例"]:
+        if u["调用"]:
+            yield from u["调用"]["参数"].values()
+        yield from (u["得"] or {}).values()
+        for chk in u["库"]:
+            yield from chk.get("值", {}).values()
+        for st in u["先"]:
+            if st["种类"] in ("数据", "调用"):
+                yield from st["值"].values() if st["种类"] == "数据" else st["参数"].values()
+            elif st["种类"] == "文件":
+                yield st["内容"]
+
+
+def text_space_problems(c):
+    """自由文本入参的空格 / 换行覆盖（K16c 2a）：模块有接收自由文本的公开函数，而所有用例的值
+    都不含空格、也不含字面 \\n（换行的唯一写法）→ 报一条。用例语法里「调用 / 先 数据 / 得 / 库」的值
+    按空白切开、不能带空格，只有「先 文件 内容=…」能带空格（\\n 还原成真换行），所以文本带空格走文件、
+    不能走文件的入参值里写字面 \\n，都算覆盖。"""
+    fns = [(f, p) for f in c["函数"] if f["公开"] for p in _free_text_params(f)]
+    if not fns:
+        return []
+    if any(" " in v or "\\n" in v for v in _case_values(c)):
+        return []
+    names = "、".join(f"{f['名']} 的 {p}" for f, p in fns[:3]) + ("…" if len(fns) > 3 else "")
+    return [f"公开函数 {names} 是自由文本入参，但所有用例的值都不含空格 / 换行："
+            f"至少一条用例的文本带空格或换行（走文件的入参用「先 文件 … 内容=…」，内容可带空格、换行写 \\n；"
+            f"不能走文件的入参值里写字面 \\n，如 content=第一行\\n第二行），并用「库 …」或返回值核对原样保存"]
 
 
 def head_text(f):

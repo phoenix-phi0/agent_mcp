@@ -67,7 +67,7 @@ scripts/jobs_run.zs 入参 job_id；出错 scripts/jobs_run_fail.zs；逐项处�
 
 ## 用例
 用例 提交任务_全成功
-  调用 提交任务 title=T t1=a t2=b t3=c
+  调用 提交任务 title=第1课\n讲解 t1=a t2=b t3=c
   得 job_id=1
   库 jobs_item 共 3 行
   库 jobs_item 含 body=b result=B status=完成
