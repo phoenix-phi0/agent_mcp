@@ -689,7 +689,8 @@ def test_background():
     out, _ = run("后台执行 slow.zs n=9 on_error=fail.zs\n", client=c, workdir=d)
     wait_background(10)
     check("出错时带着 error 跑 on_error 的脚本：模型的错是一句人话、只要第一行",
-          (d / "fail_9.txt").read_text(encoding="utf-8").strip(), "模型没有回应：claude 超过 90 秒没有返回")
+          (d / "fail_9.txt").read_text(encoding="utf-8").strip(),
+          "模型没有回应：模型调用失败：claude 超过 90 秒没有返回")
     check("出错那个脚本自己的后半截没跑", (d / "out_9.txt").exists(), False)
     live["max"] = 0
     run("".join(f"后台执行 slow.zs n={i}\n" for i in range(2, 7)), client=c, workdir=d)

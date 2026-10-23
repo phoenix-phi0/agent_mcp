@@ -394,7 +394,8 @@ def main():
     check(st == 200 and wait_background(30), f"第二个任务（不改写、等级 N1）：{st}")
     ch = {x["title"]: x for x in rows("SELECT * FROM import_chunk WHERE job = 2")}
     check(ch["第2课 たい"]["chunk_status"] == "出错"
-          and ch["第2课 たい"]["error"].startswith("模型没有回应：claude 超过 90 秒没有返回")
+          and ch["第2课 たい"]["error"].startswith(
+              "模型没有回应：模型调用失败：claude 超过 90 秒没有返回")
           and "第二行" not in ch["第2课 たい"]["error"],
           f"模型抛错 → 块出错，一句人话：{ch['第2课 たい']['error']}")
     check(ch["第3课 ながら"]["chunk_status"] == "出错" and "不是要的JSON" in ch["第3课 ながら"]["error"],

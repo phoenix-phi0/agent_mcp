@@ -43,7 +43,8 @@ from pathlib import Path
 from . import config
 from . import json_repair as _jr
 from .dsl_core import (ATTACH_RE, DEFAULT_TOOL_ROUNDS, DSLError,
-                       MAX_CALL_DEPTH, MODEL_ID_RE, ModelOutputError,
+                       MAX_CALL_DEPTH, MODEL_ID_RE, ModelCallError,
+                       ModelOutputError,
                        MODEL_RE, RETRY_RE, TOOLS_RE, UNEXPANDED_RE,
                        check_name, to_text)
 
@@ -383,10 +384,15 @@ class ModelMixin:
         tools = self._tools_schema(names)
 
         for _ in range(max(1, max_rounds)):
-            data = self.client.chat_raw(messages, tools=tools,
-                                        tool_choice="auto",
-                                        temperature=self.temperature,
-                                        model=model or self.model)
+            try:
+                data = self.client.chat_raw(messages, tools=tools,
+                                            tool_choice="auto",
+                                            temperature=self.temperature,
+                                            model=model or self.model)
+            except (RuntimeError, OSError) as e:
+                err = ModelCallError(f"模型调用失败：{e}")
+                err.model_call = True
+                raise err from e
             msg = data["choices"][0]["message"]
             # reasoning_content 不能回传：推理模型返回的思考过程原样发
             # 回去白烧 token，有的接口还会报错
@@ -420,15 +426,24 @@ class ModelMixin:
     # ------------------------------------------------------------------
 
     def _generate(self, prompt: str, model: str | None = None) -> str:
-        # 模型那头出错（超时、进程退出、网络）：异常原样抛，只打个标记。
-        # HTTP 接口据此回 502 和一句人话（见 dsl_http 的 dispatch），
-        # 不当成脚本写错了回 500 加一段原文
+        # 模型那头出错（超时、限流、进程退出、网络）：服务失败（客户端抛的
+        # RuntimeError / 网络类异常）包成 ModelCallError，`调用 … 出错时` 和
+        # `问JSON … 出错时` 都接得住；其余异常（编程错误等）原样抛。都打
+        # model_call 标记：HTTP 接口据此回 502 和一句人话（见 dsl_http 的
+        # dispatch），不当成脚本写错了回 500 加一段原文
         try:
             return self.client.chat(prompt, system=self.system,
                                     temperature=self.temperature,
                                     model=model or self.model)
+        except ModelCallError as e:
+            e.model_call = True
+            raise
         except Exception as e:
             e.model_call = True
+            if isinstance(e, (RuntimeError, OSError)):
+                err = ModelCallError(f"模型调用失败：{e}")
+                err.model_call = True
+                raise err from e
             raise
 
     def _do_ask(self, rest: str, lineno: int) -> None:
@@ -515,6 +530,15 @@ class ModelMixin:
             result = self.client.chat_json(
                 prompt, system=self.system, temperature=self.temperature,
                 model=model or self.model)
+        except (RuntimeError, OSError) as e:
+            # 模型服务调用失败（超时、限流、网络断）：包成 ModelCallError，
+            # 写了「出错时」就接住（码 503），没写照旧抛
+            err = ModelCallError(f"第 {lineno + 1} 行：模型调用失败：{e}")
+            err.model_call = True
+            if not on_err:
+                raise err from e
+            self._take_ask_json_error(on_err, name, err)
+            return
         except ValueError as e:
             # 模型没有返回合法 JSON：模型输出的问题，抛 ModelOutputError
             # 让「出错时」接得住（消息原文不变）
@@ -550,8 +574,17 @@ class ModelMixin:
             msgs.append({"role": "system", "content": self.system})
         msgs.append({"role": "user", "content": prompt})
         for attempt in range(reasks + 1):
-            reply = self.client.chat_messages(
-                msgs, temperature=self.temperature, model=model or self.model)
+            try:
+                reply = self.client.chat_messages(
+                    msgs, temperature=self.temperature,
+                    model=model or self.model)
+            except (RuntimeError, OSError) as e:
+                # 模型服务调用失败（超时、限流、网络断）：包成 ModelCallError，
+                # 「出错时」接得住（码 503），没写「出错时」照旧往上抛
+                err = ModelCallError(
+                    f"第 {lineno + 1} 行：模型调用失败：{e}")
+                err.model_call = True
+                raise err from e
             err = ""
             if isinstance(reply, (dict, list)):     # 假客户端的 handler 可直接回结构
                 data, last = reply, to_text(reply)
@@ -580,12 +613,17 @@ class ModelMixin:
         rest, model = self._split_model(rest)
         name, prompt = self._prompt_of(rest, "流式")
         parts = []
-        for chunk in self.client.stream(prompt, system=self.system,
-                                        temperature=self.temperature,
-                                        model=model or self.model):
-            parts.append(chunk)
-            if self.verbose:
-                print(chunk, end="", flush=True)
+        try:
+            for chunk in self.client.stream(prompt, system=self.system,
+                                            temperature=self.temperature,
+                                            model=model or self.model):
+                parts.append(chunk)
+                if self.verbose:
+                    print(chunk, end="", flush=True)
+        except (RuntimeError, OSError) as e:
+            err = ModelCallError(f"模型调用失败：{e}")
+            err.model_call = True
+            raise err from e
         if self.verbose:
             print()
         text = "".join(parts)
@@ -604,9 +642,14 @@ class ModelMixin:
             reply = self._chat_tools(self.history, tool_names, max_rounds,
                                      model)
         else:
-            reply = self.client.chat_messages(
-                self.history, temperature=self.temperature,
-                model=model or self.model)
+            try:
+                reply = self.client.chat_messages(
+                    self.history, temperature=self.temperature,
+                    model=model or self.model)
+            except (RuntimeError, OSError) as e:
+                err = ModelCallError(f"模型调用失败：{e}")
+                err.model_call = True
+                raise err from e
             self.history.append({"role": "assistant", "content": reply})
         self.store(name, reply)
         self._last_result = reply

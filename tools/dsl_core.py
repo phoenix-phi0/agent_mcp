@@ -171,6 +171,24 @@ class ModelOutputError(DSLError):
         self.status = status
 
 
+class ModelCallError(ModelOutputError):
+    """模型服务调用本身失败（超时、限流、服务不可用、网络断、后端起不来）：
+    不是模型回的内容不合格（那是 ModelOutputError），也不是脚本写错。模型调用
+    语句（问 / 问JSON / 对话 / 流式）在客户端抛服务失败（RuntimeError /
+    OSError，含 requests 的网络异常）时包成它，消息保留原文、加「模型调用失败」
+    前缀。
+
+    继承 ModelOutputError：现有分类逻辑（find_model_output_error）认整个
+    ModelOutputError 族，`调用 … 出错时` 和 `问JSON … 出错时` 就都能接住。
+    码用 503：上游服务临时不可用（超时、限流、满载），区别于 502「回了货但
+    货不合格」。没被接住时异常仍带 model_call 标记（dsl_model 打的），接口层
+    待遇不变（照旧 502 + 一句人话，不是 500）。
+    """
+
+    def __init__(self, message: str, status: int = 503):
+        super().__init__(message, status)
+
+
 def find_model_output_error(exc):
     """顺着错误链找 ModelOutputError（跟 db_errors.find_client_error 一个找法：
     引擎和业务层会一层层包，原来的异常挂在 __cause__ / __context__ 上）。
