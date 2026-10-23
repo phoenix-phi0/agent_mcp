@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 
 from tools.dsl import DSLEngine
+from tools import entity as E
 from tools.dsl_core import (
     CALL_PARAM_RE, DSLError, PACK_SEP_RE, RESERVED, normalize, single_eq_hint, parse_cond_expr,
     split_head, split_raw_cmp,
@@ -452,6 +453,7 @@ def check_file(path, rel=None):
 
 def check_project(root, scripts=False):
     """全项目加载：scan_routes（接口重复、块不配对）+ 每个接口块 + scripts/*.zs 逐个解析。返回问题列表。
+    entities/*.entity 的字段标签唯一没旗标也查（check_entity_uniques，与 contracts 的唯一声明同一套识别规则）。
     scripts=True 再查 `执行` / `后台执行` 的 scripts/… 目标（check_project_scripts：脚本存在、on_error 存在、归本模块）和
     写 / 读内容文件的路径（写只能写 content/<本模块>/ 下，读不能读别的模块的 content/）——
     只在核查阶段（dslproj 的 加载检查 / project.load_problems）开，生成阶段（骨架、v2 逐步生成）不开：脚本是后写的，
@@ -487,6 +489,35 @@ def check_project(root, scripts=False):
             probs += check_calls(lines, svc, None, False, str(f.relative_to(root)))
     if scripts:
         probs += check_project_scripts(root)
+    probs += check_entity_uniques(root)
+    return probs
+
+
+def check_entity_uniques(root):
+    """entities/*.entity 里字段说明文字写了「唯一」（紧跟逗号 / 括号里只有「唯一」）但没写「唯一」旗标 → 报。
+    说明文字不参与建表：唯一没写成旗标，建表就没有 UNIQUE，库不拦重复（K13/K14b 的教训——验收全过、
+    核查三轮都没报）。识别规则与 packs.dslproj.contract.unique_decls 对约定用的是同一套
+    （tools/entity.py text_declares_unique，不认「唯一标识」这类文字）。报错不算警告：它只在
+    确定性识别命中时出现，命中就是库真的没有 UNIQUE。实体语法错不在这里报（建表 / 跑用例会报），解析不了的文件跳过。"""
+    from tools.entity import EntitySyntaxError
+    from tools.entity import parse as parse_entities
+    ed = Path(root) / "entities"
+    probs = []
+    for f in sorted(ed.glob("*.entity")) if ed.is_dir() else []:
+        try:
+            ents = parse_entities(f.read_text(encoding="utf-8"))
+        except (EntitySyntaxError, UnicodeDecodeError):
+            continue
+        rel = str(f.relative_to(root))
+        for e in ents:
+            for fl in e.fields:
+                if fl.unique or any(fl.name in u for u in e.uniques):
+                    continue
+                if E.text_declares_unique(fl.label or ""):
+                    probs.append(
+                        f"{rel} 第 {fl.line} 行：字段 {fl.name} 的说明文字里写了「唯一」，但没写「唯一」旗标"
+                        f"（说明文字不生效，建表没有 UNIQUE，库不拦重复）；"
+                        f"正确写法：字段 {fl.name} {fl.type} 必填 唯一 <说明>")
     return probs
 
 

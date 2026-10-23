@@ -60,6 +60,7 @@ keywords and type names stay Chinese — DSL vocabulary, same as in ui.py.
 
 from dataclasses import dataclass, field as dc_field
 from typing import Optional
+import re
 
 BLOCK = "实体"
 LINE = "字段"
@@ -85,6 +86,36 @@ KEYED = {"关联", "默认"}
 # Spelled as words because a script should not have to know SQLite's
 # function names — and because the same word renders differently per target.
 DEFAULT_WORDS = {"now", "今天", "现在"}
+
+# 说明文字里「唯一」的确定性写法（约定 contracts/<模块>.md 的字段行和实体字段的标签共用同一套，
+# 见 text_declares_unique / unique_columns；比对约定和加载检查靠它们把「约定说唯一、实体没旗标」报出来）。
+# 「唯一」后面不再接字（唯一标识 / 唯一的实现 这类 prose 不认），不做模糊匹配。
+UNIQUE_COMMA_RE = re.compile(r"[，,]\s*唯一(?![A-Za-z0-9_一-鿿])")
+UNIQUE_PAREN_RE = re.compile(r"[（(]\s*唯一\s*[)）]")
+UNIQUE_MULTI_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*(?:\s*[+＋]\s*[A-Za-z_][A-Za-z0-9_]*)+)(?:\s*[，,])?\s*唯一(?![A-Za-z0-9_一-鿿])")
+
+
+def unique_columns(text):
+    """说明文字里的多列唯一声明 `a + b 唯一`（+ 两边可有空白，也认全角＋）→ ["a", "b"]；没有返回 None。
+    这是约定里表达「几列合起来不能重复」的写法，对应实体里的行首「唯一 a b」。"""
+    m = UNIQUE_MULTI_RE.search(text)
+    return re.split(r"\s*[+＋]\s*", m.group(1)) if m else None
+
+
+def text_declares_unique(text):
+    """说明文字里是否用明确写法声明了「本字段唯一」→ 布尔。只认三种（K16b 定下的识别规则）：
+
+      1. 「唯一」自成一词：        code 文本 唯一 知识点编号
+      2. 「唯一」紧跟逗号、后面不再接字（收尾或跟括号都行）：
+                                   username 文本 用户名，唯一
+                                   code 文本 系列编号，唯一（默认系列编号为 hanabira）
+      3. 括号里只有「唯一」：      username 文本 用户名（唯一）
+
+    其余位置的「唯一」（「唯一标识」「学习者，唯一标识」这类）不算；文字里若是 `a + b 唯一`
+    的多列声明，不算这一列的单列唯一（多列看 unique_columns）。"""
+    m = UNIQUE_MULTI_RE.search(text)
+    rest = text[:m.start()] if m else text
+    return bool(UNIQUE_COMMA_RE.search(rest) or UNIQUE_PAREN_RE.search(rest) or "唯一" in rest.split())
 
 
 class EntitySyntaxError(Exception):

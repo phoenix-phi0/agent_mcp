@@ -52,6 +52,8 @@ parse(text) -> (contract, 问题)；check(contract, name, upstream, all_modules)
 import hashlib
 import re
 
+from tools import entity as E
+
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 PARAM_RE = re.compile(r"^[a-z_][a-z0-9_]*\??$")
 IDENT = r"[A-Za-z0-9_一-鿿]+"
@@ -334,6 +336,30 @@ def _content_line(c, s, no, probs):
 def declared_content(c):
     """约定里声明的内容文件路径（保序）。"""
     return [x["路径"] for x in c.get("内容文件", [])]
+
+
+def unique_decls(c):
+    """约定「## 表」里确定性可识别的唯一声明 → {"单列": [(表, 字段, 行)], "多列": [(表, [字段…], 行)]}。
+
+    约定格式里「唯一」没有专门的旗标写法，历来写在字段说明文字里。这里只认 tools/entity.py
+    text_declares_unique / unique_columns 的四种明确写法，其余位置的「唯一」（「唯一标识」「唯一的实现」）
+    不认、不模糊匹配：比对约定拿它和实体旗标对账，宁可漏认也不误报。
+
+      1. 「唯一」自成一词：        code 文本 唯一 知识点编号
+      2. 紧跟逗号、后面不再接字：  username 文本 用户名，唯一 / code 文本 系列编号，唯一（默认系列编号为 hanabira）
+      3. 括号里只有「唯一」：      username 文本 用户名（唯一）
+      4. 多列（a + b 唯一）：      point_code 文本 知识点编号；learner + point_code 唯一
+    """
+    single, multi = [], []
+    for t in c["表"]:
+        for f in t["字段"]:
+            d = f["说明"]
+            cols = E.unique_columns(d)
+            if cols:
+                multi.append((t["名"], cols, f["行"]))
+            if E.text_declares_unique(d):
+                single.append((t["名"], f["名"], f["行"]))
+    return {"单列": single, "多列": multi}
 
 
 def declared_scripts(c):

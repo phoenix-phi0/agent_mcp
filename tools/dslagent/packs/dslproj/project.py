@@ -280,7 +280,8 @@ def content_diffs(project, module, contract, modules):
 
 def compare(project, module, contract, modules):
     """实际文件与约定是否一致：脚本（约定「## 脚本」）、业务文件（模块名 / 依赖 / 每个函数的名字、公开与否、入参顺序与可选）、接口（方法 + 路径存在、只调约定里那个函数）、
-    约定里的表在 entities/<模块>.entity 里都有、内容文件（代码里读写的本模块 content/<模块>/ 路径都要在约定「## 内容文件」里声明）。
+    约定里的表在 entities/<模块>.entity 里都有、约定里明确写出的唯一声明在实体里有对应旗标（单列「唯一」旗标 / 多列「唯一 a b」行，
+    声明的识别规则见 contract.unique_decls）、内容文件（代码里读写的本模块 content/<模块>/ 路径都要在约定「## 内容文件」里声明）。
     返回 {"一致": bool, "差异": [文字], "提示": [文字]}；提示不算不一致（声明了的内容文件没人写 / 没人读）。"""
     from tools.dsl_http import split_endpoints
     from tools.dsl_service import ServiceProblem, parse_module
@@ -353,7 +354,34 @@ def compare(project, module, contract, modules):
     c_diffs, hints = content_diffs(project, module, contract, modules)
     diffs += c_diffs
     ef = project / "entities" / f"{module}.entity"
-    ents = set(re.findall(r"^\s*实体\s+(\S+)", ef.read_text(encoding="utf-8"), re.M)) if ef.is_file() else set()
+    etext = ef.read_text(encoding="utf-8") if ef.is_file() else ""
+    ents = set(re.findall(r"^\s*实体\s+(\S+)", etext, re.M)) if etext else set()
+    # 唯一比对：约定里确定性识别出的唯一声明（C.unique_decls），实体要有对应的「唯一」旗标 / 多列「唯一」行。
+    # 实体解析不了（语法错）不在这里报（加载检查 / 跑用例会报），跳过唯一比对；实体或字段整个缺失也不在这里报
+    # （缺实体上一条已报，缺字段会让查询 / 用例失败），只对「字段在、旗标不在」报。
+    emap = {}
+    if etext:
+        try:
+            from tools.entity import parse as _eparse
+            emap = {e.name: e for e in _eparse(etext)}
+        except Exception:  # noqa: BLE001
+            emap = {}
+    udecls = C.unique_decls(contract)
+    for tbl, fld, no in udecls["单列"]:
+        e = emap.get(tbl)
+        f = e.field(fld) if e else None
+        if f is None or f.unique:
+            continue
+        diffs.append(
+            f"第 {no} 行：约定要求 {tbl}.{fld} 唯一，entities/{module}.entity 的「实体 {tbl}」里「字段 {fld}」"
+            f"没写「唯一」旗标（「唯一」写进说明文字不生效，建表没有 UNIQUE，库不拦重复）；"
+            f"正确写法：字段 {fld} {f.type} 必填 唯一 <说明>")
+    for tbl, cols, no in udecls["多列"]:
+        e = emap.get(tbl)
+        if e is not None and not any(set(cols) == set(u) for u in e.uniques):
+            diffs.append(
+                f"第 {no} 行：约定要求 {tbl} 的 {' + '.join(cols)} 合起来唯一，entities/{module}.entity 的"
+                f"「实体 {tbl}」没有对应的多列唯一声明；正确写法：实体里单独一行写「唯一 {' '.join(cols)}」")
     for t in contract["表"]:
         if t["名"] not in ents:
             diffs.append(f"约定里的表「{t['名']}」在 entities/{module}.entity 里没有对应的「实体 {t['名']}」")
@@ -368,5 +396,6 @@ def load_problems(project, module, modules):
     """加载检查（loadcheck.check_project，含 执行 / 后台执行 scripts/… 的检查）里属于该模块文件（含它的脚本）的问题。"""
     from tools.dslagent import loadcheck
     keys = ([f"services/{module}.zs"] + [f"routes/{f.name}" for f in route_files(project, module, modules)]
-            + [f"scripts/{f.name}" for f in script_files(project, module, modules)])
+            + [f"scripts/{f.name}" for f in script_files(project, module, modules)]
+            + [f"entities/{module}.entity"])
     return [p for p in loadcheck.check_project(project, scripts=True) if any(k in p for k in keys)]

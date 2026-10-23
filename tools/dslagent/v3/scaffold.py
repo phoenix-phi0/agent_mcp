@@ -15,6 +15,14 @@ OPTIONAL_HINTS = ("可空", "可选", "允许为空", "可以为空")
 
 
 def entity_text(c):
+    # 约定里确定性写出的唯一声明落成旗标 / 「唯一」行（与比对约定同一套识别，见 C.unique_decls）：
+    # 骨架要带上它们，否则生成的实体一验收就被「缺唯一旗标」打回。
+    decls = VC.C.unique_decls(c)
+    one, many = {}, {}
+    for tbl, fld, _ in decls["单列"]:
+        one.setdefault(tbl, set()).add(fld)
+    for tbl, cols, _ in decls["多列"]:
+        many.setdefault(tbl, []).append(cols)
     out = []
     for t in c["表"]:
         fields = []
@@ -23,8 +31,10 @@ def entity_text(c):
                 continue
             typ = TYPE_MAP.get(f["类型"], "文本")
             req = "" if any(h in f["说明"] for h in OPTIONAL_HINTS) else " 必填"
+            uniq = " 唯一" if f["名"] in one.get(t["名"], ()) else ""
             label = (f["说明"].split() or [f["名"]])[0]
-            fields.append(f"  字段 {f['名']} {typ}{req} {label}")
+            fields.append(f"  字段 {f['名']} {typ}{req}{uniq} {label}")
+        fields += [f"  唯一 {' '.join(cols)}" for cols in many.get(t["名"], [])]
         if not fields:
             fields = ["  字段 note 文本 备注"]
         out.append(f"实体 {t['名']} {t['名']}\n" + "\n".join(fields) + "\n结束\n")
