@@ -120,6 +120,7 @@ run DSL规划骨架 $PY tests/tools/test_dslagent_dslplan.py
 run DSLv3流程 $PY tests/tools/test_dslagent_v3.py
 run 批量opencode $PY tests/tools/test_obatch.py
 run 批量codex   $PY tests/tools/test_cxbatch.py
+run 批量goose   $PY tests/tools/test_gsbatch.py
 run Colab启动   $PY tests/tools/test_colab_vllm.py
 run 批量grok    $PY tests/tools/test_gbatch.py
 run grok权限    $PY tests/tools/test_gbatch_perm.py
