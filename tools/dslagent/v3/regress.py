@@ -371,7 +371,10 @@ def smoke_detail(project, mods):
 # ------------------------------------------------------------------ 检查：只报告，不重做、不改 state
 
 def code_files(project, module, mods):
-    """模块现有的代码文件（项目相对路径，按 entities / services / routes / queries 排）。"""
+    """模块现有的代码文件（项目相对路径，按 entities / services / routes / scripts / queries 排）。
+    scripts/ 按「同前缀取最长」归属（dslproj.project.script_files，与 scope / 加载检查同一条
+    规则）。核查（audit2 / 核查.zs）给核查模型的入参必须带上它们：漏了核查员读不到脚本，
+    会把「约定要的脚本不存在」误报出来（K14b：textbook_import 的两个脚本一直在）。"""
     from ..packs.dslproj import project as P
     root = Path(project)
     out = []
@@ -379,6 +382,7 @@ def code_files(project, module, mods):
         if (root / rel).is_file():
             out.append(rel)
     out += [f.relative_to(root).as_posix() for f in P.route_files(project, module, mods)]
+    out += [f"scripts/{f.name}" for f in P.script_files(project, module, mods)]
     qd = root / "queries"
     out += [f.relative_to(root).as_posix() for f in sorted(qd.glob(f"{module}_*.sql"))] if qd.is_dir() else []
     return out
