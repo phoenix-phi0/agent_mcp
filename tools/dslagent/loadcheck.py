@@ -79,6 +79,12 @@ def parse_script(script):
                 parse_cond(cond, i)
             elif head == "set":
                 eng._split_assign(rest, "设")
+            elif head == "ask_json":
+                if ASK_JSON_ON_ERROR_MID_RE.search(rest):
+                    raise DSLError(
+                        f"第 {i + 1} 行：问JSON 的 出错时 要写在语句末尾"
+                        f"（如 问JSON j = 提示词 格式 a:文本 出错时 e），"
+                        f"写在中间会被当提示词发给模型、失败也接不住")
             elif head in ("else", "elif", "end") and not _opened(lines, i):
                 raise DSLError(f"第 {i + 1} 行：多余的「{head_word(head)}」")
     except DSLError as e:
@@ -107,6 +113,11 @@ def _opened(lines, at):
 
 BAD_BIZ_CODE_RE = re.compile(r"^报错\s+(\d{3})(?:\s|$)")
 BIZ_CODE_HEAD_RE = re.compile(r"^4\d\d(?:\s|$)")
+# 问JSON 的「出错时」只认语句末尾（引擎 tools/dsl_model.py _split_on_error）；
+# 写在中间（后面还跟着 格式 / 用 / 附 / 带工具 / 重问 这些后缀）是确定的错误
+# 写法：「出错时 e」会被当提示词发给模型，失败也接不住（K14b tutor 踩过）
+ASK_JSON_ON_ERROR_MID_RE = re.compile(
+    r"\s出错时\s+\S+\s+(?:格式|用|附|带工具|重问)(?:\s|$)")
 
 
 def call_sites(lines, funcs=None):

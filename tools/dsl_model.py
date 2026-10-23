@@ -45,7 +45,7 @@ from . import json_repair as _jr
 from .dsl_core import (ATTACH_RE, DEFAULT_TOOL_ROUNDS, DSLError,
                        MAX_CALL_DEPTH, MODEL_ID_RE, ModelOutputError,
                        MODEL_RE, RETRY_RE, TOOLS_RE, UNEXPANDED_RE,
-                       to_text)
+                       check_name, to_text)
 
 
 # ----------------------------------------------------------------------
@@ -57,6 +57,10 @@ from .dsl_core import (ATTACH_RE, DEFAULT_TOOL_ROUNDS, DSLError,
 
 FORMAT_RE = _re.compile(r"\s+格式((?:\s+\S+)+?)(?:\s+重问\s+(\d+)\s*次)?\s*$")
 FIELD_RE = _re.compile(r"^([^\s:?]+)(\?)?:(\S+)$")
+
+# 「出错时 <变量>」：问JSON 语句的尾巴。只在语句最末尘认（_split_on_error），
+# 写在中间的不动——那种写法由加载检查拦，这里不猜。
+ON_ERROR_TAIL_RE = _re.compile(r"\s+出错时\s+([^\s]+)\s*$")
 FORMAT_TYPES = ("文本", "数字", "是否", "列表")
 DEFAULT_REASKS = 2
 MAX_REASKS = 5
@@ -103,6 +107,24 @@ def _split_format(rest: str, lineno: int):
                                f"{MAX_REASKS} 次")
         return rest[:start], spec, reasks
     return rest, None, 0
+
+
+def _split_on_error(rest: str):
+    """剥语句末尾的「出错时 <变量>」，返回 (剩下的, 变量名或空)。
+
+    只认语句末尾、且后面是一个合法变量名（check_name）；其余位置的
+    「出错时」照旧是提示词文字，不猜——这里不报错是因为提示词正文出现
+    这两个词不算写错，报了会误伤；「写在中间」这种确定的错误写法由加载
+    检查拦（tools/dslagent/loadcheck.py）。
+    """
+    m = ON_ERROR_TAIL_RE.search(rest)
+    if not m:
+        return rest, ""
+    try:
+        check_name(m.group(1))
+    except DSLError:
+        return rest, ""
+    return rest[:m.start()], m.group(1)
 
 
 _KIND_DESC = {"文本": "文本（非空字符串）", "数字": "数字",
@@ -450,13 +472,20 @@ class ModelMixin:
 
     def _do_ask_json(self, rest: str, lineno: int) -> None:
         """问JSON X = 提示词 [附 文件] [格式 字段:类型 … [重问 N 次]] [用 模型]
+                        [出错时 e]
 
         解析失败抛错而不是给空对象：后面 {决策.意图} 取不到会原样保留成
         字符串，扔进条件判断只会一路走到「否则」，错得很隐蔽。
 
         带「格式」时走 _ask_json_format：附格式说明、检查、不对就重问，
         重问用完抛错。不带的旧写法一行不变。
+
+        语句末尾的「出错时 e」接住模型输出错（ModelOutputError，只认末尾，
+        见 _split_on_error）：e = {code, error}，跟 调用…出错时 的 e 同构
+        （码 502），目标变量设成空串；没出错 e 是空串。DSL 写法错、引擎
+        内部错不接；没写「出错时」行为完全不变。
         """
+        rest, on_err = _split_on_error(rest)
         rest, model = self._split_model(rest)
         rest, spec, reasks = _split_format(rest, lineno)
         if spec is None:
@@ -468,8 +497,16 @@ class ModelMixin:
                     rest = f"{head} 附 {','.join(files)}"
         if spec is not None:
             name, prompt = self._prompt_of(rest, "问JSON")
-            result = self._ask_json_format(prompt + _format_note(spec), spec,
-                                           reasks, model, lineno)
+            try:
+                result = self._ask_json_format(prompt + _format_note(spec),
+                                               spec, reasks, model, lineno)
+            except ModelOutputError as e:
+                if not on_err:
+                    raise
+                self._take_ask_json_error(on_err, name, e)
+                return
+            if on_err:
+                self.store(on_err, "")
             self.store(name, result)
             self._last_result = to_text(result)
             return
@@ -481,9 +518,24 @@ class ModelMixin:
         except ValueError as e:
             # 模型没有返回合法 JSON：模型输出的问题，抛 ModelOutputError
             # 让「出错时」接得住（消息原文不变）
-            raise ModelOutputError(f"第 {lineno + 1} 行：{e}") from e
+            err = ModelOutputError(f"第 {lineno + 1} 行：{e}")
+            if on_err:
+                self._take_ask_json_error(on_err, name, err)
+                return
+            raise err from e
+        if on_err:
+            self.store(on_err, "")
         self.store(name, result)
         self._last_result = to_text(result)
+
+    def _take_ask_json_error(self, on_err: str, name: str, err) -> None:
+        """接住问JSON 的模型输出错：e = {code, error}（与业务层 _swallow 同构），
+        目标变量设成空串。成功时 出错时 的变量也是空串，所以接住后用
+        「如果 {e} 不为空」判断。
+        """
+        self.store(on_err, {"code": err.status, "error": err.message})
+        self.store(name, "")
+        self._last_result = ""
 
     def _ask_json_format(self, prompt: str, spec: list, reasks: int,
                          model, lineno: int):
