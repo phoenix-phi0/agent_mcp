@@ -181,6 +181,14 @@ def register(reg, workspace):
         """把 ["limit=3", "author=a01"] 变成字典。
 
         值一律保持字符串，不猜类型。数值比较由 SQL 里的 CAST 负责。
+
+        这些键=值 是按空格切开再传进来的，所以值里不能有空格——字面量带
+        空格会在源头被切成两截（「标题=第1课 第2课」的「第2课」变成下一个
+        参数，早先不报错）。整个用 {变量} 传的值是切完才展开的，内部有空格
+        /换行没事，但**首尾**空白会被 v.strip() 悄悄剪掉——跟 写库表（不剪）
+        存的对不上，查询撞到别的行（教材导入同一文件去重失效就是这么来的）。
+        所以首尾有空白直接报错；值可能含空格的（标题、正文、用户输入）装进
+        一个对象，用 查询表/查一行表/查一值表/写库表 传。
         """
         out = {}
         for item in pairs:
@@ -188,15 +196,29 @@ def register(reg, workspace):
                 continue
             k, sep, v = item.partition("=")
             if not sep:
-                raise ValueError(f"参数要写成 名=值，收到：{item}")
+                raise ValueError(
+                    f"参数要写成 名=值，收到：{item}。这通常是前一个值里有空格，"
+                    f"把它后面的词挤了出来；值可能含空格的参数装进对象，"
+                    f"用 查询表/查一行表/查一值表/写库表 传")
+            if v != v.strip():
+                raise ValueError(
+                    f"参数「{k.strip()}」的值首尾有空白：{v[:40]!r}，"
+                    f"传进 SQL 前会被剪掉，存进去的就跟原值对不上"
+                    f"（写库表 不剪，两边不一致）。"
+                    f"把这个参数装进对象，用 查询表/查一行表/查一值表/写库表 传")
             out[k.strip()] = v.strip()
         return out
 
-    def bind(sql: str, given: dict) -> dict:
+    def bind(sql: str, given: dict, pairs: bool = False) -> dict:
         """检查 SQL 要的参数都给了，返回绑定字典。
 
         少给直接报错而不是当 NULL：少传一个参数通常是笔误，静默当 NULL
         会让「查不到结果」变成一个要翻半天的谜。
+
+        多给的只对 键=值 切开传的路径报错：那条路多出来的参数几乎总是值里
+        有空格挤出来的「词=值」，静默丢弃会让「公式 E=mc2」存成「公式」。
+        结构传参（查询表/查一行表/查一值表/写库表）不查——把整条记录当参数
+        表传过去、SQL 只用其中几个字段是正常写法。
         """
         needed = set(PARAM_RE.findall(sql))
         missing = needed - set(given)
@@ -204,7 +226,15 @@ def register(reg, workspace):
             raise ValueError(
                 f"缺少参数：{'、'.join(sorted(missing))}。"
                 f"这条查询要：{'、'.join(sorted(needed)) or '无'}")
-        # 多给的丢掉——sqlite3 对多余的命名参数会报错
+        # 多给的不再丢掉——sqlite3 对多余的命名参数会报错，早先这里静默丢弃，
+        # 值里有空格挤出来的「词=值」就无声消失了（「公式 E=mc2」存成了「公式」）
+        extra = sorted(set(given) - needed)
+        if extra and pairs:
+            raise ValueError(
+                f"用不到的参数：{'、'.join(extra)}。"
+                f"这条查询要：{'、'.join(sorted(needed)) or '无'}。"
+                f"多半是某个值里有空格，把它后面的「词=值」挤成了另一个参数；"
+                f"值可能含空格的参数装进对象，用 查询表/查一行表/查一值表/写库表 传")
         return {k: v for k, v in given.items() if k in needed}
 
     def open_conn(db: str) -> sqlite3.Connection:
@@ -278,7 +308,7 @@ def register(reg, workspace):
     def query(db: str, name: str, pairs) -> list:
         """跑一条查询。事务里复用那个连接，否则用完就关。"""
         sql = load_sql(name)
-        args = bind(sql, parse_params(pairs))
+        args = bind(sql, parse_params(pairs), pairs=True)
         con = in_tx()
         if con is not None:
             return [dict(r) for r in con.execute(sql, args).fetchall()]
@@ -293,7 +323,9 @@ def register(reg, workspace):
     # ------------------------------------------------------------------
 
     @reg.verb("按名字执行 queries/ 下的查询，返回行列表。"
-              "例如 查询 数据.db 作者文章 author=a01 limit=3")
+              "例如 查询 数据.db 作者文章 author=a01 limit=3。"
+              "键=值 的值里不能有空格（带空格的字面量会被切开；值首尾空白会被剪掉——都报错），"
+              "值可能含空格时装进对象用 查询表。")
     def 查询(库: str, 查询名: str, 参数一: str = "", 参数二: str = "",
              参数三: str = "", 参数四: str = "", 参数五: str = "",
              参数六: str = "", 参数七: str = "", 参数八: str = "") -> list:
@@ -340,14 +372,16 @@ def register(reg, workspace):
         return str(next(iter(rows[0].values()), ""))
 
     @reg.verb("执行增删改，返回影响的行数。语句同样放 queries/ 下。"
-              "在「事务」块里出错会抛出去让整块回滚。")
+              "在「事务」块里出错会抛出去让整块回滚。"
+              "键=值 的值里不能有空格（带空格的字面量会被切开；值首尾空白会被剪掉——都报错），"
+              "值可能含空格时装进对象用 写库表。")
     def 写库(库: str, 语句名: str, 参数一: str = "", 参数二: str = "",
              参数三: str = "", 参数四: str = "", 参数五: str = "",
              参数六: str = "", 参数七: str = "", 参数八: str = "") -> str:
         pairs = [参数一, 参数二, 参数三, 参数四, 参数五, 参数六, 参数七, 参数八]
         try:
             sql = load_sql(语句名)
-            args = bind(sql, parse_params(pairs))
+            args = bind(sql, parse_params(pairs), pairs=True)
             con = in_tx()
             if con is not None:
                 # 事务里不 commit——那是「事务提交」的事
