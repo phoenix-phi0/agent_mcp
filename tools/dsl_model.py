@@ -448,11 +448,18 @@ class ModelMixin:
 
     def _do_ask(self, rest: str, lineno: int) -> None:
         """问 X = 提示词 [附 文件] [带工具 …] [重试 N 次 直到 条件] [用 模型]
+                        [出错时 e]
 
-        后缀从外往里剥：「用」最外（只管这一次的模型），然后重试、
-        带工具，最后挂载。所以「附 a.md 带工具 X 重试 2 次 直到 … 用 快」
-        这个顺序是对的。
+        后缀从外往里剥：「出错时」在最外（必须写在语句最末尾，见
+        _split_on_error），然后「用」、重试、带工具、挂载。
+
+        语句末尾的「出错时 e」接住模型调用失败（K20 起客户端的服务失败包
+        成 ModelCallError，ModelOutputError 族，码 503）：e = {code, error}，
+        跟 调用…出错时 的 e 同构，目标变量设成空串；没出错 e 是空串。DSL
+        写法错、编程错误不接；没写「出错时」行为完全不变（照旧抛，
+        model_call 标记还在）。
         """
+        rest, on_err = _split_on_error(rest)
         rest, model = self._split_model(rest)
         retry, cond = 0, None
         m = RETRY_RE.search(rest)
@@ -472,16 +479,25 @@ class ModelMixin:
             msgs.append({"role": "user", "content": prompt})
             return self._chat_tools(msgs, tool_names, max_rounds, model)
 
-        result = once()
-        attempts = 1
-        while cond and not self._eval_against(result, cond, lineno):
-            if attempts >= max(1, retry):
-                self._emit(f"[重试 {attempts} 次后仍不满足「{cond}」，"
-                           f"采用最后一次结果]")
-                break
-            attempts += 1
+        try:
             result = once()
-
+            attempts = 1
+            while cond and not self._eval_against(result, cond, lineno):
+                if attempts >= max(1, retry):
+                    self._emit(f"[重试 {attempts} 次后仍不满足「{cond}」，"
+                               f"采用最后一次结果]")
+                    break
+                attempts += 1
+                result = once()
+        except ModelOutputError as e:
+            # 模型调用失败等模型侧错误：写了「出错时」就接住（接法与问JSON
+            # 相同），没写「出错时」照旧抛
+            if not on_err:
+                raise
+            self._take_ask_json_error(on_err, name, e)
+            return
+        if on_err:
+            self.store(on_err, "")
         self.store(name, result)
         self._last_result = result
 
@@ -553,7 +569,7 @@ class ModelMixin:
         self._last_result = to_text(result)
 
     def _take_ask_json_error(self, on_err: str, name: str, err) -> None:
-        """接住问JSON 的模型输出错：e = {code, error}（与业务层 _swallow 同构），
+        """接住 问 / 问JSON 的模型侧错误：e = {code, error}（与业务层 _swallow 同构），
         目标变量设成空串。成功时 出错时 的变量也是空串，所以接住后用
         「如果 {e} 不为空」判断。
         """
