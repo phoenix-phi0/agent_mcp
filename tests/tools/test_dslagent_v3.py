@@ -412,6 +412,9 @@ def test_prompt_example():
     block = t.split("# 完整示例")[1].split("```")[1]
     top = VT.load("项目 demo\n模块 graph\n模块 progress 依赖 graph\n")
     p = project_with_contracts()
+    (p / "ui").mkdir()
+    (p / "ui" / "progress.ui").write_text(
+        "界面 进度\n  动作 progress_home 远程 进入时\n结束\n", encoding="utf-8")  # 示例声明了「动作」，项目就得有前端页面
     probs = VC.check(block.strip() + "\n", "progress", top, p)
     check(probs == [], "contract.md 里的完整示例自己能通过约定检查", probs)
     ex = core.prompt_text("top.md").split("输出：")[1]

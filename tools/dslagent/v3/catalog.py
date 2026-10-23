@@ -52,6 +52,8 @@ def _parsed_modules(project):
 
 def _iface_line(i):
     tail = []
+    if i.get("动作"):
+        tail.append(f"动作 {i['动作']}")
     if i["公开"]:
         tail.append("公开")
     if i["角色"]:
@@ -64,6 +66,20 @@ def _iface_line(i):
         if u["上限"]:
             extra.append(f"上限 {u['上限']}")
         tail.append(" ".join(extra))
+    if i.get("表格"):
+        w = i["表格"]
+        s = f"表格 {w['键']}" + (f" 取 {w['取']}" if w["取"] else "") + (f" 行 {','.join(w['行'])}" if w["行"] else "")
+        tail.append(s)
+    if i.get("表单"):
+        w = i["表单"]
+        tail.append("表单" + (f" 取 {w['取']}" if w["取"] else ""))
+    if i.get("状态"):
+        w = i["状态"]
+        tail.append(f"状态 {w['键']}" + (f" 取 {w['取']}" if w["取"] else ""))
+    if i.get("消息"):
+        tail.append(f"消息 {i['消息']}")
+    if i.get("跳转"):
+        tail.append(f"跳转 {i['跳转']}")
     head = f"{i['方法']} {i['路径']} -> {i['函数']}"
     return head + ("  " + "  ".join(tail) if tail else "")
 

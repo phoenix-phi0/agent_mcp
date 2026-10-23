@@ -98,6 +98,29 @@ def _upload_lines(i, req, opt):
     return lines
 
 
+def _wrap_lines(i):
+    """封装标记 → 组装信封的路由行（已带两格缩进，插在「调用」之后）。
+    信封组装只用现有响应动词：表格 <键> {…} / 响应 form {…} / 状态 <键> {…} / 消息 系统 <话> ok / 响应 go <目标>；
+    结尾不写「返回」——脚本正常跑完时 Router 把动词塞进响应桶作为返回体（写了「返回」会整个盖掉桶，K25 报告有记）。"""
+    def payload(w):
+        return "{r}" if not (w and w.get("取")) else "{r." + w["取"] + "}"
+    lines = []
+    if i["表格"]:
+        lines.append(f"  表格 {i['表格']['键']} {payload(i['表格'])}")
+    if i["表单"]:
+        lines.append(f"  响应 form {payload(i['表单'])}")
+    if i["状态"]:
+        # 状态 <键> 不用「状态 <键> {r}」——那个动词收到的值是替换后的 JSON 文本，对象会存成字符串；
+        # 用 kg 同款「响应 state {…}」合并，JSON 字面量包一层键（字面量里不能有空格，引擎按空格切参数），
+        # 对象 / 数组 / 标量都落对
+        lines.append(f'  响应 state {{"{i["状态"]["键"]}":{payload(i["状态"])}}}')
+    if i["消息"]:
+        lines.append(f"  消息 系统 {i['消息']} ok")
+    if i["跳转"]:
+        lines.append(f"  响应 go {i['跳转']}")
+    return lines
+
+
 def route_text(name, c, contracts=None):
     fns = {f["名"]: f for f in c["函数"]}
     header = auth_header(name, contracts if contracts is not None else {name: c})
@@ -108,8 +131,14 @@ def route_text(name, c, contracts=None):
         pre = _upload_lines(i, req, opt) if i["上传"] else []
         args = [f"{p}={{{p}}}" for p in req] + [f"{p}={{{p} 或}}" for p in opt]
         tag = " 公开" if i["公开"] else (f" 角色 {i['角色']}" if i["角色"] else "")
-        body = "".join(l + "\n" for l in pre)
-        out.append(f"接口 {i['方法']} {i['路径']}{tag}\n{body}  设 r = 调用 {name}.{i['函数']}{(' ' + ' '.join(args)) if args else ''}\n  返回 {{r}}\n结束\n")
+        if VC.C.has_wrap(i):
+            tag = (f" 动作 {i['动作']}" if i["动作"] else "") + tag      # 路由行的 动作 要写在 公开/角色 之前（dsl_http.API_RE 的顺序）
+            call = f"  设 r = 调用 {name}.{i['函数']}{(' ' + ' '.join(args)) if args else ''}"
+            body = "".join(l + "\n" for l in pre) + call + "\n" + "".join(l + "\n" for l in _wrap_lines(i))
+            out.append(f"接口 {i['方法']} {i['路径']}{tag}\n{body}结束\n")
+        else:
+            body = "".join(l + "\n" for l in pre)
+            out.append(f"接口 {i['方法']} {i['路径']}{tag}\n{body}  设 r = 调用 {name}.{i['函数']}{(' ' + ' '.join(args)) if args else ''}\n  返回 {{r}}\n结束\n")
     return "\n".join(out)
 
 

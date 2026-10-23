@@ -20,6 +20,11 @@
     POST /textbook_import/task -> 新建导入 上传 file 类型 pdf,docx,md,txt 上限 20MB 角色 teacher   # 带「上传」的接口：
                                   # 函数要有入参「<字段>_path」收存盘后的路径（骨架自动生成「先 存文件」「失败回 400」）；
                                   # 入参里有 file_name/file_size/file_ext 才会额外取「上传信息」传给函数
+    POST /note/list -> 列笔记 动作 note_list 表格 notes 行 title,updated_at   # 封装标记（顺序不限，可不写；写了骨架生成
+                                  # 组装信封的路由，比对约定核对）：动作 <名> 绑前端 .ui 的远程动作；表格 <键> [取 <字段>]
+                                  # [行 <a,b,…>] 结果进 lists.<键>；表单 [取 <字段>] 结果进 form；状态 <键> [取 <字段>]
+                                  # 结果进 state.<键>；消息 <一句话> 成功提示；跳转 <界面名|@来处|#界面?参数> 进 go。
+                                  # 有封装的接口方法必须 POST（前端只会 POST）；出错照旧走 {"error": …} + 4xx
 
     ## 用例                                  # 每个公开函数至少一条
     用例 记作答_全对
@@ -80,6 +85,17 @@ ROLE_LABELS = {"teacher": "教师", "student": "学生"}
 # 接口行：<方法> <路径> -> <函数>，后面跟任意顺序的标记：上传 <字段> [类型 <扩展名,…>] [上限 <大小>]、公开、角色 <代号>
 IFACE_HEAD_RE = re.compile(r"^(\w+)\s+(\S+)\s*(?:->|→)\s*(\S+)(.*)$")
 UPLOAD_SIZE_RE = re.compile(r"^\d+(?:\.\d+)?(?:B|KB|MB|GB)?$", re.I)
+WRAP_KEYS = ("动作", "表格", "表单", "状态", "消息", "跳转")
+
+
+def has_wrap(i):
+    """接口声明了封装（动作 / 表格 / 表单 / 状态 / 消息 / 跳转 任一）→ 这是给前端用的接口。"""
+    return any(i.get(k) for k in WRAP_KEYS)
+
+
+def empty_wrap():
+    """接口封装标记的缺省值（parse 出的每个接口都带这些键；没写封装 = 行为与从前完全一样）。"""
+    return {"动作": "", "表格": None, "表单": None, "状态": None, "消息": "", "跳转": ""}
 
 
 def account_modules(contracts):
@@ -133,7 +149,8 @@ def hash_of(text):
 def _strip_comment(s):
     i = s.find("#")
     while i >= 0:
-        if i == 0 or s[i - 1] in " \t":
+        # 行内 # 只有后跟空白 / 行尾才算注释开头（跳转 #首页?参数 这种 token 里的 # 不是注释）
+        if i == 0 or (s[i - 1] in " \t" and (i + 1 >= len(s) or s[i + 1] in " \t")):
             return s[:i].rstrip()
         i = s.find("#", i + 1)
     return s.rstrip()
@@ -149,11 +166,13 @@ def _kv(text):
 
 
 def _iface_tail(tail):
-    """接口行 -> 函数 之后的标记（上传 / 类型 / 上限 / 公开 / 角色），顺序不限。
-    → (上传dict|None, 公开bool, 角色str, 问题列表)。"""
+    """接口行 -> 函数 之后的标记（上传 / 类型 / 上限 / 公开 / 角色 + 封装：动作 / 表格 / 表单 / 状态 / 消息 / 跳转），顺序不限。
+    → (上传dict|None, 公开bool, 角色str, 封装dict, 问题列表)。"""
     toks = tail.split()
     probs = []
     upload, public, role = None, False, ""
+    wrap = empty_wrap()
+    ctx = ""          # 「取」「行」跟着谁：表格 / 表单 / 状态
     i = 0
     while i < len(toks):
         t = toks[i]
@@ -186,12 +205,51 @@ def _iface_tail(tail):
                 break
             role = toks[i + 1]
             i += 2
+        elif t in ("动作", "消息", "跳转"):
+            if i + 1 >= len(toks):
+                probs.append(f"「{t}」后面要跟一个词")
+                break
+            if wrap[t]:
+                probs.append(f"「{t}」只能写一次")
+            wrap[t] = toks[i + 1]
+            ctx = ""
+            i += 2
+        elif t in ("表格", "状态"):
+            if i + 1 >= len(toks):
+                probs.append(f"「{t}」后面要跟数据键")
+                break
+            if wrap[t]:
+                probs.append(f"「{t}」只能写一次")
+            wrap[t] = {"键": toks[i + 1], "取": "", "行": []}
+            ctx = t
+            i += 2
+        elif t == "表单":
+            if wrap[t]:
+                probs.append("「表单」只能写一次")
+            wrap[t] = {"取": ""}
+            ctx = t
+            i += 1
+        elif t == "取":
+            if not ctx or i + 1 >= len(toks):
+                probs.append("「取」要写在「表格 <键>」「表单」「状态 <键>」后面，且后面要跟字段名")
+                i += 2 if i + 1 < len(toks) else 1
+            else:
+                wrap[ctx]["取"] = toks[i + 1]
+                i += 2
+        elif t == "行":
+            if ctx != "表格" or i + 1 >= len(toks):
+                probs.append("「行」要写在「表格 <键> [取 <字段>]」后面，且后面跟逗号隔开的行字段名")
+                i += 2 if i + 1 < len(toks) else 1
+            else:
+                wrap["表格"]["行"] = [x for x in toks[i + 1].split(",") if x]
+                i += 2
         else:
-            probs.append(f"不认识的接口标记「{t}」（只有 上传 <字段> [类型 …] [上限 …] / 公开 / 角色 <代号>）")
+            probs.append(f"不认识的接口标记「{t}」（只有 上传 <字段> [类型 …] [上限 …] / 公开 / 角色 <代号> / "
+                         f"动作 <名> / 表格 <键> [取 <字段>] [行 <a,b,…>] / 表单 [取 <字段>] / 状态 <键> [取 <字段>] / 消息 <一句话> / 跳转 <界面名|@来处|#界面?参数>）")
             i += 1
     if upload and upload["上限"] and not UPLOAD_SIZE_RE.match(upload["上限"]):
         probs.append(f"「上限 {upload['上限']}」写错了，写成 20MB / 500KB / 字节数")
-    return upload, public, role, probs
+    return upload, public, role, wrap, probs
 
 
 def parse(text):
@@ -268,15 +326,16 @@ def parse(text):
         elif sec == "接口":
             m = IFACE_HEAD_RE.match(s)
             if not m:
-                probs.append(f"第 {no} 行：接口写法是「<GET|POST|PUT|DELETE> <路径> -> <函数名> [上传 <字段> [类型 …] [上限 …]] [公开|角色 <代号>]」，现在是「{s}」")
+                probs.append(f"第 {no} 行：接口写法是「<GET|POST|PUT|DELETE> <路径> -> <函数名> [上传 <字段> [类型 …] [上限 …]] [公开|角色 <代号>] "
+                             f"[动作 <名>] [表格 <键> [取 <字段>] [行 <a,b,…>]] [表单 [取 <字段>]] [状态 <键> [取 <字段>]] [消息 <一句话>] [跳转 <界面名|@来处|#界面?参数>]]」，现在是「{s}」")
             else:
                 method, path, fn, tail = m.groups()
-                upload, pub, role, tail_probs = _iface_tail(tail.strip())
+                upload, pub, role, wrap, tail_probs = _iface_tail(tail.strip())
                 probs += [f"第 {no} 行：{p}" for p in tail_probs]
                 if pub and role:
                     probs.append(f"第 {no} 行：接口「{path}」不能同时写「公开」和「角色」")
                 c["接口"].append({"方法": method.upper(), "路径": path, "函数": fn, "公开": bool(pub), "角色": role or "",
-                                  "上传": upload, "行": no})
+                                  "上传": upload, **wrap, "行": no})
         elif sec == "用例":
             _case_line(c, s, parts, h, no, probs)
             cur = c["用例"][-1] if c["用例"] else None
@@ -594,6 +653,7 @@ def check(c, name, upstream, all_modules):
             for m in QCALL_RE.finditer(p["文字"]):
                 target(m.group(1), m.group(2), f"第 {p['行']} 行（函数 {f['名']} 的伪代码）", True)
     seen = set()
+    seen_act = set()
     for i in c["接口"]:
         key = (i["方法"], i["路径"])
         if key in seen:
@@ -603,6 +663,25 @@ def check(c, name, upstream, all_modules):
             probs.append(f"第 {i['行']} 行：方法「{i['方法']}」不在 {'/'.join(METHODS)} 里")
         if not i["路径"].startswith("/"):
             probs.append(f"第 {i['行']} 行：路径「{i['路径']}」要以 / 开头")
+        if has_wrap(i) and i["方法"] != "POST":
+            probs.append(f"第 {i['行']} 行：接口 {i['路径']} 声明了封装（{'、'.join(k for k in WRAP_KEYS if i.get(k))}），是给前端用的，"
+                         f"方法要写 POST（前端一律发 POST {chr(123)}action, form{chr(125)}，GET/DELETE 前端打不通）")
+        if i["动作"]:
+            if not NAME_RE.match(i["动作"]):
+                probs.append(f"第 {i['行']} 行：动作名「{i['动作']}」要用英文 snake（和 .ui 里「动作 <名> 远程」的名字一字不差）")
+            if i["动作"] in seen_act:
+                probs.append(f"第 {i['行']} 行：动作「{i['动作']}」被本模块两个接口声明（一个动作名只能绑一个接口）")
+            seen_act.add(i["动作"])
+        for tag, w in (("表格", i["表格"]), ("状态", i["状态"])):
+            if w and not NAME_RE.match(w["键"]):
+                probs.append(f"第 {i['行']} 行：「{tag} {w['键']}」的数据键要用英文 snake")
+        for w in (i["表格"], i["表单"], i["状态"]):
+            if w and w["取"] and not NAME_RE.match(w["取"]):
+                probs.append(f"第 {i['行']} 行：「取 {w['取']}」的字段名要用英文 snake（取函数返回对象里的这个字段）")
+        if i["表格"] and i["表格"]["行"]:
+            bad = [x for x in i["表格"]["行"] if not NAME_RE.match(x)]
+            if bad:
+                probs.append(f"第 {i['行']} 行：「行」的字段名 {bad} 要用英文 snake，逗号隔开")
         f = fns.get(i["函数"])
         if f is None or not f["公开"]:
             probs.append(f"第 {i['行']} 行：接口 {i['路径']} 调的函数「{i['函数']}」不是本模块的公开函数")

@@ -44,6 +44,50 @@ def cycle_with(project, name, deps, mods):
     return T.find_cycle(graph)
 
 
+def ui_action_problems(project, name, c, mods):
+    """项目有 ui/*.ui 时对接口「动作」声明的核对（K25；.ui 是前端的输入，解析用 tools.ui_actions）：
+    - 本约定声明的动作必须在某个 .ui 里真的有人调（声明动作只为绑前端；项目没有 .ui 时不该有「动作」）；
+    - 每个 .ui 远程动作都要有接口声明它：等其余模块的约定都落盘后才做全量核对——写约定按依赖分层并行，
+      先写的模块核对时别人的还没有，缺不算错；最后一份过检查时全量核对（gen build 的 missing_endpoint 是最终兜底）。"""
+    try:
+        from tools import ui_actions as UA
+        uis = UA.remote_names(project)
+    except Exception:  # noqa: BLE001  .ui 语法错由 gen build / 界面编译报
+        return []
+    probs = []
+    mine = {i["动作"] for i in c["接口"] if i["动作"]}
+    if not uis:
+        if mine:
+            probs.append("项目没有 ui/*.ui（或里面没有远程动作），接口不用声明「动作 …」——那是给前端绑定用的；删掉："
+                         + "、".join(sorted(mine)))
+        return probs
+    for a in sorted(mine - uis):
+        probs.append(f"接口声明了「动作 {a}」，但项目 ui/*.ui 里没有这个远程动作（声明「动作」是给前端绑定用的；"
+                     f"动作名要和 .ui 里「动作 <名> 远程」一字不差）")
+    if any(m != name and not path_of(project, m).is_file() for m in mods):
+        return probs          # 还有模块没写完约定，覆盖核对放到最后一份过检查时
+    decl = {}
+    for m in mods:
+        if m == name:
+            cc = c
+        else:
+            uc, p = C.parse(path_of(project, m).read_text(encoding="utf-8"))
+            if p:
+                continue
+            cc = uc
+        for i in cc["接口"]:
+            if i["动作"]:
+                decl.setdefault(i["动作"], []).append(m)
+    for a in sorted(uis):
+        hit = decl.get(a, [])
+        if not hit:
+            probs.append(f"前端 .ui 的远程动作「{a}」还没有任何接口声明「动作 {a}」：要在拥有它的模块的约定「## 接口」里"
+                         f"写一行 POST 接口并带上「动作 {a}」（前端只会 POST）")
+        elif len(hit) > 1:
+            probs.append(f"前端动作「{a}」被模块 {'、'.join(hit)} 都声明了，一个动作名只能绑一个接口")
+    return probs
+
+
 def check(text, name, top, project):
     """→ 问题列表（空 = 通过）。top：top.load 的结果；project：读上游约定的项目目录。"""
     mods = {m["名"]: m["依赖"] for m in top["模块"]}
@@ -63,6 +107,7 @@ def check(text, name, top, project):
             probs.append(f"第 {t['行']} 行：表名「{t['名']}」要以「{name}_」开头（各模块的表不重名）")
     probs += optional_empty(c)
     probs += provides_missing(c, name, top)
+    probs += ui_action_problems(project, name, c, list(mods))
     seen = set()
     return [p for p in probs if not (p in seen or seen.add(p))]
 

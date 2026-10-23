@@ -8,6 +8,8 @@ from pathlib import Path
 
 from tools.dsl_core import ScriptHalt
 
+from tools import ui_actions as UIA
+
 from .. import guard as G
 from .. import v2 as V2
 from ..packs.dslproj import contract as DC
@@ -96,6 +98,15 @@ def syntax_part(ctx):
 
 def user_text(ctx, kind, req, module="", problems="", prev=""):
     parts = [f"【需求】\n{(req or '').strip()}"]
+    ui = UIA.summary(ctx.project)
+    if ui:
+        rule = ("分模块时给每个远程动作一个归属：拥有它的模块要为它出公开函数和接口（接口行带「动作 <名>」）。"
+                if kind == "顶层" else
+                "本模块拥有的动作都要在「## 接口」里有且只有一个接口声明「动作 <名>」（方法 POST），"
+                "封装照页面读的键写：页面读 lists.<键> 写「表格 <键>」（行字段用「行 a,b」声明），表单回填写「表单」，"
+                "读 state.<键> 写「状态 <键>」，成功提示写「消息 <一句话>」，成功后跳转写「跳转 <界面名|@来处|#界面?参数>」。")
+        parts.append("【前端页面 ui/*.ui 的远程动作（程序提取，只读；前端只会发 POST {action, form}，"
+                     "接口直接返回页面要的信封 messages/state/lists/form/go）】\n" + ui + "\n\n" + rule)
     if kind == "顶层":
         cat = CAT.path_of(ctx.project)
         if cat.is_file():

@@ -21,7 +21,7 @@ from . import contracts as VC
 
 
 def check(project, top):
-    by_route, by_table = defaultdict(set), defaultdict(set)
+    by_route, by_table, by_action = defaultdict(set), defaultdict(set), defaultdict(set)
     contracts = {}
     for m in top["模块"]:
         name = m["名"]
@@ -34,12 +34,19 @@ def check(project, top):
         contracts[name] = c
         for i in c["接口"]:
             by_route[(i["方法"], i["路径"])].add(name)
+            if i["动作"]:
+                by_action[i["动作"]].add(name)
         for t in c["表"]:
             by_table[t["名"]].add(name)
     per_module = defaultdict(list)
     for (method, path), mods in sorted(by_route.items()):
         if len(mods) > 1:
             msg = f"接口「{method} {path}」在模块 {'、'.join(sorted(mods))} 里都定义了，一个方法+路径只能属于一个模块"
+            for m in mods:
+                per_module[m].append(msg)
+    for act, mods in sorted(by_action.items()):
+        if len(mods) > 1:
+            msg = f"动作「{act}」在模块 {'、'.join(sorted(mods))} 里都声明了，一个动作名只能绑一个接口（前端按动作名找接口）"
             for m in mods:
                 per_module[m].append(msg)
     for table, mods in sorted(by_table.items()):

@@ -278,6 +278,55 @@ def content_diffs(project, module, contract, modules):
     return diffs, hints
 
 
+def _entity_fields(project):
+    """项目全部 entities/*.entity 的字段名并集（页面实体也是实体，它的字段一样在字段表里——kg 的 account_view 同款）。"""
+    out = set()
+    ed = Path(project) / "entities"
+    if not ed.is_dir():
+        return out
+    from tools.entity import field_table, parse as _eparse
+    for f in sorted(ed.glob("*.entity")):
+        try:
+            out |= {k for k in field_table(_eparse(f.read_text(encoding="utf-8"))) if "." not in k}
+        except Exception:  # noqa: BLE001  实体语法错由加载检查 / 跑用例报，这里不重复
+            continue
+    return out
+
+
+def _action_diffs(project, module, contract, modules):
+    """「动作」声明 ↔ 前端 .ui 的远程动作（K25）：项目里有 ui/*.ui 时——
+    每个 .ui 远程动作要有且只有一个接口声明它（少 = 编译期 endpoints 绑不上，多 = 绑定二义）；项目自己的约定声明了
+    .ui 里没有的远程动作也报（声明「动作」只为绑前端，纯后端接口不写）。.ui 语法错不在这里报（gen build 会报）。"""
+    from . import contract as C
+    try:
+        from tools import ui_actions as UA
+        uis = UA.remote_names(project)
+    except Exception:  # noqa: BLE001
+        return []
+    if not uis:
+        return []
+    decl = {}
+    for mname, cc in _all_contracts(project, module, contract, modules).items():
+        for ii in cc["接口"]:
+            if ii["动作"]:
+                decl.setdefault(ii["动作"], []).append((mname, ii["方法"], ii["路径"]))
+    diffs = []
+    for a in sorted(uis):
+        hit = decl.get(a, [])
+        if not hit:
+            diffs.append(f"前端 .ui 的远程动作「{a}」没有任何接口声明「动作 {a}」（编译期绑不进 endpoints，gen build 会报 missing_endpoint）")
+        elif len(hit) > 1:
+            diffs.append(f"前端动作「{a}」被 {len(hit)} 个接口声明（{'；'.join(f'{m} {me} {pa}' for m, me, pa in hit)}），"
+                         f"一个动作名只能绑一个接口")
+    for a, hits in sorted(decl.items()):
+        if a not in uis:
+            for mname, me, pa in hits:
+                if mname == module:
+                    diffs.append(f"接口 {me} {pa} 声明了「动作 {a}」，但项目 ui/*.ui 里没有这个远程动作"
+                                 f"（声明「动作」是给前端绑定用的；纯后端接口不要写「动作」）")
+    return diffs
+
+
 def compare(project, module, contract, modules):
     """实际文件与约定是否一致：脚本（约定「## 脚本」）、业务文件（模块名 / 依赖 / 每个函数的名字、公开与否、入参顺序与可选）、接口（方法 + 路径存在、只调约定里那个函数）、
     约定里的表在 entities/<模块>.entity 里都有、约定里明确写出的唯一声明在实体里有对应旗标（单列「唯一」旗标 / 多列「唯一 a b」行，
@@ -348,8 +397,40 @@ def compare(project, module, contract, modules):
                 diffs.append(f"接口 {i['方法']} {i['路径']} 约定「类型 {up['类型']}」，routes 脚本里没有「存文件 … 类型={up['类型']}」")
             if up["上限"] and f"上限={up['上限']}" not in e.script:
                 diffs.append(f"接口 {i['方法']} {i['路径']} 约定「上限 {up['上限']}」，routes 脚本里没有「存文件 … 上限={up['上限']}」")
+        # 封装标记（K25）：动作绑定、信封的每个键都要在路由里真的组装了（能确定性查到的程度：动词 + 键）。
+        if i["动作"] and (e.action or "") != i["动作"]:
+            got = f"是「动作 {e.action}」" if e.action else "没写「动作」"
+            diffs.append(f"接口 {i['方法']} {i['路径']} 约定「动作 {i['动作']}」，实际路由{got}（前端按动作名找接口）")
+        if C.has_wrap(i):
+            tag = f"接口 {i['方法']} {i['路径']}"
+            if i["表格"]:
+                k = i["表格"]["键"]
+                if not re.search(rf"(?:^|\s)表格\s+{re.escape(k)}(?:\s|$)", e.script, re.M):
+                    diffs.append(f"{tag} 约定「表格 {k}」，但路由里没有「表格 {k} …」（lists.{k} 没人组装，页面拿不到这张表）")
+            if i["表单"] and not re.search(r"响应\s+form(?:\s|$)", e.script):
+                diffs.append(f"{tag} 约定「表单」，但路由里没有「响应 form …」（form 没人填，「载入」回填拿不到数据）")
+            if i["状态"]:
+                k = i["状态"]["键"]
+                if not (re.search(rf"(?:^|\s)状态\s+{re.escape(k)}(?:\s|$)", e.script, re.M)
+                        or re.search(r"响应\s+state(?:\s|$)", e.script)):
+                    diffs.append(f"{tag} 约定「状态 {k}」，但路由里没有「状态 {k} …」或「响应 state …」（state.{k} 没人组装）")
+            if i["消息"] and not re.search(rf"(?:^|\s)消息\s+\S+\s+{re.escape(i['消息'])}(?:\s|$)", e.script):
+                diffs.append(f"{tag} 约定「消息 {i['消息']}」，但路由里没有把这句话交给「消息」动词")
+            if i["跳转"] and not re.search(rf"响应\s+go\s+{re.escape(i['跳转'])}(?:\s|$)", e.script):
+                diffs.append(f"{tag} 约定「跳转 {i['跳转']}」，但路由里没有「响应 go {i['跳转']}」")
+            body = [l for l in e.body if l.strip()]
+            if body and body[-1].strip().startswith("返回"):
+                diffs.append(f"{tag} 声明了封装（信封用响应动词组装），最后一步不能是「返回 …」——「返回」会整个盖掉组装好的信封，"
+                             f"前端只会收到裸对象")
+            if i["表格"] and i["表格"]["行"]:
+                bad = [x for x in i["表格"]["行"] if x not in _entity_fields(project)]
+                if bad:
+                    diffs.append(f"{tag} 约定「行 {'、'.join(i['表格']['行'])}」里的字段 {bad} 不在任何实体字段表里"
+                                 f"（.ui 的列名要能在字段表里查到，unknown_field 挡编译；页面专用字段在实体文件里的页面实体声明，"
+                                 f"参照 kg/entities/user.entity 的 account_view——entity 语法没有「不建表」写法，页面实体照 kg 现状也是一张不写入数据的表）")
     for (m, p) in by:
         diffs.append(f"多了约定里没有的接口 {m} {p}")
+    diffs += _action_diffs(project, module, contract, modules)
     diffs += _auth_diffs(project, module, contract, modules)
     diffs += script_diffs(project, module, contract, modules)
     c_diffs, hints = content_diffs(project, module, contract, modules)
