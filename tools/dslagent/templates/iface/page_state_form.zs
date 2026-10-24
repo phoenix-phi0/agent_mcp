@@ -6,13 +6,13 @@
 例子 POST /quiz/state -> 做题页面 动作 quiz_state 模板 页面状态表单 表单=form
 主体
   响应 state {r}
+主体 当 表单,去处
+  响应 state {r}
+  响应 form {r.<<表单>>}
+  响应 go <<去处>>
 主体 当 表单
   响应 state {r}
   响应 form {r.<<表单>>}
 主体 当 去处
   响应 state {r}
-  响应 go <<去处>>
-主体 当 表单,去处
-  响应 state {r}
-  响应 form {r.<<表单>>}
   响应 go <<去处>>
