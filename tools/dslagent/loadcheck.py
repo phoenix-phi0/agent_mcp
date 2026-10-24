@@ -343,6 +343,47 @@ def check_verb_calls(lines, reg, label, base=0):
     return probs
 
 
+def check_set_unknown_verbs(lines, reg, label, base=0):
+    """严格模式（文件有「用包」）下，「设」右值以词+空格开头、首词像动词但不是已注册动词：
+    运行时（dsl.py _exec_block 的 set 分支）把它当动词调用，走到那行才报「没有名为…的动词」；
+    这里在加载检查时提前报。判定直接复用引擎的 _check_unknown_verb（VERB_LIKE_RE + RESERVED +
+    动词表同一套，传 base+i 让报错行号跟文件行号一致），与运行时完全同一口径。
+    「执行 / 调用」（业务函数、脚本调用）和「计算」引擎先分派、不走文本赋值，跳过——
+    它们的目标不存在 / 参数不对由 check_calls / parse_script 管。
+    reg 由调用方（_check_file_verbs）用 点名包 ∪ 常驻包 建（common、http 是 RESIDENT_PACKS，
+    与 check_table_external_verbs 的放行同一惯例）：运行时的动词表是各方共用的，路由引擎默认
+    就载入 common http（dsl_http 的 DEFAULT_PACKS），业务文件没点名 common 也能用它的动词
+    （v3 fixture vocab.zs 只 用包 db 就用了 当前时间）。"""
+    eng = _ParseOnly(client=None, workdir=Path("."), verbose=False)
+    eng.verbs = reg
+    probs = []
+    for i, raw in enumerate(lines):
+        line = normalize(raw).strip()
+        if not line or line.startswith("#"):
+            continue
+        head, rest = split_head(line)
+        if head != "set":
+            continue
+        _name, sep, value = rest.partition("=")
+        if not sep:
+            continue   # 缺「=」的语法错由 parse_script 的 _split_assign 报
+        sub_head, sub_rest = split_head(value.strip())
+        if sub_head in ("call", "compute"):
+            continue   # 引擎先分派这两种，不是文本赋值
+        if sub_head not in RESERVED and reg.has(sub_head):
+            continue   # 引擎的 _is_verb 分支：已注册动词走 _do_verb，到不了文本赋值
+        try:
+            eng._check_unknown_verb(sub_head, sub_rest, base + i)
+        except DSLError as e:
+            probs.append(
+                f"[接口出错] {label}: {e}"
+                f"改写示例：把开头的文字和后面的内容连写"
+                f"（「设 x = {sub_head} {{level}} 等级给你出题」→「设 x = {sub_head}{{level}} 等级给你出题」），"
+                f"或先把文字放进变量（「设 文案 = {sub_head}」再「设 x = {{文案}} {{level}} 等级给你出题」），"
+                f"或调整语序让这行不以词+空格开头。")
+    return probs
+
+
 # 这两个包随处能用，不用「用包」点名：routes 的 DEFAULT_PACKS 就是它俩（见 dsl_http.py），
 # 这里把 services / scripts 也按同一惯例放行，省得模型照顾一个处处都要写的「用包 common http」
 RESIDENT_PACKS = {"common", "http"}
@@ -617,6 +658,9 @@ def _check_file_verbs(root, f, route):
     if not route:
         lines = text.splitlines()
         probs = check_verb_calls(lines, reg, rel) if packs else []
+        if packs:
+            reg_set = load_verbs(root, sorted(set(packs) | RESIDENT_PACKS))
+            probs += check_set_unknown_verbs(lines, reg_set, rel)
         probs += check_table_external_verbs(lines, reg, full, packs, rel)
         return probs
     try:
@@ -627,7 +671,9 @@ def _check_file_verbs(root, f, route):
     for ep in eps:
         label = f"{rel} 接口 {ep.method} {ep.path}（文件第 {ep.line} 行起）"
         if packs:
+            reg_set = load_verbs(root, sorted(set(packs) | RESIDENT_PACKS))
             probs += check_verb_calls(ep.body, reg, label, base=ep.line)
+            probs += check_set_unknown_verbs(ep.body, reg_set, label, base=ep.line)
         probs += check_table_external_verbs(ep.body, reg, full, packs, label, base=ep.line)
     return probs
 
