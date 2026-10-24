@@ -81,8 +81,8 @@ POST /note/list -> 列笔记 动作 note_list 模板 列表 键=notes 行=title,
 def t_tpl():
     print("模板库：清单 / 校验 / 渲染 / 信封")
     names = T.names()
-    check(names == ["列表", "回填", "回复消息", "提交消息", "提交跳转", "提交跳转动态", "状态", "页面状态"],
-          "5+3 个模板都在（按中文名排序）", names)
+    have = ["列表", "回填", "提交消息", "提交跳转", "提交跳转动态", "状态", "页面状态", "回复消息"]
+    check(all(n in names for n in have), "必须有的 8 个模板都在（子集即可，允许后续加新模板）", names)
     ls = T.listing()
     for want in ("- 模板 列表：", "- 模板 回填：", "- 模板 提交消息：", "- 模板 提交跳转：", "- 模板 状态：",
                  "键 必填", "例子：POST /notes/list -> 列笔记 动作 note_list 模板 列表 键=notes 行=title,content,created_at"):
@@ -164,6 +164,15 @@ def t_tpl():
     check(e10 == {"state": {"form": {"a": 1}}, "form": {"a": 1}, "go": "#做题"}, "信封解释：表单+去处 → state/form/go 三键齐", e10)
     e11 = T.envelope("页面状态", {"取": "page", "表单": "form", "去处": "@来处"}, {"page": {"x": 1}, "form": {"y": 2}})
     check(e11 == {"state": {"x": 1}, "form": {"y": 2}, "go": "@来处"}, "信封解释：取+表单+去处 全给 → 各键各取各的", e11)
+    # templates/iface/ 下每个 .zs 都通过模板校验、中文名不重复（加新模板不用改这里）
+    files = sorted((T.DIR).glob("*.zs"))
+    check(len(files) >= 8, "templates/iface/ 至少 8 个模板文件", [f.name for f in files])
+    zh = []
+    for f in files:
+        tpl, probs = T._parse(f.read_text(encoding="utf-8"))
+        check(not probs, f"模板文件 {f.name} 通过校验", probs)
+        zh.append(tpl["名"])
+    check(len(zh) == len(set(zh)), "模板中文名不重复", zh)
 
 
 def t_parse():
