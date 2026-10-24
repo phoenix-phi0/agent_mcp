@@ -117,6 +117,20 @@ def t_tpl():
     # K28b 新模板：页面状态 / 回复消息 / 提交跳转动态
     check(T.render("页面状态", {}) == ["  响应 state {r}"], "页面状态缺省块：整体铺进 state", T.render("页面状态", {}))
     check(T.render("页面状态", {"取": "page"}) == ["  响应 state {r.page}"], "页面状态 当取 块")
+    check(T.validate("页面状态", {"去处": "做题"}) == [], "页面状态：去处 go 值 界面名 合法", T.validate("页面状态", {"去处": "做题"}))
+    check(T.validate("页面状态", {"去处": "#做题"}) == [] and T.validate("页面状态", {"去处": "@来处"}) == [],
+          "页面状态：去处 #界面 / @来处 合法（做题页「开始」回 #做题 清地址参数）", "")
+    check("不合法" in T.validate("页面状态", {"去处": "做题?a=b"})[0], "页面状态：去处 非法 go 值 → 报（选 go 不选 free 的理由：静态校验）", "")
+    check(T.render("页面状态", {"表单": "form"}) == ["  响应 state {r}", "  响应 form {r.form}"], "页面状态 当表单 块")
+    check(T.render("页面状态", {"去处": "#做题"}) == ["  响应 state {r}", "  响应 go #做题"], "页面状态 当去处 块")
+    check(T.render("页面状态", {"取": "page", "表单": "form"}) ==
+          ["  响应 state {r.page}", "  响应 form {r.form}"], "页面状态 当取,表单 块：state 铺取的字段 + form 回填")
+    check(T.render("页面状态", {"取": "page", "去处": "@来处"}) ==
+          ["  响应 state {r.page}", "  响应 go @来处"], "页面状态 当取,去处 块")
+    check(T.render("页面状态", {"表单": "form", "去处": "#做题"}) ==
+          ["  响应 state {r}", "  响应 form {r.form}", "  响应 go #做题"], "页面状态 当表单,去处 块")
+    check(T.render("页面状态", {"取": "page", "表单": "form", "去处": "做题"}) ==
+          ["  响应 state {r.page}", "  响应 form {r.form}", "  响应 go 做题"], "页面状态 当取,表单,去处 块：三个可同时出现")
     check(T.render("回复消息", {"谁": "老师", "取": "reply"}) == ["  消息 老师 {r.reply} ok"], "回复消息 当谁,取 块")
     check(T.render("回复消息", {}) == ["  消息 老师 {r} ok"], "回复消息缺省块")
     check(T.validate("提交跳转动态", {"消息": "已建任务", "跳转": "#教材导入?job={r.task_id}"}) == [],
@@ -143,6 +157,13 @@ def t_tpl():
           "信封解释：动态 go 的 {r.字段} 按运行时展开记期望（Router 实测会展开）", e7)
     e8 = T.envelope("提交跳转动态", {"消息": "x", "跳转": "#a?job={r.nope}"}, {})
     check(e8["go"] == "#a?job={r.nope}", "信封解释：go 引用取不到保持原样（与引擎一致）", e8)
+    e9 = T.envelope("页面状态", {"表单": "form"}, {"form": {"pick_level": "n3"}, "stat": {"done": 1}})
+    check(e9 == {"state": {"form": {"pick_level": "n3"}, "stat": {"done": 1}}, "form": {"pick_level": "n3"}},
+          "信封解释：页面状态 表单=form → 整页铺 state + form 回填该字段", e9)
+    e10 = T.envelope("页面状态", {"表单": "form", "去处": "#做题"}, {"form": {"a": 1}})
+    check(e10 == {"state": {"form": {"a": 1}}, "form": {"a": 1}, "go": "#做题"}, "信封解释：表单+去处 → state/form/go 三键齐", e10)
+    e11 = T.envelope("页面状态", {"取": "page", "表单": "form", "去处": "@来处"}, {"page": {"x": 1}, "form": {"y": 2}})
+    check(e11 == {"state": {"x": 1}, "form": {"y": 2}, "go": "@来处"}, "信封解释：取+表单+去处 全给 → 各键各取各的", e11)
 
 
 def t_parse():
@@ -647,20 +668,24 @@ def t_router_new():
              "公开 函数 停用 username disabled\n  返回 {ok}\n  伪代码 返回 {\"ok\": 1}\n"
              "公开 函数 页面数据 learner\n  返回 {stat, rows}\n  伪代码 返回 {\"stat\": {\"done\": 1}}\n"
              "公开 函数 问老师 learner message\n  返回 {reply}\n  伪代码 返回 {\"reply\": \"回答\"}\n"
-             "公开 函数 建任务 series_code\n  返回 {task_id}\n  伪代码 返回 {\"task_id\": \"job_1\"}\n\n## 接口\n"
+             "公开 函数 建任务 series_code\n  返回 {task_id}\n  伪代码 返回 {\"task_id\": \"job_1\"}\n"
+             "公开 函数 开始练习 learner\n  返回 {stat, form}\n  伪代码 返回 {\"stat\": {\"done\": 0}, \"form\": {\"pick_level\": \"n3\"}}\n\n## 接口\n"
              "POST /acc/disable -> 停用 动作 acc_disable 模板 列表 键=students 传 disabled=1 参数 reset_user=username 公开\n"
              "POST /acc/page -> 页面数据 动作 acc_page 模板 页面状态 公开\n"
              "POST /acc/ask -> 问老师 动作 acc_ask 模板 回复消息 谁=老师 取=reply 公开\n"
-             "POST /acc/task -> 建任务 动作 acc_task 模板 提交跳转动态 消息=已建任务 跳转=#教材导入?job={r.task_id} 公开\n\n## 用例\n"
+             "POST /acc/task -> 建任务 动作 acc_task 模板 提交跳转动态 消息=已建任务 跳转=#教材导入?job={r.task_id} 公开\n"
+             "POST /acc/start -> 开始练习 动作 acc_start 模板 页面状态 表单=form 去处=#做题 公开\n\n## 用例\n"
              "用例 停用_有\n  调用 停用 username=u1 disabled=1\n  得 有返回\n"
              "用例 页面_有\n  调用 页面数据 learner=u1\n  得 有返回\n"
              "用例 问_有\n  调用 问老师 learner=u1 message=hi\n  得 有返回\n"
-             "用例 任务_有\n  调用 建任务 series_code=s1\n  得 有返回\n")
+             "用例 任务_有\n  调用 建任务 series_code=s1\n  得 有返回\n"
+             "用例 开始_有\n  调用 开始练习 learner=u1\n  得 有返回\n")
     svc = ("业务 account\n  用包 common\n\n"
            "  公开 函数 停用 username disabled\n    返回 [{\"who\": \"{username}\", \"flag\": \"{disabled}\"}]\n  结束\n\n"
            "  公开 函数 页面数据 learner\n    返回 {\"stat\": {\"done\": 1}, \"rows\": [\"a\"]}\n  结束\n\n"
            "  公开 函数 问老师 learner message\n    返回 {\"reply\": \"回答\"}\n  结束\n\n"
-           "  公开 函数 建任务 series_code\n    返回 {\"task_id\": \"job_1\"}\n  结束\n结束\n")
+           "  公开 函数 建任务 series_code\n    返回 {\"task_id\": \"job_1\"}\n  结束\n\n"
+           "  公开 函数 开始练习 learner\n    返回 {\"stat\": {\"done\": 0}, \"form\": {\"pick_level\": \"n3\"}}\n  结束\n结束\n")
     c, probs = C.parse(ctext)
     check(not probs, "Router 用约定（含 传/参数 与三个新模板）解析通过", probs)
     routes_text = SF.route_text("account", c, {"account": c})
@@ -682,6 +707,11 @@ def t_router_new():
     check(resp.status_code == 200 and resp.get_json() == {"go": "#教材导入?job=job_1",
                                                           "messages": [{"who": "系统", "text": "已建任务", "kind": "ok"}]},
           "提交跳转动态：go 里的 {r.task_id} 运行时展开成真实值（K27b §5.3 待验证点，实测展开）",
+          (resp.status_code, resp.get_json()))
+    resp = cl.post("/acc/start", json={"action": "acc_start", "form": {"learner": "u1"}})
+    check(resp.status_code == 200 and resp.get_json() == {"state": {"stat": {"done": 0}, "form": {"pick_level": "n3"}},
+                                                          "form": {"pick_level": "n3"}, "go": "#做题"},
+          "页面状态 表单+去处：Router 实跑 state/form/go 前端信封三键齐（go 清地址参数，刷新不再触发「载入」）",
           (resp.status_code, resp.get_json()))
 
 
