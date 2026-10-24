@@ -11,6 +11,7 @@ from tools.dsl_core import ScriptHalt
 from tools import ui_actions as UIA
 
 from .. import guard as G
+from .. import iftpl
 from .. import v2 as V2
 from ..packs.dslproj import contract as DC
 from . import catalog as CAT
@@ -102,11 +103,15 @@ def user_text(ctx, kind, req, module="", problems="", prev=""):
     if ui:
         rule = ("分模块时给每个远程动作一个归属：拥有它的模块要为它出公开函数和接口（接口行带「动作 <名>」）。"
                 if kind == "顶层" else
-                "本模块拥有的动作都要在「## 接口」里有且只有一个接口声明「动作 <名>」（方法 POST），"
-                "封装照页面读的键写：页面读 lists.<键> 写「表格 <键>」（行字段用「行 a,b」声明），表单回填写「表单」，"
-                "读 state.<键> 写「状态 <键>」，成功提示写「消息 <一句话>」，成功后跳转写「跳转 <界面名|@来处|#界面?参数>」。")
+                "本模块拥有的动作都要在「## 接口」里有且只有一个接口声明「动作 <名>」（方法 POST）。"
+                "接口返回封装用【接口封装模板】清单里的模板写：接口行在「动作」后写「模板 <中文名> 键=值 …」，"
+                "只能用清单里的模板、参数照清单（键=值 之间不能有空格）；页面要的信封清单里没有模板能表达时，"
+                "不要自创封装写法——接口先不加模板（照旧返回裸对象），复核会把这类缺口当问题报出来。")
         parts.append("【前端页面 ui/*.ui 的远程动作（程序提取，只读；前端只会发 POST {action, form}，"
                      "接口直接返回页面要的信封 messages/state/lists/form/go）】\n" + ui + "\n\n" + rule)
+        if kind == "约定":
+            parts.append("【接口封装模板（程序从模板库 tools/dslagent/templates/iface/ 生成，返回封装只能从这里选）】\n"
+                         + iftpl.listing())
     if kind == "顶层":
         cat = CAT.path_of(ctx.project)
         if cat.is_file():
@@ -208,6 +213,8 @@ def review_user(ctx, module, text, req):
         parts.append("【项目接口目录 plan/catalog.md（只读参考：按 top.zs 的分工判断——需求里的事如果已经在别的模块的"
                       "公开函数 / 接口里找得到，不算本模块缺失；反过来同一件事被两个模块各做一份，在问题里指出）】\n"
                       + cat.read_text(encoding="utf-8").strip())
+    parts.append("【接口封装模板（程序从模板库生成；约定里的接口返回封装只能用这些模板，写法「模板 <中文名> 键=值 …」）】\n"
+                 + iftpl.listing())
     parts.extend(syntax_part(ctx))
     parts.append(f"【模块 {module} 的约定】\n{VT.clean(text).strip()}")
     return "\n\n".join(parts)

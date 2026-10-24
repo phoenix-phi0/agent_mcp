@@ -61,7 +61,7 @@
 ```
 - 接口行格式：`接口 [GET|POST|PUT|DELETE] /路径 [动作 名] [公开] [角色 代号 | 只许 中文名]`，方法省略 = POST；「公开」「角色」「只许」都可省。同一方法 + 路径不能重复声明；同一动作名不能被两个接口声明。
 - 接口里只收请求、调约定里写的那个函数、返回。请求体 / GET 查询参数直接是变量（`{learner}`），没传是空串。
-- **给前端的接口（约定里声明了「动作」或封装）由骨架生成**，组装信封只用这些现有动词（页面信封 = messages / state / lists / form / go，前端 applyResponse 只认这几个键）：
+- **给前端的接口（约定里声明了「动作」或「模板」）由骨架按封装模板生成**，组装信封只用这些现有动词（页面信封 = messages / state / lists / form / go，前端 applyResponse 只认这几个键）：
 ```
 接口 POST /note/list 动作 note_list 角色 teacher
   设 r = 调用 note.列笔记 owner={owner}

@@ -66,20 +66,9 @@ def _iface_line(i):
         if u["上限"]:
             extra.append(f"上限 {u['上限']}")
         tail.append(" ".join(extra))
-    if i.get("表格"):
-        w = i["表格"]
-        s = f"表格 {w['键']}" + (f" 取 {w['取']}" if w["取"] else "") + (f" 行 {','.join(w['行'])}" if w["行"] else "")
-        tail.append(s)
-    if i.get("表单"):
-        w = i["表单"]
-        tail.append("表单" + (f" 取 {w['取']}" if w["取"] else ""))
-    if i.get("状态"):
-        w = i["状态"]
-        tail.append(f"状态 {w['键']}" + (f" 取 {w['取']}" if w["取"] else ""))
-    if i.get("消息"):
-        tail.append(f"消息 {i['消息']}")
-    if i.get("跳转"):
-        tail.append(f"跳转 {i['跳转']}")
+    if i.get("模板"):
+        w = i["模板"]
+        tail.append("模板 " + w["名"] + "".join(f" {k}={v}" for k, v in w["参数"].items()))
     head = f"{i['方法']} {i['路径']} -> {i['函数']}"
     return head + ("  " + "  ".join(tail) if tail else "")
 

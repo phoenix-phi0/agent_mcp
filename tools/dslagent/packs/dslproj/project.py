@@ -8,6 +8,8 @@ routes/<模块>*.zs（文件名以模块名开头）、queries/<模块>_*.sql、
 import re
 from pathlib import Path
 
+from tools.dslagent import iftpl
+
 from . import contract as C
 
 MODULE_RE = re.compile(r"^\s*模块[ \t:：]+([A-Za-z][A-Za-z0-9_]*)\s*$", re.M)
@@ -397,37 +399,45 @@ def compare(project, module, contract, modules):
                 diffs.append(f"接口 {i['方法']} {i['路径']} 约定「类型 {up['类型']}」，routes 脚本里没有「存文件 … 类型={up['类型']}」")
             if up["上限"] and f"上限={up['上限']}" not in e.script:
                 diffs.append(f"接口 {i['方法']} {i['路径']} 约定「上限 {up['上限']}」，routes 脚本里没有「存文件 … 上限={up['上限']}」")
-        # 封装标记（K25）：动作绑定、信封的每个键都要在路由里真的组装了（能确定性查到的程度：动词 + 键）。
+        # 封装模板（K26）：动作绑定 + 路由体要和模板渲染出的逐行一致（同一份渲染，不会两套写法漂移）；
+        # 结尾不能是「返回」（会盖掉信封）；行字段（模板里 snake_list 约束的参数）都要在实体字段表里。
         if i["动作"] and (e.action or "") != i["动作"]:
             got = f"是「动作 {e.action}」" if e.action else "没写「动作」"
             diffs.append(f"接口 {i['方法']} {i['路径']} 约定「动作 {i['动作']}」，实际路由{got}（前端按动作名找接口）")
         if C.has_wrap(i):
             tag = f"接口 {i['方法']} {i['路径']}"
-            if i["表格"]:
-                k = i["表格"]["键"]
-                if not re.search(rf"(?:^|\s)表格\s+{re.escape(k)}(?:\s|$)", e.script, re.M):
-                    diffs.append(f"{tag} 约定「表格 {k}」，但路由里没有「表格 {k} …」（lists.{k} 没人组装，页面拿不到这张表）")
-            if i["表单"] and not re.search(r"响应\s+form(?:\s|$)", e.script):
-                diffs.append(f"{tag} 约定「表单」，但路由里没有「响应 form …」（form 没人填，「载入」回填拿不到数据）")
-            if i["状态"]:
-                k = i["状态"]["键"]
-                if not (re.search(rf"(?:^|\s)状态\s+{re.escape(k)}(?:\s|$)", e.script, re.M)
-                        or re.search(r"响应\s+state(?:\s|$)", e.script)):
-                    diffs.append(f"{tag} 约定「状态 {k}」，但路由里没有「状态 {k} …」或「响应 state …」（state.{k} 没人组装）")
-            if i["消息"] and not re.search(rf"(?:^|\s)消息\s+\S+\s+{re.escape(i['消息'])}(?:\s|$)", e.script):
-                diffs.append(f"{tag} 约定「消息 {i['消息']}」，但路由里没有把这句话交给「消息」动词")
-            if i["跳转"] and not re.search(rf"响应\s+go\s+{re.escape(i['跳转'])}(?:\s|$)", e.script):
-                diffs.append(f"{tag} 约定「跳转 {i['跳转']}」，但路由里没有「响应 go {i['跳转']}」")
             body = [l for l in e.body if l.strip()]
             if body and body[-1].strip().startswith("返回"):
                 diffs.append(f"{tag} 声明了封装（信封用响应动词组装），最后一步不能是「返回 …」——「返回」会整个盖掉组装好的信封，"
                              f"前端只会收到裸对象")
-            if i["表格"] and i["表格"]["行"]:
-                bad = [x for x in i["表格"]["行"] if x not in _entity_fields(project)]
-                if bad:
-                    diffs.append(f"{tag} 约定「行 {'、'.join(i['表格']['行'])}」里的字段 {bad} 不在任何实体字段表里"
-                                 f"（.ui 的列名要能在字段表里查到，unknown_field 挡编译；页面专用字段在实体文件里的页面实体声明，"
-                                 f"参照 kg/entities/user.entity 的 account_view——entity 语法没有「不建表」写法，页面实体照 kg 现状也是一张不写入数据的表）")
+            w = i["模板"]
+            fnc = next((x for x in contract["函数"] if x["名"] == i["函数"]), None)
+            if w is None:
+                continue        # 只有「动作」没有模板：绑动作上面已查，组装行为与 K25 相同（骨架只生成调用），不逐行比
+            wtext = " ".join([f"模板 {w['名']}"] + [f"{k}={v}" for k, v in w["参数"].items()])
+            if fnc is None:
+                diffs.append(f"{tag} 调的函数「{i['函数']}」不在约定里（约定检查会报），没法按模板核对路由体")
+            else:
+                try:
+                    want = [l.strip() for l in C.route_body(module, i, fnc)]
+                except ValueError as err:      # 模板 / 参数不对：约定检查已报，这里不重复
+                    want = None
+                    diffs.append(f"{tag} 的封装模板渲染失败：{err}")
+                if want is not None:
+                    got = [l.strip() for l in body]
+                    if got != want:
+                        diffs.append(f"{tag} 的路由体和约定「{wtext}」渲染出的不一致（骨架按模板原样生成，手改也要保持同样的组装行）：\n"
+                                     f"    应是：{' ⏎ '.join(want)}\n    实际：{' ⏎ '.join(got)}")
+            tpl = iftpl.get(w["名"])
+            if tpl is not None:
+                fields = _entity_fields(project)
+                for pname, spec in tpl["参数"].items():
+                    if spec["约束"] == "snake_list" and w["参数"].get(pname):
+                        bad = [x for x in w["参数"][pname].split(",") if x and x not in fields]
+                        if bad:
+                            diffs.append(f"{tag} 约定「{pname}={w['参数'][pname]}」里的字段 {bad} 不在任何实体字段表里"
+                                         f"（.ui 的列名要能在字段表里查到，unknown_field 挡编译；页面专用字段在实体文件里的页面实体声明，"
+                                         f"参照 kg/entities/user.entity 的 account_view——entity 语法没有「不建表」写法，页面实体照 kg 现状也是一张不写入数据的表）")
     for (m, p) in by:
         diffs.append(f"多了约定里没有的接口 {m} {p}")
     diffs += _action_diffs(project, module, contract, modules)

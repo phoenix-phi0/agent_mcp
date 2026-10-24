@@ -19,6 +19,8 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
+from .. import iftpl
+
 
 def _accept_module(project, module, mods):
     """加载检查 + 比对约定 + 跑用例，三项都过才算过。→ (ok, 原因)。"""
@@ -190,24 +192,13 @@ def _login_cookie(client, ws, username, password, login_ep):
 
 
 def _envelope(iface, r):
-    """封装接口的直接调用结果 → 前端信封（与 scaffold 生成的路由组装一致；消息文字里 {变量} 会被路由展开，
-    值可能不同——结构一致按软差异记备注，和随机字段的待遇一样）。"""
-    def payload(w):
-        if w and w.get("取"):
-            return r.get(w["取"]) if isinstance(r, dict) else None
-        return r
-    body = {}
-    if iface.get("表格"):
-        body["lists"] = {iface["表格"]["键"]: payload(iface["表格"])}
-    if iface.get("表单"):
-        body["form"] = payload(iface["表单"])
-    if iface.get("状态"):
-        body["state"] = {iface["状态"]["键"]: payload(iface["状态"])}
-    if iface.get("消息"):
-        body["messages"] = [{"who": "系统", "text": iface["消息"], "kind": "ok"}]
-    if iface.get("跳转"):
-        body["go"] = iface["跳转"]
-    return body
+    """封装接口的直接调用结果 → 前端信封：按约定里的模板渲染路由体（与骨架生成同一份渲染），
+    再逐行解释成信封（iftpl.envelope，只认现有的响应动词）。消息文字里 {变量} 会被路由展开，
+    值可能不同——结构一致按软差异记备注，和随机字段的待遇一样。"""
+    w = iface.get("模板")
+    if not w:
+        return {}
+    return iftpl.envelope(w["名"], w["参数"], r)
 
 
 def _smoke_one(ws, sql, module, iface, case, notes, auth, login, login_ep):

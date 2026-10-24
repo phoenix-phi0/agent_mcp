@@ -69,74 +69,21 @@ def auth_header(name, contracts):
     return "\n".join(lines) + "\n\n"
 
 
-# file_name/file_size/file_ext 入参 -> 「上传信息」返回里的字段名；只有函数声明了才取
-UPLOAD_INFO_FIELDS = {"file_name": "name", "file_size": "size", "file_ext": "ext"}
-
-
-def _upload_lines(i, req, opt):
-    """接口声明了「上传」时，先存文件（失败回 400），函数要 file_name/file_size/file_ext
-    入参才额外取「上传信息」。返回要插在「调用」之前的那几行（已带两格缩进）。"""
-    up = i["上传"]
-    field = up["字段"]
-    path_var = f"{field}_path"
-    call = f"存文件 {field}"
-    if up["类型"]:
-        call += f" 类型={up['类型']}"
-    if up["上限"]:
-        call += f" 上限={up['上限']}"
-    lines = [f"  设 {path_var} = {call}",
-             f"  如果 {{{path_var}}} 开头是 [",
-             f'    返回 {{"error":"{{{path_var}}}"}} 400',
-             "  结束"]
-    have = set(req) | set(opt)
-    if have & set(UPLOAD_INFO_FIELDS):
-        info_var = f"{field}_info"
-        lines.append(f"  设 {info_var} = 上传信息 {field}")
-        for pname, attr in UPLOAD_INFO_FIELDS.items():
-            if pname in have:
-                lines.append(f"  设 {pname} = {{{info_var}.{attr}}}")
-    return lines
-
-
-def _wrap_lines(i):
-    """封装标记 → 组装信封的路由行（已带两格缩进，插在「调用」之后）。
-    信封组装只用现有响应动词：表格 <键> {…} / 响应 form {…} / 状态 <键> {…} / 消息 系统 <话> ok / 响应 go <目标>；
-    结尾不写「返回」——脚本正常跑完时 Router 把动词塞进响应桶作为返回体（写了「返回」会整个盖掉桶，K25 报告有记）。"""
-    def payload(w):
-        return "{r}" if not (w and w.get("取")) else "{r." + w["取"] + "}"
-    lines = []
-    if i["表格"]:
-        lines.append(f"  表格 {i['表格']['键']} {payload(i['表格'])}")
-    if i["表单"]:
-        lines.append(f"  响应 form {payload(i['表单'])}")
-    if i["状态"]:
-        # 状态 <键> 不用「状态 <键> {r}」——那个动词收到的值是替换后的 JSON 文本，对象会存成字符串；
-        # 用 kg 同款「响应 state {…}」合并，JSON 字面量包一层键（字面量里不能有空格，引擎按空格切参数），
-        # 对象 / 数组 / 标量都落对
-        lines.append(f'  响应 state {{"{i["状态"]["键"]}":{payload(i["状态"])}}}')
-    if i["消息"]:
-        lines.append(f"  消息 系统 {i['消息']} ok")
-    if i["跳转"]:
-        lines.append(f"  响应 go {i['跳转']}")
-    return lines
-
-
 def route_text(name, c, contracts=None):
     fns = {f["名"]: f for f in c["函数"]}
     header = auth_header(name, contracts if contracts is not None else {name: c})
     out = [header] if header else []
     for i in c["接口"]:
         f = fns[i["函数"]]
-        req, opt, _ = VC.C.params(f)
-        pre = _upload_lines(i, req, opt) if i["上传"] else []
-        args = [f"{p}={{{p}}}" for p in req] + [f"{p}={{{p} 或}}" for p in opt]
         tag = " 公开" if i["公开"] else (f" 角色 {i['角色']}" if i["角色"] else "")
         if VC.C.has_wrap(i):
             tag = (f" 动作 {i['动作']}" if i["动作"] else "") + tag      # 路由行的 动作 要写在 公开/角色 之前（dsl_http.API_RE 的顺序）
-            call = f"  设 r = 调用 {name}.{i['函数']}{(' ' + ' '.join(args)) if args else ''}"
-            body = "".join(l + "\n" for l in pre) + call + "\n" + "".join(l + "\n" for l in _wrap_lines(i))
+            body = "".join(l + "\n" for l in VC.C.route_body(name, i, f))
             out.append(f"接口 {i['方法']} {i['路径']}{tag}\n{body}结束\n")
         else:
+            req, opt, _ = VC.C.params(f)
+            pre = VC.C.upload_lines(i, req, opt) if i["上传"] else []
+            args = [f"{p}={{{p}}}" for p in req] + [f"{p}={{{p} 或}}" for p in opt]
             body = "".join(l + "\n" for l in pre)
             out.append(f"接口 {i['方法']} {i['路径']}{tag}\n{body}  设 r = 调用 {name}.{i['函数']}{(' ' + ' '.join(args)) if args else ''}\n  返回 {{r}}\n结束\n")
     return "\n".join(out)
