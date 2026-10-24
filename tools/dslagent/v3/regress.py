@@ -213,6 +213,7 @@ def _smoke_one(ws, sql, module, iface, case, notes, auth, login, login_ep):
 
 def _smoke_one_inner(ws, sql, module, iface, case, notes, auth, login, login_ep):
     from ..packs.dslproj import cases as K
+    from ..packs.dslproj import contract as _C
     why = K.seed_case(ws, sql, module, case)
     tag = f"{module} {iface['方法']} {iface['路径']}"
     if why:
@@ -222,7 +223,9 @@ def _smoke_one_inner(ws, sql, module, iface, case, notes, auth, login, login_ep)
     seed_content = K.snapshot_content(ws)
     try:
         eng = K.make_engine(ws)
-        r, err = K.call(eng, module, case["调用"]["目标"], case["调用"]["参数"], "smoke")
+        # 直接调用也按路由的调用行语义取参：「传」定值的入参用约定的字面值（K28b）——
+        # 路由里写的是定值字面量，不看用例给的这个键，两边取参不一致冒烟就对不上
+        r, err = K.call(eng, module, case["调用"]["目标"], _C.route_call_args(iface, case["调用"]["参数"]), "smoke")
         K.settle()
     except TimeoutError as e:
         return f"{tag}：直接调用超时：{e}"
@@ -231,7 +234,6 @@ def _smoke_one_inner(ws, sql, module, iface, case, notes, auth, login, login_ep)
     direct_status = 200 if err in ("", None) else err.get("code")
     direct_body = r if err in ("", None) else {"error": err.get("error")}
     if err in ("", None):
-        from ..packs.dslproj import contract as _C
         if _C.has_wrap(iface):
             direct_body = _envelope(iface, r)      # 封装接口：HTTP 回的是信封，直接调用的结果按约定组装后比对
 
@@ -250,7 +252,8 @@ def _smoke_one_inner(ws, sql, module, iface, case, notes, auth, login, login_ep)
         from tools.dsl_http import Router
         router = Router(Path(ws) / "routes", Path(ws), Path(ws) / "sessions", real=False, login=login)
         client = router.app().test_client()
-        args = {k: _val(v) for k, v in case["调用"]["参数"].items()}
+        # HTTP 表单按约定的「参数」改名对齐前端键、「传」定值的入参不发（K28b）——路由的调用行引用的是前端键
+        args = {k: _val(v) for k, v in _C.form_args(iface, case["调用"]["参数"]).items()}
 
         def call():
             if iface["方法"] == "GET":

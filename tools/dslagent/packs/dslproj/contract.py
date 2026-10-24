@@ -26,8 +26,11 @@
                                   # 入参里有 file_name/file_size/file_ext 才会额外取「上传信息」传给函数
     POST /note/list -> 列笔记 动作 note_list 模板 列表 键=notes 行=title,updated_at   # 封装标记（顺序不限，可不写）：动作 <名> 绑前端 .ui 的远程动作（必须
                                   # 和「模板」一起写，只有动作没有模板在检查里报）；模板 <中文名> [参数=值 …]＝返回封装走模板（只能用【接口封装模板】
-                                  # 清单里的，骨架按模板生成组装信封的路由；参数缺 / 多 / 不合法都在检查里报）。有「动作」或「模板」的接口方法必须 POST
-                                  # （前端只会 POST）；出错照旧走 {"error": …} + 4xx
+                                  # 清单里的，骨架按模板生成组装信封的路由；参数缺 / 多 / 不合法都在检查里报）。
+                                  # 传 <入参>=<定值> …＝调函数时这个入参用固定值（可多个；定值按空格切词、不能带空格，如 传 disabled=1）；
+                                  # 参数 <前端键>=<入参> …＝前端表单键 <前端键> 的值传给函数入参 <入参>（可多个；前端键和函数参数名不一致时用）。
+                                  # 「传」「参数」都要写在声明了「模板」的封装接口上，入参必须在函数头里、同一个入参不能既「传」定值又改名（检查里报）。
+                                  # 有「动作」或「模板」的接口方法必须 POST（前端只会 POST）；出错照旧走 {"error": …} + 4xx
 
     ## 用例                                  # 每个公开函数至少一条
     用例 记作答_全对
@@ -101,7 +104,7 @@ def has_wrap(i):
 
 def empty_wrap():
     """接口封装的缺省值（parse 出的每个接口都带这些键；「动作」「模板」都没写的旧接口行为与从前完全一样）。"""
-    return {"动作": "", "模板": None}
+    return {"动作": "", "模板": None, "传": {}, "参数": {}}
 
 
 def account_modules(contracts):
@@ -172,13 +175,16 @@ def _kv(text):
 
 
 def _iface_tail(tail):
-    """接口行 -> 函数 之后的标记（上传 / 类型 / 上限 / 公开 / 角色 / 动作 / 模板 [参数=值 …]），顺序不限。
-    「模板 <中文名>」后面的 键=值 token 都是它的参数（碰到没有 = 的标记就停）。
-    → (上传dict|None, 公开bool, 角色str, 动作str, 模板dict|None, 问题列表)。"""
+    """接口行 -> 函数 之后的标记（上传 / 类型 / 上限 / 公开 / 角色 / 动作 / 模板 [参数=值 …] /
+    传 <入参>=<定值> … / 参数 <前端键>=<入参> …），顺序不限。
+    「模板 <中文名>」后面的 键=值 token 都是它的参数（碰到没有 = 的标记就停）；「传」「参数」各只写一次，
+    后面连续的 k=v token 都是它们的（定值按空格切词、不能带空格）。
+    → (上传dict|None, 公开bool, 角色str, 动作str, 模板dict|None, 传dict, 参数dict, 问题列表)。"""
     toks = tail.split()
     probs = []
     upload, public, role = None, False, ""
     action, tpl = "", None
+    fixed, ren = {}, {}          # 传：入参 -> 定值；参数：前端键 -> 入参
     i = 0
     while i < len(toks):
         t = toks[i]
@@ -237,13 +243,58 @@ def _iface_tail(tail):
                 params[k] = v
                 i += 1
             tpl = {"名": name, "参数": params}
-        else:
-            probs.append(f"不认识的接口标记「{t}」（只有 上传 <字段> [类型 …] [上限 …] / 公开 / 角色 <代号> / "
-                         f"动作 <名> / 模板 <中文名> [参数=值 …]；返回封装只能用模板，清单见写约定的输入）")
+        elif t == "传":
+            if fixed:
+                probs.append("「传」只能写一次")
+                i += 1
+                continue
             i += 1
+            while i < len(toks) and "=" in toks[i]:
+                k, _, v = toks[i].partition("=")
+                if k in fixed:
+                    probs.append(f"「传」的入参「{k}」重复")
+                elif v == "":
+                    probs.append(f"「传 {k}=」缺定值（定值直接写字面值，按空格切词、不能带空格，如 传 disabled=1）")
+                else:
+                    fixed[k] = v
+                i += 1
+            if not fixed:
+                probs.append("「传」后面要跟 入参=定值 …（如 传 disabled=1；多个用空格隔开）")
+        elif t == "参数":
+            if ren:
+                probs.append("「参数」只能写一次")
+                i += 1
+                continue
+            i += 1
+            while i < len(toks) and "=" in toks[i]:
+                k, _, v = toks[i].partition("=")
+                if k in ren:
+                    probs.append(f"「参数」的前端键「{k}」重复")
+                elif not NAME_RE.match(k):
+                    probs.append(f"「参数」的前端键「{k}」要用英文 snake（前端表单键，要和 .ui 字段名对得上）")
+                elif v == "":
+                    probs.append(f"「参数 {k}=」缺函数入参（写法是 参数 <前端键>=<函数入参>，如 参数 reset_user=username）")
+                elif v in ren.values():
+                    probs.append(f"「参数 {k}={v}」：入参「{v}」已经被「参数」映射过（一个入参只收一个前端键）")
+                else:
+                    ren[k] = v
+                i += 1
+            if not ren:
+                probs.append("「参数」后面要跟 前端键=函数入参 …（如 参数 reset_user=username；多个用空格隔开）")
+        else:
+            probs.append(f"不认识的接口标记「{t}」（只有 上传 <字段> [类型 …] [上限 …] / 公开 / 角色 <代号> / 动作 <名> / "
+                         f"模板 <中文名> [参数=值 …] / 传 <入参>=<定值> … / 参数 <前端键>=<入参> …；返回封装只能用模板，清单见写约定的输入）")
+            i += 1
+    # 「传」×「参数」的交叉冲突在循环外查（两边的标记顺序不限，只看结果）：
+    # 同一入参既传定值又被改名；前端键撞「传」的入参名。
+    for k in sorted(set(fixed) & set(ren.values())):
+        f = next(x for x, v in ren.items() if v == k)
+        probs.append(f"「传 {k}={fixed[k]}」和「参数 {f}={k}」撞了同一个入参「{k}」（既传定值又改名，二选一）")
+    for k in sorted(set(fixed) & set(ren)):
+        probs.append(f"「参数 {k}={ren[k]}」：前端键「{k}」和「传」的入参重名（定值入参前端不发，换一个前端键）")
     if upload and upload["上限"] and not UPLOAD_SIZE_RE.match(upload["上限"]):
         probs.append(f"「上限 {upload['上限']}」写错了，写成 20MB / 500KB / 字节数")
-    return upload, public, role, action, tpl, probs
+    return upload, public, role, action, tpl, fixed, ren, probs
 
 
 def parse(text):
@@ -338,12 +389,12 @@ def parse(text):
                              f"[动作 <名>] [模板 <中文名> [参数=值 …]]]，现在是「{s}」")
             else:
                 method, path, fn, tail = m.groups()
-                upload, pub, role, action, tpl, tail_probs = _iface_tail(tail.strip())
+                upload, pub, role, action, tpl, fixed, ren, tail_probs = _iface_tail(tail.strip())
                 probs += [f"第 {no} 行：{p}" for p in tail_probs]
                 if pub and role:
                     probs.append(f"第 {no} 行：接口「{path}」不能同时写「公开」和「角色」")
                 c["接口"].append({"方法": method.upper(), "路径": path, "函数": fn, "公开": bool(pub), "角色": role or "",
-                                  "上传": upload, "动作": action, "模板": tpl, "行": no})
+                                  "上传": upload, "动作": action, "模板": tpl, "传": fixed, "参数": ren, "行": no})
         elif sec == "用例":
             _case_line(c, s, parts, h, no, probs)
             cur = c["用例"][-1] if c["用例"] else None
@@ -568,17 +619,49 @@ def upload_lines(i, req, opt):
 def route_body(module, i, fn):
     """封装接口的路由体：存文件（声明了「上传」时）→ 调用 → 模板渲染出的组装行（已带缩进，结尾不写「返回」）。
     K27a 起「动作」必须配「模板」（约定检查会拦只有动作的约定），这里总是按模板渲染。
+    调用行的参数（K28b）：「传 入参=定值」写定值字面量、「参数 前端键=入参」写 入参={前端键}，其余照旧 p={p}（可选 p={p 或}）。
     骨架生成（v3.scaffold.route_text）和比对约定（project.compare 拿它和实际路由逐行比）共用这一份渲染，
     模板怎么改都不会出现「生成的」和「比对的」两套写法漂移。"""
     req, opt, _ = params(fn)
     lines = upload_lines(i, req, opt) if i["上传"] else []
-    args = [f"{p}={{{p}}}" for p in req] + [f"{p}={{{p} 或}}" for p in opt]
+    fixed, ren = i.get("传") or {}, i.get("参数") or {}
+    front = {p: f for f, p in ren.items()}          # 入参 -> 前端键
+
+    def arg(p, alt=""):
+        if p in fixed:
+            return f"{p}={fixed[p]}"                # 定值：写字面值（前端不发这个键）
+        if p in front:
+            return f"{p}={{{front[p]}{alt}}}"       # 改名：前端表单键的值传给函数入参
+        return f"{p}={{{p}{alt}}}"
+
+    args = [arg(p) for p in req] + [arg(p, " 或") for p in opt]
     lines.append(f"  设 r = 调用 {module}.{i['函数']}{(' ' + ' '.join(args)) if args else ''}")
     if not i["模板"]:
         raise ValueError(f"接口 {i['路径']} 声明了「动作 {i['动作']}」却没有「模板」：前端动作的接口要用模板组装返回"
                          f"（可用模板：{'、'.join(iftpl.names())}；约定检查会拦，这里不该走到）")
     lines += iftpl.render(i["模板"]["名"], i["模板"]["参数"])
     return lines
+
+
+def form_args(i, kv):
+    """接口冒烟发 HTTP 用的表单（v3.regress 用）：约定「参数 前端键=入参」把函数入参的键换成前端键、
+    「传」定值的入参不发（路由里那是字面值，前端也不发这个键）。封装接口的调用行按 route_body 引用前端键，
+    表单不对齐改名参数就收不到值。没写「传」「参数」的接口原样返回。"""
+    ren, fixed = i.get("参数") or {}, set(i.get("传") or ())
+    front = {p: f for f, p in ren.items()}
+    return {front.get(k, k): v for k, v in kv.items() if k not in fixed}
+
+
+def route_call_args(i, kv):
+    """接口冒烟「直接调用」用的入参（v3.regress 用）：「传」定值的入参用约定的字面值——路由的调用行
+    写的是定值字面量，不看用例给的这个键的值；其余照用例。「参数」改名只影响 HTTP 表单（form_args），
+    直接调用本来就按函数入参名传，不动。"""
+    fixed = i.get("传") or {}
+    if not fixed:
+        return kv
+    out = dict(kv)
+    out.update(fixed)
+    return out
 
 
 def _auth_problems(c, fns):
@@ -750,6 +833,26 @@ def check(c, name, upstream, all_modules):
             names = [p.rstrip("?") for p in f["入参"]]
             if path_param not in names:
                 probs.append(f"第 {i['行']} 行：接口 {i['路径']} 声明了「上传 {i['上传']['字段']}」，但函数「{i['函数']}」没有入参「{path_param}」接收存盘路径")
+        if f is not None and (i["传"] or i["参数"]):
+            if i["模板"] is None:
+                probs.append(f"第 {i['行']} 行：「传 …」「参数 …」只对声明了「模板」的封装接口有意义"
+                             f"（裸接口没有前端键可改，调用参数就是函数入参）")
+            else:
+                pnames = [p.rstrip("?") for p in f["入参"]]
+                for k in sorted(i["传"]):
+                    if k not in pnames:
+                        probs.append(f"第 {i['行']} 行：「传 {k}={i['传'][k]}」的 {k} 不是函数「{i['函数']}」的入参"
+                                     f"（「传」只能给函数头里有的入参定值）")
+                for fk, p in sorted(i["参数"].items()):
+                    if p not in pnames:
+                        probs.append(f"第 {i['行']} 行：「参数 {fk}={p}」的 {p} 不是函数「{i['函数']}」的入参")
+                    elif fk in pnames and fk != p:
+                        probs.append(f"第 {i['行']} 行：「参数 {fk}={p}」的前端键「{fk}」和函数入参「{fk}」重名"
+                                     f"（同名入参本来就照 {fk}={{{fk}}} 传，别让一个表单键喂两个入参）")
+                if i["上传"]:
+                    path_param = f"{i['上传']['字段']}_path"
+                    for k in sorted((set(i["传"]) | set(i["参数"].values())) & {path_param}):
+                        probs.append(f"第 {i['行']} 行：入参「{k}」由「上传 {i['上传']['字段']}」的存盘路径传入，不能再用「传」/「参数」改写")
     probs += _auth_problems(c, fns)
     probs += _script_problems(c, name, all_modules)
     probs += _content_problems(c, name)

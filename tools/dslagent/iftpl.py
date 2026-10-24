@@ -164,7 +164,8 @@ def render(name, params):
 def envelope(name, params, r):
     """模板渲染出的路由体 + 直接调用结果 r → 前端信封（接口冒烟用）。
     逐行解释渲染结果，只认「设 变量 = 值」和现有的响应动词（表格 / 响应 form|state|go / 消息），
-    与 Router 的响应桶行为一致；加新模板不用改这里。"""
+    与 Router 的响应桶行为一致：「响应 state {r}」整体铺开按 verbs/http 的合并语义记期望，
+    go 目标里的 {r.字段} 引用按运行时展开后的值记（Router 实测会展开）；加新模板不用改这里。"""
     env, vs = {}, {}
     for line in render(name, params):
         s = line.strip()
@@ -180,21 +181,37 @@ def envelope(name, params, r):
         if m:
             env["form"] = _pick(m.group(1), r, vs)
             continue
+        m = re.match(r"^响应\s+state\s+\{r(?:\.([A-Za-z_]\w*))?\}$", s)
+        if m:
+            v = r if m.group(1) is None else (r.get(m.group(1)) if isinstance(r, dict) else None)
+            if isinstance(v, dict):
+                env.setdefault("state", {}).update(v)     # 与 verbs/http 响应 state 的合并语义一致
+            continue
         m = re.match(r'^响应\s+state\s+\{"(.+?)":(.+)\}$', s)
         if m:
             env.setdefault("state", {})[m.group(1)] = _pick(m.group(2), r, vs)
             continue
         m = re.match(r"^响应\s+go\s+(\S+)$", s)
         if m:
-            env["go"] = m.group(1)
+            env["go"] = _go(m.group(1), r)
             continue
         m = re.match(r"^消息\s+(\S+)\s+(\S+)(?:\s+(\S+))?\s*$", s)
         if m:
-            msg = {"who": m.group(1), "text": _expand(m.group(2), vs)}
+            msg = {"who": m.group(1), "text": _pick(m.group(2), r, vs)}
             if m.group(3):
                 msg["kind"] = m.group(3)
             env.setdefault("messages", []).append(msg)
     return env
+
+
+def _go(target, r):
+    """go 目标里的 {r.字段} 引用按直接调用结果展开（Router 运行时会展开，实测见 tests/tools/test_dslagent_wrap.py；
+    取不到的保持原样，跟引擎「取不到原样保留」一致）。"""
+    if not isinstance(r, dict):
+        return target
+    return re.sub(r"\{r\.([A-Za-z_]\w*)\}",
+                  lambda m: m.group(0) if r.get(m.group(1)) is None else str(r[m.group(1)]),
+                  target)
 
 
 def _pick(token, r, vs):

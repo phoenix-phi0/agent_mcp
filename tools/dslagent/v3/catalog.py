@@ -69,6 +69,10 @@ def _iface_line(i):
     if i.get("模板"):
         w = i["模板"]
         tail.append("模板 " + w["名"] + "".join(f" {k}={v}" for k, v in w["参数"].items()))
+    if i.get("传"):
+        tail.append("传 " + " ".join(f"{k}={v}" for k, v in i["传"].items()))
+    if i.get("参数"):
+        tail.append("参数 " + " ".join(f"{f}={p}" for f, p in i["参数"].items()))
     head = f"{i['方法']} {i['路径']} -> {i['函数']}"
     return head + ("  " + "  ".join(tail) if tail else "")
 
