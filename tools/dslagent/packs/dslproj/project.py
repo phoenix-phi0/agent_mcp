@@ -413,7 +413,7 @@ def compare(project, module, contract, modules):
             w = i["模板"]
             fnc = next((x for x in contract["函数"] if x["名"] == i["函数"]), None)
             if w is None:
-                continue        # 只有「动作」没有模板：绑动作上面已查，组装行为与 K25 相同（骨架只生成调用），不逐行比
+                continue        # K27a 起「动作」必须配「模板」（约定检查已拦），只有动作的约定到不了这里；留着防空约定炸 TypeError
             wtext = " ".join([f"模板 {w['名']}"] + [f"{k}={v}" for k, v in w["参数"].items()])
             if fnc is None:
                 diffs.append(f"{tag} 调的函数「{i['函数']}」不在约定里（约定检查会报），没法按模板核对路由体")

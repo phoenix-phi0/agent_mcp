@@ -4,7 +4,8 @@
     cd /workspace/agent_mcp && .venv/bin/python tests/tools/test_dslagent_wrap.py
 
 一、模板库（tools/dslagent/iftpl）：清单生成、参数校验各错误、渲染（当 块）、信封解释
-二、约定解析：模板行（参数、乱序、混写）、K25 旧封装标记现在要报、旧写法（无模板）完全兼容
+二、约定解析：模板行（参数、乱序、混写）、K25 旧封装标记现在要报、旧写法（无模板）完全兼容；
+    只有「动作」没有「模板」要报（K27a：前端动作的接口要用模板组装返回），动作+模板不报
 三、骨架生成：各模板渲染出的路由、结尾不写返回；没写模板的照旧「返回 {r}」
 四、约定检查（v3 contracts）：动作名要在 .ui 里、覆盖核对（其余约定齐了才全量查）、没有 .ui 的项目不声明动作
 五、比对约定：路由体要和模板渲染出的一致、结尾不能是「返回」、行字段要在实体字段表、动作绑定一致、.ui 覆盖与跨模块重复
@@ -152,16 +153,26 @@ def t_parse():
     for want in ("「模板」后面要跟模板中文名", "「模板」只能写一次", "模板参数「键」重复",
                  "不认识的接口标记「表格」", "不认识的接口标记「消息」", "不认识的接口标记「取」"):
         check(any(want in x for x in p3), f"错误写法报出「{want}」", p3)
-    # 只有「动作」没有模板（K25 就有的写法）：行为不变——要 POST、骨架绑动作、结尾不写返回
+    # K27a：只有「动作」没有「模板」→ 报（前端动作的接口要用模板组装返回，报错里列出可用模板）；动作+模板 → 不报；
+    # 都没有 → 旧行为（t_compat）
     c5, p5 = C.parse("模块 note\n依赖 无\n\n## 函数\n公开 函数 f a\n  返回 {ok}\n\n## 接口\n"
                      "POST /k -> f 动作 a9\nGET /m -> f 动作 a10\n")
     check(not p5, "只有动作没有模板解析无问题", p5)
     pr5 = C.check(c5, "note", {}, ["note"])
+    check(any("接口 /k " in x and "没有「模板」" in x and "要用模板组装返回" in x for x in pr5),
+          "POST + 只有动作 → 报「要用模板组装返回」", pr5)
+    check(any("可用模板：列表、回填、提交消息、提交跳转、状态" in x for x in pr5), "报错里列出可用模板中文名", pr5)
     check(any("接口 /m " in x and "方法要写 POST" in x and "动作 a10" in x for x in pr5), "GET + 只有动作 → 也要求 POST", pr5)
-    check(all("POST /k" not in x for x in pr5), "POST + 只有动作 → 不报", pr5)
-    rt5 = SF.route_text("note", c5)
-    check("接口 POST /k 动作 a9\n  设 r = 调用 note.f a={a}\n结束" in rt5, "只有动作的接口骨架照 K25 绑动作、不写返回", rt5)
-    check("接口 GET /m 动作 a10" in rt5, "GET 接口的骨架也带动作声明", rt5)
+    c6, _ = C.parse("模块 note\n依赖 无\n\n## 函数\n公开 函数 f a\n  返回 {ok}\n\n## 接口\n"
+                    "POST /k -> f 动作 a9 模板 回填\n")
+    pr6 = C.check(c6, "note", {}, ["note"])
+    check(all("a9" not in x for x in pr6), "动作+模板 → 不报", pr6)
+    # 只有动作的约定过不了检查，不再为它生成「只绑动作」的路由（route_body 总是按模板渲染，渲染不出就炸出来）
+    try:
+        SF.route_text("note", c5)
+        check(False, "只有动作没有模板 → 骨架炸 ValueError（兼容分支已不可达）", "没有抛")
+    except ValueError as e:
+        check("模板" in str(e), "只有动作没有模板 → 骨架炸 ValueError（兼容分支已不可达）", e)
     # 约定检查：参数校验各错误、动作名 / 唯一 / POST
     c4, _ = C.parse("模块 note\n依赖 无\n\n## 函数\n公开 函数 f a\n  返回 {ok}\n\n## 接口\n"
                     "GET /x -> f 模板 列表 键=rows\n"
@@ -324,7 +335,7 @@ def t_compare():
     cc, _ = P.load_contract(q, "note")
     d = P.compare(q, "note", cc, ["note"])["差异"]
     check(any("「ghost_action」没有任何接口声明" in x for x in d), ".ui 动作没人声明 → 差异", d)
-    more = tail + "POST /note/x -> 列笔记 动作 not_in_ui\n"
+    more = tail + "POST /note/x -> 列笔记 动作 not_in_ui 模板 回填\n"
     extra_ct = ("模块 note\n依赖 无\n\n## 函数\n公开 函数 列笔记 owner\n  返回 行列表\n  伪代码 返回 []\n\n## 接口\n"
                 + more + "\n\n## 用例\n用例 列笔记_有\n  调用 列笔记 owner=u1\n  得 有返回\n")
     q = mkproj("cmp_extra", {"contracts/note.md": extra_ct}, entities, routes, services, ui)

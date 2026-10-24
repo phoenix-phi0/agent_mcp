@@ -20,9 +20,9 @@
     POST /textbook_import/task -> 新建导入 上传 file 类型 pdf,docx,md,txt 上限 20MB 角色 teacher   # 带「上传」的接口：
                                   # 函数要有入参「<字段>_path」收存盘后的路径（骨架自动生成「先 存文件」「失败回 400」）；
                                   # 入参里有 file_name/file_size/file_ext 才会额外取「上传信息」传给函数
-    POST /note/list -> 列笔记 动作 note_list 模板 列表 键=notes 行=title,updated_at   # 封装标记（顺序不限，可不写）：动作 <名> 绑前端 .ui 的远程动作；
-                                  # 模板 <中文名> [参数=值 …]＝返回封装走模板（只能用【接口封装模板】清单里的，骨架按模板生成组装
-                                  # 信封的路由；参数缺 / 多 / 不合法都在检查里报）。有「动作」或「模板」的接口方法必须 POST
+    POST /note/list -> 列笔记 动作 note_list 模板 列表 键=notes 行=title,updated_at   # 封装标记（顺序不限，可不写）：动作 <名> 绑前端 .ui 的远程动作（必须
+                                  # 和「模板」一起写，只有动作没有模板在检查里报）；模板 <中文名> [参数=值 …]＝返回封装走模板（只能用【接口封装模板】
+                                  # 清单里的，骨架按模板生成组装信封的路由；参数缺 / 多 / 不合法都在检查里报）。有「动作」或「模板」的接口方法必须 POST
                                   # （前端只会 POST）；出错照旧走 {"error": …} + 4xx
 
     ## 用例                                  # 每个公开函数至少一条
@@ -90,13 +90,13 @@ UPLOAD_SIZE_RE = re.compile(r"^\d+(?:\.\d+)?(?:B|KB|MB|GB)?$", re.I)
 
 def has_wrap(i):
     """接口声明了封装（「动作 <名>」或「模板 <中文名> …」）→ 这是给前端用的接口（K25 起「动作」也算封装：
-    要 POST、路由要绑动作、结尾不写「返回」；K26 起信封组装一律走模板，只有「动作」没有模板的接口
-    照 K25 一样只绑动作、组装行为与从前完全一样）。"""
+    要 POST、路由要绑动作、结尾不写「返回」；K26 起信封组装一律走模板，K27a 起「动作」必须配「模板」，
+    只有动作没有模板的约定在检查里报）。"""
     return bool(i.get("动作")) or i.get("模板") is not None
 
 
 def empty_wrap():
-    """接口封装的缺省值（parse 出的每个接口都带这些键；没写模板 = 行为与从前完全一样）。"""
+    """接口封装的缺省值（parse 出的每个接口都带这些键；「动作」「模板」都没写的旧接口行为与从前完全一样）。"""
     return {"动作": "", "模板": None}
 
 
@@ -548,16 +548,18 @@ def upload_lines(i, req, opt):
 
 
 def route_body(module, i, fn):
-    """模板接口的路由体：存文件（声明了「上传」时）→ 调用 → 模板渲染出的组装行（已带缩进，结尾不写「返回」）。
-    只有「动作」没有模板的接口也走这里（K25 行为：只绑动作、调函数，没有组装行、不写「返回」）。
+    """封装接口的路由体：存文件（声明了「上传」时）→ 调用 → 模板渲染出的组装行（已带缩进，结尾不写「返回」）。
+    K27a 起「动作」必须配「模板」（约定检查会拦只有动作的约定），这里总是按模板渲染。
     骨架生成（v3.scaffold.route_text）和比对约定（project.compare 拿它和实际路由逐行比）共用这一份渲染，
     模板怎么改都不会出现「生成的」和「比对的」两套写法漂移。"""
     req, opt, _ = params(fn)
     lines = upload_lines(i, req, opt) if i["上传"] else []
     args = [f"{p}={{{p}}}" for p in req] + [f"{p}={{{p} 或}}" for p in opt]
     lines.append(f"  设 r = 调用 {module}.{i['函数']}{(' ' + ' '.join(args)) if args else ''}")
-    if i["模板"]:
-        lines += iftpl.render(i["模板"]["名"], i["模板"]["参数"])
+    if not i["模板"]:
+        raise ValueError(f"接口 {i['路径']} 声明了「动作 {i['动作']}」却没有「模板」：前端动作的接口要用模板组装返回"
+                         f"（可用模板：{'、'.join(iftpl.names())}；约定检查会拦，这里不该走到）")
+    lines += iftpl.render(i["模板"]["名"], i["模板"]["参数"])
     return lines
 
 
@@ -706,6 +708,10 @@ def check(c, name, upstream, all_modules):
             if i["动作"] in seen_act:
                 probs.append(f"第 {i['行']} 行：动作「{i['动作']}」被本模块两个接口声明（一个动作名只能绑一个接口）")
             seen_act.add(i["动作"])
+        if i["动作"] and i["模板"] is None:
+            probs.append(f"第 {i['行']} 行：接口 {i['路径']} 声明了「动作 {i['动作']}」却没有「模板」——前端动作的接口要用模板组装返回"
+                         f"（只写「动作」的接口会返回空信封，前端拿到什么都不显示）；可用模板：{'、'.join(iftpl.names())}"
+                         f"（写约定的输入里有模板清单）")
         if i["模板"]:
             for p in iftpl.validate(i["模板"]["名"], i["模板"]["参数"]):
                 probs.append(f"第 {i['行']} 行：{p}")
