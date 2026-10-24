@@ -26,9 +26,25 @@
       唯一 learner point
     结束
 
+    页面 实体 account_view 账号页面
+      字段 account_state 文本 状态
+      字段 attempt_n 整数 作答数
+    结束
+
 One entity per block. The name is the table name; the class name is derived
 (article -> Article, see tools.render.to_class_name). Entities get an
 implicit autoincrement `id` unless 主键 names one explicitly.
+
+Page entities
+-------------
+`页面 实体 <名> <中文名>` declares a page entity: its fields feed the UI
+field table (field_table / options_map below) so .ui columns and inputs
+can bind names that no business table has — tally, verdict, job_state and
+friends — but it never becomes a table: render/order skip it, so schema.sql,
+models, gen 的建库和迁移、跑用例建库全部跳过；queries/写库 引用它的名字查不到表，
+加载检查（loadcheck.check_page_entities）会报。字段行只写 名 类型 [枚举选项]
+标签——必填/唯一/索引/系统/级联删除/默认/关联/主键 都描述表的行为，页面上
+没有表，写了 validate 会报。枚举选项是合法的：下拉框的选项就靠它。
 
 This is the single source the three template sets read from: db templates
 turn entities into DDL and models, backend templates into routes, and the
@@ -69,6 +85,9 @@ PK = "主键"
 # 跟字段行里的旗标「唯一」同一个词，位置不同：旗标管一列，这一行管一组。
 UNIQUE = "唯一"
 END = "结束"
+# 「页面 实体 <名> <中文名>」声明页面实体：只进字段表给 .ui 绑定用，不建表
+# （见模块说明 Page entities 一节）。
+PAGE = "页面"
 
 # Bare words that may follow the type
 FLAGS = {"必填", "唯一", "索引", "系统", "级联删除"}
@@ -154,7 +173,6 @@ class Field:
     system: bool = False
     # 「级联删除」旗标：建表时外键写 ON DELETE CASCADE，而不是 RESTRICT。
     cascade: bool = False
-
     @property
     def default_is_word(self) -> bool:
         """True when the default is a symbolic word, not a literal value.
@@ -187,6 +205,8 @@ class Entity:
     uniques: list = dc_field(default_factory=list)
     label: str = ""
     line: int = 0
+    # 页面实体（「页面 实体 …」）：只进字段表给 .ui 绑定用，不建表。
+    page: bool = False
 
     @property
     def has_implicit_id(self) -> bool:
@@ -215,6 +235,7 @@ class Entity:
             "uniques": [list(u) for u in self.uniques],
             "has_implicit_id": self.has_implicit_id,
             "fields": [f.to_dict() for f in self.fields],
+            **({"page": True} if self.page else {}),
         }
 
 
@@ -251,6 +272,7 @@ def parse(text: str) -> list:
     Field line:  字段 <名> <类型> [选项,逗号分隔] [旗标/键值...] [标签]
     Key line:    主键 <字段> [<字段>...]
     Unique line: 唯一 <字段> <字段> [...]    多列合起来唯一，可以写多行
+    Page block:  页面 实体 <名> <中文名> … 结束    页面实体，不建表（见模块说明）
 
     The enum options sit right after the type because they are part of it —
     an enum without options is not a usable type, and validate() says so.
@@ -282,6 +304,21 @@ def parse(text: str) -> list:
             if not words:
                 raise EntitySyntaxError("「实体」要有名字", lineno)
             current = Entity(name=words[0], label=" ".join(words[1:]), line=lineno)
+            continue
+
+        if keyword == PAGE:
+            if current is not None:
+                raise EntitySyntaxError(
+                    f"「{PAGE} {BLOCK}」不能嵌套（「{current.name}」还没「结束」）", lineno)
+            words = rest.split()
+            if not words or words[0] != BLOCK:
+                raise EntitySyntaxError(
+                    f"「{PAGE}」后面要写「{BLOCK}」，比如：{PAGE} {BLOCK} account_view 账号页面", lineno)
+            words = words[1:]
+            if not words:
+                raise EntitySyntaxError(f"「{PAGE} {BLOCK}」要有名字", lineno)
+            current = Entity(name=words[0], label=" ".join(words[1:]),
+                             line=lineno, page=True)
             continue
 
         if keyword == PK:
@@ -337,7 +374,7 @@ def parse(text: str) -> list:
             continue
 
         raise EntitySyntaxError(
-            f"不认识「{keyword}」。可用：{BLOCK}、{LINE}、{PK}、{UNIQUE}、{END}", lineno)
+            f"不认识「{keyword}」。可用：{PAGE} {BLOCK}、{BLOCK}、{LINE}、{PK}、{UNIQUE}、{END}", lineno)
 
     if current is not None:
         raise EntitySyntaxError(f"实体「{current.name}」没有「结束」", current.line)
@@ -361,6 +398,17 @@ def validate(entities) -> list:
         seen.add(e.name)
         if not e.fields:
             problems.append(f"第 {e.line} 行：实体「{e.name}」一个字段都没有")
+        if e.page:
+            # 页面实体没有表，描述表行为的东西统统没有意义：不报的话就是
+            # 一行看着重要、实际哪儿也不生效的文字（K13/K14b「唯一写进说明
+            # 文字不生效」的同类坑）。
+            if e.pk:
+                problems.append(
+                    f"第 {e.line} 行：页面实体「{e.name}」不建表，不用写「主键」")
+            for cols in e.uniques:
+                problems.append(
+                    f"第 {e.line} 行：页面实体「{e.name}」不建表，"
+                    f"不用写「唯一 {' '.join(cols)}」")
 
         names = set()
         for f in e.fields:
@@ -383,6 +431,23 @@ def validate(entities) -> list:
             if f.type not in TYPES:
                 problems.append(f"第 {f.line} 行：未知类型「{f.type}」")
 
+            if e.page:
+                # 字段行里描述表行为的旗标 / 键值：页面实体没有表，写了也
+                # 不生效（必填不会拦提交——页面自己管；唯一/索引没有索引可建；
+                # 默认值没有插入会发生；关联没有表可指向）。
+                useless = [w for w, on in (("必填", f.required), ("唯一", f.unique),
+                                           ("索引", f.indexed), ("系统", f.system),
+                                           ("级联删除", f.cascade)) if on]
+                if f.ref:
+                    useless.append(f"关联 {f.ref}")
+                if f.default:
+                    useless.append(f"默认 {f.default}")
+                if useless:
+                    problems.append(
+                        f"第 {f.line} 行：页面实体「{e.name}」不建表，字段「{f.name}」的 "
+                        f"{'、'.join(useless)} 没有意义（页面实体的字段行只写 "
+                        f"名 类型 [枚举选项] 标签）")
+
             if f.ref:
                 target = by_name.get(f.ref)
                 # A dangling reference builds a schema that will not create.
@@ -395,6 +460,11 @@ def validate(entities) -> list:
                         f"这里有：{'、'.join(sorted(by_name)) or '无'}。"
                         f"指向库外的东西（jsonl 题库、别的库）不要写「关联」，"
                         f"那种校验放在应用代码里")
+                elif target.page and not e.page:
+                    problems.append(
+                        f"第 {f.line} 行：「{f.name} 关联 {f.ref}」指向页面实体"
+                        f"「{f.ref}」：页面实体不建表，外键接不上（要引用就给它"
+                        f"建一张真表，或这一列不写「关联」、在应用代码里核对）")
                 elif len(target.pk) > 1:
                     problems.append(
                         f"第 {f.line} 行：「{f.name}」指向的「{f.ref}」是复合主键，"
@@ -494,7 +564,11 @@ def order(entities) -> list:
     order rather than raising: SQLite tolerates circular references when the
     tables are created in one transaction, and refusing to build would be a
     harsher rule than the database itself applies.
+
+    页面实体不在这里：不建表，建库 / 造数（render_db、trial.seed）都从这
+    个列表拿表，把它留下只会产出对不上的 CREATE TABLE。
     """
+    entities = [e for e in entities if not e.page]
     by_name = {e.name: e for e in entities}
     out, placed = [], set()
 
@@ -519,7 +593,7 @@ def dump(entities) -> str:
     """Indented text, for eyeballing what the parser produced."""
     out = []
     for e in entities:
-        head = f"实体 {e.name}"
+        head = f"页面 实体 {e.name}" if e.page else f"实体 {e.name}"
         if e.label and e.label != e.name:
             head += f" — {e.label}"
         out.append(head)
@@ -562,7 +636,7 @@ def check(text: str) -> str:
             bits.append(f"主键 {'+'.join(e.pk)}")
         if e.refs():
             bits.append("关联 " + "、".join(f.ref for f in e.refs()))
-        lines.append(f"实体「{e.name}」：{'，'.join(bits)}")
+        lines.append(f"{'页面实体' if e.page else '实体'}「{e.name}」：{'，'.join(bits)}")
     if problems:
         lines.append("问题：")
         lines.extend("  - " + p for p in problems)

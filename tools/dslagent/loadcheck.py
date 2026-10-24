@@ -501,6 +501,42 @@ def check_project(root, scripts=False):
     if scripts:
         probs += check_project_scripts(root)
     probs += check_entity_uniques(root)
+    probs += check_page_entities(root)
+    return probs
+
+
+def check_page_entities(root):
+    """queries/*.sql 引用页面实体（「页面 实体 …」，不建表）→ 报。
+
+    页面实体只进 .ui 的字段表：没有对应的表，查询 / 写库拿它当表跑要到
+    运行时才炸 no such table。这里在加载时就报。实体语法错不在这里报
+    （建表 / 跑用例会报），解析不了的文件跳过。"""
+    from tools.entity import EntitySyntaxError
+    from tools.entity import parse as parse_entities
+    ed = Path(root) / "entities"
+    pages = {}
+    for f in sorted(ed.glob("*.entity")) if ed.is_dir() else []:
+        try:
+            for e in parse_entities(f.read_text(encoding="utf-8")):
+                if e.page:
+                    pages[e.name] = str(f.relative_to(root))
+        except (EntitySyntaxError, UnicodeDecodeError):
+            continue
+    if not pages:
+        return []
+    qd = Path(root) / "queries"
+    probs = []
+    for f in sorted(qd.glob("*.sql")) if qd.is_dir() else []:
+        try:
+            t = f.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        hit = sorted(n for n in pages if re.search(rf"\b{re.escape(n)}\b", t))
+        if hit:
+            probs.append(
+                f"queries/{f.name} 用到页面实体 {'、'.join(hit)}（{pages[hit[0]]} 里"
+                f"「页面 实体 {hit[0]}」，不建表）：查询 / 写库不能拿页面实体当表，"
+                f"要查数据就建真表，或者改走别的查询")
     return probs
 
 
@@ -521,6 +557,10 @@ def check_entity_uniques(root):
             continue
         rel = str(f.relative_to(root))
         for e in ents:
+            if e.page:
+                # 页面实体不建表：没有 UNIQUE 可建，也不用旗标（校验实体时
+                # 反而禁止写旗标）。说明文字里出现「唯一」不报，免得两头堵。
+                continue
             for fl in e.fields:
                 if fl.unique or any(fl.name in u for u in e.uniques):
                     continue

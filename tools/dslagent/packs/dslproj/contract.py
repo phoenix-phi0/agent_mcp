@@ -9,6 +9,10 @@
       learner 文本 学习者
     表 answer_log 学习记录                   # 拥有学习者真实记录的表要标「学习记录」（只加不重建，见 tools/migrate.py）
 
+    ## 页面字段                              # 可选：页面专用字段（.ui 的列/表单要绑、业务表里没有的：tally、verdict、job_state 这类）
+    页面 account_view 账号页面               # 实体名英文 snake + 中文名；不建表，骨架写成「页面 实体 …」（不进建库/迁移，查询/写库不能用）
+      account_state 文本 状态                # 名 类型 说明，写法与「## 表」的字段行一致
+
     ## 函数
     公开 函数 记作答 learner point_code correct pass_line?    # 「公开」可省（私有）；入参末尾 ? = 可选
       返回 {score, mastered}
@@ -64,7 +68,7 @@ PARAM_RE = re.compile(r"^[a-z_][a-z0-9_]*\??$")
 IDENT = r"[A-Za-z0-9_一-鿿]+"
 QCALL_RE = re.compile(rf"调用\s+({IDENT})\.({IDENT})")
 METHODS = ("GET", "POST", "PUT", "DELETE")
-SECTIONS = {"表": "表", "数据": "表", "函数": "函数", "接口": "接口", "用例": "用例", "脚本": "脚本", "内容文件": "内容文件"}
+SECTIONS = {"表": "表", "数据": "表", "页面字段": "页面字段", "函数": "函数", "接口": "接口", "用例": "用例", "脚本": "脚本", "内容文件": "内容文件"}
 SCRIPT_RE = re.compile(r"^scripts/([a-z][a-z0-9_]*)\.zs$")
 CONTENT_RE = re.compile(r"^content/([a-z][a-z0-9_]*)/([A-Za-z0-9_{}./-]+\.(?:jsonl|json))$")   # 内容文件路径：content/<模块>/…（.jsonl / .json，可含 {变量}）
 
@@ -245,7 +249,7 @@ def _iface_tail(tail):
 def parse(text):
     """→ (contract, 问题)。contract = {模块, 依赖, 表, 函数, 接口, 用例, 脚本, 内容文件}；各项带「行」。"""
     probs = []
-    c = {"模块": None, "依赖": [], "表": [], "函数": [], "接口": [], "用例": [], "脚本": [], "内容文件": []}
+    c = {"模块": None, "依赖": [], "表": [], "页面字段": [], "函数": [], "接口": [], "用例": [], "脚本": [], "内容文件": []}
     sec, cur = None, None
     for no, raw in enumerate(text.replace("\r", "").splitlines(), 1):
         if raw.strip().startswith("```"):
@@ -255,7 +259,7 @@ def parse(text):
             sec = SECTIONS.get(title)
             cur = None
             if sec is None:
-                probs.append(f"第 {no} 行：不认识的小节「{title}」（只有 表 / 函数 / 接口 / 用例 / 脚本 / 内容文件）")
+                probs.append(f"第 {no} 行：不认识的小节「{title}」（只有 表 / 页面字段 / 函数 / 接口 / 用例 / 脚本 / 内容文件）")
             continue
         s = _strip_comment(raw).strip()
         if not s or s.startswith("#"):
@@ -281,6 +285,20 @@ def parse(text):
                 c["表"].append(cur)
             elif cur is None:
                 probs.append(f"第 {no} 行：字段要写在「表 <表名>」下面")
+            elif len(parts) < 2:
+                probs.append(f"第 {no} 行：字段写法是「名 类型 [说明]」，现在是「{s}」")
+            else:
+                cur["字段"].append({"名": parts[0], "类型": parts[1], "说明": " ".join(parts[2:]), "行": no})
+        elif sec == "页面字段":
+            if h == "页面":
+                if len(parts) not in (2, 3):
+                    probs.append(f"第 {no} 行：页面写法是「页面 <实体名> [中文名]」，现在是「{s}」")
+                    continue
+                cur = {"名": parts[1], "中文名": parts[2] if len(parts) == 3 else parts[1],
+                       "字段": [], "行": no}
+                c["页面字段"].append(cur)
+            elif cur is None:
+                probs.append(f"第 {no} 行：字段要写在「页面 <实体名>」下面")
             elif len(parts) < 2:
                 probs.append(f"第 {no} 行：字段写法是「名 类型 [说明]」，现在是「{s}」")
             else:
@@ -652,6 +670,15 @@ def check(c, name, upstream, all_modules):
         if t["名"] in tnames:
             probs.append(f"第 {t['行']} 行：表「{t['名']}」重复")
         tnames.add(t["名"])
+    pnames = set()
+    for pg in c["页面字段"]:
+        if not NAME_RE.match(pg["名"]):
+            probs.append(f"第 {pg['行']} 行：页面实体名「{pg['名']}」要用英文 snake")
+        if pg["名"] in pnames:
+            probs.append(f"第 {pg['行']} 行：页面实体「{pg['名']}」重复")
+        if pg["名"] in tnames:
+            probs.append(f"第 {pg['行']} 行：「{pg['名']}」既是「## 表」里的表又是页面实体（页面实体不建表，一个名字只能是一样）")
+        pnames.add(pg["名"])
     fns = {}
     for f in c["函数"]:
         if f["名"] in fns:

@@ -181,6 +181,11 @@ def generate(root: Path, template_set: str = "full", only=None,
     plan, produced = [], {}
     need = required_fields(template_set)
     for e in entities:
+        if e.page:
+            # 页面实体只撑 .ui 的字段表，没有表：给它生成增删改查会产出一堆
+            # 查一张不存在的表的文件。
+            out.append(f"  跳过实体 {e.name}（页面实体不建表，不生成增删改查）")
+            continue
         have = {f.name for f in e.fields}
         missing = [n for n in need if n not in have]
         if missing:

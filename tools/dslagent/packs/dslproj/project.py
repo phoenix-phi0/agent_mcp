@@ -436,8 +436,8 @@ def compare(project, module, contract, modules):
                         bad = [x for x in w["参数"][pname].split(",") if x and x not in fields]
                         if bad:
                             diffs.append(f"{tag} 约定「{pname}={w['参数'][pname]}」里的字段 {bad} 不在任何实体字段表里"
-                                         f"（.ui 的列名要能在字段表里查到，unknown_field 挡编译；页面专用字段在实体文件里的页面实体声明，"
-                                         f"参照 kg/entities/user.entity 的 account_view——entity 语法没有「不建表」写法，页面实体照 kg 现状也是一张不写入数据的表）")
+                                         f"（.ui 的列名要能在字段表里查到，unknown_field 挡编译；页面专用字段写在实体文件的"
+                                         f"「页面 实体 …」（不建表，只进字段表），并在约定「## 页面字段」里声明）")
     for (m, p) in by:
         diffs.append(f"多了约定里没有的接口 {m} {p}")
     diffs += _action_diffs(project, module, contract, modules)
@@ -478,6 +478,32 @@ def compare(project, module, contract, modules):
     for t in contract["表"]:
         if t["名"] not in ents:
             diffs.append(f"约定里的表「{t['名']}」在 entities/{module}.entity 里没有对应的「实体 {t['名']}」")
+    # 页面字段（页面实体）：要真的写成「页面 实体 …」（不建表），字段要与约定一致
+    for pg in contract["页面字段"]:
+        e = emap.get(pg["名"])
+        if e is None:
+            diffs.append(f"约定「## 页面字段」的页面实体「{pg['名']}」在 entities/{module}.entity 里没有对应的"
+                         f"「页面 实体 {pg['名']}」（页面专用字段进不了字段表，.ui 绑定会报 unknown_field）")
+            continue
+        if not e.page:
+            diffs.append(f"entities/{module}.entity 里的「{pg['名']}」是普通实体（会建表）；约定把它声明在「## 页面字段」，"
+                         f"要改成「页面 实体 {pg['名']} {pg['中文名']}」——不要为页面专用字段建真表")
+        missing = [f["名"] for f in pg["字段"] if e.field(f["名"]) is None]
+        if missing:
+            diffs.append(f"约定「## 页面字段」的页面实体「{pg['名']}」缺字段：{'、'.join(missing)}"
+                         f"（.ui 绑定要用的页面字段都要在实体里声明）")
+        extra = [f.name for f in e.fields
+                 if f.name not in {x["名"] for x in pg["字段"]}]
+        if extra:
+            diffs.append(f"页面实体「{pg['名']}」多了约定「## 页面字段」里没有的字段：{'、'.join(extra)}"
+                         f"（约定是冻结的：要加字段先改约定，不要在实体里私加）")
+        from tools.dslagent.v3.scaffold import TYPE_MAP as _TYPE_MAP
+        for f in pg["字段"]:
+            ef = e.field(f["名"])
+            if ef is not None and f["类型"] in _TYPE_MAP \
+                    and ef.type != _TYPE_MAP[f["类型"]]:
+                diffs.append(f"约定「## 页面字段」的页面实体「{pg['名']}」字段「{f['名']}」类型是 {f['类型']}，"
+                             f"实体里是 {ef.type}（两边要对上）")
     if any(t.get("学习记录") for t in contract["表"]):
         from tools.migrate import switch_on
         if not switch_on(project / "routes"):

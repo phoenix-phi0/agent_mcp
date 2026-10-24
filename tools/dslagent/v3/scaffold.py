@@ -1,5 +1,5 @@
 """确定性的两个生成：
-  gen_skeleton  从冻结的约定生成 entities/<m>.entity（表）、services/<m>.zs（函数头 + 伪代码注释 + 报错 未实现）、routes/<m>.zs（接口头 + 调用）；
+  gen_skeleton  从冻结的约定生成 entities/<m>.entity（表 + 页面实体）、services/<m>.zs（函数头 + 伪代码注释 + 报错 未实现）、routes/<m>.zs（接口头 + 调用）；
                 已存在的文件不覆盖。生成后对新文件跑加载检查。
   gen_build     从 top.zs 按依赖分层生成 plan/build.zs（做模块组 …），不调模型。
 """
@@ -38,6 +38,17 @@ def entity_text(c):
         if not fields:
             fields = ["  字段 note 文本 备注"]
         out.append(f"实体 {t['名']} {t['名']}\n" + "\n".join(fields) + "\n结束\n")
+    for pg in c.get("页面字段", []):
+        # 页面实体（K28a）：只进字段表给 .ui 绑定，不建表——所以字段行不带
+        # 必填/唯一（页面实体写旗标会被实体校验打回）。
+        fields = []
+        for f in pg["字段"]:
+            typ = TYPE_MAP.get(f["类型"], "文本")
+            label = (f["说明"].split() or [f["名"]])[0]
+            fields.append(f"  字段 {f['名']} {typ} {label}")
+        if not fields:
+            fields = ["  字段 note 文本 备注"]
+        out.append(f"页面 实体 {pg['名']} {pg['中文名']}\n" + "\n".join(fields) + "\n结束\n")
     return "\n".join(out)
 
 
