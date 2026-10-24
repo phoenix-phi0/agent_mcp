@@ -39,9 +39,10 @@ def syntax_text(ctx=None):
 
 
 class Ctx:
-    def __init__(self, project, out, req, M, cost_cap=None, module_cmd=None, module_wall=1800):
+    def __init__(self, project, out, req, M, cost_cap=None, module_cmd=None, module_wall=1800, module_calls=None):
         self.project, self.out, self.req, self.M = Path(project), Path(out), req, M
         self.cost_cap, self.module_cmd, self.module_wall = cost_cap, module_cmd, module_wall
+        self.module_calls = module_calls       # 派代理（执行方式=v2 的角色）的「预算 调用 N」下限；None = 不干预（change2 的 --max-turns）
         self.usage = None                      # 引擎的 Usage（run() 里挂上）：预算按它算
         self.lock = threading.RLock()
         self.module_cost = 0.0
@@ -181,7 +182,7 @@ def run(req, project, out, stop_after=None, backend=None, cost_cap=None, wall=WA
 
 
 def run_entry(script, project, out, req, extra_vars=None, backend=None, cost_cap=None, wall=WALL,
-              module_cmd=None, module_wall=1800):
+              module_cmd=None, module_wall=1800, module_calls=None):
     """跑 v3/ 下的顶层脚本（核查.zs / 修改.zs，script 不带 .zs）：req 是需求全文。
     → {status, reason, at, 花费, 用时, 模型调用[, returned]}，同时写 out/<script>_result.json。"""
     project, out = Path(project), Path(out)
@@ -189,7 +190,8 @@ def run_entry(script, project, out, req, extra_vars=None, backend=None, cost_cap
     out.mkdir(parents=True, exist_ok=True)
     M = V2.Model(out, backend=backend, max_calls=MAX_CALLS, deadline=time.time() + wall)
     prev_calls = _load_json(out / "calls.json", [])
-    ctx = Ctx(project, out, req, M, cost_cap=cost_cap, module_cmd=module_cmd, module_wall=module_wall)
+    ctx = Ctx(project, out, req, M, cost_cap=cost_cap, module_cmd=module_cmd, module_wall=module_wall,
+              module_calls=module_calls)
     eng = V3Engine(client=V2.Client(M), workdir=project, verbose=False, verbs_root=C.VERBS)
     eng.v3, ctx.usage = ctx, eng.usage
     syntax = syntax_text(ctx)

@@ -208,7 +208,8 @@ def _reply_ok(fmt, text):
 
 
 def dispatch_agent(role_name, task="", inputs=None, fmt=None, *, out_dir, backend=None, parent_id=None,
-                    ledger=None, roles_map=None, budget=None, project=None, module_cmd=None, v2_backend=None, mlog=None):
+                    ledger=None, roles_map=None, budget=None, project=None, module_cmd=None, v2_backend=None, mlog=None,
+                    v2_calls=None):
     """`派代理 角色 任务 入参? 格式?` 的 Python 实现。返回 {result, status, reason, role, model, cost, calls, secs}。
     mlog：v2.Model（v3 流程把 ctx.M 传进来）——按角色回退时补一条进 calls.json（不传就不补）。
     status：ok（成功）/ fail（角色不存在、入参越范围、两次都没拿到合格回复）/ over（预算超了，没调模型）。
@@ -239,7 +240,8 @@ def dispatch_agent(role_name, task="", inputs=None, fmt=None, *, out_dir, backen
 
     timeout = float(role.get("单次超时") or 300)
     if role.get("执行方式") == "v2":
-        return _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, module_cmd, v2_backend, timeout, out_dir, mlog=mlog)
+        return _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, module_cmd, v2_backend, timeout,
+                            out_dir, mlog=mlog, v2_calls=v2_calls)
     system = _prompt_text(role.get("提示词文件"))
     user = _user_text(task, inputs)
     call = backend or (lambda spec, s, u, tmo: EG.call(spec, s, u, tmo))
@@ -309,6 +311,8 @@ def _run_v2_subprocess(spec, req):
     cmd = list(req.get("module_cmd") or [sys.executable, "-m", "tools.dslagent"]) + [
         "run", "--pack", "dslproj", "--project", str(work), "--task-file", str(rec / "task.txt"),
         "--out", str(rec / "v2"), "--wall", str(int(req["timeout"])), "--scope", ",".join(req["scope"])]
+    if req.get("v2_calls"):       # 修改代理的「预算 调用 N」下限（v3 change2 --max-turns）：规划写小了会被子进程提到它
+        cmd += ["--budget-calls", str(req["v2_calls"])]
     env = dict(os.environ)
     env["DSLAGENT_MODELS"] = json.dumps({s: spec for s in EG.STEPS})
     t0 = time.time()
@@ -339,7 +343,9 @@ def _run_v2_subprocess(spec, req):
     return out
 
 
-def _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, module_cmd, v2_backend, timeout, out_dir, mlog=None):
+def _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, module_cmd, v2_backend, timeout, out_dir, mlog=None,
+                 v2_calls=None):
+    """v2_calls：给子进程的「预算 调用 N」下限（--budget-calls；None = 不干预）；agents.jsonl 记 v2_calls（上限）+ num_turns（实际调用数）。"""
     def _fail(reason, spec=None):
         led.record(role=role_name, status="fail", reason=reason, parent_id=parent_id, model=spec)
         return {"result": "", "status": "fail", "reason": reason, "role": role_name, "model": spec,
@@ -352,7 +358,7 @@ def _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, mod
     from .packs.dslproj import project as P
     scope = _v2_scope(role) + (P.scope_globs(module, project) if "本模块路径" in _list_field(role, "可写范围") else [])
     req = {"role": role_name, "module": module, "task": f"模块 {module}\n{(task or '').strip()}\n", "scope": scope,
-           "project": project, "module_cmd": module_cmd, "timeout": timeout, "out_dir": str(out_dir)}
+           "project": project, "module_cmd": module_cmd, "timeout": timeout, "out_dir": str(out_dir), "v2_calls": v2_calls}
     run = v2_backend or _run_v2_subprocess
     cost = secs = 0.0
     calls = 0
@@ -374,7 +380,7 @@ def _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, mod
     reason = "" if ok else (str(r.get("stop") or "v2 验收没过").strip()[:V2_STOP_MAX])
     status = "ok" if ok else "fail"
     row = led.record(role=role_name, model=spec["spec"], effort=spec.get("effort"), parent_id=parent_id, cost=cost, secs=secs,
-                      status=status, reason=reason, num_turns=calls, fallback=used_fallback)
+                      status=status, reason=reason, num_turns=calls, fallback=used_fallback, v2_calls=req.get("v2_calls"))
     files = r.get("files") or []
     return {"result": ", ".join(files) if ok else "", "status": status, "reason": reason, "role": role_name,
             "model": spec["spec"], "cost": cost, "calls": calls, "secs": round(secs, 2), "call_id": row["call_id"],

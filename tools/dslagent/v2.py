@@ -57,6 +57,19 @@ MAX_CALLS = 20           # 规划 1（+重写 1）+ 计划内 ≤12 + 补改 1 +
 WALL = 900
 SKIP_NOTE = "未跑（这次测试的结果不改变计划走向，验收时统一跑一次全量测试）"
 
+_BUDGET_RE = re.compile(r"(^\s*预算\s+调用\s+)(\d+)((?:\s+秒\s+\d+)?)(?=\s*$)", re.M)
+
+
+def bump_budget(script, min_calls):
+    """把计划里的「预算 调用 N …」的 N 提到不低于 min_calls（只放宽不收紧；没有这行 / N 写成 {变量} 就原样）。
+
+    调用方：v2.run(budget_calls=N)——`dslagent run --budget-calls`；v3 change2 的 --max-turns 经
+    roles.dispatch_agent(v2_calls=…) → 子进程 --budget-calls 透传到每个 modify_module（K36：dslproj 的规划
+    常把 N 写得很小，K29b 的 quiz/tutor 都只派了 1 次计划内任务就收尾，agents.jsonl 里 num_turns=2）。"""
+    if not min_calls or min_calls <= 0:
+        return script
+    return _BUDGET_RE.sub(lambda m: m.group(1) + str(max(int(m.group(2)), min_calls)) + (m.group(3) or ""), script, count=1)
+
 
 class Stop(Exception):
     pass
@@ -574,13 +587,14 @@ def check(project, work, script, task, pack=None):
 
 
 def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=MAX_CALLS, boundary=True, scope=None, plan_fix=None, pack=None,
-        call_max=None):
+        call_max=None, budget_calls=None):
     """跑一次 v2。project 里直接改文件；记录写进 out_dir（calls/、calls.json、plan*.zs、outline.md、boundary/、result.json）。
     model：假模型 backend(system, user, tag, timeout) → str|dict（测试用），缺省走 claude CLI。
     scope：允许改动的路径（目录前缀 / 精确文件 / glob，"a/,b/" 或列表；缺省取包的 scope_for，再缺省看计划里的 #范围 块，都没有就不启用范围闸，见 scope.py）。
     pack：资料包名或包对象（缺省看环境变量 DSLAGENT_PACK，再缺省 code；接口见 packs/__init__.py）。
     test_cmd：交给验收 prepare 的「给定配置」（code 是测试命令，别的包不用）。
     call_max：单次模型调用的总超时上限（缺省 guard.CALL_MAX；entry.run_pack 缺省按包声明的 CALL_MAX 覆盖，仍不超过剩余墙钟）。
+    budget_calls：计划里「预算 调用 N」的下限（只放宽不收紧；总调用上限跟着放宽到 budget_calls + 4）。
     返回结果字典（runner.run 同款字段 + reply / v2）。"""
     from . import plan as DP
     from . import prompts as DPR
@@ -602,6 +616,8 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
     except ValueError as e:
         pack = ver = None
         pick_err = str(e)
+    if budget_calls:       # 计划内任务上限抬高了：总调用上限（规划 + 重写 + 补改 + 边界都占它）跟着放宽，别让它先于预算满
+        max_calls = max(max_calls, budget_calls + 4)
     M = Model(out, backend=model, max_calls=max_calls, deadline=t_start + wall, routes=routes, call_max=call_max)
     steps, info = {}, {"检查": [], "重写": False, "子任务模式": DC.env_mode(), "子任务": []}
     res = {"project": str(project), "test_cmd": test_cmd, "kind": "task", "planner": "v2", "fixed": False,
@@ -690,6 +706,7 @@ def run(project, task, out_dir, test_cmd=None, wall=WALL, model=None, max_calls=
                             tnote = ""
                 script, _ = DP.strip_prose(raw)
                 script, n_close, _ = DP.autoclose(script)
+                script = bump_budget(script, budget_calls)      # 规划把 预算 调用 N 写得太小时提到下限（只放宽不收紧）
                 (out / f"plan_v{k + 1}.zs").write_text(script, encoding="utf-8")
                 problem, main, subs, crec = check(project, out / "dry", script, task, pack)
                 fixes, problem0 = [], problem

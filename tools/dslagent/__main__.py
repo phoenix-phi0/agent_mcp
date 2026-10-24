@@ -27,6 +27,7 @@ def main(argv=None):
     r.add_argument("--wall", type=int, default=None, help="墙钟秒数；缺省：旧命令 500，--pack 的 v2 路径 900（包声明了 WALL 就用包的，如 dslproj 1800）")
     r.add_argument("--scope", help="允许改动的路径，逗号分隔（目录前缀如 kg/,tests/kg/，精确文件，或带 * 的通配如 routes/graph*.zs）；只对 v2 规划路径有效，范围外的改动恢复并要求补改；缺省取资料包的 scope_for")
     r.add_argument("--pack", help="资料包名（code / dslproj，见 packs/）：写了就走 v2 规划路径（与 DSLAGENT_PLANNER 无关），场景差异全由包声明；不写 = 旧命令（code 行为不变）")
+    r.add_argument("--budget-calls", type=int, default=None, help="（--pack 时）把规划写的「预算 调用 N」至少提到这个数（只放宽不收紧），v2 的总调用上限跟着放宽；v3 change2 --max-turns 就是用它透传给修改代理的")
     r.add_argument("--inject", default="{}", help="测试用 JSON，如 {\"template\": \"fail\"}")
     u = sp.add_parser("auto", help="只做 engine=auto 的判定")
     u.add_argument("--project")
@@ -61,6 +62,7 @@ def main(argv=None):
     v.add_argument("--issues", default="latest", help="（change）读哪份问题清单：路径或 latest（默认最新一份）")
     v.add_argument("--llm", default="sonnet", help="（audit / change / audit2 / fix2）调模型用的模型名")
     v.add_argument("--rounds", type=int, default=5, help="（fix2）核查→修改最多几轮")
+    v.add_argument("--max-turns", type=int, default=8, help="（change2）每个 modify_module 代理（v2 子进程）里计划「预算 调用 N」的下限：规划写的 N 小于它就被提到它，只放宽不收紧；缺省 8，传 0 = 不干预（规划自己定）。背景：K29b 两轮 modify_module 都只用了 2 次模型调用（1 规划 + 1 派任务）就收尾，quiz 要新增 9 个函数装不下；agents.jsonl 每条记 v2_calls（上限）和 num_turns（实际）。只对 change2 生效，audit2 / fix2 / build2 / 修改 不受影响")
     ag = sp.add_parser("agents", help="子 agent 管理：角色登记表、调度层账本")
     agsp = ag.add_subparsers(dest="agents_cmd", required=True)
     st = agsp.add_parser("stats", help="按角色 / 按模型统计调用数、成功率、平均轮数、花费、用时")
@@ -83,7 +85,8 @@ def main(argv=None):
             extra = ({"issues": a.issues} if a.action == "change2"
                      else {"llm": a.llm, "rounds": a.rounds} if a.action == "fix2" else {"llm": a.llm})
             res = V3.run_entry(a.action, a.project, a.out, req_text, extra_vars=extra,
-                               cost_cap=a.cost_cap, **({"wall": a.wall} if a.wall else {}), module_wall=a.module_wall)
+                               cost_cap=a.cost_cap, **({"wall": a.wall} if a.wall else {}), module_wall=a.module_wall,
+                               **({"module_calls": a.max_turns} if a.action == "change2" else {}))
             print(json.dumps({k: res.get(k) for k in ("status", "reason", "at", "花费", "用时", "模型调用", "returned")}, ensure_ascii=False))
             return 0 if res["status"] == "成功" else 1
         if a.action == "audit":
@@ -130,7 +133,8 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, on_term)
     if a.pack:
         from . import entry
-        res = entry.run_pack(a.project, _task(a), a.pack, a.out, scope=a.scope, test_cmd=a.test_cmd, wall=a.wall)
+        res = entry.run_pack(a.project, _task(a), a.pack, a.out, scope=a.scope, test_cmd=a.test_cmd, wall=a.wall,
+                             **({"budget_calls": a.budget_calls} if a.budget_calls else {}))
         print(json.dumps({k: res.get(k) for k in ("kind", "fixed", "engine_used", "versions", "calls", "cost", "seconds", "stop")},
                          ensure_ascii=False))
         return 0
