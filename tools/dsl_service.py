@@ -51,7 +51,7 @@ from pathlib import Path
 from .db_errors import find_client_error
 from .dsl_core import (
     BIZ_ERR_RE, BLOCK_OPENERS, CALL_PARAM_RE, BizError, DSLError, ScriptReturn,
-    check_name, find_model_output_error, normalize, split_head,
+    check_name, find_model_output_error, normalize, split_head, split_ws_once,
 )
 
 DEFAULT_MAX_DEPTH = 32
@@ -152,7 +152,7 @@ def parse_module(text: str, path: Path, rel: str = "") -> Module:
             i += 1
             continue
         line = _clean(raw)
-        word, _, rest = line.partition(" ")
+        word, rest = split_ws_once(line)
         rest = rest.strip()
         if closed:
             bad(i, "业务块「结束」之后不能再写东西")
@@ -178,7 +178,7 @@ def parse_module(text: str, path: Path, rel: str = "") -> Module:
         public = False
         if word == "公开":
             public = True
-            word, _, rest = rest.partition(" ")
+            word, rest = split_ws_once(rest)
             rest = rest.strip()
         if word != "函数":
             bad(i, f"业务块里只能写 依赖 / 用包 / [公开] 函数，现在是「{line.split(' ')[0]}」")

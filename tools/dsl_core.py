@@ -255,9 +255,45 @@ class ScriptHalt(ScriptReturn):
 
 
 def normalize(line: str) -> str:
-    """全角符号转半角。逗号和冒号保持原样——正文里它们是标点。"""
-    return (line.replace("＝", "=").replace("　", " ").replace("＃", "#")
+    """全角符号转半角，全角空格除外。逗号和冒号保持原样——正文里它们是标点。
+
+    U+3000 曾经也在这里被换成半角空格，整行（连字面量值一起）遭殃：
+    「设 head = 《{t}》　{l}　第{n}课」运行出来分隔全成了半角。现在值里的
+    全角空格原样保留；语句结构上的分隔照旧认它——str.split() 本来就把
+    U+3000 当空白，靠 partition(" ") 切头的地方换成 split_ws_once。
+    """
+    return (line.replace("＝", "=").replace("＃", "#")
                 .replace("｛", "{").replace("｝", "}"))
+
+
+WS_SEP_RE = re.compile(r"[ \u3000]")
+
+
+def split_ws_once(line: str) -> tuple:
+    """在第一个空格（半角/全角）处把一行切成（头，余下）；没有空格就（原文，''）。
+
+    全角空格当分隔符是历史行为：引擎曾把整行的 U+3000 先换成半角再切。
+    修复「值里的 U+3000 被归一」后，分隔仍认它，写法不因修复而变：
+    「打印　甲」照旧等价于「打印 甲」。
+    """
+    m = WS_SEP_RE.search(line)
+    if not m:
+        return line, ""
+    return line[:m.start()], line[m.end():]
+
+
+def split_alt(body: str) -> tuple:
+    """「{名 或 默认}」按「或」切成（名，默认值）；没有「或」返回（原文，None）。
+
+    「或」两边要有空白（半角全角都行），否则「甲或乙」这种普通变量名会
+    被误切。先认两边都有、再认只在前头（{名 或} 取空）——这套先后顺序
+    就是历史行为，早先靠行级归一顺便得到，现在写明。
+    """
+    for sep in (" 或 ", " 或", "　或　", "　或"):
+        head, found, alt = body.partition(sep)
+        if found:
+            return head, alt
+    return body, None
 
 
 def split_items(text: str) -> list:
@@ -750,7 +786,7 @@ def split_head(line: str):
 
     关键字后紧跟汉字时不算关键字：「打印机 状态」的 head 是「打印机」。
     """
-    head, _, rest = line.partition(" ")
+    head, rest = split_ws_once(line)
     if head in KEYWORDS:
         return KEYWORDS[head], rest.strip()
     if head in KEYWORDS.values():

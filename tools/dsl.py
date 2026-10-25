@@ -281,7 +281,7 @@ from .dsl_core import (  # noqa: F401
     BizError, ScriptReturn, TX_BEGIN, TX_COMMIT, TX_ROLLBACK, VAR_RE, VERB_LIKE_RE,
     as_number, check_name, dig, eval_cond_expr, eval_parts, is_empty,
     iter_items, msg_size, normalize, parse_cond_expr, parse_condition, put,
-    split_condition_tail, split_head, split_items, to_text,
+    split_alt, split_condition_tail, split_head, split_items, split_ws_once, to_text,
 )
 from .dsl_calc import calculate
 
@@ -484,10 +484,9 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
             if m.group(1) is not None:
                 return "{" + m.group(1) + "}"
             body = m.group(2)
-            # 「或」两边要有空格，否则「甲或乙」这种普通变量名会被误切
-            head, sep, alt = body.partition(" 或 ")
-            if not sep:
-                head, sep, alt = body.partition(" 或")   # {名 或} 取空
+            # 「或」两边要有空格（半角全角都认），否则「甲或乙」这种普通变量名会被误切
+            head, alt = split_alt(body)
+            sep = alt is not None
             got = self.lookup(head.strip())
             if sep:
                 # 取不到（None）、空串、空列表、空字典都算「没有」，用默认值。
@@ -511,9 +510,8 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
             # 「或 默认值」这里也要认，不然 `设 后 = {项.after 或}` 走不通：
             # lookup 拿整串「项.after 或」去查，查不到，变量没建起来，
             # 后面再引用只会看到 {后} 原样保留。
-            head, sep, alt = body.partition(" 或 ")
-            if not sep:
-                head, sep, alt = body.partition(" 或")
+            head, alt = split_alt(body)
+            sep = alt is not None
             got = self.lookup(head.strip())
             if sep:
                 blank = got is None or (hasattr(got, "__len__") and not len(got))
@@ -557,7 +555,7 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
         return name, path
 
     def _split_file_arg(self, rest: str, kw: str):
-        fname, _, content = rest.partition(" ")
+        fname, content = split_ws_once(rest)
         if not fname:
             raise DSLError(f"「{kw}」的语法应为：{kw} 文件名 内容")
         path = self._safe_path(self.expand(fname))
@@ -698,7 +696,7 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
     @staticmethod
     def _parse_halt(rest: str, lineno: int):
         """「终止 状态 原因」→ (状态原文, 原因原文)。状态是 {变量} 的留到运行时查。"""
-        state, _, reason = rest.strip().partition(" ")
+        state, reason = split_ws_once(rest.strip())
         if not state:
             raise DSLError(f"第 {lineno + 1} 行：「终止」的写法：终止 成功|失败|超出预期 原因")
         if state not in HALT_STATES and not VAR_RE.fullmatch(state):
@@ -1173,9 +1171,8 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
         def value_of(token: str):
             m = VAR_RE.fullmatch(token)
             body = m.group(1)
-            head, sep, alt = body.partition(" 或 ")
-            if not sep:
-                head, sep, alt = body.partition(" 或")
+            head, alt = split_alt(body)
+            sep = alt is not None
             got = self.lookup(head.strip())
             if sep and (got is None or (hasattr(got, "__len__") and not len(got))):
                 return alt.strip()
