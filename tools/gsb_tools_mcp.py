@@ -25,7 +25,9 @@ goose 1.55 每轮只执行一个工具，所以这里的工具都一次做完多
   工作目录锁在自己的临时目录 /tmp/verify_<id>/（起本地服务要监听端口，放开 network_access），
   派验证 agent 做全量回归 / 起服务逐接口实测 / 基线对比：它自己摸项目、优先用项目已有入口、
   没有才写临时脚本；被验项目与仓库只读，结束时核对它们的 git status / 文件清单，
-  变了在结果里标「违规改动」。最终回复严格按 JSON 交回，解析失败按原文返回。
+  变了在结果里标「违规改动」。最终回复严格按 JSON 交回（必须带「环境」：解释器、引擎、
+  起法），解析时核对其解释器是不是被验仓库的 .venv、引擎是不是被验仓库里那份，
+  不符就在摘要里标「⚠ 环境不符」，结论按「无法验证」对待。
 
 goose 对 stdio 扩展的单次工具调用有超时（--with-extension 固定 300 秒，
 命令行改不了），所以单次调用最多阻塞 GSB_MAX_BLOCK 秒（默认 270）。
@@ -138,22 +140,61 @@ REVIEW_PROMPT = """你是代码审查员，独立审查另一个 agent 刚做完
 {status}"""
 
 
-# verify 的固定前言：只验证不修、只写自己的临时目录、优先项目已有入口、结论带证据、严格 JSON。
+# verify 的固定前言：只验证不修、只写自己的临时目录、运行环境必须是被验仓库自己的
+# .venv + 引擎、优先项目已有入口、结论带证据、严格 JSON（带「环境」字段）。
 VERIFY_PREAMBLE = """你是验证 agent：主任务只交代「验什么」，你自己去摸项目、写临时脚本、跑，只交回结论。规则：
 1. 只做验证不修东西：发现 bug 如实写进「发现」，不修、不顺手改进；不改被验项目和它所在仓库的任何文件，不用 git 写操作（add/commit/checkout/reset/stash 等）动被验仓库。
-2. 你只能写自己的临时目录 {tmp}（沙箱强制，别处写不进去）：要实验先把被验项目拷进来（cp -a），临时脚本也放这里。
-3. 先摸清项目怎么跑：README、现有测试、回归 / 冒烟入口（如 tools/dslagent/v3 的回归、接口冒烟）；优先用项目已有入口，没有才自己写临时脚本。
-4. 起本地服务时日志写文件别接管道；记下 PID，结束时按进程组停掉（kill -TERM -PGID），不要用 pkill。
-5. 结论必须有证据：每项检查给出跑的命令和关键输出原文片段；多读文件可用 read_files 工具（若挂着）。
-6. 不读取、不打印任何 key、token、认证文件；不装新依赖。
-7. 最后一条回复就是交付结果，严格按这个 JSON 交回，不要包代码围栏、不要附加别的文字：
-{{"状态": "成功|失败", "结果": {{"结论": "通过|不通过|无法验证", "检查": [{{"项": "...", "通过": true/false, "证据": "命令与关键输出"}}], "发现": ["不在要求内但发现的问题"], "说明": "..."}}}}
-（「状态」= 验证本身有没有跑完；「结果.结论」= 被验对象过没过。）
+2. 你只能写自己的临时目录 {tmp}（沙箱强制，别处写不进去）：要实验先把被验项目拷进来（cp -a），临时脚本也放这里。拷进临时目录的只是被验「项目」（数据、约定、.zs/.ui），引擎代码不拷。
+3. 运行环境（有过教训：验证员用了别的目录下的旧引擎快照加系统 python，得出过时的「不通过」）：
+   - Python 解释器：{env_py} 不要用系统 python3 / python（缺依赖，也不能证明是被验仓库的环境）。
+   - 引擎代码（gen、tools、verbs）：{env_repo}。不要用别的目录（如 /workspace/dslagent_exp 下其他快照）的 gen / tools / verbs；不确定就先跑 python -c "import gen,tools;print(gen.__file__,tools.__file__)" 核对。
+   - 起法优先用项目已有入口和 README / 报告里写过的起法（如 kg 项目用 make_app(real=False, login=…)）；`gen run` 会编译全部 .ui，项目里有还没实现接口的 .ui 时会编译不过——这属进行中的正常中间态，写进「发现」，换不编译 .ui 的起法（如 tools.dsl_http.Router / make_app）继续验，不要因此判业务不通过。
+4. 先摸清项目怎么跑：README、现有测试、回归 / 冒烟入口（如 tools/dslagent/v3 的回归、接口冒烟）；优先用项目已有入口，没有才自己写临时脚本。
+5. 起本地服务时日志写文件别接管道；记下 PID，结束时按进程组停掉（kill -TERM -PGID），不要用 pkill。
+6. 结论必须有证据：每项检查给出跑的命令和关键输出原文片段；多读文件可用 read_files 工具（若挂着）。
+7. 不读取、不打印任何 key、token、认证文件；不装新依赖。
+8. 最后一条回复就是交付结果，严格按这个 JSON 交回，不要包代码围栏、不要附加别的文字：
+{{"状态": "成功|失败", "结果": {{"结论": "通过|不通过|无法验证", "环境": {{"python": "实际用的解释器绝对路径", "引擎": "实际 import 的 gen / tools 绝对路径（用 python -c 'import gen,tools;print(gen.__file__,tools.__file__)' 取）", "起法": "实际起服务 / 跑回归用的命令"}}, "检查": [{{"项": "...", "通过": true/false, "证据": "命令与关键输出"}}], "发现": ["不在要求内但发现的问题"], "说明": "..."}}}}
+（「状态」= 验证本身有没有跑完；「结果.结论」= 被验对象过没过；「环境」必填：python 必须是被验仓库的 .venv、引擎必须在被验仓库根下，不符就只能给「无法验证」。）
 
 被验项目：{project}
 {base_line}验证任务：
 {instructions}
 """
+
+
+def _repo_root_of(proj):
+    """从被验项目推引擎仓库根：git toplevel 优先；非 git 就向上找带 gen/ + tools/ 的
+    目录。推不出返回 None（前言里交代「先找仓库的 .venv」）。"""
+    rc, top = _git(proj, "rev-parse", "--show-toplevel")
+    if rc == 0:
+        return os.path.realpath(top.strip())
+    d = os.path.realpath(proj)
+    if not os.path.isdir(d):
+        d = os.path.dirname(d)
+    while True:
+        if os.path.isdir(os.path.join(d, "gen")) and os.path.isdir(os.path.join(d, "tools")):
+            return d
+        up = os.path.dirname(d)
+        if up == d:
+            return None
+        d = up
+
+
+def _env_lines(proj):
+    """前言里的运行环境交代：返回 (仓库根或 None, 解释器句, 引擎句)。"""
+    repo = _repo_root_of(proj)
+    if repo:
+        py = os.path.join(repo, ".venv", "bin", "python")
+        env_py = (f"一律用 {py}。" if os.path.isfile(py)
+                  else f"先找被验仓库的 .venv/bin/python（应为 {py} 这一类）。")
+        env_repo = (f"一律用被验仓库（{repo}）里的那份，跑任何 python 前设 PYTHONPATH={repo}；"
+                    f"不要拷引擎进临时目录")
+    else:
+        env_py = "先找被验仓库的 .venv/bin/python"
+        env_repo = ("先从被验项目向上找仓库根（带 gen/ 和 tools/ 的那份），跑任何 python 前"
+                    "设 PYTHONPATH 指向它；实在推不出，把找的过程和结果如实写进「说明」")
+    return repo, env_py, env_repo
 
 # ----------------------------------------------------------------------
 # read_files
@@ -1025,8 +1066,14 @@ def _probe_report(pid_):
                          "是否采信主任务自己判断）")
         if reply:
             d, jerr = _verify_parse(reply)
-            lines.append(f"验证 JSON：解析失败（{jerr}），下面按原文返回" if d is None
-                         else f"验证 JSON：已解析；{_verify_summary(d)}")
+            if d is None:
+                lines.append(f"验证 JSON：解析失败（{jerr}），下面按原文返回")
+            else:
+                lines.append(f"验证 JSON：已解析；{_verify_summary(d)}")
+                bad_env = _verify_env_check(d, r.get("verify_repo"))
+                if bad_env:
+                    lines.append(f"⚠ 环境不符：{bad_env}——结论按「无法验证」对待"
+                                 "（验证员原文照录，不改）")
     if reply:
         if len(reply) > PROBE_MAX_REPLY:
             reply = reply[:PROBE_MAX_REPLY] + f"\n…（截断，共 {len(reply)} 字，全文在 {r['out']}）"
@@ -1203,6 +1250,29 @@ def _verify_summary(d):
             f"检查 {len(checks)} 项（通过 {ok}，不通过 {bad}）；发现 {len(finds)} 条")
 
 
+def _verify_env_check(d, repo):
+    """核对结论 JSON 的「环境」：解释器必须是被验仓库的 .venv、引擎必须在仓库根下。
+    不符返回原因（摘要标 ⚠，结论按「无法验证」对待），合规或缺仓库根返回 None。"""
+    res = d.get("结果") or {}
+    env = res.get("环境")
+    if not isinstance(env, dict):
+        return "结论 JSON 缺「环境」字段（应含 python / 引擎 / 起法）"
+    miss = [k for k in ("python", "引擎", "起法") if not str(env.get(k) or "").strip()]
+    if miss:
+        return "「环境」缺：" + "、".join(miss)
+    if not repo:
+        return None
+    r = os.path.realpath(repo)
+    py = os.path.realpath(os.path.expanduser(str(env["python"]).split()[0]))
+    if not py.startswith(r + os.sep + ".venv" + os.sep):
+        return f"解释器不是被验仓库的 .venv：{env['python']}（仓库根 {r}）"
+    bad = [x for x in str(env["引擎"]).split()
+           if not os.path.realpath(os.path.expanduser(x)).startswith(r + os.sep)]
+    if bad:
+        return f"引擎不在被验仓库根下：{' '.join(bad)}（仓库根 {r}）"
+    return None
+
+
 def verify(instructions, cwd=None, project=None, base=None, effort="medium",
            timeout_secs=900, wait=True, model=None, _cancel=None):
     """派一个验证 agent：codex workspace-write，-C 锁在 /tmp/verify_<id>/（临时目录），
@@ -1229,11 +1299,13 @@ def verify(instructions, cwd=None, project=None, base=None, effort="medium",
     pid_ = _new_probe_id("verify")
     tmp = os.path.join(VERIFY_WORK_PARENT, f"verify_{pid_}")
     os.makedirs(tmp, exist_ok=True)
+    repo, env_py, env_repo = _env_lines(proj)
     prompt = VERIFY_PREAMBLE.format(tmp=tmp, project=proj, base_line=base_line,
-                                    instructions=instructions.strip())
+                                    instructions=instructions.strip(),
+                                    env_py=env_py, env_repo=env_repo)
     pid2 = _codex_start("verify", prompt, eff, to, m, tmp, exe, sandbox="workspace-write",
                         extra_cfg=["sandbox_workspace_write.network_access=true"], pid_=pid_)
-    _PROBES[pid2].update(verify_watch=watch, project=proj, base=base)
+    _PROBES[pid2].update(verify_watch=watch, project=proj, base=base, verify_repo=repo)
     if not wait:
         return (f"verify_id：{pid2}\n状态：started（后台验证，模型 {m}，强度 {eff}，超时 {to} 秒）\n"
                 f"工作目录 {tmp}（只能写这里），被验项目 {proj} 只读\n"
@@ -1690,7 +1762,8 @@ VERIFY_TOOLS = [
                      "冒烟入口），优先用项目已有入口，没有才写临时脚本；起的服务自己停。被验项目与"
                      "仓库只读；结束时核对它们的 git status / 文件清单，有变化在结果里标「违规改动」"
                      "（只是线索，可能有并发作业动过同一仓库）。最终回复严格按 JSON 交回，verify_wait "
-                     "解析；解析失败按原文返回并标明。回归、起服务实测、基线对比交给 verify，"
+                     "解析；解析失败按原文返回并标明；结论 JSON 必须带「环境」（解释器 / 引擎 / 起法），"
+                     "不符在摘要里标「⚠ 环境不符」且结论按「无法验证」对待。回归、起服务实测、基线对比交给 verify，"
                      "不要自己现写一次性验证脚本。wait=true（默认）单次最多阻塞 "
                      f"{MAX_BLOCK} 秒，没跑完返回 still_running 和 verify_id，再调 verify_wait。"),
      "inputSchema": {"type": "object", "properties": {
@@ -1705,7 +1778,7 @@ VERIFY_TOOLS = [
          "required": ["instructions"]}},
     {"name": "verify_wait",
      "description": (f"等一个或多个验证的结果（单次最多阻塞 {MAX_BLOCK} 秒）。全部结束就返回各自的"
-                     "状态、解析出的验证 JSON 摘要和原文（违规改动会单独标出）；还有没跑完的会"
+                     "状态、解析出的验证 JSON 摘要和原文（违规改动、环境不符会单独标出）；还有没跑完的会"
                      "列出来，再调一次接着等。"),
      "inputSchema": {"type": "object", "properties": {
          "verify_ids": {"type": "array", "items": {"type": "string"}},

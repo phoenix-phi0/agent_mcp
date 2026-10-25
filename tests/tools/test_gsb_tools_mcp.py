@@ -136,7 +136,7 @@ def field(text, k):
     return m.group(1) if m else None
 
 
-FAKE_CODEX = '#!/usr/bin/env python3\n# 假 codex：记下 argv / 环境，按提示词里的关键字表演\nimport json, os, subprocess, sys, time\nargv = sys.argv[1:]\nprompt = sys.stdin.read()\nrec = os.environ["FAKE_CODEX_REC"]\nwith open(rec, "a") as f:\n    f.write(json.dumps({"argv": argv, "cwd": os.getcwd(), "prompt": prompt,\n                        "env_keys": sorted(os.environ),\n                        "secret_seen": any("SECRET-0123" in v or v.startswith("ghp_")\n                                           for v in os.environ.values())}) + "\\n")\nout = argv[argv.index("-o") + 1]\ntask = prompt.split("任务：")[-1]\nprint("OpenAI Codex (fake)\\nuser\\n" + prompt, flush=True)\ndef done(text, tok="1,234"):\n    open(out, "w").write(text)\n    print("codex\\n" + text + "\\ntokens used\\n" + tok, flush=True)\n    sys.exit(0)\nif "你是代码审查员" in prompt:\n    if "REVIEWSLOW" in prompt:\n        time.sleep(6)\n    done("结论：有问题\\n问题清单：\\n- [阻断] calc.py:2 — 负数没处理。依据：读了文件\\n"\n         "- [应修] README 也要更新。依据：任务书\\n- [建议] calc.py:1 — 可以加类型注解\\n"\n         "必查项：\\n(a) 漏了负数要求\\n(b) 无\\n(c) 无\\n(d) 无报告草稿\\n(e) 无", "4,321")\nif "FAIL" in task:\n    print("ERROR: something broke badly", flush=True); sys.exit(2)\nif "HANG" in task:\n    c = subprocess.Popen(["sleep", "300"])\n    open(os.environ["FAKE_CODEX_REC"] + ".child", "w").write(str(c.pid))\n    time.sleep(300)\nif "CAP" in task:\n    cnt = rec + ".cap"\n    n = int(open(cnt).read()) if os.path.exists(cnt) else 0\n    open(cnt, "w").write(str(n + 1))\n    if n == 0:\n        print("ERROR: Selected model is at capacity. Please try a different model.\\ntokens used\\n100", flush=True)\n        sys.exit(1)\n    done("capacity ok")\nif "BIG" in task:\n    done("B" * 40000)\nif "\u4f60\u662f\u9a8c\u8bc1 agent" in prompt:\n    tgt = os.environ.get("FAKE_VERIFY_TARGET")\n    if tgt and "WRITE" in task:\n        open(tgt, "a").write("bad\\n")\n    for w in task.split():\n        if w.startswith("SLOW"):\n            time.sleep(float(w[4:]))\n    if "VERIFYBAD" in task:\n        done("\u8fd9\u4e0d\u662f JSON\uff1a\u624b\u5de5\u5199\u7684\u7ed3\u8bba\u3002")\n    done(\'{"\u72b6\u6001": "\u6210\u529f", "\u7ed3\u679c": {"\u7ed3\u8bba": "\u901a\u8fc7", "\u68c0\u67e5": [{"\u9879": "\u5168\u91cf\u56de\u5f52", "\u901a\u8fc7": true, "\u8bc1\u636e": "run.sh: 27 passed"}, {"\u9879": "auth_login \u8fd4\u56de\u952e", "\u901a\u8fc7": false, "\u8bc1\u636e": "\u7f3a ret"}], "\u53d1\u73b0": ["README \u8fc7\u671f"], "\u8bf4\u660e": "ok"}}\', "8,888")\nfor w in task.split():\n    if w.startswith("SLOW"):\n        time.sleep(float(w[4:]))\ndone("结论：" + task.strip() + "（a.txt:2）")\n'
+FAKE_CODEX = '#!/usr/bin/env python3\n# 假 codex：记下 argv / 环境，按提示词里的关键字表演\nimport json, os, subprocess, sys, time\nargv = sys.argv[1:]\nprompt = sys.stdin.read()\nrec = os.environ["FAKE_CODEX_REC"]\nwith open(rec, "a") as f:\n    f.write(json.dumps({"argv": argv, "cwd": os.getcwd(), "prompt": prompt,\n                        "env_keys": sorted(os.environ),\n                        "secret_seen": any("SECRET-0123" in v or v.startswith("ghp_")\n                                           for v in os.environ.values())}) + "\\n")\nout = argv[argv.index("-o") + 1]\ntask = prompt.split("任务：")[-1]\nprint("OpenAI Codex (fake)\\nuser\\n" + prompt, flush=True)\ndef done(text, tok="1,234"):\n    open(out, "w").write(text)\n    print("codex\\n" + text + "\\ntokens used\\n" + tok, flush=True)\n    sys.exit(0)\nif "你是代码审查员" in prompt:\n    if "REVIEWSLOW" in prompt:\n        time.sleep(6)\n    done("结论：有问题\\n问题清单：\\n- [阻断] calc.py:2 — 负数没处理。依据：读了文件\\n"\n         "- [应修] README 也要更新。依据：任务书\\n- [建议] calc.py:1 — 可以加类型注解\\n"\n         "必查项：\\n(a) 漏了负数要求\\n(b) 无\\n(c) 无\\n(d) 无报告草稿\\n(e) 无", "4,321")\nif "FAIL" in task:\n    print("ERROR: something broke badly", flush=True); sys.exit(2)\nif "HANG" in task:\n    c = subprocess.Popen(["sleep", "300"])\n    open(os.environ["FAKE_CODEX_REC"] + ".child", "w").write(str(c.pid))\n    time.sleep(300)\nif "CAP" in task:\n    cnt = rec + ".cap"\n    n = int(open(cnt).read()) if os.path.exists(cnt) else 0\n    open(cnt, "w").write(str(n + 1))\n    if n == 0:\n        print("ERROR: Selected model is at capacity. Please try a different model.\\ntokens used\\n100", flush=True)\n        sys.exit(1)\n    done("capacity ok")\nif "BIG" in task:\n    done("B" * 40000)\nif "\u4f60\u662f\u9a8c\u8bc1 agent" in prompt:\n    tgt = os.environ.get("FAKE_VERIFY_TARGET")\n    if tgt and "WRITE" in task:\n        open(tgt, "a").write("bad\\n")\n    for w in task.split():\n        if w.startswith("SLOW"):\n            time.sleep(float(w[4:]))\n    if "VERIFYBAD" in task:\n        done("\u8fd9\u4e0d\u662f JSON\uff1a\u624b\u5de5\u5199\u7684\u7ed3\u8bba\u3002")\n    if "ENVOKEY" in task:\n        proj = [l.split("\uff1a", 1)[1] for l in prompt.splitlines() if l.startswith("\u88ab\u9a8c\u9879\u76ee\uff1a")][0]\n        done(\'{"\u72b6\u6001": "\u6210\u529f", "\u7ed3\u679c": {"\u7ed3\u8bba": "\u901a\u8fc7", "\u73af\u5883": {"python": "\' + proj + \'/.venv/bin/python", "\u5f15\u64ce": "\' + proj + \'/gen/__init__.py \' + proj + \'/tools/__init__.py", "\u8d77\u6cd5": "make_app(real=False, login=True)"}, "\u68c0\u67e5": [{"\u9879": "smoke", "\u901a\u8fc7": true, "\u8bc1\u636e": "200"}], "\u53d1\u73b0": [], "\u8bf4\u660e": "env ok"}}\', "7,777")\n    if "ENVWRONG" in task and "ENVWRONGENG" not in task:\n        done(\'{"\u72b6\u6001": "\u6210\u529f", "\u7ed3\u679c": {"\u7ed3\u8bba": "\u4e0d\u901a\u8fc7", "\u73af\u5883": {"python": "/usr/bin/python3", "\u5f15\u64ce": "/workspace/dslagent_exp/luna_roles/code/gen/__init__.py", "\u8d77\u6cd5": "PYTHONPATH=/elsewhere python3 -m gen run"}, "\u68c0\u67e5": [{"\u9879": "smoke", "\u901a\u8fc7": false, "\u8bc1\u636e": "500"}], "\u53d1\u73b0": [], "\u8bf4\u660e": "old snapshot"}}\', "6,666")\n    if "ENVWRONGENG" in task:\n        proj = [l.split("\uff1a", 1)[1] for l in prompt.splitlines() if l.startswith("\u88ab\u9a8c\u9879\u76ee\uff1a")][0]\n        done(\'{"\u72b6\u6001": "\u6210\u529f", "\u7ed3\u679c": {"\u7ed3\u8bba": "\u4e0d\u901a\u8fc7", "\u73af\u5883": {"python": "\' + proj + \'/.venv/bin/python", "\u5f15\u64ce": "/workspace/dslagent_exp/luna_roles/code/tools/__init__.py", "\u8d77\u6cd5": "PYTHONPATH=/elsewhere .venv/bin/python -m gen run"}, "\u68c0\u67e5": [{"\u9879": "smoke", "\u901a\u8fc7": false, "\u8bc1\u636e": "500"}], "\u53d1\u73b0": [], "\u8bf4\u660e": "old engine only"}}\', "6,667")\n    done(\'{"\u72b6\u6001": "\u6210\u529f", "\u7ed3\u679c": {"\u7ed3\u8bba": "\u901a\u8fc7", "\u68c0\u67e5": [{"\u9879": "\u5168\u91cf\u56de\u5f52", "\u901a\u8fc7": true, "\u8bc1\u636e": "run.sh: 27 passed"}, {"\u9879": "auth_login \u8fd4\u56de\u952e", "\u901a\u8fc7": false, "\u8bc1\u636e": "\u7f3a ret"}], "\u53d1\u73b0": ["README \u8fc7\u671f"], "\u8bf4\u660e": "ok"}}\', "8,888")\nfor w in task.split():\n    if w.startswith("SLOW"):\n        time.sleep(float(w[4:]))\ndone("结论：" + task.strip() + "（a.txt:2）")\n'
 
 
 FAKE_CLAUDE = """#!/usr/bin/env python3
@@ -1095,6 +1095,83 @@ def k34_tests():
     (plain / "extra.txt").unlink(missing_ok=True)
 
 
+def k38_tests():
+    """K38 追加：verify 前言交代运行环境（.venv / PYTHONPATH / 「环境」JSON 字段 /
+    make_app 起法）；结论 JSON 的「环境」合规 → 正常；引擎不在被验仓库下 / 缺「环境」
+    → 摘要标 ⚠ 环境不符，按「无法验证」对待；推不出仓库根时前言交代先找。"""
+    bindir = TMP / "fakebin38"
+    bindir.mkdir(exist_ok=True)
+    (bindir / "codex").write_text(FAKE_CODEX)
+    (bindir / "codex").chmod(0o755)
+    rec = TMP / "codex_calls38.jsonl"
+    env = {"PATH": f"{bindir}:{os.environ.get('PATH', '')}", "FAKE_CODEX_REC": str(rec),
+           "GSB_PROBE_RETRY_WAITS": "1,1"}
+    proj = TMP / "k34proj"
+    proj.mkdir(exist_ok=True)
+    if not (proj / ".git").exists():
+        git(proj, "init", "-q", "-b", "main")
+        (proj / "app.py").write_text("print('hi')\n")
+        git(proj, "add", "-A")
+        git(proj, "commit", "-q", "-m", "i")
+    plain = TMP / "k38plain"
+    plain.mkdir(exist_ok=True)
+    (plain / "a.txt").write_text("x\n", encoding="utf-8")
+
+    s = Server(max_block=4, GSB_VERIFY="1", **env)
+    try:
+        print("K38 前言交代运行环境")
+        t, e = s.call("verify", {"instructions": "VERIFYOK 跑全量回归", "cwd": str(proj)},
+                      timeout=30)
+        pr = recs(rec)[-1]["prompt"]
+        check("状态：done" in t and "验证 JSON：已解析" in t, "K38: verify 正常跑完", t)
+        check(".venv/bin/python" in pr and "PYTHONPATH=" in pr
+              and "import gen,tools;print(gen.__file__,tools.__file__)" in pr
+              and "「环境」" in pr and "make_app(real=False, login=…)" in pr
+              and "引擎代码不拷" in pr and "不要用系统 python3" in pr,
+              "K38 前言：.venv 解释器 / PYTHONPATH 引擎 / 环境 JSON 字段 / make_app 起法 / 不拷引擎",
+              pr)
+        check(f"PYTHONPATH={proj}" in pr and f"{proj}/.venv/bin/python" in pr,
+              "K38 前言：能推出仓库根时写具体路径", pr)
+
+        print("K38 环境合规：不标 ⚠")
+        t, e = s.call("verify", {"instructions": "VERIFYOK ENVOKEY 环境合规", "cwd": str(proj)},
+                      timeout=30)
+        check("状态：done" in t and "验证 JSON：已解析" in t and "结论=通过" in t
+              and "发现 0 条" in t and "环境不符" not in t,
+              "K38 合规环境：正常解析，无 ⚠ 环境不符", t)
+
+        print("K38 引擎不在被验仓库下 → ⚠ 且按无法验证")
+        t, e = s.call("verify", {"instructions": "VERIFYOK ENVWRONG 旧快照", "cwd": str(proj)},
+                      timeout=30)
+        check("状态：done" in t and "⚠ 环境不符" in t and "解释器不是被验仓库的 .venv" in t
+              and "/usr/bin/python3" in t and "按「无法验证」对待" in t
+              and "结论=不通过" in t and "这不是 JSON" not in t,
+              "K38 旧解释器：标 ⚠ 环境不符（模型原文照录，结论=不通过 保留）", t)
+
+        print("K38 引擎不在被验仓库下 → ⚠ 且按无法验证")
+        t, e = s.call("verify", {"instructions": "VERIFYOK ENVWRONGENG 旧引擎", "cwd": str(proj)},
+                      timeout=30)
+        check("状态：done" in t and "⚠ 环境不符" in t and "引擎不在被验仓库根下" in t
+              and "luna_roles" in t and "按「无法验证」对待" in t,
+              "K38 旧引擎快照：标 ⚠ 环境不符，按无法验证", t)
+
+        print("K38 缺「环境」字段 → ⚠")
+        t, e = s.call("verify", {"instructions": "VERIFYOK 缺环境字段", "cwd": str(proj)},
+                      timeout=30)
+        check("状态：done" in t and "⚠ 环境不符" in t and "缺「环境」字段" in t
+              and "按「无法验证」对待" in t, "K38 缺环境：标 ⚠，按无法验证", t)
+
+        print("K38 非 git 项目推不出仓库根：前言交代先找")
+        t, e = s.call("verify", {"instructions": "VERIFYOK plain", "cwd": str(plain)},
+                      timeout=30)
+        pr = recs(rec)[-1]["prompt"]
+        check("先找被验仓库的 .venv/bin/python" in pr and "向上找仓库根" in pr,
+              "K38 推不出仓库根：前言交代先找 .venv / 向上找仓库根", pr)
+    finally:
+        s.close()
+    shutil.rmtree(plain, ignore_errors=True)
+
+
 def main():
     (TMP / "a.txt").write_text("".join(f"line{i}\n" for i in range(1, 11)), encoding="utf-8")
     (TMP / "b.py").write_text("print('b')\r\nx = 1\r\n", encoding="utf-8")
@@ -1279,6 +1356,7 @@ def main():
         iface_tests()
         k32_tests()
         k34_tests()
+        k38_tests()
     finally:
         s.close()
         shutil.rmtree(TMP, ignore_errors=True)
