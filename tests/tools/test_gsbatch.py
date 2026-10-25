@@ -255,8 +255,8 @@ def main():
     check(c["argv"][:5] == ["run", "--no-profile", "--output-format", "stream-json", "--provider"]
           and arg(c, "--provider") == "zai_low" and arg(c, "--model") == "glm-5.3-flash"
           and c["argv"][-2:] == ["-i", "-"], "goose run --no-profile stream-json，提示词走 stdin", c["argv"])
-    check(arg(c, "--with-builtin") == "developer" and c["mode"] == "auto" and c["keyring"] == "1",
-          "默认挂 developer、GOOSE_MODE=auto、关 keyring")
+    check("--with-builtin" not in c["argv"] and c["mode"] == "auto" and c["keyring"] == "1",
+          "默认不挂 goose 原生扩展、GOOSE_MODE=auto、关 keyring")
     check(c["root"] is None and START_MARK.exists(), "zai_low 不设 GOOSE_PATH_ROOT，跑前调了 start_proxy.sh")
     check(c["has_zai_key"] and not c["leak"], "ZAI key 只进子进程环境，别的凭证/GOOSE_* 没漏", c["leak"])
     check(arg(c, "--system") == gsbatch.PREAMBLE + "\n" + gsbatch.PREAMBLE_TOOLS + "\n" + gsbatch.PREAMBLE_PROBE_CLAUDE + "\n" + gsbatch.PREAMBLE_REVIEW + "\n" + gsbatch.PREAMBLE_VERIFY
@@ -269,7 +269,7 @@ def main():
           and "grep" in gsbatch.PREAMBLE_TOOLS and "sleep" in gsbatch.PREAMBLE_TOOLS
           and "8. " in gsbatch.PREAMBLE_TOOLS and "9. " in gsbatch.PREAMBLE_TOOLS
           and "multi_edit" in gsbatch.PREAMBLE_TOOLS,
-          "PREAMBLE_TOOLS：标题 + 6–9 四句（读文件/跑命令/multi_edit/iface）、勿改 iftpl、勿 sleep 轮询")
+          "PREAMBLE_TOOLS：标题 + 6–9 四句（读文件/跑命令/multi_edit/iface）、勿改 iftpl、勿 sleep、勿用内置 edit")
     check("probe" in gsbatch.PREAMBLE_PROBE and "只读" in gsbatch.PREAMBLE_PROBE
           and gsbatch.PREAMBLE_PROBE.startswith("10. ") and "probe" not in gsbatch.PREAMBLE_TOOLS,
           "probe 是第 10 句，单独在 PREAMBLE_PROBE")
@@ -289,14 +289,16 @@ def main():
     ext = arg(c, "--with-extension")
     check(ext == gsbatch._extra_tools_arg(d["options"]) and ext.startswith("gsb_tools:GSB_MAX_BLOCK=")
           and ext.split()[1] == "GSB_PROBE=1" and ext.split()[2] == "GSB_PROBE_BACKEND=claude"
-          and ext.split()[3] == "GSB_REVIEW=1" and ext.split()[4] == "GSB_VERIFY=1"
+          and ext.split()[3] == "GSB_REVIEW=1" and ext.split()[4] == "GSB_REVIEW_BACKEND=claude"
+          and ext.split()[5] == "GSB_VERIFY=1"
           and ext.split()[-1] == str(gsbatch.EXTRA_TOOLS_SCRIPT) and gsbatch.EXTRA_TOOLS_SCRIPT.is_file()
           and " " not in str(gsbatch.EXTRA_TOOLS_SCRIPT), "默认挂 gsb_tools 扩展（--with-extension）", ext)
     check(d["options"]["extra_tools"] is True and d["options"]["probe"] is True
           and d["options"].get("probe_backend") == "claude"
           and gsbatch.PREAMBLE_PROBE_CLAUDE in arg(c, "--system")
-          and d["options"]["review"] is True and d["options"]["verify"] is True,
-          "job.json 记了 extra_tools、probe=claude（默认）、review、verify", d["options"])
+          and d["options"]["review"] is True and d["options"].get("review_backend") == "claude"
+          and d["options"]["verify"] is True,
+          "job.json 记了 extra_tools、probe=claude、review=claude（默认）、verify", d["options"])
     check(c["cwd"] == str(TMP), "在指定 cwd 里跑")
 
     print("别的强度：本批代理补 reasoning_effort")
@@ -340,12 +342,14 @@ def main():
     d, cs = run(["戊 probe"], probe=False)
     c = cs[0]
     ext = arg(c, "--with-extension")
-    check(ext and "GSB_PROBE" not in ext and "GSB_REVIEW=1" in ext and "GSB_VERIFY=1" in ext
+    check(ext and "GSB_PROBE" not in ext and "GSB_REVIEW=1" in ext
+          and "GSB_REVIEW_BACKEND=claude" in ext and "GSB_VERIFY=1" in ext
           and ext.startswith("gsb_tools:GSB_MAX_BLOCK=")
           and arg(c, "--system") == gsbatch.PREAMBLE + "\n" + gsbatch.PREAMBLE_TOOLS + "\n" + gsbatch.PREAMBLE_REVIEW + "\n" + gsbatch.PREAMBLE_VERIFY
           and gsbatch.PREAMBLE_PROBE not in arg(c, "--system")
           and d["options"]["extra_tools"] is True and d["options"]["probe"] is False
-          and d["options"]["review"] is True and d["options"]["verify"] is True,
+          and d["options"]["review"] is True and d["options"].get("review_backend") == "claude"
+          and d["options"]["verify"] is True,
           "probe=False：扩展不带 GSB_PROBE=1，preamble 是 6–9 + 11 + 12", c["argv"])
 
     print("probe=\"claude\"：扩展带 GSB_PROBE_BACKEND=claude，preamble 用 Claude 那句")
@@ -377,6 +381,17 @@ def main():
           and d["options"]["review"] is False and d["options"]["probe"] is True
           and d["options"]["verify"] is True,
           "review=False：扩展不带 GSB_REVIEW=1，preamble 没有 review 句", c["argv"])
+    print("review=\"claude\" / review=\"codex\"")
+    d, cs = run(["戊 review-claude"], review="claude")
+    check(d["options"]["review"] is True and d["options"]["review_backend"] == "claude"
+          and "GSB_REVIEW_BACKEND=claude" in arg(cs[0], "--with-extension"),
+          "review=claude：BACKEND=claude", (arg(cs[0], "--with-extension"), d["options"]))
+    d, cs = run(["戊 review-codex"], review="codex")
+    check(d["options"]["review"] is True and d["options"]["review_backend"] == "codex"
+          and "GSB_REVIEW_BACKEND=codex" in arg(cs[0], "--with-extension"),
+          "review=codex：BACKEND=codex", (arg(cs[0], "--with-extension"), d["options"]))
+    check(gsbatch._review_backend({"extra_tools": True, "review": True}) == "codex",
+          "旧 job.json 没记 review_backend → 仍按 codex 续跑")
     d, cs = run(["戊 都关"], probe=False, review=False)
     c = cs[0]
     ext = arg(c, "--with-extension")
@@ -395,18 +410,24 @@ def main():
           and d["options"]["verify"] is False,
           "verify=False：扩展不带 GSB_VERIFY=1，preamble 没有 verify 句", c["argv"])
 
-    print("extra_tools=False / 不挂 developer：不挂附加工具")
+    print("extra_tools=False：不挂附加工具；显式 extensions 仍可挂原生，且不挡 gsb")
     d, cs = run(["戊"], extra_tools=False)
     c = cs[0]
     check("--with-extension" not in c["argv"] and arg(c, "--system") == gsbatch.PREAMBLE
-          and arg(c, "--with-builtin") == "developer" and d["options"]["extra_tools"] is False
+          and "--with-builtin" not in c["argv"] and d["options"]["extra_tools"] is False
           and d["options"]["probe"] is False and d["options"]["review"] is False
           and d["options"]["verify"] is False,
           "extra_tools=False 不挂扩展，preamble 不加那几句，probe 也跟着关", c["argv"])
     d, cs = run(["己"], extensions=["memory"])
     c = cs[0]
-    check("--with-extension" not in c["argv"] and arg(c, "--system") == gsbatch.PREAMBLE,
-          "没挂 developer 就不挂附加工具", c["argv"])
+    check(arg(c, "--with-builtin") == "memory" and arg(c, "--with-extension")
+          and "gsb_tools" in arg(c, "--with-extension")
+          and arg(c, "--system") == gsbatch.PREAMBLE + "\n" + gsbatch.PREAMBLE_TOOLS + "\n" + gsbatch.PREAMBLE_PROBE_CLAUDE + "\n" + gsbatch.PREAMBLE_REVIEW + "\n" + gsbatch.PREAMBLE_VERIFY,
+          "只挂 memory 原生时仍挂 gsb_tools（不再要求 developer）", c["argv"])
+    d, cs = run(["庚"], extensions=["developer"])
+    c = cs[0]
+    check(arg(c, "--with-builtin") == "developer" and "gsb_tools" in arg(c, "--with-extension"),
+          "显式 extensions=[developer] 仍可挂原生 + gsb_tools", c["argv"])
 
     print("chat / 关 preamble / max_turns")
     d, cs = run(["丁 创建文件"], permission_mode="readonly", preamble=False, max_turns=3)
@@ -431,7 +452,7 @@ def main():
     check("--resume" not in cs[0]["argv"] and arg(cs[1], "--session-id") == t[0]["session_id"]
           and "-n" not in cs[1]["argv"], "第二条续接第一条的会话", cs[1]["argv"])
     check(arg(cs[0], "--with-extension") and "--with-extension" not in cs[1]["argv"]
-          and "GSB_PROBE=1 GSB_PROBE_BACKEND=claude GSB_REVIEW=1 GSB_VERIFY=1" in arg(cs[0], "--with-extension")
+          and "GSB_PROBE=1 GSB_PROBE_BACKEND=claude GSB_REVIEW=1 GSB_REVIEW_BACKEND=claude GSB_VERIFY=1" in arg(cs[0], "--with-extension")
           and arg(cs[1], "--system") == gsbatch.PREAMBLE + "\n" + gsbatch.PREAMBLE_TOOLS + "\n" + gsbatch.PREAMBLE_PROBE_CLAUDE + "\n" + gsbatch.PREAMBLE_REVIEW + "\n" + gsbatch.PREAMBLE_VERIFY,
           "续接时不再传 --with-extension（会话里已有，重传会报重名）", cs[1]["argv"])
     check(t[1]["tokens"]["input"] == 1000 and t[1]["session_tokens"]["input"] == 1010,

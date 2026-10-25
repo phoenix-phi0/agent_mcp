@@ -20,7 +20,7 @@ probe / probe_wait 用 PATH 上的假 codex（不联网）：默认不出现、G
 不带 --dangerously*，凭证变量进不了 codex。默认还给 codex 挂 gsb_read_files MCP
 （GSB_TOOLS_ONLY=read_files）；GSB_PROBE_READ_FILES=0 可关。
 GSB_PROBE_BACKEND=claude 时改走假 claude（经 probe_claude_run.py）：plan 模式、
-strict-mcp-config、只挂 gsb_read_files、关 connectors；review 仍走 codex。
+strict-mcp-config、只挂 gsb_read_files、关 connectors；GSB_REVIEW_BACKEND 同理（默认 claude）。
 verify / verify_wait（GSB_VERIFY=1）：假 codex 交回 JSON / 非 JSON / 往被验项目写文件，
 验开关、参数校验、workspace-write + 临时目录 argv、JSON 解析成功 / 失败、违规改动
 （git 与非 git）、still_running + verify_wait、超时杀进程组；说明里提 verify。
@@ -69,8 +69,12 @@ class Server:
         env.pop("GSB_PROBE", None)
         env.pop("GSB_PROBE_BACKEND", None)
         env.pop("GSB_PROBE_MODEL", None)
+        env.pop("GSB_REVIEW", None)
+        env.pop("GSB_REVIEW_BACKEND", None)
+        env.pop("GSB_REVIEW_MODEL", None)
         env.pop("GSB_TOOLS_ONLY", None)
         env["GSB_PROBE_BACKEND"] = "codex"  # 大部分用例用假 codex；默认 claude 另测
+        env["GSB_REVIEW_BACKEND"] = "codex"
         env.update(extra)
         env = {k: v for k, v in env.items() if v is not None}
         self.p = subprocess.Popen([sys.executable, str(SCRIPT)], cwd=str(TMP), env=env,
@@ -165,6 +169,12 @@ def emit(result, tok_in=1200, is_error=False, rc=0, err=None):
     print(json.dumps(d, ensure_ascii=False), flush=True)
     sys.exit(rc)
 
+if "你是代码审查员" in prompt:
+    if "REVIEWSLOW" in prompt:
+        time.sleep(6)
+    emit("结论：有问题\\n问题清单：\\n- [阻断] calc.py:2 — 负数没处理。依据：读了文件\\n"
+         "- [应修] README 也要更新。依据：任务书\\n- [建议] calc.py:1 — 可以加类型注解\\n"
+         "必查项：\\n(a) 漏了负数要求\\n(b) 无\\n(c) 无\\n(d) 无报告草稿\\n(e) 无", tok_in=4321)
 if "FAIL" in task:
     emit("", is_error=True, rc=1, err="ERROR: something broke badly")
 if "HANG" in task:
@@ -467,11 +477,12 @@ def probe_claude_tests():
     finally:
         s.close()
 
-    print("Claude 后端时 review 仍走 codex")
+    print("Claude probe + 显式 review=codex：审查仍走 codex")
     (bindir / "codex").write_text(FAKE_CODEX)
     (bindir / "codex").chmod(0o755)
     crec = TMP / "codex_calls_with_claude_probe.jsonl"
-    env2 = {**env, "FAKE_CODEX_REC": str(crec), "PATH": f"{bindir}:{os.environ.get('PATH', '')}"}
+    env2 = {**env, "FAKE_CODEX_REC": str(crec), "PATH": f"{bindir}:{os.environ.get('PATH', '')}",
+            "GSB_REVIEW_BACKEND": "codex"}
     repo = TMP / "repo_claude_probe"
     repo.mkdir(exist_ok=True)
     if not (repo / ".git").exists():
@@ -486,12 +497,44 @@ def probe_claude_tests():
         cr = recs(crec)
         check(cr and cr[-1]["argv"][0] == "exec"
               and cr[-1]["argv"][cr[-1]["argv"].index("-m") + 1] == "gpt-6-luna",
-              "review 仍调 codex gpt-6-luna", cr[-1]["argv"] if cr else None)
+              "GSB_REVIEW_BACKEND=codex 时审查仍调 codex", cr[-1]["argv"] if cr else None)
         n_claude = len(recs(rec))
         n_codex = len(cr)
         t, e = s.call("probe", {"instructions": "OK review-isolation"})
         check(len(recs(rec)) == n_claude + 1 and len(recs(crec)) == n_codex,
               "probe 走 claude、不碰 codex", (len(recs(rec)), len(recs(crec))))
+    finally:
+        s.close()
+
+    print("Claude review 后端：默认 haiku + 格式")
+    env3 = {**env, "GSB_REVIEW_BACKEND": "claude", "FAKE_CLAUDE_REC": str(rec)}
+    # clear rec for clean count? keep appending is fine
+    s = Server(max_block=4, GSB_REVIEW="1", **env3)
+    try:
+        tools = {t["name"]: t for t in s.req("tools/list")["result"]["tools"]}
+        check("Claude CLI" in tools["review"]["description"]
+              and "claude-haiku-5-5" in tools["review"]["description"],
+              "review 描述写 Claude / haiku", tools["review"]["description"][:160])
+        t, e = s.call("review", {"instructions": "看一下", "cwd": str(repo)})
+        check(not e and "状态：done" in t and "初步审查" in t
+              and "结论：有问题" in t and "claude" in t,
+              "Claude review done + 固定格式", t[:400])
+        c = recs(rec)[-1]
+        a = c["argv"]
+        check(a[0] == "-p" and a[a.index("--model") + 1] == "claude-haiku-5-5"
+              and a[a.index("--permission-mode") + 1] == "plan"
+              and "--strict-mcp-config" in a,
+              "Claude review argv：plan haiku strict-mcp", a)
+        check(c["prompt"].startswith("你是代码审查员"), "审查员前言", c["prompt"][:80])
+    finally:
+        s.close()
+
+    print("没设 GSB_REVIEW_BACKEND：默认 claude")
+    s = Server(max_block=4, GSB_REVIEW="1", **dict(env, GSB_REVIEW_BACKEND=None))
+    try:
+        tools = {t["name"]: t for t in s.req("tools/list")["result"]["tools"]}
+        check("Claude CLI" in tools["review"]["description"], "默认审查后端 claude",
+              tools["review"]["description"][:120])
     finally:
         s.close()
 

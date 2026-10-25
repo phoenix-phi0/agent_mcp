@@ -10,7 +10,7 @@ JOBS/<job_id>/job.json。
 
 - 一条任务：`goose run --no-profile --output-format stream-json -i - …`
   提示词走标准输入。`--no-profile` 不加载用户配置里的扩展，只挂
-  `--with-builtin` 给的内置扩展（默认 developer：读写文件、跑 shell）。
+  `--with-builtin` 给的内置扩展（默认不挂；要 developer 等请显式传 extensions）。
 - stream-json 的 stdout 前几行是 banner（不是 JSON），里面有会话 id
   （形如 20261023_1），记成 session_id。之后每行一个事件：
   `message`（assistant 的 text / thinking / toolRequest，user 的
@@ -70,11 +70,12 @@ goose 1.55 自带的 zai_coding_plan **不发 reasoning_effort**
 
 ## 附加工具（extra_tools，默认开）
 
-auto 且挂了 developer 时，再用 `--with-extension` 挂一个 stdio MCP 扩展
+permission_mode=auto 时，用 `--with-extension` 挂一个 stdio MCP 扩展
 gsb_tools（tools/gsb_tools_mcp.py，纯标准库）：read_files 一次读多个文件 / 多段，
 multi_edit 一次多处 / 多文件精确替换（默认原子），run_wait 跑命令并阻塞等结束，wait_pid 等已在跑的进程；
 list / check / write_iface_template 管理接口封装模板（templates/iface/*.zs，校验通过才落盘，
-不改 iftpl.py）。goose 每轮只执行一个工具，这几个一次做完多步。PREAMBLE 后面追加 PREAMBLE_TOOLS 提示。
+不改 iftpl.py）。默认不挂 goose 内置 developer（读写 / shell）；读写和跑命令走 gsb_tools。
+goose 每轮只执行一个工具，这几个一次做完多步。PREAMBLE 后面追加 PREAMBLE_TOOLS 提示。
 
 - probe（默认开，前提是 extra_tools 开着）：扩展带 GSB_PROBE=1 启动，多出
   probe / probe_wait。默认后端 Claude CLI claude-haiku-5-5；`probe="codex"`
@@ -85,8 +86,10 @@ list / check / write_iface_template 管理接口封装模板（templates/iface/*
   见 tools/PROBE_READ_FILES.md）。只收结论；后台进程组、单次最多 270 秒、
   wait=false 并行 + probe_wait。Codex 花公司 ChatGPT 额度；Claude 花 Claude
   订阅/API。probe=False 关掉；关掉时 PREAMBLE 不加 probe 那句。
-- review（默认开，前提同 probe）：扩展带 GSB_REVIEW=1，多出 review / review_wait：
-  同一套 codex 只读执行，派审查员按任务书（task_file）独立审查改动（默认工作区相对
+- review（默认开，前提同 probe）：扩展带 GSB_REVIEW=1，多出 review / review_wait。
+  默认后端 Claude CLI claude-haiku-5-5（与 probe 同套 plan 只读 + gsb_read_files）；
+  `review="codex"` 或 options.review_backend=codex 时改走 Codex CLI gpt-6-luna
+  （`-s read-only`）。派审查员按任务书（task_file）独立审查改动（默认工作区相对
   HEAD 的未提交改动 + 暂存区；给 base 审 base..HEAD + 未提交改动），可核对报告草稿
   （report_file），按固定格式交回「通过 / 有问题」和问题清单。这只是「初步审查」：
   返回文本开头提示逐条自行核实，没有 文件:行号 出处的意见标「无出处，低可信」。
@@ -197,7 +200,7 @@ EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")   # 面板用的�
 EFFORT_ALIASES = {"极低": "minimal", "低": "low", "中": "medium", "高": "high", "极高": "xhigh"}
 DEFAULT_EFFORT = "low"
 
-DEFAULT_EXTENSIONS = ("developer",)
+DEFAULT_EXTENSIONS = ()  # 默认不挂 goose 内置；读写/shell 走 gsb_tools
 # 附加工具：stdio MCP 扩展（read_files / run_wait / wait_pid / iface 模板三件套）
 EXTRA_TOOLS_NAME = "gsb_tools"
 EXTRA_TOOLS_SCRIPT = Path(__file__).resolve().parent / "gsb_tools_mcp.py"
@@ -238,9 +241,9 @@ PREAMBLE = """这是批量任务里的一条，没有人在旁边看着，也没
 # 挂了附加工具时追加在 PREAMBLE 后面（一节「工具用法」，总长控制在 300 字左右；
 # probe / review 的两条按开关单独追加，没开就不写，免得提示不存在的工具）
 PREAMBLE_TOOLS = """工具用法：
-6. 读文件一律用 read_files（可一次多个、带行号范围、glob），不要用 shell 的 cat/head/tail/sed -n/less 读；grep/rg 搜索照用，看搜到的内容回 read_files。
+6. 读文件一律用 read_files（可一次多个、带行号范围、glob），不要用 shell 的 cat/head/tail/sed -n/less 读；grep/rg 搜索用 run_wait 跑，看搜到的内容再回 read_files。
 7. 测试、构建等长命令用 run_wait 阻塞等结果，后台进程等结束用 wait_pid；不要 sleep 轮询，sleep 超过 10 秒一律改用 wait_pid。
-8. 同一文件改 2 处以上、或一次改多个文件，用 multi_edit 一次提交（默认原子）；单处小改可用内置 edit。
+8. 改文件一律用 multi_edit（默认可原子、可一次多处/多文件）；不要用内置 edit，也不要用 shell 重定向写文件。
 9. 现有接口封装模板盖不住时，用 list_iface_templates / check_iface_template / write_iface_template 加模板，不要手写模板文件、不要改 iftpl.py。"""
 
 # 开了 probe 时再追加（按后端微调文案）
@@ -345,13 +348,15 @@ def _check_extensions(exts):
     return out
 
 
-def _precheck(items, perm: str, exts: list) -> list:
+def _precheck(items, perm: str, exts: list, extra_tools: bool = True) -> list:
+    # 能写：auto 且挂了 developer，或开了 gsb_tools（multi_edit）
     out = []
-    if perm == "chat" or "developer" not in exts:
+    can_write = perm == "auto" and ("developer" in exts or extra_tools)
+    if not can_write:
         for i, it in enumerate(items, 1):
             if _WANTS_WRITE.search(it["prompt"]):
-                out.append(f"第 {i} 条看着要写文件，但没挂 developer 扩展（或 permission_mode=chat），"
-                           "写不了文件")
+                out.append(f"第 {i} 条看着要写文件，但 permission_mode=chat，"
+                           "或没挂 developer / 没开 extra_tools（gsb_tools multi_edit），写不了文件")
     return out
 
 
@@ -377,8 +382,8 @@ def _provider_name(job_id: str, n: int) -> str:
 
 
 def _extra_tools_on(o: dict) -> bool:
-    return bool(o.get("extra_tools")) and o["permission_mode"] == "auto" \
-        and "developer" in (o.get("extensions") or [])
+    # 不再要求挂 developer：默认只挂 gsb_tools，读写/shell 走它
+    return bool(o.get("extra_tools")) and o["permission_mode"] == "auto"
 
 
 def _probe_on(o: dict) -> bool:
@@ -412,6 +417,29 @@ def _review_on(o: dict) -> bool:
     return _extra_tools_on(o) and bool(o.get("review"))
 
 
+def _review_backend(o: dict) -> str:
+    # 旧 job.json 没记 review_backend 的按当时默认 codex 处理（续跑不变）
+    x = str(o.get("review_backend") or "codex").strip().lower()
+    return x if x in ("codex", "claude") else "codex"
+
+
+def _norm_review(review):
+    """review=True/'claude' → (True, 'claude')（默认）; 'codex' → (True, 'codex'); False → (False, 'claude')."""
+    if review is False or review is None or review == "":
+        return False, "claude"
+    if review is True:
+        return True, "claude"
+    if isinstance(review, str):
+        s = review.strip().lower()
+        if s == "codex":
+            return True, "codex"
+        if s in ("claude", "1", "true", "yes", "on"):
+            return True, "claude"
+        if s in ("0", "false", "no", "off"):
+            return False, "claude"
+    raise GSBatchError(f"review 只能是 True / False / 'codex' / 'claude'，收到：{review!r}")
+
+
 def _verify_on(o: dict) -> bool:
     return _extra_tools_on(o) and bool(o.get("verify"))
 
@@ -424,7 +452,9 @@ def _extra_tools_arg(o: dict = None) -> str:
             envs += " GSB_PROBE=1"
             # 后端总是显式写出，不依赖 gsb_tools 的默认值
             envs += f" GSB_PROBE_BACKEND={_probe_backend(o)}"
-        envs += " GSB_REVIEW=1" if _review_on(o) else ""
+        if _review_on(o):
+            envs += " GSB_REVIEW=1"
+            envs += f" GSB_REVIEW_BACKEND={_review_backend(o)}"
         envs += " GSB_VERIFY=1" if _verify_on(o) else ""
     return (f"{EXTRA_TOOLS_NAME}:GSB_MAX_BLOCK={EXTRA_TOOLS_MAX_BLOCK}{envs} "
             f"{EXTRA_TOOLS_PY} {EXTRA_TOOLS_SCRIPT}")
@@ -819,7 +849,7 @@ def submit(tasks, name: str = "", provider: str = DEFAULT_PROVIDER, model: str =
            mode: str = "isolated", permission_mode: str = None,
            extensions=None, max_turns: int = None,
            preamble: bool = True, effort: str = DEFAULT_EFFORT,
-           extra_tools: bool = True, probe=True, review: bool = True,
+           extra_tools: bool = True, probe=True, review=True,
            verify: bool = True) -> dict:
     """提交一批任务，立刻返回，不等跑完。
 
@@ -836,20 +866,22 @@ def submit(tasks, name: str = "", provider: str = DEFAULT_PROVIDER, model: str =
         会话，前一条失败就开新会话。
     permission_mode：auto（默认，工具自动批准，也收 acceptEdits）或 chat
         （不挂扩展、只回答，也收 readonly）。
-    extensions：auto 时挂的 goose 内置扩展，默认 ["developer"]（文件读写 + shell）。
+    extensions：auto 时挂的 goose 内置扩展，默认 []（不挂 developer 等原生扩展）。
+        要文件读写 + shell 的原生 developer 就显式传 ["developer"]。
         列表或逗号分隔字符串；[] 表示不挂。
     max_turns：传给 --max-turns，不传不限（靠 timeout 兜底）。
     preamble：把 PREAMBLE 经 --system 追加进系统提示。
-    extra_tools：auto 且挂了 developer 时，再挂 gsb_tools 扩展（read_files /
-        multi_edit / run_wait / wait_pid 等，减少调用次数），PREAMBLE 追加用法。False 不挂。
+    extra_tools：auto 时挂 gsb_tools 扩展（read_files / multi_edit / run_wait /
+        wait_pid 等；默认靠它读写和跑命令），PREAMBLE 追加用法。False 不挂。
     probe：extra_tools 开着时再给 probe / probe_wait。True / "claude"（默认）派
         Claude CLI claude-haiku-5-5（plan 只读 + 仅 gsb_read_files MCP）；"codex" 派
         Codex CLI gpt-6-luna 只读探针。PREAMBLE 再加一句。False 关掉。
         extra_tools 关了它也跟着关。
-    review：extra_tools 开着时再给 review / review_wait（派 gpt-6-luna 只读审查员按任务书
-        做初步审查、核对报告草稿），PREAMBLE 加一句（commit/push、写报告前调 review；
-        意见只是线索，先核实再改，报告里附审查结论）。
-        同样花 ChatGPT 额度，False 关掉。
+    review：extra_tools 开着时再给 review / review_wait。True / "claude"（默认）派
+        Claude CLI claude-haiku-5-5（plan 只读 + 仅 gsb_read_files MCP）；"codex" 派
+        Codex CLI gpt-6-luna 只读审查员。按任务书做初步审查、核对报告草稿；PREAMBLE
+        加一句（commit/push、写报告前调 review；意见只是线索，先核实再改，报告里附审查结论）。
+        False 关掉。
     verify：extra_tools 开着时再给 verify / verify_wait（派 codex workspace-write 验证 agent
         做全量回归 / 起服务实测 / 基线对比，只交回结构化 JSON），PREAMBLE 加一句
         （回归、起服务实测、基线对比交给 verify，不要现写验证脚本）。False 关掉。
@@ -901,7 +933,8 @@ def submit(tasks, name: str = "", provider: str = DEFAULT_PROVIDER, model: str =
             f"环境里没有 ZHIPU_API_KEY（或 ZAI_CODING_PLAN_API_KEY），{prov} 用不了。"
             "调用方（MCP 服务 / batchmgr）的环境里得有这个变量")
     probe_on, probe_backend = _norm_probe(probe)
-    warnings = _precheck(items, perm, exts)
+    review_on, review_backend = _norm_review(review)
+    warnings = _precheck(items, perm, exts, extra_tools=bool(extra_tools))
     if perm == "chat" and extensions:
         warnings.append("permission_mode=chat 不挂扩展，extensions 忽略")
     if cwd:
@@ -928,16 +961,16 @@ def submit(tasks, name: str = "", provider: str = DEFAULT_PROVIDER, model: str =
                     "extensions": exts if perm == "auto" else [],
                     "max_turns": max_turns, "preamble": bool(preamble),
                     "effort": job_effort,
-                    "extra_tools": bool(extra_tools) and perm == "auto" and "developer" in exts,
-                    "probe": bool(probe_on) and bool(extra_tools) and perm == "auto"
-                    and "developer" in exts,
+                    "extra_tools": bool(extra_tools) and perm == "auto",
+                    "probe": bool(probe_on) and bool(extra_tools) and perm == "auto",
                     "probe_backend": probe_backend if (
                         bool(probe_on) and bool(extra_tools) and perm == "auto"
-                        and "developer" in exts) else "codex",
-                    "review": bool(review) and bool(extra_tools) and perm == "auto"
-                    and "developer" in exts,
-                    "verify": bool(verify) and bool(extra_tools) and perm == "auto"
-                    and "developer" in exts},
+                        ) else "codex",
+                    "review": bool(review_on) and bool(extra_tools) and perm == "auto",
+                    "review_backend": review_backend if (
+                        bool(review_on) and bool(extra_tools) and perm == "auto"
+                        ) else "codex",
+                    "verify": bool(verify) and bool(extra_tools) and perm == "auto"},
         "warnings": warnings, "cmd": None,
         "tasks": [dict(it, status="pending", output="", error="", session_id=None,
                        seconds=None, tokens=None, cost_usd=None, cost_est_usd=None,
@@ -1067,12 +1100,12 @@ def describe() -> str:
         "  None 或空串 = 不设。单条可在任务字典里覆盖。",
         "",
         "权限（goose 没有沙箱）：",
-        "  不传 / auto / acceptEdits  GOOSE_MODE=auto，挂 extensions（默认 developer），工具自动批准，",
+        "  不传 / auto / acceptEdits  GOOSE_MODE=auto，挂 extensions（默认不挂原生）+ gsb_tools，工具自动批准，",
         "                             能写 cwd 以外的地方",
         "  chat / readonly            不挂扩展，只回答",
         "  approve / smart_approve / bypassPermissions 不收",
         "",
-        "extra_tools（默认开，auto + developer 时）：再挂 gsb_tools 扩展：read_files 一次读多个文件、",
+        "extra_tools（默认开，auto 时）：挂 gsb_tools 扩展：read_files 一次读多个文件、",
         "  multi_edit 一次多处/多文件精确替换（默认原子）、",
         f"  run_wait 跑命令阻塞等结束、wait_pid 等已在跑的进程；单次调用最多阻塞 {EXTRA_TOOLS_MAX_BLOCK} 秒",
         "  （goose 对扩展 300 秒超时），没跑完返回 still_running。extra_tools=False 不挂。",
@@ -1081,8 +1114,10 @@ def describe() -> str:
         "  True/\"claude\"（默认）= Claude CLI claude-haiku-5-5（plan + 仅 gsb_read_files，关 connectors）；",
         "  probe=\"codex\" = Codex CLI gpt-6-luna（ChatGPT 额度）。",
         "  probe=False 关掉。",
-        "review（默认开，跟着 extra_tools）：再给 review / review_wait，派 gpt-6-luna 只读审查员按任务书",
-        "  做初步审查（默认工作区 diff，base 给了审 base..HEAD），核对报告草稿；PREAMBLE 要求",
+        "review（默认开，跟着 extra_tools）：再给 review / review_wait。",
+        "  True/\"claude\"（默认）= Claude CLI claude-haiku-5-5（plan + 仅 gsb_read_files）；",
+        "  review=\"codex\" = Codex CLI gpt-6-luna（ChatGPT 额度）。",
+        "  按任务书做初步审查（默认工作区 diff，base 给了审 base..HEAD），核对报告草稿；PREAMBLE 要求",
         "  commit/push、写最终报告前调，意见是线索不是定论，报告里附审查结论。review=False 关掉。",
         "verify（默认开，跟着 extra_tools）：再给 verify / verify_wait，派 codex workspace-write 验证 agent",
         "  做全量回归 / 起服务逐接口实测 / 基线对比，只交回结构化 JSON 结论；被验项目与仓库只读，",

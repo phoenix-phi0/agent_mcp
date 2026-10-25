@@ -17,10 +17,12 @@ goose 1.55 每轮只执行一个工具，所以这里的工具都一次做完多
   GSB_MAX_BLOCK 秒，没跑完返回 still_running + probe_id，再调 probe_wait。
 - GSB_TOOLS_ONLY：逗号分隔工具名（如 read_files），只暴露这些工具。给 Claude /
   Codex 探针挂「仅多文件读取」MCP 时用，避免带上 multi_edit / Notion 等。
-- review / review_wait（GSB_REVIEW=1 时才有）：始终走 Codex 只读执行，派一个审查员
-  按任务书独立审查改动（工作区 diff 或 base..HEAD），按固定格式交回「通过 / 有问题」
-  和问题清单。codex 用 ~/.codex/auth.json
-  的 ChatGPT 登录（靠 HOME），不需要也不放行任何密钥环境变量。
+- review / review_wait（GSB_REVIEW=1 时才有）：派一个审查员按任务书独立审查改动
+  （工作区 diff 或 base..HEAD），按固定格式交回「通过 / 有问题」和问题清单。
+  后端由 GSB_REVIEW_BACKEND 选择：claude（默认，Claude CLI claude-haiku-5-5，plan 模式，
+  只挂 builtins + gsb_read_files，关 connectors）或 codex（codex exec gpt-6-luna，
+  -s read-only）。Codex 用 ~/.codex/auth.json 的 ChatGPT 登录（靠 HOME）；
+  两种后端都不需要也不放行任何密钥环境变量。
 - verify / verify_wait（GSB_VERIFY=1 时才有）：始终走 Codex，但用 workspace-write 沙箱、
   工作目录锁在自己的临时目录 /tmp/verify_<id>/（起本地服务要监听端口，放开 network_access），
   派验证 agent 做全量回归 / 起服务逐接口实测 / 基线对比：它自己摸项目、优先用项目已有入口、
@@ -88,7 +90,10 @@ _PROBE_BACKEND_RAW = (os.environ.get("GSB_PROBE_BACKEND") or "claude").strip().l
 PROBE_BACKEND = _PROBE_BACKEND_RAW if _PROBE_BACKEND_RAW in ("codex", "claude") else "claude"
 PROBE_MODEL = os.environ.get("GSB_PROBE_MODEL") or (
     "claude-haiku-5-5" if PROBE_BACKEND == "claude" else "gpt-6-luna")
-REVIEW_MODEL = os.environ.get("GSB_REVIEW_MODEL") or "gpt-6-luna"
+_REVIEW_BACKEND_RAW = (os.environ.get("GSB_REVIEW_BACKEND") or "claude").strip().lower()
+REVIEW_BACKEND = _REVIEW_BACKEND_RAW if _REVIEW_BACKEND_RAW in ("codex", "claude") else "claude"
+REVIEW_MODEL = os.environ.get("GSB_REVIEW_MODEL") or (
+    "claude-haiku-5-5" if REVIEW_BACKEND == "claude" else "gpt-6-luna")
 VERIFY_ON = os.environ.get("GSB_VERIFY") == "1"
 VERIFY_MODEL = os.environ.get("GSB_VERIFY_MODEL") or "gpt-6-luna"
 PROBE_EFFORTS = ("low", "medium", "high")
@@ -838,6 +843,39 @@ def _probe_opts(effort, timeout_secs, model, cwd):
     return backend, eff, to, m, wd, exe
 
 
+def _review_opts(effort, timeout_secs, model, cwd):
+    """校验审查参数；按 REVIEW_BACKEND 检查对应 CLI（与探针同套启动器）。"""
+    eff = str(effort or "medium").strip().lower()
+    if eff not in PROBE_EFFORTS:
+        raise ValueError(f"effort 只能是 {' / '.join(PROBE_EFFORTS)}，收到：{effort!r}")
+    to = int(timeout_secs or 900)
+    if not 1 <= to <= PROBE_MAX_TIMEOUT:
+        raise ValueError(f"timeout_secs 要在 1~{PROBE_MAX_TIMEOUT}")
+    backend = REVIEW_BACKEND
+    default_m = "claude-haiku-5-5" if backend == "claude" else "gpt-6-luna"
+    m = str(model or REVIEW_MODEL or default_m).strip()
+    if not _MODEL_RE.match(m):
+        raise ValueError(f"model 不对：{model!r}")
+    wd = _resolve(cwd) if cwd else os.getcwd()
+    if not os.path.isdir(wd):
+        raise ValueError(f"cwd 不是目录：{wd}")
+    if backend == "claude":
+        exe = _claude_bin()
+        if not exe:
+            raise ValueError("找不到 claude（PATH 里没有；或设 GSB_CLAUDE_BIN）")
+        if not PROBE_CLAUDE_RUN.is_file():
+            raise ValueError(f"找不到 Claude 启动器：{PROBE_CLAUDE_RUN}")
+        if not Path(PROBE_CLAUDE_MCP).is_file():
+            raise ValueError(f"找不到 Claude MCP 配置：{PROBE_CLAUDE_MCP}")
+        if not Path(PROBE_CLAUDE_SETTINGS).is_file():
+            raise ValueError(f"找不到 Claude settings：{PROBE_CLAUDE_SETTINGS}")
+    else:
+        exe = _codex_bin()
+        if not exe:
+            raise ValueError("找不到 codex（PATH 里没有）")
+    return backend, eff, to, m, wd, exe
+
+
 def _new_probe_id(kind):
     """probe / review / verify 共用的 id：p1-<pid>-<ts> / r… / v…。"""
     with _PLOCK:
@@ -979,7 +1017,7 @@ def review(task_file=None, instructions=None, cwd=None, base=None, report_file=N
     if instructions is not None and not isinstance(instructions, str):
         raise ValueError("instructions 要是字符串")
     extra = (instructions or "").strip()
-    eff, to, m, wd, exe = _codex_opts(effort, timeout_secs, model, cwd, default_model=REVIEW_MODEL)
+    backend, eff, to, m, wd, exe = _review_opts(effort, timeout_secs, model, cwd)
     tf = _existing_file(task_file, wd, "task_file")
     rf = _existing_file(report_file, wd, "report_file")
     if not tf and not extra:
@@ -1016,11 +1054,16 @@ def review(task_file=None, instructions=None, cwd=None, base=None, report_file=N
         report=(f"报告草稿：{rf}（逐条核对里面的说法和数字）\n" if rf else "报告草稿：无\n"),
         extra=(f"补充说明（主任务写的：做了什么、要特别核对的点）：\n{extra}\n" if extra else ""),
         status=status)
-    pid_ = _codex_start("review", prompt, eff, to, m, wd, exe)
+    if backend == "claude":
+        pid_ = _claude_start("review", prompt, eff, to, m, wd, exe)
+        label = f"Claude {m}"
+    else:
+        pid_ = _codex_start("review", prompt, eff, to, m, wd, exe)
+        label = m
     r = _PROBES[pid_]
     r.update(task_file=tf, report_file=rf, base=base)
     if not wait:
-        return (f"review_id：{pid_}\n状态：started（后台审查，模型 {m}，强度 {eff}，超时 {to} 秒）\n"
+        return (f"review_id：{pid_}\n状态：started（后台审查，{label}，强度 {eff}，超时 {to} 秒，后端 {backend}）\n"
                 f"用 review_wait(review_ids=[\"{pid_}\"]) 等结论")
     return probe_wait([pid_], _cancel=_cancel, _tool="review_wait", _arg="review_ids")
 
@@ -1767,14 +1810,23 @@ PROBE_TOOLS = [
          "timeout_secs": {"type": "integer", "description": f"本次最多等几秒，默认且最多 {MAX_BLOCK}"}},
          "required": ["probe_ids"]}},
 ]
+def _review_tool_description():
+    if REVIEW_BACKEND == "claude":
+        be = (f"Claude CLI 的 {REVIEW_MODEL}，permission-mode=plan 只读，"
+              "只挂 Read/Glob/Grep/Bash + gsb_read_files，关掉无关 MCP/connectors")
+    else:
+        be = f"Codex CLI 的 {REVIEW_MODEL}，强制 read-only 沙箱"
+    return (f"派一个独立审查员（{be}）对你的改动做初步审查："
+            "改完代码、git commit / push 之前，以及写最终报告之前调一次。审查员自己在 cwd 跑只读命令"
+            "（git diff / status、rg、只读测试），按任务书逐条核对要求和规则、有没有混进无关改动、"
+            "报告里的数字是否属实、明显 bug，交回「结论：通过 / 有问题」和问题清单（阻断 / 应修 / 建议）。"
+            "初步审查意见只是参考线索，不是定论，可能误报也可能漏报。改完可以再审一次。"
+            f"单次最多阻塞 {MAX_BLOCK} 秒，没审完返回 still_running 和 review_id，再调 review_wait。")
+
+
 REVIEW_TOOLS = [
     {"name": "review",
-     "description": (f"派一个独立审查员（Codex CLI 的 {REVIEW_MODEL}，强制 read-only 沙箱）对你的改动做初步审查："
-                     "改完代码、git commit / push 之前，以及写最终报告之前调一次。审查员自己在 cwd 跑只读命令"
-                     "（git diff / status、rg、只读测试），按任务书逐条核对要求和规则、有没有混进无关改动、"
-                     "报告里的数字是否属实、明显 bug，交回「结论：通过 / 有问题」和问题清单（阻断 / 应修 / 建议）。"
-                     "初步审查意见只是参考线索，不是定论，可能误报也可能漏报。改完可以再审一次。"
-                     f"单次最多阻塞 {MAX_BLOCK} 秒，没审完返回 still_running 和 review_id，再调 review_wait。"),
+     "description": _review_tool_description(),
      "inputSchema": {"type": "object", "properties": {
          "task_file": {"type": "string", "description": "任务书路径（相对 cwd 或绝对）；不给就在 instructions 里写明要求"},
          "instructions": {"type": "string", "description": "补充说明：做了什么、要特别核对的点"},

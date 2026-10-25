@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "gsb_read_files": {
+      "command": "/usr/bin/python3",
+      "args": ["/workspace/agent_mcp/tools/gsb_tools_mcp.py"],
+      "env": {
+        "GSB_TOOLS_ONLY": "read_files"
+      }
+    }
+  }
+}
