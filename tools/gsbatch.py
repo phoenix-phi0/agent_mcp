@@ -254,7 +254,7 @@ PREAMBLE_PROBE_CLAUDE = ("10. 要读很多文件再对照 / 总结时，派给 p
 PREAMBLE_REVIEW = """11. 改了代码的任务，在 commit/push 和写最终报告前调 review 做初步审查（给 task_file，有报告草稿就给 report_file）。初步审查意见只是参考线索，不是定论，可能误报也可能漏报；阻断和应修的问题核实后先改，改完可以再审一次。报告里附上审查结论。"""
 
 # 开了 verify 时再追加
-PREAMBLE_VERIFY = """12. 全量回归、起服务逐接口实测、全套测试基线 vs 改后对比，交给 verify（wait=false + verify_wait 可并行）：验证 agent 自己摸项目、跑、只交回结构化 JSON 结论（含证据），不要自己现写一次性验证脚本；跑完核对结论和证据再采信。"""
+PREAMBLE_VERIFY = """12. 全量回归、起服务逐接口实测、全套测试基线 vs 改后对比，交给 verify（wait=false + verify_wait 可并行）：验证 agent 自己摸项目、跑、只交回结构化 JSON 结论（含证据），不要自己现写一次性验证脚本；跑完核对结论和证据再采信。被验项目不在引擎仓库下时传 engine_repo（或保证 cwd 在引擎仓库）。"""
 
 _WANTS_WRITE = re.compile(
     r"写(?!清楚|明|出来)|修改|改成|改掉|创建|新建|删除|删掉|保存|生成.{0,6}文件"

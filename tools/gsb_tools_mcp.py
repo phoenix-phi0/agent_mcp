@@ -143,7 +143,7 @@ REVIEW_PROMPT = """你是代码审查员，独立审查另一个 agent 刚做完
 # verify 的固定前言：只验证不修、只写自己的临时目录、运行环境必须是被验仓库自己的
 # .venv + 引擎、优先项目已有入口、结论带证据、严格 JSON（带「环境」字段）。
 VERIFY_PREAMBLE = """你是验证 agent：主任务只交代「验什么」，你自己去摸项目、写临时脚本、跑，只交回结论。规则：
-1. 只做验证不修东西：发现 bug 如实写进「发现」，不修、不顺手改进；不改被验项目和它所在仓库的任何文件，不用 git 写操作（add/commit/checkout/reset/stash 等）动被验仓库。
+1. 只做验证不修东西：发现 bug 如实写进「发现」，不修、不顺手改进；不改被验项目和它所在仓库的任何文件，引擎仓库（见第 3 条，与被验仓库分离时两边都不许改）也不许动，不用 git 写操作（add/commit/checkout/reset/stash 等）动被验仓库。
 2. 你只能写自己的临时目录 {tmp}（沙箱强制，别处写不进去）：要实验先把被验项目拷进来（cp -a），临时脚本也放这里。拷进临时目录的只是被验「项目」（数据、约定、.zs/.ui），引擎代码不拷。
 3. 运行环境（有过教训：验证员用了别的目录下的旧引擎快照加系统 python，得出过时的「不通过」）：
    - Python 解释器：{env_py} 不要用系统 python3 / python（缺依赖，也不能证明是被验仓库的环境）。
@@ -155,7 +155,7 @@ VERIFY_PREAMBLE = """你是验证 agent：主任务只交代「验什么」，�
 7. 不读取、不打印任何 key、token、认证文件；不装新依赖。
 8. 最后一条回复就是交付结果，严格按这个 JSON 交回，不要包代码围栏、不要附加别的文字：
 {{"状态": "成功|失败", "结果": {{"结论": "通过|不通过|无法验证", "环境": {{"python": "实际用的解释器绝对路径", "引擎": "实际 import 的 gen / tools 绝对路径（用 python -c 'import gen,tools;print(gen.__file__,tools.__file__)' 取）", "起法": "实际起服务 / 跑回归用的命令"}}, "检查": [{{"项": "...", "通过": true/false, "证据": "命令与关键输出"}}], "发现": ["不在要求内但发现的问题"], "说明": "..."}}}}
-（「状态」= 验证本身有没有跑完；「结果.结论」= 被验对象过没过；「环境」必填：python 必须是被验仓库的 .venv、引擎必须在被验仓库根下，不符就只能给「无法验证」。）
+（「状态」= 验证本身有没有跑完；「结果.结论」= 被验对象过没过；「环境」必填：python 必须是引擎仓库的 .venv、引擎必须在引擎仓库根下（引擎仓库通常就是被验项目所在仓库，分离时按主任务交代的引擎仓库判），不符就只能给「无法验证」。）
 
 被验项目：{project}
 {base_line}验证任务：
@@ -181,18 +181,51 @@ def _repo_root_of(proj):
         d = up
 
 
-def _env_lines(proj):
-    """前言里的运行环境交代：返回 (仓库根或 None, 解释器句, 引擎句)。"""
+def _upward_repo(d):
+    """从 d 向上找带 gen/ + tools/ 的目录（引擎仓库根），找不到返回 None。"""
+    d = os.path.realpath(os.path.expanduser(str(d)))
+    while True:
+        if os.path.isdir(os.path.join(d, "gen")) and os.path.isdir(os.path.join(d, "tools")):
+            return d
+        up = os.path.dirname(d)
+        if up == d:
+            return None
+        d = up
+
+
+def _engine_repo_of(proj, engine_repo=None, cwd=None):
+    """定引擎仓库根（前言的 .venv / PYTHONPATH 和交付时的「环境」核对都用它）：
+    显式 engine_repo → 被验项目向上探测（_repo_root_of）→ 调用方 cwd（或 MCP 进程 cwd）
+    向上找带 gen/ + tools/ 的仓库根。都没有返回 None（前言交代「先找」）。"""
+    if engine_repo not in (None, ""):
+        d = os.path.realpath(os.path.expanduser(str(engine_repo)))
+        if not os.path.isdir(d):
+            raise ValueError(f"engine_repo 不是目录：{d}")
+        if not (os.path.isdir(os.path.join(d, "gen")) and os.path.isdir(os.path.join(d, "tools"))):
+            raise ValueError(f"engine_repo 要是带 gen/ 和 tools/ 的引擎仓库根：{d}")
+        return d
     repo = _repo_root_of(proj)
+    if repo:
+        return repo
+    return _upward_repo(cwd or os.getcwd())
+
+
+def _env_lines(proj, repo=None):
+    """前言里的运行环境交代：返回 (引擎仓库根或 None, 解释器句, 引擎句)。repo 缺省时
+    从被验项目自己推（旧口径）；verify 传 _engine_repo_of 定出的引擎仓库根。"""
+    repo = _repo_root_of(proj) if repo is None else repo
     if repo:
         py = os.path.join(repo, ".venv", "bin", "python")
         env_py = (f"一律用 {py}。" if os.path.isfile(py)
-                  else f"先找被验仓库的 .venv/bin/python（应为 {py} 这一类）。")
-        env_repo = (f"一律用被验仓库（{repo}）里的那份，跑任何 python 前设 PYTHONPATH={repo}；"
+                  else f"引擎仓库（{repo}）下没有 {py}：不要改用系统 python 或别处的解释器"
+                       f"（交付时「环境」核对要求解释器在该仓库 .venv 下，不符按无法验证）；"
+                       f"找不到就如实写进「说明」，结论给「无法验证」。")
+        env_repo = (f"一律用引擎仓库（{repo}）里的那份，跑任何 python 前设 PYTHONPATH={repo}；"
                     f"不要拷引擎进临时目录")
     else:
         env_py = "先找被验仓库的 .venv/bin/python"
-        env_repo = ("先从被验项目向上找仓库根（带 gen/ 和 tools/ 的那份），跑任何 python 前"
+        env_repo = ("先从被验项目向上找仓库根（带 gen/ 和 tools/ 的那份；被验项目推不出，"
+                    "再从当前工作目录向上找），跑任何 python 前"
                     "设 PYTHONPATH 指向它；实在推不出，把找的过程和结果如实写进「说明」")
     return repo, env_py, env_repo
 
@@ -1251,7 +1284,8 @@ def _verify_summary(d):
 
 
 def _verify_env_check(d, repo):
-    """核对结论 JSON 的「环境」：解释器必须是被验仓库的 .venv、引擎必须在仓库根下。
+    """核对结论 JSON 的「环境」：解释器必须是引擎仓库的 .venv、引擎必须在引擎仓库根下
+    （repo 由 verify 按 engine_repo → 被验项目 → cwd 的顺序定出，可能与被验仓库分离）。
     不符返回原因（摘要标 ⚠，结论按「无法验证」对待），合规或缺仓库根返回 None。"""
     res = d.get("结果") or {}
     env = res.get("环境")
@@ -1263,7 +1297,9 @@ def _verify_env_check(d, repo):
     if not repo:
         return None
     r = os.path.realpath(repo)
-    py = os.path.realpath(os.path.expanduser(str(env["python"]).split()[0]))
+    # 解释器按报告的路径本身判（abspath，不解符号链接）：venv 里的 python 通常是指向系统
+    # python3 的符号链接，realpath 会跳出 .venv 而误报。
+    py = os.path.abspath(os.path.expanduser(str(env["python"]).split()[0]))
     if not py.startswith(r + os.sep + ".venv" + os.sep):
         return f"解释器不是被验仓库的 .venv：{env['python']}（仓库根 {r}）"
     bad = [x for x in str(env["引擎"]).split()
@@ -1274,10 +1310,13 @@ def _verify_env_check(d, repo):
 
 
 def verify(instructions, cwd=None, project=None, base=None, effort="medium",
-           timeout_secs=900, wait=True, model=None, _cancel=None):
+           timeout_secs=900, wait=True, model=None, engine_repo=None, _cancel=None):
     """派一个验证 agent：codex workspace-write，-C 锁在 /tmp/verify_<id>/（临时目录），
     放开 network_access 好起本地服务；被验项目与仓库都不在可写根里，写不进去。
-    派前给被验项目 / 仓库拍快照，结束时核对，变了标「违规改动」。"""
+    派前给被验项目 / 仓库拍快照，结束时核对，变了标「违规改动」。
+    引擎仓库（engine_repo）按 显式参数 → 被验项目向上探测 → cwd 向上探测 确定，前言和
+    「环境」核对都用它；被验仓库（快照比对、禁写保护）仍是被验项目自己的仓库/目录，
+    两者分离时两边都拍快照。"""
     if not isinstance(instructions, str) or not instructions.strip():
         raise ValueError("instructions 要是非空字符串：写清楚验什么（如「kg_v4 全量回归」）")
     eff, to, m, wd, exe = _codex_opts(effort, timeout_secs, model, cwd, default_model=VERIFY_MODEL)
@@ -1295,11 +1334,12 @@ def verify(instructions, cwd=None, project=None, base=None, effort="medium",
             raise ValueError(f"base 在仓库里找不到：{base!r}")
         base_line = (f"基线（对比用，只读）：git 提交 {base}。要跑基线就在你自己的目录里"
                      f"拷一份仓库再切过去，不准动原仓库的 HEAD 和工作区。\n")
-    watch = _verify_watch(proj, wd)
+    repo = _engine_repo_of(proj, engine_repo, wd)
+    watch = _verify_watch(proj, wd, repo)
     pid_ = _new_probe_id("verify")
     tmp = os.path.join(VERIFY_WORK_PARENT, f"verify_{pid_}")
     os.makedirs(tmp, exist_ok=True)
-    repo, env_py, env_repo = _env_lines(proj)
+    _, env_py, env_repo = _env_lines(proj, repo)
     prompt = VERIFY_PREAMBLE.format(tmp=tmp, project=proj, base_line=base_line,
                                     instructions=instructions.strip(),
                                     env_py=env_py, env_repo=env_repo)
@@ -1761,7 +1801,9 @@ VERIFY_TOOLS = [
                      "逐接口实测、全套测试基线 vs 改后对比。它自己去摸项目（README / 现有测试 / 回归"
                      "冒烟入口），优先用项目已有入口，没有才写临时脚本；起的服务自己停。被验项目与"
                      "仓库只读；结束时核对它们的 git status / 文件清单，有变化在结果里标「违规改动」"
-                     "（只是线索，可能有并发作业动过同一仓库）。最终回复严格按 JSON 交回，verify_wait "
+                     "（只是线索，可能有并发作业动过同一仓库）。被验项目不在引擎仓库下时传 engine_repo "
+                     "或保证 cwd 在引擎仓库（engine_repo 定出的引擎仓库根同时用于前言和「环境」核对；"
+                     "被验仓库的快照比对不变）。最终回复严格按 JSON 交回，verify_wait "
                      "解析；解析失败按原文返回并标明；结论 JSON 必须带「环境」（解释器 / 引擎 / 起法），"
                      "不符在摘要里标「⚠ 环境不符」且结论按「无法验证」对待。回归、起服务实测、基线对比交给 verify，"
                      "不要自己现写一次性验证脚本。wait=true（默认）单次最多阻塞 "
@@ -1770,6 +1812,7 @@ VERIFY_TOOLS = [
          "instructions": {"type": "string", "description": "验什么：如「kg_v4 全量回归」「起服务按前端动作逐个打 auth_login、student_* 并核对返回键」「全套测试基线 vs 改后，基线用 HEAD」"},
          "cwd": {"type": "string", "description": "工作目录，默认任务工作目录"},
          "project": {"type": "string", "description": "被验项目路径（默认 cwd）；结束时核对它和所在仓库没被改"},
+         "engine_repo": {"type": "string", "description": "引擎仓库根（带 gen/ 和 tools/，含 .venv）：被验项目所用引擎所在的仓库。不传时先从被验项目向上探测，推不出再从 cwd 向上找；被验项目不在引擎仓库下时传这个或保证 cwd 在引擎仓库"},
          "base": {"type": "string", "description": "基线 git 提交（对比用；验证员只会在自己的目录里拷仓库切基线，不动原仓库）"},
          "effort": {"type": "string", "enum": list(PROBE_EFFORTS), "description": "推理强度，默认 medium"},
          "timeout_secs": {"type": "integer", "description": f"默认 900，最多 {PROBE_MAX_TIMEOUT}，超时杀掉"},
@@ -1835,7 +1878,7 @@ def _priority_instructions():
         p.append("改完代码、commit/push 和写报告前用 review 做初步审查；意见只是线索，核实后再改。")
     if "verify" in have:
         p.append("回归、起服务实测、基线对比交给 verify（wait=false + verify_wait 可并行），"
-                 "不要自己现写验证脚本。")
+                 "不要自己现写验证脚本；被验项目不在引擎仓库下时传 engine_repo 或保证 cwd 在引擎仓库。")
     return ("工具用法：" + "".join(p)) if p else ""
 
 
@@ -1889,7 +1932,7 @@ def _call(name, args, cancel):
         return verify(args.get("instructions"), args.get("cwd"), args.get("project"),
                       args.get("base"), args.get("effort") or "medium",
                       args.get("timeout_secs") or 900, True if w is None else bool(w),
-                      args.get("model"), _cancel=cancel)
+                      args.get("model"), args.get("engine_repo"), _cancel=cancel)
     if name == "verify_wait":
         return verify_wait(args.get("verify_ids"), args.get("timeout_secs"), _cancel=cancel)
     raise KeyError(name)

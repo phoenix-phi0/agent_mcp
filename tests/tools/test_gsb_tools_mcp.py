@@ -1172,6 +1172,175 @@ def k38_tests():
     shutil.rmtree(plain, ignore_errors=True)
 
 
+FAKE_CODEX47 = '''#!/usr/bin/env python3
+# 假 codex（K47）：记 argv / 提示词；「环境」JSON 的路径可由 FAKE_ENGINE_REPO 指到别的仓库
+import json, os, sys
+argv = sys.argv[1:]
+prompt = sys.stdin.read()
+rec = os.environ["FAKE_CODEX_REC"]
+with open(rec, "a") as f:
+    f.write(json.dumps({"argv": argv, "cwd": os.getcwd(), "prompt": prompt}) + "\\n")
+out = argv[argv.index("-o") + 1]
+task = prompt.split("任务：")[-1]
+print("OpenAI Codex (fake)\\nuser\\n" + prompt, flush=True)
+
+
+def done(text, tok="1,234"):
+    open(out, "w").write(text)
+    print("codex\\n" + text + "\\ntokens used\\n" + tok, flush=True)
+    sys.exit(0)
+
+
+if "你是验证 agent" in prompt:
+    tgt = os.environ.get("FAKE_VERIFY_TARGET")
+    if tgt and "WRITE" in task:
+        open(tgt, "a").write("bad\\n")
+    if "ENGOKEY" in task:
+        eng = os.environ.get("FAKE_ENGINE_REPO") or "/noeng"
+        done(json.dumps({"状态": "成功", "结果": {"结论": "通过", "环境": {
+            "python": eng + "/.venv/bin/python",
+            "引擎": eng + "/gen/__init__.py " + eng + "/tools/__init__.py",
+            "起法": "PYTHONPATH=" + eng + " .venv/bin/python serve.py"},
+            "检查": [{"项": "smoke", "通过": True, "证据": "200"}],
+            "发现": [], "说明": "engine env"}}, ensure_ascii=False), "7,778")
+    if "ENVWRONG" in task:
+        done(json.dumps({"状态": "成功", "结果": {"结论": "不通过", "环境": {
+            "python": "/usr/bin/python3",
+            "引擎": "/workspace/dslagent_exp/luna_roles/code/gen/__init__.py",
+            "起法": "PYTHONPATH=/elsewhere python3 -m gen run"},
+            "检查": [{"项": "smoke", "通过": False, "证据": "500"}],
+            "发现": [], "说明": "old snapshot"}}, ensure_ascii=False), "6,666")
+    done(json.dumps({"状态": "成功", "结果": {"结论": "通过", "检查": [
+        {"项": "x", "通过": True, "证据": "e"}], "发现": [], "说明": "ok"}},
+        ensure_ascii=False))
+done("结论：" + task.strip())
+'''
+
+
+def k47_tests():
+    """K47 追加：verify 加 engine_repo（引擎仓库）。显式参数生效；项目在仓库外、cwd 在
+    仓库内 → 用 cwd 的仓库；都推不出 → 「先找」；engine_repo 不是带 gen/ + tools/ 的仓库根
+    要拒；引擎仓库与被验项目分离时「环境」核对按引擎仓库判；被验仓库和引擎仓库两边快照都
+    比对（写哪边都标违规改动）。已有 K34/K38 用例一字不改。"""
+    bindir = TMP / "fakebin47"
+    bindir.mkdir(exist_ok=True)
+    (bindir / "codex").write_text(FAKE_CODEX47)
+    (bindir / "codex").chmod(0o755)
+    rec = TMP / "codex_calls47.jsonl"
+    proj = TMP / "k47proj"           # 被验项目：仓库外普通目录（非 git）
+    proj.mkdir(exist_ok=True)
+    (proj / "a.txt").write_text("x\\n", encoding="utf-8")
+    eng = TMP / "k47eng"             # 引擎仓库：带 gen/ + tools/ + .venv/bin/python（非 git）
+    (eng / "gen").mkdir(parents=True, exist_ok=True)
+    (eng / "tools").mkdir(exist_ok=True)
+    (eng / ".venv" / "bin").mkdir(parents=True, exist_ok=True)
+    # 真实 venv 的 python 是指向系统 python3 的符号链接：核对不能用 realpath 跳出 .venv
+    _vpy = eng / ".venv" / "bin" / "python"
+    if not _vpy.is_symlink():
+        _vpy.unlink(missing_ok=True)
+        _vpy.symlink_to("/bin/sh")
+    engd = TMP / "k47eng"           # Path 版本，后面拼 FAKE_VERIFY_TARGET 用
+    eng = os.path.realpath(str(eng))
+    env = {"PATH": f"{bindir}:{os.environ.get('PATH', '')}", "FAKE_CODEX_REC": str(rec),
+           "GSB_PROBE_RETRY_WAITS": "1,1", "FAKE_ENGINE_REPO": eng}
+
+    s = Server(max_block=4, GSB_VERIFY="1", **env)
+    try:
+        print("K47 schema / 说明")
+        tools = {t["name"]: t for t in s.req("tools/list")["result"]["tools"]}
+        d = tools["verify"]["description"]
+        props = tools["verify"]["inputSchema"]["properties"]
+        check("engine_repo" in props and "engine_repo" in d and "cwd 在引擎仓库" in d,
+              "K47: schema 有 engine_repo，描述写明被验项目不在引擎仓库下时传它 / 保证 cwd", d[:260])
+        ins = s.req("initialize", {"protocolVersion": "2025-03-26"})["result"]["instructions"]
+        check("engine_repo" in ins, "K47: initialize 说明提 engine_repo", ins)
+
+        print("K47 参数校验（不启动 codex）")
+        for bad, why in (({"instructions": "x", "cwd": str(proj), "engine_repo": str(proj)},
+                          "engine_repo 没有 gen/ + tools/"),
+                         ({"instructions": "x", "cwd": str(proj),
+                           "engine_repo": str(TMP / "nodir47")}, "engine_repo 不是目录")):
+            n = len(recs(rec))
+            t, e = s.call("verify", bad)
+            check(e and "出错" in t and len(recs(rec)) == n, f"K47 拒绝：{why}", t)
+
+        print("K47 显式 engine_repo 生效")
+        t, e = s.call("verify", {"instructions": "VERIFYOK plain", "cwd": str(proj),
+                                 "engine_repo": str(eng)}, timeout=30)
+        pr = recs(rec)[-1]["prompt"]
+        check("状态：done" in t and f"PYTHONPATH={eng}" in pr
+              and f"{eng}/.venv/bin/python" in pr and "引擎仓库" in pr and "也不许" in pr,
+              "K47: 显式参数 → 前言的 .venv / PYTHONPATH 都指引擎仓库，且写明引擎仓库不许改",
+              pr[-300:])
+
+        print("K47 项目在仓库外、cwd 在仓库内 → 用 cwd 的仓库")
+        t, e = s.call("verify", {"instructions": "VERIFYOK plain", "cwd": eng,
+                                 "project": str(proj)}, timeout=30)
+        pr = recs(rec)[-1]["prompt"]
+        check("状态：done" in t and f"PYTHONPATH={eng}" in pr,
+              "K47: cwd 向上探测到带 gen/ + tools/ 的仓库根", pr[-300:])
+
+        print("K47 都推不出 → 前言交代先找")
+        t, e = s.call("verify", {"instructions": "VERIFYOK plain", "cwd": str(proj)}, timeout=30)
+        pr = recs(rec)[-1]["prompt"]
+        check("先找被验仓库的 .venv/bin/python" in pr and "向上找仓库根" in pr
+              and "当前工作目录" in pr,
+              "K47: 推不出引擎仓库 → 先找 / 被验项目推不出再从 cwd 向上找", pr[-300:])
+
+        print("K47 显式 engine_repo 缺 .venv → 前言禁用别处解释器，环境核对按无法验证")
+        eng2 = TMP / "k47eng_novenv"
+        (eng2 / "gen").mkdir(parents=True, exist_ok=True)
+        (eng2 / "tools").mkdir(exist_ok=True)
+        eng2 = os.path.realpath(str(eng2))
+        t, e = s.call("verify", {"instructions": "VERIFYOK plain", "cwd": str(proj),
+                                 "engine_repo": eng2}, timeout=30)
+        pr = recs(rec)[-1]["prompt"]
+        check("状态：done" in t and f"{eng2}/.venv/bin/python" in pr and "下没有" in pr
+              and "不要改用系统 python" in pr and f"PYTHONPATH={eng2}" in pr
+              and "先找引擎仓库的 .venv" not in pr,
+              "K47: 显式引擎仓库缺 .venv → 前言写明没有、不许改用别处解释器、结论无法验证", pr[-400:])
+        t, e = s.call("verify", {"instructions": "VERIFYOK ENGOKEY 别处venv", "cwd": str(proj),
+                                 "engine_repo": eng2}, timeout=30)
+        check("状态：done" in t and "⚠ 环境不符" in t and "按「无法验证」对待" in t,
+              "K47: 缺 .venv 的引擎仓库 + 验证员用了别处 .venv → ⚠ 环境不符", t)
+
+        print("K47 分离时「环境」核对按引擎仓库判")
+        t, e = s.call("verify", {"instructions": "VERIFYOK ENGOKEY 分离合规", "cwd": str(proj),
+                                 "engine_repo": eng}, timeout=30)
+        check("状态：done" in t and "验证 JSON：已解析" in t and "结论=通过" in t
+              and "环境不符" not in t,
+              "K47: 环境=引擎仓库（分离于被验项目）→ 不标 ⚠", t)
+        t, e = s.call("verify", {"instructions": "VERIFYOK ENVWRONG 旧快照", "cwd": str(proj),
+                                 "engine_repo": eng}, timeout=30)
+        check("状态：done" in t and "⚠ 环境不符" in t and "解释器不是被验仓库的 .venv" in t
+              and "按「无法验证」对待" in t,
+              "K47: 环境指向别的仓库 → 按引擎仓库判 ⚠ 环境不符", t)
+    finally:
+        s.close()
+
+    print("K47 两边快照都比对（被验仓库 + 引擎仓库）")
+    s2 = Server(max_block=4, GSB_VERIFY="1",
+                **dict(env, FAKE_VERIFY_TARGET=str(proj / "bad.txt")))
+    try:
+        t, e = s2.call("verify", {"instructions": "VERIFYOK WRITE", "cwd": str(proj),
+                                  "engine_repo": eng}, timeout=30)
+        check("状态：done" in t and "违规改动" in t and str(proj) in t,
+              "K47: 写被验项目 → 标违规改动", t)
+    finally:
+        s2.close()
+    (proj / "bad.txt").unlink(missing_ok=True)
+    s3 = Server(max_block=4, GSB_VERIFY="1",
+                **dict(env, FAKE_VERIFY_TARGET=str(engd / "bad.txt")))
+    try:
+        t, e = s3.call("verify", {"instructions": "VERIFYOK WRITE", "cwd": str(proj),
+                                  "engine_repo": eng}, timeout=30)
+        check("状态：done" in t and "违规改动" in t and eng in t,
+              "K47: 写引擎仓库 → 也标违规改动（两边都拍快照）", t)
+    finally:
+        s3.close()
+    (engd / "bad.txt").unlink(missing_ok=True)
+
+
 def main():
     (TMP / "a.txt").write_text("".join(f"line{i}\n" for i in range(1, 11)), encoding="utf-8")
     (TMP / "b.py").write_text("print('b')\r\nx = 1\r\n", encoding="utf-8")
@@ -1357,6 +1526,7 @@ def main():
         k32_tests()
         k34_tests()
         k38_tests()
+        k47_tests()
     finally:
         s.close()
         shutil.rmtree(TMP, ignore_errors=True)
