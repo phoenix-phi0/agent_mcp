@@ -52,6 +52,7 @@ run 动词参数    $PY tests/dsl/test_verb_params.py
 run 界面编译    $PY -m tools.test_ui
 run 会话        $PY tests/http/test_session.py
 run 库出错      $PY tests/http/test_db_errors.py
+run 服务并发    $PY tests/http/test_concurrent.py
 run 模板命名    $PY tests/gen/test_templates.py
 run 按端拆页面  $PY tests/gen/test_ends.py
 run 只加迁移    $PY tests/gen/test_migrate.py
