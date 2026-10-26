@@ -156,6 +156,7 @@ import traceback
 from pathlib import Path
 
 from .dsl import DSLEngine, DSLError
+from .dsl_core import BLOCK_OPENERS, KEYWORDS
 from .dsl_service import get_services
 from .http_ctx import set_bucket, take_auth, take_bucket
 from . import packs
@@ -189,8 +190,10 @@ AUTH_ROLE_RE = re.compile(r"^认证\s+角色\s+(\S+)\s+(\S+)(?:\s+拒绝\s+(.+?)
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 
 # 块内这些关键字会开一层，它们的「结束」不能被当成接口的收尾
-INNER_OPENERS = {"如果", "若", "if", "遍历", "循环", "每个",
-                 "逐项", "逐个", "each", "foreach", "事务", "tx"}
+# 与 dsl_core.BLOCK_OPENERS 同一口径：凡是引擎里开块的关键字（含「当」「重复」）
+# 及其内部名，都从 KEYWORDS 推出来，不再手抄一份
+INNER_OPENERS = ({k for k, v in KEYWORDS.items() if v in BLOCK_OPENERS}
+                 | BLOCK_OPENERS)
 CLOSERS = {"结束", "end"}
 
 # 接口脚本默认能用的包。脚本自己写「用包」会在这个基础上追加。

@@ -330,13 +330,14 @@ def hide_password_hash(root: Path) -> list:
 
 def _register_span(lines: list):
     """/auth/register 接口体在 lines 里的 (头行下标, 结束行下标)；找不到返回 None。"""
+    from tools.dsl_http import INNER_OPENERS
     for i, ln in enumerate(lines):
         if re.match(r"^接口\s+(?:POST\s+)?/auth/register\b", ln):
             j = i + 1
             depth = 1
             while j < len(lines):
                 h = lines[j].strip().split(" ")[0]
-                if h in ("如果", "若", "遍历", "事务", "if", "each", "tx"):
+                if h in INNER_OPENERS:
                     depth += 1
                 elif h in ("结束", "end"):
                     depth -= 1
