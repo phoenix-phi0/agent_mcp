@@ -1,0 +1,1 @@
+SELECT COUNT(*) AS cnt, MAX(CAST(SUBSTR(level, 2) AS INTEGER)) AS lv FROM lesson_text WHERE code IN (SELECT lesson_code FROM lesson_point_link WHERE point_code = :point_code UNION SELECT lesson_code FROM lesson_item_link WHERE instr(',' || :items, ',' || item_code || ',') > 0)

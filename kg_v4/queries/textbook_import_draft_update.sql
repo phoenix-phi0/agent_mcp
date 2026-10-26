@@ -1,0 +1,1 @@
+UPDATE textbook_import_draft SET title = :title, level = :level, summary = :summary, explain = :explain, connection = :connection, examples = :examples, examples_edited = CAST(:examples_edited AS INTEGER), seq = CAST(:seq AS INTEGER), display_title = :display_title WHERE id = CAST(:id AS INTEGER)

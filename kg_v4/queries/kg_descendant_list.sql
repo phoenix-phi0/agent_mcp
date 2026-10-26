@@ -1,0 +1,1 @@
+WITH RECURSIVE des(c) AS (SELECT point_code FROM kg_edge WHERE pre_code = :code UNION SELECT e.point_code FROM kg_edge e JOIN des ON e.pre_code = des.c) SELECT p.code AS code, p.title AS title FROM kg_point p WHERE p.code IN (SELECT c FROM des) AND p.code <> :code ORDER BY p.id

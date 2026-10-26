@@ -1,0 +1,1 @@
+SELECT group_concat(line, char(10)) FROM (SELECT line FROM (SELECT id, (CASE role WHEN 'user' THEN '学生：' ELSE '老师：' END) || content AS line FROM tutor_message WHERE learner = :learner AND COALESCE(summary_round, '') = '' ORDER BY id DESC LIMIT CAST(:limit AS INTEGER)) ORDER BY id ASC)

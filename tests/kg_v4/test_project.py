@@ -1,0 +1,107 @@
+# -*- coding: utf-8 -*-
+"""kg_v4 项目级最小检查：约定检查、全量回归、编译、数据初始化脚本。
+
+    cd /workspace/agent_mcp && .venv/bin/python tests/kg_v4/test_project.py
+
+拷一份 kg_v4（不带 app.db / web / uploads）到临时目录再检查，不动仓库里的文件。离线，不调模型。
+  一、11 个模块的约定检查 + 全局检查 + 加载检查
+  二、全量回归（每个模块的约定用例在临时库上跑）11/11
+  三、gen build：60 个接口
+  四、setup/init_data.py：用裁小的单词表（200 条）+ 仓库题库灌一遍，各类条数对；
+      再跑一次，已有数据全部跳过、条数不变
+"""
+
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+SRC = ROOT / "kg_v4"
+sys.path.insert(0, str(ROOT))
+
+passed = failed = 0
+
+
+def check(ok, msg, detail=None):
+    global passed, failed
+    if ok:
+        passed += 1
+    else:
+        failed += 1
+    print(("  ✓ " if ok else "  ✗ ") + msg + ("" if ok or detail is None else f"\n      {detail}"))
+
+
+NAMES = "kg lesson progress account quiz vocab dictation teacher_rules tutor report textbook_import".split()
+tmp = Path(tempfile.mkdtemp(prefix="kg_v4_test_"))
+proj = tmp / "kg_v4"
+shutil.copytree(SRC, proj, ignore=shutil.ignore_patterns("app.db", "web", "uploads", "sessions", ".auth_secret", "__pycache__"))
+try:
+    print("一、约定检查")
+    from tools.dslagent import loadcheck
+    from tools.dslagent.packs.dslproj import contract as C
+    from tools.dslagent.v3 import globalcheck, top as vtop
+
+    mods, probs = {}, []
+    for n in NAMES:
+        c, p = C.parse((proj / "contracts" / f"{n}.md").read_text(encoding="utf-8"))
+        mods[n] = c
+        probs += [f"[{n}] {x}" for x in p]
+    for n in NAMES:
+        c = mods[n]
+        probs += [f"[{n}] {x}" for x in C.check(c, n, {d: mods[d] for d in c["依赖"] if d in mods}, NAMES)]
+    check(not probs, f"{len(NAMES)} 个模块的约定检查通过", probs[:3])
+    tp, tprobs = vtop.parse((proj / "plan" / "top.zs").read_text(encoding="utf-8"))
+    check(not tprobs, "plan/top.zs 能解析", tprobs)
+    gp = globalcheck.check(str(proj), tp)
+    check(not (gp.get("条数", 0) if isinstance(gp, dict) else len(gp)), "全局检查 0 重复", gp)
+    lp = loadcheck.check_project(str(proj), scripts=True)
+    check(not lp, "加载检查 0 问题", lp[:3])
+
+    print("二、全量回归")
+    from tools.dslagent.v3 import regress as R
+    fails = []
+    for n in NAMES:
+        ok, why = R._accept_module(str(proj), n, NAMES)
+        if not ok:
+            fails.append((n, str(why)[:200]))
+    check(not fails, f"全量回归 {len(NAMES) - len(fails)}/{len(NAMES)}", fails)
+
+    print("三、编译")
+    r = subprocess.run([sys.executable, "-m", "gen", "build", str(proj)], cwd=ROOT, capture_output=True, text=True)
+    check(r.returncode == 0 and "60 个接口" in r.stdout, "gen build：60 个接口", (r.stdout + r.stderr)[-300:])
+
+    print("四、数据初始化脚本")
+    content = tmp / "content"
+    shutil.copytree(ROOT / "kg" / "content", content, ignore=shutil.ignore_patterns("translate", "series"))
+    for f in ("words.jsonl", "words_jlpt.jsonl"):
+        lines = (content / f).read_text(encoding="utf-8").splitlines()[:100]
+        (content / f).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    quiz = ROOT / "workspace" / "japanese" / "content" / "bunpou" / "题库"
+    cmd = [sys.executable, str(SRC / "setup" / "init_data.py"), str(proj), "--content", str(content), "--quiz", str(quiz)]
+    r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    import sqlite3
+
+    def counts():
+        con = sqlite3.connect(proj / "app.db")
+        try:
+            return {t: con.execute(f"select count(*) from {t}").fetchone()[0]
+                    for t in ("kg_point", "kg_edge", "kg_item", "kg_contrast", "lesson_text", "vocab_word", "quiz_question")}
+        finally:
+            con.close()
+    c1 = counts() if (proj / "app.db").is_file() else {}
+    check(r.returncode == 0 and c1 == {"kg_point": 69, "kg_edge": 112, "kg_item": 192, "kg_contrast": 20,
+                                      "lesson_text": 125, "vocab_word": 200, "quiz_question": 466},
+          "初始化：69/112/192/20/125 课/200 词/466 题", (c1, r.stdout[-300:], r.stderr[-300:]))
+    r2 = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    check(r2.returncode == 0 and r2.stdout.count("已有数据，跳过") == 7 and counts() == c1,
+          "再跑一次：7 类全部跳过、条数不变", r2.stdout[-300:])
+    r3 = subprocess.run(cmd[:2] + ["/nonexistent"], capture_output=True, text=True)
+    check(r3.returncode == 2, "项目目录不对：退出码 2")
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+print(f"\n通过 {passed}，失败 {failed}")
+sys.exit(1 if failed else 0)

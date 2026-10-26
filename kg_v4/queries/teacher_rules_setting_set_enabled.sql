@@ -1,0 +1,1 @@
+UPDATE teacher_rules_setting SET version = CASE WHEN enabled = 0 AND CAST(:enabled AS INTEGER) = 1 THEN version + 1 ELSE version END, enabled = CAST(:enabled AS INTEGER), updated_at = datetime('now', 'localtime') WHERE id = CAST(:id AS INTEGER)

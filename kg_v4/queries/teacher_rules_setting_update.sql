@@ -1,0 +1,1 @@
+UPDATE teacher_rules_setting SET version = CASE WHEN content = :content THEN version ELSE version + 1 END, kind = :kind, student = :student, keywords = :keywords, content = :content, once = CAST(:once AS INTEGER), author = :author, updated_at = datetime('now', 'localtime') WHERE id = CAST(:id AS INTEGER)

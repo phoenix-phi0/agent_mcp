@@ -1,0 +1,47 @@
+实体 lesson_series lesson_series
+  字段 code 文本 必填 唯一 系列编号，唯一（默认系列编号为
+  字段 name 文本 必填 系列名称
+  字段 intro 长文本 简介，可空
+  字段 source 文本 来源，可空
+  字段 license 文本 许可，可空
+  字段 sort_order 整数 必填 排序，小于
+结束
+
+实体 lesson_text lesson_text
+  字段 code 文本 必填 唯一 课文编号，唯一
+  字段 level 文本 必填 等级
+  字段 title 文本 必填 标题
+  字段 summary 长文本 一句话，可空
+  字段 explain 长文本 讲解，可空
+  字段 connection 长文本 接续，可空
+  字段 examples 长文本 例句（日语+中文，整体存取，不拆行），可空
+  字段 examples_edited 整数 必填 是否改过例句（1/0）
+  字段 orig_title 文本 原标题，可空
+  字段 series_code 文本 必填 所属系列编号
+  字段 seq 整数 必填 课序（线性教材显示第
+结束
+
+实体 lesson_item_link lesson_item_link
+  字段 lesson_code 文本 必填 课文编号
+  字段 item_code 文本 必填 表达方式条目编号（来自
+结束
+
+实体 lesson_point_link lesson_point_link
+  字段 lesson_code 文本 必填 课文编号
+  字段 point_code 文本 必填 知识点编号（来自
+结束
+
+实体 lesson_pref lesson_pref
+  字段 learner 文本 必填 唯一 学习者，唯一
+  字段 series_code 文本 必填 所选当前系列编号（偏好，导入和撤下都不清空）
+结束
+页面 实体 lesson_view 教材页面
+  字段 series 文本 系列编号（选项来自series_options）
+  字段 lesson_level 枚举 全部,N5,N4,N3,N2,N1 等级筛选
+  字段 keyword 文本 关键字（标题/一句话/条目名）
+  字段 qcount 整数 课文表「题数」列（按挂接算出来的，不在真表）
+  字段 jp 文本 例句表「日语」列
+  字段 zh 文本 例句表「中文」列
+  字段 label 文本 条目表「条目」列（条目名或「（整个知识点）」）
+  字段 point_label 文本 条目表「所属知识点」列
+结束

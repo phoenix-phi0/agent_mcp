@@ -1,0 +1,1 @@
+SELECT id, role, content, intent, lesson_code, link, links, summary_round, at FROM (SELECT id, role, content, intent, lesson_code, link, links, summary_round, at FROM tutor_message WHERE learner = :learner ORDER BY id DESC LIMIT CAST(:limit AS INTEGER)) ORDER BY id ASC

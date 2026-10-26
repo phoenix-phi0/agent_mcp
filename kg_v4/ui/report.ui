@@ -1,0 +1,209 @@
+# 学情（教师端首页）：全班学得怎么样、哪个学生卡在哪。全是读，接口在
+# routes/report.zs（「只许 教师」），查询在 queries/report_*.sql。
+#
+# 「端 教师」：教师端（/teacher）的第一个界面，打开教师端就落在这一页；学生端
+# （/）上没有它，单人模式也一样（引擎按「端」拆页面，见 gen/project.py 的
+# split_pages）。
+#
+# 同一个界面按地址切两块（「当」看 params）：
+#
+#   #学情              全班表（点名字进去）：显示名、最近学习、作答数、近期正确率、
+#                      平均得分、已掌握、薄弱知识点前 3、错词本；排序下拉（最近
+#                      学习 / 平均得分），一改就重排。下面是全班薄弱点：答错最多的
+#                      知识点、条目各前 10
+#   #学情?student=s1   一个学生：抬头（教材、最近学习）、概况、「请 AI 写学情总结」
+#                      （平衡档，十几秒，等的时候有提示；写好的存起来，下次打开还
+#                      在）、各知识点得分与掌握、常错条目、最近作答、默写错词本、
+#                      问老师记录（只读，老师的回答带着当时用了的 AI 老师设定）、
+#                      AI 老师设定：这个学生个人的和全班的放在一起（全班的只读），
+#                      新增 / 编辑在「编辑学生设定」浮层里（地址里的 student 跟着
+#                      提交，接口就知道是给这个学生的），行上停用 / 启用 / 删除；
+#                      传达：这个学生的和全班的（全班的只读），状态是这个学生的
+#                      （待传达·已带入 n 轮 / 已传达 / 传达有误 / 已过期），传达到
+#                      了的「看那条回复」开「学生传达记录」浮层，个人的在「编辑
+#                      学生传达」浮层里新增 / 编辑
+#
+# 「当」的条件里不能有空格；「提示」里不能有双引号。
+
+界面 自定义 学情 端 教师 载入 report_one
+  动作 report_home 远程 进入时 隐藏 刷新
+
+  # ---- 全班 ----
+  分组 排序 横排 间距 12px 对齐 center 当 !params.student
+    字段 report_sort 控件 下拉 宽 140px 改时 report_home 排序
+    显示 class_count
+  结束
+
+  布局 占满 当 !params.student
+    区域 全班
+      文案 当 lists.class_rows&&!lists.class_rows.length 还没有学生，也没有谁的学习记录。去「学生管理」建账号。
+      列表 全班表 绑 class_rows 当 lists.class_rows&&lists.class_rows.length
+        列 label 地址 href 学生
+        列 last_active 最近学习
+        列 attempt_n 作答数
+        列 recent_rate 近期正确率
+        列 avg_score 平均得分
+        列 mastered_n 已掌握
+        列 weak_points 薄弱知识点
+        列 book_n 错词本
+      结束
+    结束
+    区域 全班薄弱点
+      文案 当 lists.class_weak_points&&!lists.class_weak_points.length 还没有人答错过。
+      列表 薄弱知识点表 绑 class_weak_points 当 lists.class_weak_points&&lists.class_weak_points.length
+        列 label 知识点
+        列 wrong_n 答错
+        列 answer_n 作答
+        列 learner_n 答错的人数
+      结束
+      列表 常错条目表 绑 class_weak_items 当 lists.class_weak_items&&lists.class_weak_items.length
+        列 label 条目
+        列 point_label 所属知识点
+        列 wrong_n 答错
+        列 answer_n 作答
+        列 learner_n 答错的人数
+      结束
+    结束
+  结束
+
+  # ---- 一个学生 ----
+  分组 学生顶栏 横排 顶栏 间距 12px 对齐 center 当 params.student
+    链接 student_back 绑 student.back 次要 ← 回全班
+    显示 student.head 当 shared.student&&shared.student.username===params.student&&!shared.student.missing
+    显示 student.missing 当 shared.student&&shared.student.missing
+  结束
+
+  布局 占满 当 params.student&&shared.student&&shared.student.username===params.student&&!shared.student.missing
+    区域 概况
+      显示 student.overview 正文
+      显示 student.dictation
+      分组 总结按钮 横排 间距 12px 对齐 center
+        动作 report_summary 远程 请 AI 写学情总结
+        文案 当 pending==='report_summary' AI 正在看这个学生的数据，写总结要十几秒……
+      结束
+      显示 student_summary.head 当 shared.student_summary&&shared.student_summary.student===params.student&&shared.student_summary.text
+      显示 student_summary.text 正文 当 shared.student_summary&&shared.student_summary.student===params.student&&shared.student_summary.text
+    结束
+    区域 各知识点
+      文案 当 lists.student_points&&!lists.student_points.length 还没有答过题。
+      列表 知识点表 绑 student_points 当 lists.student_points&&lists.student_points.length
+        列 label 知识点
+        列 tally 答对/答题
+        列 score_text 得分
+        列 mastered_text 掌握
+      结束
+    结束
+    区域 常错条目 当 lists.student_wrong&&lists.student_wrong.length
+      列表 常错表 绑 student_wrong
+        列 label 条目
+        列 point_label 所属知识点
+        列 wrong_n 答错
+        列 tally 答对/答题
+        列 last_wrong 最近答错
+      结束
+    结束
+    区域 最近作答 当 lists.student_recent&&lists.student_recent.length
+      列表 最近作答表 绑 student_recent
+        列 at 时间
+        列 point_label 知识点
+        列 stem_brief 题干
+        列 given_text 作答
+        列 result 对错
+      结束
+    结束
+    区域 默写错词本 当 lists.student_book&&lists.student_book.length
+      列表 错词表 绑 student_book
+        列 label 单词
+        列 direction_label 方向
+        列 last_wrong 最近答错
+      结束
+    结束
+    区域 问老师记录 当 lists.student_chat&&lists.student_chat.length
+      列表 问老师表 绑 student_chat
+        列 chat_who 谁
+        列 chat_text 内容
+        列 chat_at 时间
+        列 chat_notes 用了的设定
+      结束
+    结束
+    区域 AI老师设定
+      文案 这个学生的AI老师设定和全班的放在一起看：全班的只读（到「AI老师设定」页改），这个学生个人的排在全班的后面。只进问老师里AI老师的提示词，学生看不到。
+      动作 new_student_note 打开 编辑学生设定 重置 给这个学生加一条
+      文案 当 lists.student_notes&&!lists.student_notes.length 还没有设定。
+      列表 学生设定表 绑 student_notes 当 lists.student_notes&&lists.student_notes.length
+        列 note_id 编号
+        列 note_scope 范围
+        列 note_kind 种类
+        列 note_keywords 关键词
+        列 note_brief 内容
+        列 note_state 状态
+        列 note_updated 更新时间
+        列 note_by 写的人
+        动作 edit_student_note 打开 编辑学生设定 带 note_id 当 row.mine==1 编辑
+        动作 teacher_note_disable 远程 带 note_id 当 row.mine==1&&row.note_state!=='停用' 停用
+        动作 teacher_note_enable 远程 带 note_id 当 row.mine==1&&row.note_state==='停用' 启用
+        动作 teacher_note_delete 远程 危险 带 note_id 当 row.mine==1 删除
+      结束
+    结束
+    区域 传达
+      文案 要让这个学生知道的事：AI老师会结合话题自然地说给他，说没说到由AI判定。全班的只读（到「AI老师设定」页改），状态是这个学生的。
+      动作 new_student_relay 打开 编辑学生传达 重置 给这个学生加一条传达
+      文案 当 lists.student_relays&&!lists.student_relays.length 还没有传达。
+      列表 学生传达表 绑 student_relays 当 lists.student_relays&&lists.student_relays.length
+        列 relay_id 编号
+        列 relay_scope 范围
+        列 relay_urgency 紧急程度
+        列 relay_brief 要点
+        列 relay_facts 必须准确的信息
+        列 relay_due 截止日期
+        列 relay_state_text 状态
+        列 relay_excerpt AI原话
+        动作 open_student_relay_message 打开 学生传达记录 带 message_id 当 row.message_id 看那条回复
+        动作 edit_student_relay 打开 编辑学生传达 带 relay_id 当 row.mine==1 编辑
+        动作 teacher_relay_disable 远程 带 relay_id 当 row.mine==1&&row.relay_enabled_text==='启用' 停用
+        动作 teacher_relay_enable 远程 带 relay_id 当 row.mine==1&&row.relay_enabled_text==='停用' 启用
+        动作 teacher_relay_delete 远程 危险 带 relay_id 当 row.mine==1 删除
+      结束
+    结束
+  结束
+
+  浮层 编辑学生设定 宽 560px 载入 teacher_note_open
+    分组 主体 竖排 间距 12px
+      字段 note_kind 控件 下拉 种类
+      字段 note_keywords 提示 关键词卡才要填，逗号分隔，比如：ばかり,たばかり 关键词
+      字段 note_content 控件 多行 提示 最多400字。学生看不到，只进AI老师的提示词 内容
+      字段 note_once 控件 开关 只用于下一条回复（只对作者注有效）
+    结束
+    分组 底栏 横排 底栏
+      动作 teacher_note_save 提交 远程 关闭 保存
+      动作 cancel_student_note 次要 关闭 取消
+    结束
+  结束
+
+  浮层 编辑学生传达 宽 600px 载入 teacher_relay_open
+    分组 主体 竖排 间距 12px
+      字段 relay_point 控件 多行 提示 写要让学生明白什么（意图，不是台词），最多300字 要点
+      字段 relay_urgency 控件 下拉 紧急程度（不选是尽快。顺便：话题沾边才说；尽快：一两轮内；立即：下一条就说）
+      字段 relay_voice 控件 下拉 口吻（不选是以老师名义）
+      字段 relay_facts 提示 日期、数字、范围这类，AI要原样说对，判定时核对，可空 必须准确的信息
+      字段 relay_keywords 提示 「顺便」时提示什么算沾边，逗号分隔，可空 话题关键词
+      字段 relay_rounds 控件 数字 几轮没传达到就升级为立即（0或不填是3）
+      字段 relay_due 控件 日期 截止日期（当天升级为立即，过了没传达到就不再带）
+    结束
+    分组 底栏 横排 底栏
+      动作 teacher_relay_save 提交 远程 关闭 保存
+      动作 cancel_student_relay 次要 关闭 取消
+    结束
+  结束
+
+  浮层 学生传达记录 宽 640px 载入 teacher_relay_message
+    分组 主体 竖排 间距 12px
+      字段 relay_msg_ask 控件 多行 学生问
+      字段 relay_msg_reply 控件 多行 AI老师的回复
+      字段 relay_excerpt 传达的那句
+    结束
+    分组 底栏 横排 底栏
+      动作 close_student_relay_message 次要 关闭 返回
+    结束
+  结束
+结束

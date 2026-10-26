@@ -1,0 +1,1 @@
+UPDATE lesson_series SET name = CASE WHEN :name = '' THEN name ELSE :name END, intro = CASE WHEN :intro = '' THEN intro ELSE :intro END, source = CASE WHEN :source = '' THEN source ELSE :source END, license = CASE WHEN :license = '' THEN license ELSE :license END, sort_order = CASE WHEN :sort_order = '' THEN sort_order ELSE CAST(:sort_order AS INTEGER) END WHERE code = :code

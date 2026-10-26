@@ -1,0 +1,1 @@
+SELECT '传达#' || id || '「' || (CASE WHEN length(must_info) > 30 THEN substr(must_info, 1, 30) || '…' ELSE must_info END) || '」，这次按「' || (CASE WHEN urgency = 'urgent' THEN '立即' WHEN urgency = 'low' THEN '顺便' ELSE '尽快' END) || '」带；后面还排着' || CAST(:rest AS INTEGER) || '条（一条回复只带一条）' FROM teacher_rules_relay WHERE id = CAST(:id AS INTEGER)

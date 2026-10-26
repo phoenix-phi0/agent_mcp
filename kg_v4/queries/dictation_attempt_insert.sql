@@ -1,0 +1,1 @@
+INSERT INTO dictation_attempt (learner, word_id, direction, answer, correct, hinted, at) VALUES (:learner, CAST(:word_id AS INTEGER), :direction, :answer, CAST(:correct AS INTEGER), CAST(:hinted AS INTEGER), :at)

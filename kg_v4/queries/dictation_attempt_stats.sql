@@ -1,0 +1,1 @@
+SELECT COUNT(*) AS total, COALESCE(SUM(correct), 0) AS right, COALESCE((SELECT x.at FROM dictation_attempt x WHERE x.learner = :learner ORDER BY x.id DESC LIMIT 1), '') AS last_at FROM dictation_attempt WHERE learner = :learner

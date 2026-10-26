@@ -1,0 +1,1 @@
+INSERT INTO textbook_import_task (series_code, series_name, source, license, code_prefix, file_name, raw_text, status, display_title, created_at, lesson_level, rewrite, overwrite) VALUES (:series_code, :series_name, :source, :license, :code_prefix, :file_name, :raw_text, '处理中', :display_title, :created_at, :lesson_level, CAST(:rewrite AS INTEGER), CAST(:overwrite AS INTEGER))

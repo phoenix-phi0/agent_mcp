@@ -1,0 +1,76 @@
+实体 textbook_import_task textbook_import_task
+  字段 series_code 文本 必填 目标系列代号
+  字段 series_name 文本 必填 系列显示名
+  字段 source 文本 来源，可空
+  字段 license 文本 授权，可空
+  字段 code_prefix 文本 课号前缀，可空
+  字段 file_name 文本 原文件名，可空
+  字段 raw_text 长文本 必填 从文件取出的纯文本（同一文件重复上传靠它全局判重）
+  字段 status 文本 必填 处理中
+  字段 fail_reason 文本 失败原因，可空
+  字段 report 长文本 确认导入后的导入报告（JSON
+  字段 display_title 文本 页面显示标题（系列显示名-原文件名，没有文件名时只取系列显示名），可空
+  字段 created_at 文本 必填 建于时间
+  字段 lesson_level 文本 等级范围（全部或N5到N1，给模型的候选条目按等级预筛），可空，空按全部
+  字段 rewrite 整数 是否让模型改写讲解和例句（1/0），可空，空按1
+  字段 overwrite 整数 是否允许覆盖已有系列（1/0），可空，空按0
+结束
+
+实体 textbook_import_chunk textbook_import_chunk
+  字段 task_id 整数 必填 所属任务
+  字段 seq 整数 必填 块序号，从
+  字段 title 文本 块标题（块的第一行截前
+  字段 content 长文本 必填 块文本
+  字段 status 文本 必填 待处理
+  字段 fail_reason 文本 失败原因，可空
+  字段 retry_count 整数 必填 重试次数，默认
+结束
+
+实体 textbook_import_draft textbook_import_draft
+  字段 task_id 整数 必填 所属任务
+  字段 chunk_id 整数 必填 来源块
+  字段 code 文本 必填 课号（课号前缀
+  字段 level 文本 必填 等级
+  字段 title 文本 必填 标题
+  字段 summary 长文本 一句话，可空
+  字段 explain 长文本 讲解，可空
+  字段 connection 长文本 接续，可空
+  字段 examples 长文本 例句，可空
+  字段 examples_edited 整数 必填 是否改过例句（1/0）
+  字段 orig_title 文本 原标题，可空
+  字段 seq 整数 必填 课序
+  字段 item_codes 文本 映射的条目编号，英文逗号连接，可空
+  字段 point_codes 文本 映射的知识点编号，英文逗号连接，可空
+  字段 status 文本 必填 待审
+  字段 display_title 文本 页面显示标题（课号-标题），可空
+  字段 confidence 整数 模型自评的映射把握（0到100），可空
+  字段 dropped_codes 文本 模型给了但库里没有被丢掉的编号，可空
+  字段 reason 文本 模型说的映射理由，可空
+结束
+
+页面 实体 import_view 教材导入页面
+  字段 prefix 文本 课号前缀
+  字段 rewrite 布尔 改写讲解和例句（开关）
+  字段 overwrite 布尔 覆盖已有系列（开关）
+  字段 document 文件 教材文件
+  字段 job_state 文本 任务表进度列
+  字段 created 文本 任务表时间列
+  字段 lesson_n 整数 系列表课数列
+  字段 series_state 文本 系列表状态列
+  字段 reason 文本 模型的理由
+  字段 draft_level 枚举 N5,N4,N3,N2,N1 草稿课等级
+  字段 mapping 文本 草稿课表映射列
+  字段 issues 文本 问题
+  字段 confidence 文本 把握
+  字段 review 文本 审阅
+  字段 chunk_status 文本 块表状态列
+  字段 error 文本 块表说明列
+  字段 tries 整数 块表次数列
+  字段 formation 文本 接续
+  字段 explanation 文本 讲解
+  字段 map_kind 文本 映射表种类列
+  字段 map_code 文本 映射表编号列
+  字段 map_label 文本 映射表名称列
+  字段 map_add 文本 从已有的选
+  字段 map_typed 文本 或者输入编号
+结束

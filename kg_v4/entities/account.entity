@@ -1,0 +1,24 @@
+实体 account_user account_user
+  字段 username 文本 必填 唯一 用户名，唯一
+  字段 password_hash 文本 必填 密码哈希（scrypt），明文不存
+  字段 display_name 文本 必填 显示名
+  字段 role 文本 必填 角色代号：student
+  字段 disabled 整数 必填 是否停用（1/0）
+  字段 created_at 文本 必填 建于时间，格式
+结束
+
+实体 account_login_fail account_login_fail
+  字段 username 文本 必填 唯一 登录时填的用户名（不论是否存在），唯一
+  字段 fail_count 整数 必填 当前连续失败次数
+  字段 locked_until 文本 锁定到何时，格式
+结束
+
+页面 实体 account_view 账号页面
+  字段 account_state 文本 状态
+  字段 attempt_n 整数 作答数
+  字段 last_active 文本 最近学习
+  字段 reset_user 文本 学生用户名
+  字段 old_password 文本 旧密码
+  字段 new_password 文本 新密码
+  字段 new_password2 文本 再输一次新密码
+结束

@@ -1,0 +1,1 @@
+UPDATE teacher_rules_relay_state SET rounds_done = rounds_done + 1, finished = CASE WHEN rounds_done + 1 >= COALESCE((SELECT r.rounds FROM teacher_rules_relay r WHERE r.id = teacher_rules_relay_state.relay_id), 1) THEN 1 ELSE finished END, updated_at = datetime('now', 'localtime') WHERE student = :student AND instr(',' || replace(:ids, ' ', '') || ',', ',' || relay_id || ',') > 0

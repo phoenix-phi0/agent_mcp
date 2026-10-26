@@ -1,0 +1,78 @@
+# 学习进度：学到哪了。全是读，数据来自 attempt / mastery / score。
+#
+#   概览        已掌握 x / 总知识点 y、累计答题、正确率；一道都没答过时换成
+#               一句「去做题页做几道」和链接；答过题的有「复习薄弱点」
+#               （#做题?mode=review，题从低分点、错题里挑）
+#   在学        答过的知识点：答对/答题、达不达标（按得分 80 / 回落 60 现算）
+#   现在能学    没掌握、前置都掌握了的（跟知识图谱上「可学」的是同一批）
+#   最近作答    20 条：时间、知识点、条目、对错
+#   各等级      N5..N1 每级题目涉及的知识点掌握了几个、答过几题（没答过也显示，
+#               看得出每级要学几个点）
+#   掌握得分    打过分才有；没有就整块不显示。知识点、当前分、变化（跟上一次
+#               比 +x / −x，只打过一次是「首次」）、最近打分时间；分低的在前，
+#               薄弱的先看到。分是做题时自动打的（见 queries/score_calc.sql）
+#   单词默写    练过几个词、正确率、错词本几个（queries/dictation_stats.sql），
+#               链接到默写页：错词本不空是 #默写?source=review（直接开一轮错词
+#               复习），空就是 #默写。默写单独记，不算进上面的答题和得分
+#
+# 进页面时一次拉齐（progress_page），不推消息。没有表单要填：学习者是 me，
+# 跟别的接口同一个默认值。
+#
+# 「当」的条件里不能有空格；prog.empty 从库里来是数字，用 String() 比，
+# 不管 JSON 里是 1 还是 "1" 都对。
+
+界面 自定义 学习进度 端 学生
+  动作 progress_page 远程 进入时 隐藏 刷新
+
+  布局 占满
+    区域 概览
+      显示 prog.head 正文
+      显示 prog.answers_text 当 String(shared.prog.empty)==='0'
+      显示 prog.rate_text 当 String(shared.prog.empty)==='0'
+      显示 prog.score_text 当 String(shared.prog.empty)==='0'
+      文案 当 String(shared.prog.empty)==='1' 还没有作答记录，去做题页做几道，这里就有进度了。
+      链接 quiz 绑 prog.quiz_link 当 String(shared.prog.empty)==='1' 去做题页
+      链接 review 绑 prog.review_link 复习薄弱点
+    结束
+    区域 在学 当 lists.doing&&lists.doing.length
+      列表 在学表 绑 doing
+        列 label 知识点
+        列 tally 答对/答题
+        列 verdict 是否达标
+      结束
+    结束
+    区域 现在能学 当 lists.next&&lists.next.length
+      列表 能学表 绑 next
+        列 label 知识点
+        列 depth 第几步
+      结束
+    结束
+    区域 最近作答 当 lists.recent&&lists.recent.length
+      列表 作答表 绑 recent
+        列 at 时间
+        列 label 知识点
+        列 item_label 条目
+        列 result 对错
+      结束
+    结束
+    区域 单词默写
+      显示 dictation.text
+      链接 dictation 绑 dictation.link 去默写
+    结束
+    区域 各等级
+      列表 等级表 绑 levels
+        列 level 等级
+        列 tally 已掌握/总数
+        列 qcount 绑 answers 答过的题
+      结束
+    结束
+    区域 掌握得分 当 lists.scores&&lists.scores.length
+      列表 得分表 绑 scores
+        列 label 知识点
+        列 value 得分
+        列 delta 变化
+        列 at 打分时间
+      结束
+    结束
+  结束
+结束

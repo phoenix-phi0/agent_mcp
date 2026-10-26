@@ -1,0 +1,1 @@
+SELECT st.relay_id AS relay_id, st.student AS student, r.must_info AS must_info, r.rounds AS rounds, st.rounds_done AS rounds_done, st.finished AS finished, st.confirmed AS confirmed FROM teacher_rules_relay_state st JOIN teacher_rules_relay r ON r.id = st.relay_id WHERE (:student = '' OR st.student = :student) ORDER BY st.relay_id, st.student

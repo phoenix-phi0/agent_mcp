@@ -1,0 +1,1 @@
+WITH RECURSIVE d(c, dep) AS (SELECT code, 0 FROM kg_point WHERE code NOT IN (SELECT point_code FROM kg_edge) UNION ALL SELECT e.point_code, d.dep + 1 FROM kg_edge e JOIN d ON e.pre_code = d.c) SELECT p.code AS code, p.title AS title FROM (SELECT c, MAX(dep) AS dep FROM d GROUP BY c) m JOIN kg_point p ON p.code = m.c WHERE m.dep = CAST(:depth AS INTEGER) ORDER BY p.id

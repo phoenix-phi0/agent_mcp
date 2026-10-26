@@ -1,0 +1,203 @@
+# 教材导入（教师端 /teacher）：上传一本教材，后台解析成课，逐课审阅，确认后导入成一个
+# 新的教材系列。接口在 routes/textbook_import.zs，草稿表在
+# entities/textbook_import.entity，课文格式见 content/series/README.md。
+#
+# 「端 教师」：只在教师端（/teacher），学生端（/）上没有这一页。权限在接口上
+# （「角色 teacher」，多人模式下学生 403）。
+#
+# 同一个界面按地址切四块（跟教材页一样，「当」看 params）：
+#
+#   #教材导入            新建导入：系列代号、显示名、来源、授权、课号前缀、等级
+#                        范围、改写开关（默认勾上：商业教材的原文不能直接入库）、
+#                        覆盖开关、选文件，「开始解析」；下面是导入任务表和已导入
+#                        的系列表（点名字进去）
+#   #教材导入?job=3      审阅：进度（解析中时「每隔 2」秒自己刷新，跑完就停）、
+#                        块表（出错的块能重试）、草稿课表（点标题编辑，行上通过 /
+#                        驳回）、「全部通过有映射的课」「确认导入」「删除这个任务」，
+#                        导入后显示导入报告和拒收清单
+#   #教材导入?draft=12   编辑一课：字段、映射表（行上「去掉」）、加映射（下拉选或
+#                        输入编号）、保存、通过、驳回
+#   #教材导入?manage=mnn 管理一个系列：课数、映射数，「撤下这个系列」（浮层里再
+#                        确认一次）
+#
+# 「载入 import_load」：带着地址参数进来时按参数拉回那一块的数据。删除任务、撤下
+# 系列都要在浮层里再点一次确认（「打开」浮层时地址里的 job / manage 留着）。
+# 「当」的条件里不能有空格；「提示」里不能有双引号（会截断输入框的 placeholder 属性，
+# 整个编辑页画不出来）。
+
+界面 自定义 教材导入 端 教师 载入 import_load
+  动作 import_home 远程 进入时 隐藏 刷新
+  动作 import_poll 远程 隐藏 每隔 2 当 params.job&&shared.job&&shared.job.running 轮询
+
+  # ---- 首页：新建导入 + 任务表 + 系列表 ----
+  # 字段只能放在「分组」里、分组不能套分组，所以新建表单拆成几个横排的分组
+  分组 新建导入 当 !params.job&&!params.draft&&!params.manage
+    文案 上传一本教材（pdf、docx、md、txt，20MB 以内）。后台按课切块、请模型抽出每课并映射到网站已有的条目和知识点（不新建），你逐课审阅后再导入成一个新的教材系列。
+  结束
+  分组 系列 横排 间距 12px 当 !params.job&&!params.draft&&!params.manage
+    字段 series 宽 160px 提示 英文小写，比如mnn 系列代号
+    字段 label 宽 200px 提示 教材页下拉里显示的名字 显示名
+    字段 prefix 宽 120px 提示 不填就用系列代号 课号前缀
+  结束
+  分组 出处 横排 间距 12px 当 !params.job&&!params.draft&&!params.manage
+    字段 source 宽 220px 提示 书名、出版社或网站 来源
+    字段 license 宽 220px 提示 比如：自用、CC_BY_4.0 授权
+    字段 lesson_level 控件 下拉 宽 100px 等级范围
+  结束
+  分组 选项 横排 间距 16px 对齐 center 当 !params.job&&!params.draft&&!params.manage
+    字段 rewrite 控件 开关 改写讲解和例句（商业教材原文不能直接入库，模型用自己的话重写）
+    字段 overwrite 控件 开关 覆盖已有系列
+  结束
+  分组 文件 横排 间距 12px 对齐 flex-end 当 !params.job&&!params.draft&&!params.manage
+    字段 document 接受 .pdf,.docx,.md,.txt 最大 20MB 教材文件
+    动作 import_create 远程 开始解析
+  结束
+
+  布局 占满 当 !params.job&&!params.draft&&!params.manage
+    区域 导入任务
+      文案 当 lists.import_jobs&&!lists.import_jobs.length 还没有导入任务。
+      列表 任务表 绑 import_jobs 当 lists.import_jobs&&lists.import_jobs.length
+        列 series 系列
+        列 file_name 地址 href 文件
+        列 job_state 进度
+        列 created 时间
+      结束
+    结束
+    区域 已导入的系列
+      文案 当 lists.import_series&&!lists.import_series.length 除了 hanabira 还没有别的系列。
+      列表 系列表 绑 import_series 当 lists.import_series&&lists.import_series.length
+        列 code 代号
+        列 label 地址 href 名称
+        列 lesson_n 课数
+        列 series_state 状态
+      结束
+    结束
+  结束
+
+  # ---- 审阅一个任务 ----
+  分组 审阅顶栏 横排 顶栏 间距 12px 对齐 center 当 params.job
+    链接 job_back 绑 job.back 次要 ← 回导入列表
+    显示 job.head 当 shared.job&&shared.job.id==params.job
+    显示 job.missing 当 shared.job&&shared.job.missing
+  结束
+
+  布局 占满 当 params.job&&shared.job&&shared.job.id==params.job&&!shared.job.missing
+    区域 进度
+      显示 job.progress 正文
+      显示 job_note 当 shared.job_note
+      显示 job.report_note 当 shared.job.report_note 正文
+      链接 to_textbook 绑 job.textbook 去教材页看看
+      分组 按钮 横排 间距 12px 对齐 center
+        动作 import_pass_mapped 远程 当 !shared.job.running 全部通过有映射的课
+        动作 import_confirm 远程 当 !shared.job.running&&shared.job.passed>0 确认导入
+        动作 ask_delete 危险 打开 确认删除任务 删除这个任务
+      结束
+      文案 当 lists.import_rejected&&lists.import_rejected.length 拒收的课（引用了库里没有的编号，没进库）：
+      列表 拒收表 绑 import_rejected 当 lists.import_rejected&&lists.import_rejected.length
+        列 code 课号
+        列 reason 原因
+      结束
+    结束
+    区域 草稿课
+      文案 当 lists.import_drafts&&!lists.import_drafts.length 还没有抽出课（解析中的话等一会儿）。
+      列表 草稿课表 绑 import_drafts 当 lists.import_drafts&&lists.import_drafts.length
+        列 seq 课序
+        列 title 地址 href 标题
+        列 draft_level 等级
+        列 mapping 映射
+        列 issues 问题
+        列 confidence 把握
+        列 review 审阅
+        动作 import_draft_pass 远程 带 draft 当 row.review!=='通过' 通过
+        动作 import_draft_reject 远程 带 draft 当 row.review!=='驳回' 驳回
+      结束
+    结束
+    区域 块
+      列表 块表 绑 import_chunks
+        列 seq 块序
+        列 title 标题
+        列 chunk_status 状态
+        列 error 说明
+        列 tries 次数
+        动作 import_chunk_retry 远程 带 chunk_id 当 row.chunk_status!=='待解析' 重试
+      结束
+    结束
+  结束
+
+  浮层 确认删除任务 宽 460px
+    文案 只删这个导入任务的草稿（块和草稿课），已经导入教材页的课不受影响。确定删除？
+    分组 底栏 横排 底栏 间距 12px
+      动作 import_job_delete 远程 关闭 危险 确认删除
+      动作 cancel_delete 次要 关闭 算了
+    结束
+  结束
+
+  # ---- 编辑一课草稿 ----
+  分组 编辑顶栏 横排 顶栏 间距 12px 对齐 center 当 params.draft
+    链接 draft_back 绑 draft.back 次要 ← 回审阅页
+    显示 draft.head 当 shared.draft&&shared.draft.draft==params.draft
+    显示 draft.missing 当 shared.draft&&shared.draft.missing
+  结束
+
+  布局 横排 占满 当 params.draft&&shared.draft&&shared.draft.draft==params.draft&&!shared.draft.missing
+    区域 字段 比 3
+      分组 抬头 横排 间距 12px
+        字段 title 宽 260px 标题
+        字段 draft_level 控件 下拉 宽 90px 等级
+        字段 seq 宽 80px 课序
+      结束
+      分组 正文
+        字段 summary 控件 多行 单行高 一句话
+        字段 formation 接续
+        字段 explanation 控件 多行 讲解
+        字段 examples 控件 多行 提示 JSON数组，每句一个对象，键是jp（日语）和zh（中文） 例句（JSON）
+      结束
+      分组 按钮 横排 间距 12px
+        动作 import_draft_save 远程 保存
+        动作 import_draft_pass 远程 通过
+        动作 import_draft_reject 远程 次要 驳回
+      结束
+      显示 draft_note 当 shared.draft_note
+    结束
+    区域 映射 比 2
+      显示 draft.from_chunk 来自
+      显示 draft.issues 当 shared.draft.issues 问题
+      显示 draft.dropped 当 shared.draft.dropped 丢掉的编号（库里没有）
+      显示 draft.reason 当 shared.draft.reason 模型的理由
+      显示 draft.confidence 当 shared.draft.confidence 把握
+      文案 当 lists.draft_maps&&!lists.draft_maps.length 还没有映射：这课导入后没题可出，老师也不知道它讲哪个点。
+      列表 映射表 绑 draft_maps 当 lists.draft_maps&&lists.draft_maps.length
+        列 map_kind 种类
+        列 map_code 编号
+        列 map_label 名称
+        动作 import_map_remove 远程 带 map_code 去掉
+      结束
+      分组 加映射
+        字段 map_add 控件 下拉 选项来自 map_options 从已有的选
+        字段 map_typed 宽 200px 提示 条目或知识点的编号 或者输入编号
+        动作 import_map_add 远程 加映射
+      结束
+    结束
+  结束
+
+  # ---- 管理一个系列 ----
+  分组 系列顶栏 横排 顶栏 间距 12px 对齐 center 当 params.manage
+    链接 series_back 绑 series_view.back 次要 ← 回导入列表
+  结束
+
+  布局 占满 当 params.manage&&shared.series_view&&shared.series_view.code===params.manage
+    区域 系列
+      显示 series_view.head 正文
+      显示 series_view.note 当 shared.series_view.note
+      动作 ask_withdraw 危险 打开 确认撤下 当 shared.series_view.can_withdraw 撤下这个系列
+    结束
+  结束
+
+  浮层 确认撤下 宽 480px
+    文案 撤下后，库里这个系列的课和映射都删掉，教材页的下拉里不再有它；学习记录不动，选过它的学习者回到 hanabira。课文文件改名留着（lessons.withdrawn.jsonl）。确定撤下？
+    分组 底栏 横排 底栏 间距 12px
+      动作 import_series_withdraw 远程 关闭 危险 确认撤下
+      动作 cancel_withdraw 次要 关闭 算了
+    结束
+  结束
+结束

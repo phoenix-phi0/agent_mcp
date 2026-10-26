@@ -32,3 +32,11 @@ data/gen/
 
 # 批量任务的过程报告，不进版本库
 data/reports/
+
+# kg_v4（和 kg/ 并存的新版后端）：库由 kg_v4/setup/init_data.py 灌，web/ 由 gen build 生成，
+# uploads/ 是导入接口存的上传文件。上面的通用规则本来就覆盖，这里写明方便对照。
+kg_v4/app.db
+kg_v4/web/
+kg_v4/uploads/
+kg_v4/sessions/
+kg_v4/.auth_secret

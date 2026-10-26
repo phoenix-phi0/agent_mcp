@@ -1,0 +1,1 @@
+UPDATE quiz_progress SET current_no = :current_no, answered = 0, last_correct = 0, asked_nos = :asked_nos, asked_count = CAST(:asked_count AS INTEGER), seq = CAST(:seq AS INTEGER) WHERE learner = :learner

@@ -1,0 +1,1 @@
+SELECT group_concat(c, char(10)) FROM (SELECT id, c FROM (SELECT id, content AS c FROM tutor_message WHERE learner = :learner AND role = 'user' ORDER BY id DESC LIMIT 3) UNION ALL SELECT 999999999 AS id, :cur AS c ORDER BY id ASC)

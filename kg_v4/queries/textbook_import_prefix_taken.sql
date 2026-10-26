@@ -1,0 +1,1 @@
+SELECT COUNT(*) FROM lesson_text WHERE COALESCE(series_code,'') <> :series_code AND (substr(code, 1, length(:code_prefix) + 1) = :code_prefix || '-' OR (length(code) > length(:code_prefix) AND substr(code, 1, length(:code_prefix)) = :code_prefix AND substr(code, length(:code_prefix) + 1) NOT GLOB '*[^0-9]*'))

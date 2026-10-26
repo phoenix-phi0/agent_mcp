@@ -1,0 +1,1 @@
+INSERT INTO progress_mastery (learner, point_code, right_count, total_count, mastered, updated_at) SELECT :learner, :point_code, COALESCE(SUM(correct), 0), COUNT(*), 0, :at FROM progress_answer WHERE learner = :learner AND point_code = :point_code

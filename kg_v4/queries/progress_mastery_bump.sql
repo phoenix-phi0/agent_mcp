@@ -1,0 +1,1 @@
+UPDATE progress_mastery SET total_count = total_count + 1, right_count = right_count + CAST(:correct AS INTEGER), updated_at = :at WHERE learner = :learner AND point_code = :point_code

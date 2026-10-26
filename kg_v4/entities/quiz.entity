@@ -1,0 +1,34 @@
+实体 quiz_question quiz_question
+  字段 question_no 文本 必填 唯一 题号，唯一
+  字段 course 文本 课程，可空
+  字段 level 文本 必填 等级
+  字段 category 文本 必填 考点类别（如接续题）
+  字段 stem 长文本 必填 题干
+  字段 options 长文本 选项文字，用
+  字段 answer 文本 必填 标准答案（选择题是题库原字母，如
+  字段 accepted 文本 可接受写法，用
+  字段 explain 长文本 解析，可空
+  字段 item_code 文本 必填 所属表达方式条目编号（来自
+结束
+
+实体 quiz_progress quiz_progress
+  字段 learner 文本 必填 唯一 学习者，唯一
+  字段 level 文本 上次选的等级，可空
+  字段 category 文本 上次选的考点类别，可空
+  字段 current_no 文本 当前题题号，可空
+  字段 answered 整数 必填 当前题是否已答（1/0）
+  字段 right_count 整数 必填 这一轮答对几道
+  字段 asked_nos 长文本 这一轮出过的题号，英文逗号连接，可空
+  字段 asked_count 整数 必填 这一轮第几道（已出题数）
+  字段 mode 文本 空=按等级考点自由练；lesson=按课练；review=复习薄弱点，可空
+  字段 lesson_code 文本 在练的课（按课练时有值），可空
+  字段 round_start_id 整数 必填 这一轮起点（开轮时该学习者
+  字段 seq 整数 必填 每出一题加
+  字段 last_correct 整数 必填 当前题（或刚答完的题）判题结果
+结束
+
+页面 实体 quiz_view 做题页面
+  字段 pick_level 枚举 全部,N5,N4,N3,N2,N1 等级
+  字段 pick_kind 枚举 全部,挖空,意思,接续,找错句 考点
+  字段 given 文本 接续题的作答内容
+结束

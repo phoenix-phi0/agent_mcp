@@ -1,0 +1,1 @@
+INSERT INTO quiz_question (question_no, course, level, category, stem, options, answer, accepted, "explain", item_code) VALUES (:question_no, :course, :level, :category, replace(replace(replace(:stem, char(92)||char(92), char(1)), char(92)||'n', char(10)), char(1), char(92)), :options, :answer, :accepted, :explain, :item_code)

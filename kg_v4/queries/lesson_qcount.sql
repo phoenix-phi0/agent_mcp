@@ -1,0 +1,1 @@
+SELECT lesson_code, count(*) AS n FROM (SELECT l.lesson_code AS lesson_code, q.id AS qid FROM lesson_item_link l JOIN quiz_question q ON q.item_code = l.item_code UNION SELECT p.lesson_code AS lesson_code, q.id AS qid FROM lesson_point_link p JOIN kg_item i ON i.point_code = p.point_code JOIN quiz_question q ON q.item_code = i.code) GROUP BY lesson_code

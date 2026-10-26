@@ -1,0 +1,35 @@
+实体 report_summary report_summary
+  字段 student 文本 必填 被总结的学生用户名
+  字段 summary 长文本 必填 AI
+  字段 author 文本 必填 写的人（教师用户名）
+  字段 created_at 文本 必填 写的时间，格式
+结束
+
+页面 实体 report_view 学情页面
+  字段 report_sort 枚举 最近学习,平均得分 排序
+  字段 label 文本 全班表学生列、知识点表知识点列等（显示名）
+  字段 last_active 文本 全班表最近学习列
+  字段 attempt_n 整数 全班表作答数列
+  字段 recent_rate 文本 全班表近期正确率列
+  字段 avg_score 文本 全班表平均得分列
+  字段 mastered_n 整数 全班表已掌握列
+  字段 weak_points 文本 全班表薄弱知识点列
+  字段 book_n 整数 全班表错词本列
+  字段 wrong_n 整数 答错列
+  字段 answer_n 整数 作答列
+  字段 learner_n 整数 答错的人数列
+  字段 point_label 文本 所属知识点列
+  字段 tally 文本 答对答题列
+  字段 score_text 文本 得分列
+  字段 mastered_text 文本 掌握列
+  字段 last_wrong 文本 最近答错列
+  字段 at 文本 最近作答时间列
+  字段 stem_brief 文本 题干列
+  字段 given_text 文本 作答列
+  字段 result 文本 对错列
+  字段 direction_label 文本 方向列
+  字段 chat_who 文本 问老师表谁列
+  字段 chat_text 文本 问老师表内容列
+  字段 chat_at 文本 问老师表时间列
+  字段 chat_notes 文本 问老师表用了的设定列
+结束

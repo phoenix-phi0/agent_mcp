@@ -1,0 +1,11 @@
+实体 tutor_message 学习记录
+  字段 learner 文本 必填 索引 学习者
+  字段 role 文本 必填 角色
+  字段 content 长文本 必填 内容
+  字段 intent 文本 意图
+  字段 lesson_code 文本 关联课文编号
+  字段 link 文本 主链接
+  字段 links 长文本 链接列表
+  字段 summary_round 文本 本轮总结轮次
+  字段 at 文本 必填 时间
+结束

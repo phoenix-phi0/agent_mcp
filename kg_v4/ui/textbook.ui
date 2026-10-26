@@ -1,0 +1,104 @@
+# 教材：课文表 + 阅读视图，同一个界面，按地址切换。
+#
+#   #教材                    课文表：顶栏选系列、筛等级、搜关键字（标题、一句话、
+#                            条目名）
+#   #教材?lesson=hb-n4-118   读这一课：抬头、一句话、接续、讲解、例句、挂着的
+#                            条目，顶上和底下「请老师讲解」，底下还有「练这一课」
+#                            「问老师」
+#
+# 为什么是地址不是浮层：讲解动辄几屏长，浮层里读着憋屈；而且课文要能从别处
+# 直接链过来（老师的回复、做题页、发给别人），#教材?lesson=… 就是那一课。
+# 刷新还在这一课，后退键回到课文表。「载入 lesson_one」：地址带着 lesson
+# 进来时前端调它把这一课拉回来。
+#
+# 两块用「当」按地址显隐（params 是地址参数）：
+#   课文表      !params.lesson
+#   读课文      地址里的课和拉回来的那一课对得上才显示——从 A 课退回表再点
+#               B 课，B 还没拉回来时不该顶着 A 的内容
+#   没有这一课  对得上、但后端说没有（reading.missing）
+# 「当」的条件里不能有空格。
+#
+# 系列（教材系列，见 entities/series.entity）：顶栏最前面的下拉，选项是接口给
+# 的（「选项来自 series_options」，series 表里 sort ≥ 0 的，只有一个也显示），
+# 「改时 lesson_list」：一选就提交，记进学习者的偏好、课文表换成那个系列的课。
+# 课文表顶栏和阅读顶栏都写着系列名（state.series_head / reading.series_label）。
+#
+# 表里点标题、「练这一课」「问老师」「回课文表」都是链接（「链接」和列的
+# 「地址」），走地址跳转，不用「切到」：切到带不了参数，用了它引擎还会以为
+# 界面切换自己安排好了，不再画导航。没有题的课后端给空地址，「练这一课」
+# 就不画，换成一句说明。
+#
+# 「问老师」只跳到问老师页，不预填问题：输入框预填要往地址里放参数，而地址
+# 参数会盖掉每次提交的同名键——那样之后发的每句话都成了预填的那句。
+#
+# 「请老师讲解」跳到 #问老师?lesson=…：问老师页「触发 teacher_send」，进去就
+# 把 lesson 交给它、发出讲解这一课的请求（不判意图、不靠关键词猜课），回复
+# 下面是「做这课的题」「读课文」。触发前地址里的 lesson 就清掉了，刷新、后退
+# 不会再讲一遍，之后发的话也不带它。抬头上有课号（第N课、hb-n4-118），在
+# 问老师页直接说「讲讲第118课」「讲一下 hb-n4-118」也行。
+
+界面 自定义 教材 端 学生 载入 lesson_one
+  动作 lesson_list 远程 进入时 隐藏 刷新
+
+  分组 顶栏 横排 顶栏 间距 12px 对齐 center 当 !params.lesson
+    字段 series 控件 下拉 选项来自 series_options 改时 lesson_list 宽 150px 系列
+    字段 lesson_level 控件 下拉 宽 90px 等级
+    字段 keyword 控件 多行 单行高 宽 260px 提示 标题、一句话或条目名（Enter搜索）
+    动作 lesson_list 提交 远程 搜索
+    显示 series_head
+    显示 lesson_count
+  结束
+
+  布局 占满 当 !params.lesson
+    区域 课文
+      文案 当 lists.lessons&&!lists.lessons.length 没有符合的课文，换个等级或关键字试试。
+      列表 课文表 绑 lessons 当 lists.lessons&&lists.lessons.length
+        列 level 等级
+        列 title 地址 href 标题
+        列 summary 一句话
+        列 qcount 题数
+      结束
+    结束
+  结束
+
+  分组 阅读顶栏 横排 顶栏 间距 12px 对齐 center 当 params.lesson
+    链接 back 绑 reading.back 次要 ← 回课文表
+    显示 reading.series_label 当 params.lesson&&shared.reading.code===params.lesson&&!shared.reading.missing
+    显示 reading.head 当 params.lesson&&shared.reading.code===params.lesson
+    链接 explain_top 绑 reading.explain 当 params.lesson&&shared.reading.code===params.lesson&&!shared.reading.missing 请老师讲解
+  结束
+
+  布局 占满 当 params.lesson&&shared.reading.code===params.lesson&&!shared.reading.missing
+    区域 一句话
+      显示 reading.summary 正文
+      显示 reading.formation 当 shared.reading.formation 接续
+    结束
+    区域 讲解
+      显示 reading.explanation 正文
+    结束
+    区域 例句 当 lists.examples&&lists.examples.length
+      列表 例句表 绑 examples
+        列 jp 日语
+        列 zh 中文
+      结束
+    结束
+    区域 挂着的条目 当 lists.lesson_items&&lists.lesson_items.length
+      列表 条目表 绑 lesson_items
+        列 label 条目
+        列 point_label 所属知识点
+      结束
+    结束
+    区域 练习 横排 间距 12px 对齐 center
+      链接 explain 绑 reading.explain 请老师讲解这一课
+      链接 practice 绑 reading.practice 练这一课
+      链接 ask 绑 reading.ask 次要 问老师
+      显示 reading.quiz_note
+    结束
+  结束
+
+  布局 占满 当 params.lesson&&shared.reading.code===params.lesson&&shared.reading.missing
+    区域 没找到
+      显示 reading.missing 正文
+    结束
+  结束
+结束

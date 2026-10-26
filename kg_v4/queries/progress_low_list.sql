@@ -1,0 +1,1 @@
+SELECT s.point_code AS point_code, s.score AS score FROM progress_score s WHERE s.learner = :learner AND s.id = (SELECT MAX(m.id) FROM progress_score m WHERE m.learner = s.learner AND m.point_code = s.point_code) AND s.score < CAST(:below AS INTEGER) ORDER BY s.score ASC, s.point_code ASC LIMIT CAST(:limit AS INTEGER)

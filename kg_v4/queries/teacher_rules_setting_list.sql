@@ -1,0 +1,1 @@
+SELECT id, kind, COALESCE(student, '') AS student, COALESCE(keywords, '') AS keywords, content, enabled, once, version, author, updated_at FROM teacher_rules_setting WHERE (:kind = '' OR kind = :kind) AND (:student = '' OR COALESCE(student, '') = '' OR student = :student) ORDER BY id

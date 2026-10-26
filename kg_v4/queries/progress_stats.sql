@@ -1,0 +1,1 @@
+SELECT g.learner AS learner, COUNT(*) AS answer_count, (SELECT a.at FROM progress_answer a WHERE a.learner = g.learner ORDER BY a.id DESC LIMIT 1) AS last_at FROM progress_answer g WHERE (:learner = '' OR g.learner = :learner) GROUP BY g.learner ORDER BY g.learner ASC

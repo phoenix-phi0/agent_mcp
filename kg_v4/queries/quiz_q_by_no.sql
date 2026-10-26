@@ -1,0 +1,1 @@
+SELECT id, question_no, COALESCE(course, '') AS course, level, category, stem, COALESCE(options, '') AS options, answer, COALESCE(accepted, '') AS accepted, COALESCE("explain", '') AS expl, item_code FROM quiz_question WHERE question_no = :question_no

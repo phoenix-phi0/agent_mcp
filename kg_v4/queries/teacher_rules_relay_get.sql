@@ -1,0 +1,1 @@
+SELECT id, urgency, COALESCE(tone, '') AS tone, must_info, COALESCE(facts, '') AS facts, COALESCE(keywords, '') AS keywords, rounds, COALESCE(deadline, '') AS deadline, COALESCE(student, '') AS student, enabled, author, updated_at FROM teacher_rules_relay WHERE id = CAST(:id AS INTEGER)

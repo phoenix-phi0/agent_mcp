@@ -1,0 +1,1 @@
+SELECT CASE WHEN (CASE WHEN :a = '' THEN 0 ELSE length(:a) - length(replace(:a, ',', '')) + 1 END) = (CASE WHEN :b = '' THEN 0 ELSE length(:b) - length(replace(:b, ',', '')) + 1 END) THEN 0 ELSE 1 END

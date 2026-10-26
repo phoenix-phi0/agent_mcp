@@ -1,0 +1,1 @@
+INSERT INTO teacher_rules_relay (urgency, tone, must_info, facts, keywords, rounds, deadline, student, enabled, author, updated_at) VALUES (:urgency, :tone, :must_info, :facts, :keywords, CAST(:rounds AS INTEGER), :deadline, :student, 1, :author, datetime('now', 'localtime'))

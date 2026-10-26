@@ -1,0 +1,1 @@
+SELECT id, kanji, kana, meaning, point_code FROM vocab_word WHERE (:keyword = '' OR instr(COALESCE(kanji,''), :keyword) > 0 OR instr(COALESCE(kana,''), :keyword) > 0 OR instr(COALESCE(meaning,''), :keyword) > 0) AND (:point_code = '' OR COALESCE(point_code,'') = :point_code) ORDER BY id

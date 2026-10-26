@@ -1,0 +1,1 @@
+SELECT id, point_code, question_no, correct, COALESCE(answer, '') AS answer, at FROM progress_answer WHERE learner = :learner AND id > CAST(:start_id AS INTEGER) AND (:end_id = '' OR id <= CAST(:end_id AS INTEGER)) ORDER BY id ASC

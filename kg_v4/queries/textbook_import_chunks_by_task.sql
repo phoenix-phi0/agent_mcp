@@ -1,0 +1,1 @@
+SELECT id, seq, COALESCE(title,'') AS title, status, COALESCE(fail_reason,'') AS fail_reason, COALESCE(retry_count,0) AS retry_count FROM textbook_import_chunk WHERE task_id = CAST(:task_id AS INTEGER) ORDER BY seq ASC, id ASC

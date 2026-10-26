@@ -1,0 +1,1 @@
+UPDATE teacher_rules_relay SET urgency = :urgency, tone = :tone, must_info = :must_info, facts = :facts, keywords = :keywords, rounds = CAST(:rounds AS INTEGER), deadline = :deadline, student = :student, author = :author, updated_at = datetime('now', 'localtime') WHERE id = CAST(:id AS INTEGER)

@@ -1,0 +1,1 @@
+UPDATE textbook_import_draft SET status = '通过' WHERE task_id = CAST(:task_id AS INTEGER) AND status = '待审' AND (COALESCE(item_codes,'') <> '' OR COALESCE(point_codes,'') <> '') AND COALESCE(title,'') <> '' AND level IN ('N5','N4','N3','N2','N1')

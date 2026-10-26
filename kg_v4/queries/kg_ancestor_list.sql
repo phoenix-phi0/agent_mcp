@@ -1,0 +1,1 @@
+WITH RECURSIVE anc(c) AS (SELECT pre_code FROM kg_edge WHERE point_code = :code UNION SELECT e.pre_code FROM kg_edge e JOIN anc ON e.point_code = anc.c) SELECT p.code AS code, p.title AS title FROM kg_point p WHERE p.code IN (SELECT c FROM anc) AND p.code <> :code ORDER BY p.id

@@ -1,0 +1,96 @@
+接口 GET /kg/point
+  设 r = 调用 kg.取知识点 code={code}
+  返回 {r}
+结束
+
+接口 GET /kg/points
+  设 r = 调用 kg.列知识点
+  返回 {r}
+结束
+
+接口 GET /kg/prerequisites
+  设 r = 调用 kg.列前置 code={code}
+  返回 {r}
+结束
+
+接口 GET /kg/successors
+  设 r = 调用 kg.列后续 code={code}
+  返回 {r}
+结束
+
+接口 GET /kg/ancestors
+  设 r = 调用 kg.列祖先 code={code}
+  返回 {r}
+结束
+
+接口 GET /kg/descendants
+  设 r = 调用 kg.列后代 code={code}
+  返回 {r}
+结束
+
+接口 GET /kg/roots
+  设 r = 调用 kg.列根节点
+  返回 {r}
+结束
+
+接口 GET /kg/layers
+  设 r = 调用 kg.列分层
+  返回 {r}
+结束
+
+接口 POST /kg/edge/add 角色 teacher
+  设 r = 调用 kg.加前置边 pre_code={pre_code} point_code={point_code}
+  返回 {r}
+结束
+
+接口 GET /kg/export
+  设 r = 调用 kg.导出图
+  返回 {r}
+结束
+
+接口 GET /kg/item
+  设 r = 调用 kg.取条目 code={code}
+  返回 {r}
+结束
+
+接口 GET /kg/items
+  设 r = 调用 kg.列条目
+  返回 {r}
+结束
+
+接口 GET /kg/items/by-point
+  设 r = 调用 kg.按知识点列条目 point_code={point_code}
+  返回 {r}
+结束
+
+接口 GET /kg/contrasts
+  设 r = 调用 kg.列对照 code={code 或}
+  返回 {r}
+结束
+
+接口 POST /kg/import/points 角色 teacher
+  设 file_path = 存文件 file 类型=md,txt 上限=20MB
+  如果 {file_path} 开头是 [
+    返回 {"error":"{file_path}"} 400
+  结束
+  设 r = 调用 kg.导入知识点 file_path={file_path}
+  返回 {r}
+结束
+
+接口 POST /kg/import/items 角色 teacher
+  设 file_path = 存文件 file 类型=md,txt 上限=20MB
+  如果 {file_path} 开头是 [
+    返回 {"error":"{file_path}"} 400
+  结束
+  设 r = 调用 kg.导入条目 file_path={file_path}
+  返回 {r}
+结束
+
+接口 POST /kg/import/contrasts 角色 teacher
+  设 file_path = 存文件 file 类型=md,txt 上限=20MB
+  如果 {file_path} 开头是 [
+    返回 {"error":"{file_path}"} 400
+  结束
+  设 r = 调用 kg.导入对照 file_path={file_path}
+  返回 {r}
+结束

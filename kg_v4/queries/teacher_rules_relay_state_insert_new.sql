@@ -1,0 +1,1 @@
+INSERT INTO teacher_rules_relay_state (relay_id, student, rounds_done, finished, confirmed, updated_at) SELECT CAST(:relay_id AS INTEGER), :student, 0, 0, 0, datetime('now', 'localtime') WHERE NOT EXISTS (SELECT 1 FROM teacher_rules_relay_state WHERE relay_id = CAST(:relay_id AS INTEGER) AND student = :student)

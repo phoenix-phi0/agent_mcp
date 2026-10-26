@@ -1,0 +1,1 @@
+INSERT INTO quiz_progress (learner, level, category, current_no, answered, right_count, asked_nos, asked_count, mode, lesson_code, round_start_id, seq, last_correct) VALUES (:learner, :level, :category, '', 0, 0, '', 0, :mode, :lesson_code, CAST(:round_start_id AS INTEGER), 0, 0)

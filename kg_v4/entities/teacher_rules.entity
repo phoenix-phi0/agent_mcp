@@ -1,0 +1,84 @@
+实体 teacher_rules_setting teacher_rules_setting
+  字段 kind 文本 必填 种类：memory（记忆）/
+  字段 student 文本 针对哪个学生，可空，空串或未填都表示全班
+  字段 keywords 文本 关键词，可空，半角逗号隔开
+  字段 content 长文本 必填 设定内容（必填）
+  字段 enabled 整数 必填 是否启用（1/0）
+  字段 once 整数 必填 是否只用于下一条回复（1/0，只有
+  字段 version 整数 必填 版本号，新建为
+  字段 author 文本 必填 写的人（教师用户名）
+  字段 updated_at 文本 必填 更新时间（YYYY-MM-DD
+结束
+
+实体 teacher_rules_setting_use teacher_rules_setting_use
+  字段 reply_id 整数 必填 老师回复编号
+  字段 student 文本 必填 学生用户名
+  字段 setting_ids 文本 必填 这条回复用到的设定编号，半角逗号隔开，按拼进提示词的顺序
+  字段 setting_versions 文本 必填 与
+  字段 at 文本 必填 记录时间
+结束
+
+实体 teacher_rules_relay teacher_rules_relay
+  字段 urgency 文本 必填 紧急程度：low（顺便）/ normal（尽快）/ urgent（立即）
+  字段 tone 文本 口吻，可空
+  字段 must_info 长文本 必填 必须准确传达的信息（必填）
+  字段 facts 文本 必须准确的信息，可空
+  字段 keywords 文本 话题关键词，可空，半角逗号隔开
+  字段 rounds 整数 必填 要传几轮（不小于
+  字段 deadline 文本 截止日
+  字段 student 文本 针对谁，可空，空串或未填都表示全班
+  字段 enabled 整数 必填 是否启用（1/0）
+  字段 author 文本 必填 写的人（教师用户名）
+  字段 updated_at 文本 必填 更新时间
+结束
+
+实体 teacher_rules_relay_state teacher_rules_relay_state
+  字段 relay_id 整数 必填 传达编号
+  字段 student 文本 必填 学生用户名
+  字段 rounds_done 整数 必填 已传了几轮
+  字段 finished 整数 必填 是否传完（1/0）
+  字段 confirmed 整数 必填 是否被判定已传达（1/0）
+  字段 updated_at 文本 必填 更新时间
+结束
+
+实体 teacher_rules_relay_use teacher_rules_relay_use
+  字段 reply_id 整数 必填 老师回复编号
+  字段 student 文本 必填 学生用户名
+  字段 relay_ids 文本 必填 这条回复带上的传达编号，半角逗号隔开
+  字段 at 文本 必填 记录时间
+结束
+
+页面 实体 teacher_rules_view AI老师设定页面
+  字段 note_id 整数 设定表编号列
+  字段 note_kind 枚举 记忆,作者注,关键词卡 种类
+  字段 note_keywords 文本 关键词，逗号分隔
+  字段 note_content 长文本 设定内容
+  字段 note_once 布尔 只用于下一条回复
+  字段 note_scope 文本 设定表范围列
+  字段 note_brief 文本 设定表内容列
+  字段 note_state 文本 设定表状态列
+  字段 note_updated 文本 设定表更新时间列
+  字段 note_by 文本 设定表写的人列
+  字段 preview_student 文本 预览的学生
+  字段 preview_message 文本 预览的示例提问
+  字段 hit_keyword 文本 命中表命中的关键词列
+  字段 hit_placed 文本 命中表放进去了吗列
+  字段 relay_id 整数 传达表编号列
+  字段 relay_point 长文本 传达的要点
+  字段 relay_urgency 枚举 顺便,尽快,立即 紧急程度
+  字段 relay_voice 枚举 以老师名义,AI自己的口吻 口吻
+  字段 relay_facts 文本 必须准确的信息
+  字段 relay_keywords 文本 话题关键词
+  字段 relay_rounds 整数 几轮没传达到
+  字段 relay_due 文本 截止日期
+  字段 relay_scope 文本 传达表范围列
+  字段 relay_brief 文本 传达表要点列
+  字段 relay_done 文本 传达表完成情况列
+  字段 relay_state_text 文本 传达表状态列
+  字段 relay_updated 文本 传达表更新时间列
+  字段 relay_by 文本 传达表写的人列
+  字段 relay_student_label 文本 状态表学生列
+  字段 relay_excerpt 文本 AI原话列
+  字段 relay_msg_ask 长文本 传达记录学生问
+  字段 relay_msg_reply 长文本 传达记录AI老师的回复
+结束
