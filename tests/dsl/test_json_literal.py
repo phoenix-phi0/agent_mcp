@@ -88,5 +88,15 @@ check(e.vars["x"] == {"a": "p\nq", "b": "1"}, "字面量文本的头部变量按
 e = run('设 s = 你好\n设 s.b = 1\n')
 check(e.vars["s"] == {"b": "1"}, "普通文本头部仍换成字典（行为不变）")
 
+print("设 x.字段 的头部是列表文本")
+e = run('设 x = []\n设 x.b = 1\n')
+check(e.vars["x"] == {"b": "1"}, "空列表文本 + 非下标字段：换成字典（同 3acd215 之前）")
+e = run('设 x = [1,2]\n设 x.b = 1\n')
+check(e.vars["x"] == {"b": "1"}, "[1,2] + 非下标字段：换成字典")
+e = run('设 x = [1,2]\n设 x.0 = 9\n')
+check(e.vars["x"] == ["9", 2], "[1,2] + 下标 0：按列表改")
+e = run('设 x = {"a": 1}\n设 x.b = 2\n')
+check(e.vars["x"] == {"a": 1, "b": "2"}, "字典文本头部保留原字段")
+
 print(f"\n通过 {passed}，失败 {failed}")
 sys.exit(1 if failed else 0)

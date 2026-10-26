@@ -279,7 +279,7 @@ from .dsl_core import (  # noqa: F401
     HALT_STATES, ScriptHalt, IN_WORDS, KEYWORDS, LOOP_HEADS, LOOP_MAX, LoopBreak, LoopContinue,
     LoopControl, MAX_CALL_DEPTH, REPEAT_RE, WHILE_LIMIT_RE, PACK_SEP_RE, RESERVED, RET_STATUS_RE,
     BizError, ScriptReturn, TX_BEGIN, TX_COMMIT, TX_ROLLBACK, VAR_RE, VERB_LIKE_RE,
-    as_number, check_name, dig, eval_cond_expr, eval_parts, is_empty,
+    as_number, check_name, dig, index_of, eval_cond_expr, eval_parts, is_empty,
     iter_items, msg_size, normalize, parse_cond_expr, parse_condition, put,
     split_alt, split_condition_tail, split_head, split_items, split_ws_once, to_text,
 )
@@ -465,7 +465,11 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
                 parsed = json.loads(cur)
             except ValueError:
                 parsed = None
-            if isinstance(parsed, (dict, list)):
+            # 列表文本只在路径第一段是能写进去的下标时才用（设 x = [1,2] 后设 x.0 = 9）；
+            # 否则保持以前的行为，头部换成字典再写（设 x = [] 后设 x.b = 1 得 {b:1}）
+            if isinstance(parsed, dict) or (
+                    isinstance(parsed, list)
+                    and index_of(path.partition(".")[0].strip(), parsed) is not None):
                 self.vars[head] = parsed
         if not isinstance(self.vars.get(head), (dict, list)):
             self.vars[head] = {}
