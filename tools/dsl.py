@@ -457,13 +457,54 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
             return
         head, _, path = name.partition(".")
         head = head.strip()
+        cur = self.vars.get(head)
+        if isinstance(cur, str) and cur.lstrip()[:1] in ("{", "["):
+            # 头部存的是 JSON 字面量文本（设 x = {…}）：解析成结构再往里写，
+            # 不然整个值被换成只含这个字段的空字典（lookup 读取时同样会解析）
+            try:
+                parsed = json.loads(cur)
+            except ValueError:
+                parsed = None
+            if isinstance(parsed, (dict, list)):
+                self.vars[head] = parsed
         if not isinstance(self.vars.get(head), (dict, list)):
             self.vars[head] = {}
         if not put(self.vars[head], path, value):
             raise DSLError(
                 f"写不进去：{name}。中间某一层不是字典或列表，或者下标越界")
 
-    def expand(self, text: str) -> str:
+    def expand_literal(self, text: str) -> str:
+        """展开可能是 JSON 字面量的右值（设 x = …、返回 …）。
+
+        整段以 { 或 [ 开头时，按字符串引号做词法扫描，位于 JSON 字符串引号之内的
+        {变量} 插入值做 JSON 字符串转义（换行、双引号、反斜杠、制表符…，等价
+        json.dumps(str(v))[1:-1]；数字/对象/列表先转文本再转义）；引号之外的
+        {对象} 整体插入、其它位置都不动。转义后的展开结果仍解析不成 JSON，说明
+        这不是 JSON 字面量（普通文字碰巧以 { 开头），退回原样展开，行为同以前。"""
+        if text.lstrip()[:1] not in ("{", "["):
+            return self.expand(text)
+        inside, in_str, i = set(), False, 0
+        for m in ESC_OR_VAR_RE.finditer(text):
+            # 从上一个 {变量} 之后扫到这个的起点，看停在字符串里还是外
+            while i < m.start():
+                if in_str and text[i] == "\\":
+                    i += 1
+                elif text[i] == '"':
+                    in_str = not in_str
+                i += 1
+            if in_str and m.group(2) is not None:
+                inside.add(m.start())
+            i = m.end()
+        if not inside:
+            return self.expand(text)
+        got = self.expand(text, _json_str_at=inside)
+        try:
+            json.loads(got)
+        except ValueError:
+            return self.expand(text)
+        return got
+
+    def expand(self, text: str, _json_str_at=None) -> str:
         """{变量名} 替换成值，未定义的原样保留——为了拼写错时看得见。
 
         **{名字 或 默认值}**：取不到就用默认值，取到空值也用。
@@ -488,15 +529,20 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
             head, alt = split_alt(body)
             sep = alt is not None
             got = self.lookup(head.strip())
+            esc = _json_str_at is not None and m.start() in _json_str_at
             if sep:
                 # 取不到（None）、空串、空列表、空字典都算「没有」，用默认值。
                 # 不走 is_empty：那个函数是给字符串用的，拿到 None 会炸。
                 blank = got is None or (hasattr(got, "__len__") and not len(got))
-                return alt.strip() if blank else to_text(got)
-            return m.group(0) if got is None else to_text(got)
+                out = alt.strip() if blank else to_text(got)
+            elif got is None:
+                return m.group(0)
+            else:
+                out = to_text(got)
+            return json.dumps(out, ensure_ascii=False)[1:-1] if esc else out
         return ESC_OR_VAR_RE.sub(repl, text)
 
-    def _resolve_items(self, raw: str):
+    def _resolve_items(self, raw: str, literal: bool = False):
         """整个就是一个变量引用时取原始值，否则展开成文本。
 
         这是结构化变量能用于循环的关键：展开成文本的话列表变成 JSON
@@ -518,7 +564,7 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
                 return alt.strip() if blank else got
             if got is not None:
                 return got
-        return self.expand(raw)
+        return self.expand_literal(raw) if literal else self.expand(raw)
 
     # ------------------------------------------------------------------
     # 输出与路径
@@ -1200,7 +1246,7 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
             status = int(m.group(1))
             text = text[:m.start()].strip()
 
-        value = self._resolve_items(text)
+        value = self._resolve_items(text, literal=True)
         if isinstance(value, str):
             s = value.strip()
             if s.startswith(("{", "[")):
@@ -1422,7 +1468,7 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
                 # 文本赋值。打错的动词名正好也落在这里，严格模式下先确认
                 if self.strict_verbs:
                     self._check_unknown_verb(sub_head, sub_rest, lineno)
-                self.store(name, self._resolve_items(value))
+                self.store(name, self._resolve_items(value, literal=True))
 
         elif head == "ask":
             self._do_ask(rest, lineno)
