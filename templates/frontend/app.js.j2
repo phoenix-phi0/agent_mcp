@@ -380,6 +380,15 @@ const _app = createApp({
     function applyResponse(resp) {
       if (!resp) return;
       if (resp.state && typeof shared !== "undefined") Object.assign(shared.value, resp.state);
+      // 「页面状态」那类接口把整页铺进 state，列表数据键也在里面。rowsOf 能回退去读
+      // shared，但 .ui 里写的「当 lists.键&&lists.键.length」是直接读 lists 的——
+      // 不同步的话，表格外面那层 v-if 永远是假，接口有行、页面整块不出。
+      // 先同步、再让下面的 resp.lists 覆盖：两边都给时，lists 那份算数。
+      if (resp.state && typeof resp.state === "object") {
+        for (const [k, v] of Object.entries(resp.state)) {
+          if (Array.isArray(v)) lists.value[k] = v;
+        }
+      }
       // lists：{数据键: 行表}。哪张表填哪组，由键说了算。
       if (resp.lists && typeof resp.lists === "object") {
         for (const [k, v] of Object.entries(resp.lists)) {

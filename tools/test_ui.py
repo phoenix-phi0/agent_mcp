@@ -476,6 +476,49 @@ def test_side_poll_row_remote():
           [i.code for i in bad2.get("issues", []) if "每隔" in i.message], ["missing_endpoint"])
 
 
+def test_state_lists_sync():
+    print("\n[页面状态里的列表同步进 lists]")
+    ui = ("界面 自定义 学情 载入 report_home\n"
+          "  文案 当 lists.class_rows&&!lists.class_rows.length 还没有学生\n"
+          "  列表 全班表 绑 class_rows 当 lists.class_rows&&lists.class_rows.length\n"
+          "    列 label 学生\n"
+          "  结束\n"
+          "结束\n")
+    r = compile_ui(ui, backend="vue", options={"endpoints": {"report_home": "/report/home"}})
+    check("编译没有 issue", [i.code for i in r.get("issues", [])], [])
+    js = r["result"]["files"]["app.js"]
+    check("表格外层的 v-if 直接读 lists（所以 state 里的列表必须同步进 lists）",
+          '<section class="table-wrap" v-if="lists.class_rows&&lists.class_rows.length">' in js, True)
+    i_sync = js.find("if (Array.isArray(v)) lists.value[k] = v;")
+    i_lists = js.find("if (resp.lists && typeof resp.lists")
+    check("applyResponse 把 state 顶层的数组键同步进 lists", i_sync > 0, True)
+    check("同步在 resp.lists 之前：两边都给时 lists 那份算数", 0 < i_sync < i_lists, True)
+
+    import shutil, subprocess
+    node = shutil.which("node")
+    a, b = js.find("function applyResponse(resp) {"), js.find("function followGo(")
+    if not node or a < 0 or b < a:
+        print("  - 没有 node，跳过行为检查")
+        return
+    harness = (
+        "const shared={value:{}}, lists={value:{}}, current={value:{name:'学情'}};\n"
+        "const myStream=()=>'', fillForm=()=>{}, showNotice=()=>{}, followGo=()=>{}, showOverlay=()=>{}, closeOverlay=()=>{};\n"
+        + js[a:b] +
+        "\napplyResponse({state:{class_rows:[{label:'小明'}], empty:[], text:'x', nested:{k:[1]}}});\n"
+        "const first = JSON.stringify(lists.value);\n"
+        "applyResponse({state:{class_rows:[{label:'旧'}]}, lists:{class_rows:[{label:'新'}]}});\n"
+        "console.log(JSON.stringify({first, second: lists.value.class_rows}));\n")
+    p = subprocess.run([node, "-e", harness], capture_output=True, text=True, timeout=30)
+    import json as _json
+    try:
+        got = _json.loads(p.stdout.strip().splitlines()[-1])
+    except Exception:
+        got = {"错误": (p.stdout + p.stderr)[-300:]}
+    check("state 里的数组（含空数组）同步，标量和嵌套里的不同步",
+          got.get("first"), '{"class_rows":[{"label":"小明"}],"empty":[]}')
+    check("响应同时带 lists 时 lists 覆盖 state 同名键", got.get("second"), [{"label": "新"}])
+
+
 # ----------------------------------------------------------------------
 
 
@@ -497,6 +540,7 @@ def main() -> int:
         test_dynamic_select,
         test_side_poll_row_remote,
         test_audience,
+        test_state_lists_sync,
     ]:
         try:
             fn()
