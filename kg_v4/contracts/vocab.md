@@ -1,5 +1,5 @@
 模块 vocab
-依赖 kg
+依赖 kg subject
 
 ## 表
 表 vocab_word
@@ -10,88 +10,142 @@
   subject_id 整数 所属科目，默认 1（1 是日语语法）
 
 ## 函数
-公开 函数 列单词 keyword? point_code?
+公开 函数 列单词 keyword? point_code? learner? current_role? auth_mode? subject?
   返回 {total, words}，words 是 [{id, kanji, kana, meaning, point_code}]，按 id 升序
-  伪代码 查 vocab_word 全部行
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
+  伪代码 查 vocab_word 中 subject_id 相等的行
   伪代码 keyword 不为空时，只留下 kanji、kana、meaning 任一字段包含 keyword 的行
   伪代码 point_code 不为空时，只留下 point_code 等于该值的行
   伪代码 按 id 升序，返回 {"total": 行数, "words": 列表}
 
-公开 函数 取单词 word_id? kanji? kana?
+公开 函数 取单词 word_id? kanji? kana? learner? current_role? auth_mode? subject?
   返回 {id, kanji, kana, meaning, point_code}；查不到返回空
   报错 400 word_id 和 kana 至少要给一个
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 word_id 为空且 kana 为空，报错 400 word_id 和 kana 至少要给一个
-  伪代码 word_id 不为空：按 id 查 vocab_word 一行
-  伪代码 word_id 为空：按 kanji + kana 同时相等查一行（kanji 为空串时匹配汉字为空的词）
+  伪代码 word_id 不为空：按 id 和 subject_id 查 vocab_word 一行（属于别的科目的词当不存在）
+  伪代码 word_id 为空：在本科目内按 kanji + kana 同时相等查一行（kanji 为空串时匹配汉字为空的词）
   伪代码 查不到则返回空
   伪代码 返回该行 {"id": id, "kanji": kanji, "kana": kana, "meaning": meaning, "point_code": point_code}
 
-公开 函数 按知识点列单词 point_code
+公开 函数 按知识点列单词 point_code learner? current_role? auth_mode? subject?
   返回 {point_code, total, words}，words 同「列单词」
   报错 404 没有这个知识点
-  伪代码 调用 kg.取知识点 code=point_code，取不到报错 404 没有这个知识点
-  伪代码 查 vocab_word 中 point_code 相等的行，按 id 升序
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
+  伪代码 调用 kg.取知识点 code=point_code subject=subject_id，取不到（包括属于别的科目）报错 404 没有这个知识点
+  伪代码 查 vocab_word 中 subject_id 相等且 point_code 相等的行，按 id 升序
   伪代码 返回 {"point_code": point_code, "total": 行数, "words": 列表}
 
-公开 函数 列孤儿词
+公开 函数 列孤儿词 learner? current_role? auth_mode? subject?
   返回 {total, words}，words 同「列单词」；孤儿词指没有挂知识点（point_code 为空）的词
-  伪代码 查 vocab_word 中 point_code 为空的行，按 id 升序
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
+  伪代码 查 vocab_word 中 subject_id 相等且 point_code 为空的行，按 id 升序
   伪代码 返回 {"total": 行数, "words": 列表}
 
-公开 函数 挑默写词 direction level? point_code? only_ids? skip_ids? seed
+公开 函数 挑默写词 direction level? point_code? only_ids? skip_ids? seed learner? current_role? auth_mode? subject?
   返回 {total, word}：total 是满足下面全部条件的词数；word 是其中按排序的第 (seed 对 total 取余) 个（从 0 数）单词对象；排序：only_ids 为空按 id 升序；only_ids 不为空时按单词编号在 only_ids 里出现的先后（错词复习要保持错词本的顺序） {id, kanji, kana, meaning, point_code}，total 为 0 时 word 为空
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 这是给默写选词用的：筛选、数数、挑第几个都在一条 SQL 里做，不把整张表取回来再逐词循环（8105 个词时要在 1 秒内）。direction 为 zh2jp 或 kanji2kana，其他值当 zh2jp
-  伪代码 条件（对 vocab_word 每行，全部满足才算）：①direction 为 zh2jp 要求 meaning 不为空；direction 为 kanji2kana 要求 kanji 不为空且不等于 kana；②level 不为空时要求 meaning 以「[level]」开头；③point_code 不为空时要求行的 point_code 等于它；④only_ids 不为空（逗号隔开的单词编号）时要求 id 在其中；⑤skip_ids 不为空（逗号隔开）时要求 id 不在其中
+  伪代码 条件（对 vocab_word 每行，全部满足才算）：⓪subject_id 等于本科目；①direction 为 zh2jp 要求 meaning 不为空；direction 为 kanji2kana 要求 kanji 不为空且不等于 kana；②level 不为空时要求 meaning 以「[level]」开头；③point_code 不为空时要求行的 point_code 等于它；④only_ids 不为空（逗号隔开的单词编号）时要求 id 在其中；⑤skip_ids 不为空（逗号隔开）时要求 id 不在其中
   伪代码 再排除不是词义的词条（和默写原来的口径一字不差）：point_code 是 hiragana katakana youon dakuon potential volitional imperative causative causative-passive counters-sound 之一的不要；把 meaning 开头的「[N1]」到「[N5]」去掉再去首尾空白得 bare：bare 为空的不要；bare 里有「一个非空格字符 + 一个半角空格 + 的」的不要（SQL 里 ' ' || bare GLOB '*[^ ] 的*'）；bare 以「的礼貌形」结尾的不要
   伪代码 查两条 SQL：先数满足条件的行数 total（total 为 0 直接返回 {"total": 0, "word": 空}）；再按 id 升序取第 (seed 对 total 取余) 行（LIMIT 1 OFFSET）。逗号隔开的编号在 SQL 里用 json_each('[' || :ids || ']') 展开成集合比较（IN / NOT IN），不要用 instr 在长字符串里找
   伪代码 返回 {"total": total, "word": 该行 {"id": id, "kanji": kanji, "kana": kana, "meaning": meaning, "point_code": point_code}}
 
-公开 函数 列默写词 direction level? only_ids skip_ids?
+公开 函数 列默写词 direction level? only_ids skip_ids? learner? current_role? auth_mode? subject?
   返回 {total, words}，words 是只在 only_ids 里、满足「挑默写词」同一套条件的单词对象 [{id, kanji, kana, meaning, point_code}]，按单词编号在 only_ids 里出现的先后排序（SQL 里 ORDER BY instr(',' || only_ids || ',', ',' || id || ',')）；only_ids 为空时返回 {total: 0, words: []}（不允许列全表）
-  伪代码 给错词复习用（错词本很小）：条件与 挑默写词 的①②④⑤和「排除不是词义的词条」完全相同，没有 point_code 条件；与 挑默写词 共用同一套 WHERE 写法，不另写一套口径
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
+  伪代码 给错词复习用（错词本很小）：条件与 挑默写词 的⓪①②④⑤（⓪ 是 subject_id 等于本科目）和「排除不是词义的词条」完全相同，没有 point_code 条件；与 挑默写词 共用同一套 WHERE 写法，不另写一套口径
   伪代码 一条 SQL 取出全部行，按上面的排序，返回 {"total": 行数, "words": 列表}
 
-公开 函数 新建单词 kanji? kana meaning? point_code?
+公开 函数 新建单词 kanji? kana meaning? point_code? learner? current_role? auth_mode? subject?
   返回 {ok, id}
   报错 400 假名不能为空
   报错 404 没有这个知识点
   报错 400 单词已存在
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 kana 为空，报错 400 假名不能为空
-  伪代码 point_code 不为空时，调用 kg.取知识点 code=point_code，取不到报错 404 没有这个知识点
-  伪代码 按 kanji + kana 查 vocab_word，已有则报错 400 单词已存在
-  伪代码 往 vocab_word 插入一行 (kanji, kana, meaning, point_code)
+  伪代码 point_code 不为空时，调用 kg.取知识点 code=point_code subject=subject_id，取不到（包括属于别的科目）报错 404 没有这个知识点
+  伪代码 在本科目内按 kanji + kana 查 vocab_word，已有则报错 400 单词已存在（别的科目有同样的词不算重复）
+  伪代码 往 vocab_word 插入一行 (kanji, kana, meaning, point_code, subject_id)
   伪代码 返回 {"ok": 1, "id": 新行 id}
 
-公开 函数 修改单词 word_id kanji kana meaning point_code
+公开 函数 修改单词 word_id kanji kana meaning point_code learner? current_role? auth_mode? subject?
   返回 {ok, id}；四个字段整体覆盖，传空串就是置空（kana 不许空）
   报错 404 没有这个单词
   报错 400 假名不能为空
   报错 404 没有这个知识点
   报错 400 单词已存在
-  伪代码 按 id=word_id 查 vocab_word，查不到报错 404 没有这个单词
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
+  伪代码 按 id=word_id 和 subject_id 查 vocab_word，查不到（包括属于别的科目）报错 404 没有这个单词
   伪代码 kana 为空，报错 400 假名不能为空
-  伪代码 按 kanji + kana 查 vocab_word，若存在且 id 不等于 word_id，报错 400 单词已存在
-  伪代码 point_code 不为空时，调用 kg.取知识点 code=point_code，取不到报错 404 没有这个知识点
+  伪代码 在本科目内按 kanji + kana 查 vocab_word，若存在且 id 不等于 word_id，报错 400 单词已存在
+  伪代码 point_code 不为空时，调用 kg.取知识点 code=point_code subject=subject_id，取不到（包括属于别的科目）报错 404 没有这个知识点
   伪代码 更新该行的 kanji、kana、meaning、point_code
   伪代码 返回 {"ok": 1, "id": word_id}
 
-公开 函数 删除单词 word_id
+公开 函数 删除单词 word_id learner? current_role? auth_mode? subject?
   返回 {ok}
   报错 404 没有这个单词
-  伪代码 按 id=word_id 查 vocab_word，查不到报错 404 没有这个单词
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
+  伪代码 按 id=word_id 和 subject_id 查 vocab_word，查不到（包括属于别的科目）报错 404 没有这个单词
   伪代码 删除该行
   伪代码 返回 {"ok": 1}
 
-公开 函数 导入单词 file_path
+公开 函数 导入单词 file_path learner? current_role? auth_mode? subject?
   返回 {ok, total, created, updated}
   报错 400 导入文件有错
   报错 400 知识点对不上
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 用 doc 包「读文档」读 file_path 取文本，按行拆开；空行和以 # 开头的行忽略
   伪代码 每行格式「汉字|假名|中文意思|知识点编号」，用 | 分隔；后两项可以省略或为空（缺的尾部字段当空），汉字可以为空；少于 2 项或假名为空，报错 400 导入文件有错（整批不写）
-  伪代码 对每个非空的知识点编号，调用 kg.取知识点 code=编号，取不到报错 400 知识点对不上（整批不写）
-  伪代码 在一个事务里：逐行按 汉字+假名 查 vocab_word，没有则插入 (kanji, kana, meaning, point_code) 并 created+1，有则更新 meaning、point_code 并 updated+1
+  伪代码 对每个非空的知识点编号，调用 kg.取知识点 code=编号 subject=subject_id，取不到（包括属于别的科目）报错 400 知识点对不上（整批不写）
+  伪代码 在一个事务里：逐行在本科目内按 汉字+假名 查 vocab_word，没有则插入 (kanji, kana, meaning, point_code, subject_id) 并 created+1，有则更新 meaning、point_code 并 updated+1
   伪代码 同一文件里重复的 汉字+假名，后一行覆盖前一行（按已存在算更新）
   伪代码 返回 {"ok": 1, "total": 有效行数, "created": created, "updated": updated}
+
+函数 本科目 learner current_role auth_mode subject
+  返回 {subject_id}；本次请求用哪个科目
+  伪代码 调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject，原样返回它的 subject_id（四个入参都是空串时得 1；显式 subject 无权时 解析科目 报 403/404、不是数字报 400，原样抛出）
 
 ## 接口
 GET /vocab/words -> 列单词
@@ -317,4 +371,101 @@ POST /vocab/import -> 导入单词 上传 file 类型 md,txt 上限 20MB 角色 
   先 数据 vocab_word kanji=学校 kana=がっこう meaning=学校 point_code=P1
   先 数据 vocab_word kanji=先生 kana=せんせい meaning=老师 point_code=P1
   调用 列默写词 direction=zh2jp only_ids=1,2 skip_ids=1
+  得 total=1
+
+用例 跨科目_列单词只看本科目
+  先 数据 vocab_word kanji=食べる kana=たべる meaning=吃 point_code=P1
+  先 数据 vocab_word kana=ゼロ meaning=零 subject_id=2
+  调用 列单词 subject=2
+  得 total=1
+
+用例 跨科目_不传科目是日语
+  先 数据 vocab_word kanji=食べる kana=たべる meaning=吃 point_code=P1
+  先 数据 vocab_word kana=ゼロ meaning=零 subject_id=2
+  调用 列单词
+  得 total=1
+
+用例 跨科目_取单词别的科目当不存在
+  先 数据 vocab_word kana=ゼロ meaning=零 subject_id=2
+  调用 取单词 word_id=1
+  得 为空
+
+用例 跨科目_取单词按汉字假名只看本科目
+  先 数据 vocab_word kanji=食べる kana=たべる meaning=吃 point_code=P1
+  先 数据 vocab_word kanji=食べる kana=たべる meaning=进食 subject_id=2
+  调用 取单词 kanji=食べる kana=たべる subject=2
+  得 meaning=进食
+
+用例 跨科目_按知识点列单词别的科目的点404
+  先 数据 kg_point code=P1 title=甲
+  调用 按知识点列单词 point_code=P1 subject=2
+  报错 404
+
+用例 跨科目_列孤儿词只看本科目
+  先 数据 vocab_word kana=あ
+  先 数据 vocab_word kana=ゼロ subject_id=2
+  调用 列孤儿词 subject=2
+  得 total=1
+
+用例 跨科目_新建单词落当前科目
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  调用 新建单词 kana=ゼロ meaning=零 point_code=math.a subject=2
+  得 ok=1
+  库 vocab_word 含 kana=ゼロ meaning=零 point_code=math.a subject_id=2
+
+用例 跨科目_新建单词挂别的科目的点被拒
+  先 数据 kg_point code=P1 title=甲
+  调用 新建单词 kana=ゼロ point_code=P1 subject=2
+  报错 404
+  库 vocab_word 共 0 行
+
+用例 跨科目_新建单词别的科目有同样的词不算重复
+  先 数据 vocab_word kanji=食べる kana=たべる meaning=吃
+  调用 新建单词 kanji=食べる kana=たべる meaning=进食 subject=2
+  得 ok=1
+  库 vocab_word 共 2 行
+
+用例 跨科目_修改单词别的科目404
+  先 数据 vocab_word kana=ゼロ meaning=零 subject_id=2
+  调用 修改单词 word_id=1 kanji=空 kana=ゼロ meaning=空 point_code=空
+  报错 404
+
+用例 跨科目_删除单词别的科目404
+  先 数据 vocab_word kana=ゼロ meaning=零 subject_id=2
+  调用 删除单词 word_id=1
+  报错 404
+  库 vocab_word 共 1 行
+
+用例 跨科目_导入单词落当前科目
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 文件 words.md 内容=空|ゼロ|零|math.a
+  调用 导入单词 file_path=words.md subject=2
+  得 ok=1 total=1 created=1 updated=0
+  库 vocab_word 含 kana=ゼロ meaning=零 point_code=math.a subject_id=2
+
+用例 跨科目_导入单词知识点在别的科目对不上
+  先 数据 kg_point code=P1 title=甲
+  先 文件 words.md 内容=食べる|たべる|吃|P1
+  调用 导入单词 file_path=words.md subject=2
+  报错 400
+  库 vocab_word 共 0 行
+
+用例 跨科目_导入单词只更新本科目的同词
+  先 数据 vocab_word kanji=食べる kana=たべる meaning=吃
+  先 文件 words.md 内容=食べる|たべる|进食
+  调用 导入单词 file_path=words.md subject=2
+  得 ok=1 total=1 created=1 updated=0
+  库 vocab_word 共 2 行
+
+用例 跨科目_挑默写词只数本科目
+  先 数据 vocab_word kanji=学校 kana=がっこう meaning=学校
+  先 数据 vocab_word kanji=先生 kana=せんせい meaning=老师 subject_id=2
+  先 数据 vocab_word kanji=医者 kana=いしゃ meaning=医生 subject_id=2
+  调用 挑默写词 direction=zh2jp seed=0 subject=2
+  得 total=2
+
+用例 跨科目_列默写词只在本科目里
+  先 数据 vocab_word kanji=学校 kana=がっこう meaning=学校
+  先 数据 vocab_word kanji=先生 kana=せんせい meaning=老师 subject_id=2
+  调用 列默写词 direction=zh2jp only_ids=1,2 subject=2
   得 total=1

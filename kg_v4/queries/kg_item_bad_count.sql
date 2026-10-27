@@ -1,1 +1,1 @@
-SELECT COUNT(*) FROM kg_item i WHERE i.point_code NOT IN (SELECT code FROM kg_point) OR (COALESCE(i.prev_code, '') <> '' AND i.prev_code NOT IN (SELECT code FROM kg_item))
+SELECT COUNT(*) FROM kg_item i WHERE i.subject_id = CAST(:subject_id AS INTEGER) AND (i.point_code NOT IN (SELECT code FROM kg_point WHERE subject_id = CAST(:subject_id AS INTEGER)) OR (COALESCE(i.prev_code, '') <> '' AND i.prev_code NOT IN (SELECT code FROM kg_item WHERE subject_id = CAST(:subject_id AS INTEGER))))

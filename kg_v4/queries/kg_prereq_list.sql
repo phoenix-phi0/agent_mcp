@@ -1,1 +1,1 @@
-SELECT p.code AS code, p.title AS title FROM kg_edge e JOIN kg_point p ON p.code = e.pre_code WHERE e.point_code = :code ORDER BY p.id
+SELECT p.code AS code, p.title AS title FROM kg_edge e JOIN kg_point p ON p.code = e.pre_code WHERE e.point_code = :code AND e.subject_id = CAST(:subject_id AS INTEGER) AND p.subject_id = CAST(:subject_id AS INTEGER) ORDER BY p.id
