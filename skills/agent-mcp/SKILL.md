@@ -364,6 +364,21 @@ py -m gen run 项目/           建库 + 编译 + 起服务
 `migrate_additive`），不 DROP、不改已有列，对不上的只告警。没写这行的项目，
 实体加字段要手写 `ALTER TABLE`。多列唯一写在实体里：`唯一 learner point`。
 
+**换唯一键要显式重建：** `迁移 只加` 删不掉库里旧的唯一约束（比如行内 `UNIQUE(learner)`），
+它现在会给 warning「库里有实体没有的唯一约束，用 迁移 重建 <表> 处理」。路由顶层再写
+一行 `迁移 重建 表1 表2 …`（可多行），`gen run` / `ensure_db` / dsl_http 启动时
+（`migrate_additive` 之后）对点名的表：仅当库里的唯一索引/约束集合 ≠ 实体渲染出的才
+重建——先备份成 `app.db.bak-<时间戳>`，一个事务里建 `<表>__new`、按公共列拷数据、核对行数、
+DROP 旧表、RENAME、重建该表全部索引，`foreign_key_check` 无新增违规才 COMMIT，任何异常
+（如旧数据违反新唯一）整体 ROLLBACK、原表原样并报错。没点名的表绝不动，重复执行第二次不动。
+典型用法：实体里把 `learner 唯一` 改成 `唯一 learner subject_id` + `字段 subject_id 整数 必填 默认 1`，
+`迁移 只加` 补列，`迁移 重建` 换约束。输出里有「[迁移 重建] 重建了表：…（N 行）；备份 …」。
+
+**nav 科目切换器：** 项目声明了远程动作 `subject_switch` 且开着 `auth_me`，`auth_me` 响应里
+带 `subjects`（`[{id,name}…]`，多于 1 个）和 `subject`（当前 id）时，顶栏出一个科目下拉；
+选了就调 `subject_switch`（参数 `subject=<id>`），成功后整页 reload 重新进入当前界面。
+没声明动作的项目产物里一行都没有。
+
 **`private` 模板**要求实体有 `owner` 列，服务器填，前端伪造无效。
 
 **登录可开关**：路由顶层写 `认证 可选`，平时跟没写一样；启动加 `--登录`

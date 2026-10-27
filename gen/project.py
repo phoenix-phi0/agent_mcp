@@ -401,13 +401,20 @@ def ensure_db(root: Path) -> str:
     别的不碰（tools/migrate.py）。没写的项目照旧：要按新定义重建就手动删 app.db。
     """
     from tools.entity import render_sql
-    from tools.migrate import migrate_additive, report, switch_on
+    from tools.migrate import (migrate_additive, rebuild_names, rebuild_tables, report,
+                               report_rebuild, switch_on)
 
     db = root / DEFAULT_DB
     if db.is_file():
+        names = rebuild_names(root / "routes")      # 「迁移 重建 表…」点名的表
         if switch_on(root / "routes"):
-            lines = report(migrate_additive(db, root / "entities"))
+            lines = report(migrate_additive(db, root / "entities"), names)
+            if names:
+                lines += report_rebuild(rebuild_tables(db, root / "entities", names))
             return "\n".join([f"  {DEFAULT_DB} 已存在，按实体只加不改（迁移 只加）"] + lines)
+        if names:
+            lines = report_rebuild(rebuild_tables(db, root / "entities", names))
+            return "\n".join([f"  {DEFAULT_DB} 已存在，只重建点名的表（迁移 重建）"] + lines)
         return f"  {DEFAULT_DB} 已存在，没动（实体改了字段的话要手动删掉重建）"
     sql = render_sql(entities_text(root))
     con = sqlite3.connect(db)

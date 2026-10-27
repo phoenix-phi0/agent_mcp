@@ -31,14 +31,30 @@ warning 交给人看，表原样不动——那些得人决定怎么迁，自动
 
 对比列定义不解析 SQL 文本：把渲染出来的整份建表语句在内存库里跑一遍，两边
 都用 PRAGMA table_info / index_list 读，比的是 SQLite 自己认的结果。
+
+唯一一个会重建表的入口是显式点名的第二个开关（路由顶层，可写多行）：
+
+    迁移 重建 quiz_progress dictation_progress
+
+只动点名的表，且只在「库里的唯一索引/约束集合 ≠ 实体渲染出的」时才动（换唯一键、
+去掉行内 UNIQUE 这类 ADD COLUMN 做不到的事）。流程见 rebuild_tables：先备份
+成 app.db.bak-<时间戳>，一个事务里建新表、拷数据、核对行数、换表、重建索引，
+外键检查不过或任何异常都整体回滚、原表原样。重复执行第二次不动。
 """
 
 import re
 import sqlite3
+import time
 from pathlib import Path
 
 # 路由目录里打开这个开关的那一行（顶层，接口块外面）
 SWITCH_RE = re.compile(r"^迁移\s+只加\s*$")
+# 显式重建：「迁移 重建 表1 表2 …」，顶层，可以写多行（表名合并）
+REBUILD_RE = re.compile(r"^迁移\s+重建\s+(\S.*?)\s*$")
+
+
+class RebuildError(RuntimeError):
+    """重建失败。事务已回滚，原表和数据完好；备份文件（有的话）留着。"""
 
 # 列定义行开头是这些词的是表级约束，不是列
 _TABLE_CONSTRAINTS = {"FOREIGN", "UNIQUE", "CHECK", "PRIMARY", "CONSTRAINT"}
@@ -113,6 +129,16 @@ def _cannot_add(definition: str) -> str:
     return ""
 
 
+def _unique_sets(con, table: str) -> dict:
+    """{列元组: 索引名}：这张表上的唯一索引/UNIQUE 约束（不含主键自带的那个）。"""
+    out = {}
+    for r in con.execute(f'PRAGMA index_list("{table}")'):
+        if r[2] and r[3] != "pk":
+            cols = tuple(c[2] for c in con.execute(f'PRAGMA index_info("{r[1]}")'))
+            out[cols] = r[1]
+    return out
+
+
 def _describe(shape) -> str:
     kind, notnull, default, pk = shape
     bits = [kind or "无类型"]
@@ -174,6 +200,14 @@ def migrate_additive(db, entities) -> dict:
                 result["columns"].append(f"{table}.{name}")
             for name in got.keys() - need.keys():
                 warn(f"{table}.{name}：实体里没有这一列，库里留着没删")
+            # 库里多出实体没有的唯一索引/约束（含行内 UNIQUE 的 sqlite_autoindex）：
+            # 它会继续拦着写入（比如换了唯一键，旧的单列唯一还在），不报就是静默
+            want_u = _unique_sets(want, table)
+            for cols, idx in _unique_sets(con, table).items():
+                if cols not in want_u:
+                    kind = "约束（行内 UNIQUE）" if idx.startswith("sqlite_autoindex") else "索引"
+                    warn(f"{table}：库里有实体没有的唯一{kind} {idx}（{', '.join(cols)}），没动；"
+                         f"用 迁移 重建 {table} 处理")
 
         for stmt in indexes:
             m = re.match(r"CREATE (UNIQUE )?INDEX (?:IF NOT EXISTS )?(\w+)\s+ON (\w+)\(", stmt)
@@ -204,8 +238,132 @@ def migrate_additive(db, entities) -> dict:
         want.close()
 
 
-def report(result: dict) -> list:
-    """migrate_additive 的结果写成给人看的几行。什么都没补、也没有警告时是空列表。"""
+def _backup(db: Path, con) -> str:
+    """把库备份成同目录的 <库名>.bak-<时间戳>，返回文件名。"""
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    dst = db.with_name(f"{db.name}.bak-{stamp}")
+    n = 1
+    while dst.exists():
+        n += 1
+        dst = db.with_name(f"{db.name}.bak-{stamp}-{n}")
+    out = sqlite3.connect(dst)
+    try:
+        con.backup(out)
+    finally:
+        out.close()
+    return dst.name
+
+
+def rebuild_tables(db, entities, tables) -> dict:
+    """按实体重建点名的表，保留数据。见模块说明。
+
+    只有「库里的唯一索引/约束集合 ≠ 实体的」的表才动，其余原样（幂等）。
+    返回 {"rebuilt": [(表, 行数)], "unchanged": [表], "backup": 文件名或 None,
+    "warnings": []}。失败抛 RebuildError，事务已回滚。
+
+    外键检查只看「这次重建新带来的」违规：重建前库里就有的悬空引用不挡路
+    （否则一条历史脏数据就让整个迁移永远做不了），新增的才回滚。
+    """
+    from .entity import render_sql
+
+    result = {"rebuilt": [], "unchanged": [], "backup": None, "warnings": []}
+    db = Path(db)
+    if not db.is_file():
+        return result
+    sql = render_sql(entities_text(entities), strict=True)
+    creates, idxs = _statements(sql)
+    for t in tables:
+        if t not in creates:
+            raise RebuildError(f"迁移 重建 {t}：实体里没有这张表（页面实体不建表）")
+
+    want = sqlite3.connect(":memory:")
+    want.executescript(sql)
+    con = sqlite3.connect(db, isolation_level=None)
+    try:
+        have = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        todo = []
+        for t in dict.fromkeys(tables):
+            if t not in have:
+                result["warnings"].append(f"迁移 重建 {t}：库里没有这张表，没动")
+            elif set(_unique_sets(con, t)) != set(_unique_sets(want, t)):
+                todo.append(t)
+            else:
+                result["unchanged"].append(t)
+        if not todo:
+            return result
+
+        result["backup"] = _backup(db, con)
+        con.execute("PRAGMA foreign_keys=OFF")      # 事务外才有效
+        before_fk = set(con.execute("PRAGMA foreign_key_check").fetchall())
+        started = False
+        t = None
+        try:
+            con.execute("BEGIN IMMEDIATE")
+            started = True
+            for t in todo:
+                old_cols = [r[1] for r in con.execute(f'PRAGMA table_info("{t}")')]
+                con.execute(creates[t].replace(f"CREATE TABLE {t}", f"CREATE TABLE {t}__new", 1))
+                new_cols = [r[1] for r in con.execute(f'PRAGMA table_info("{t}__new")')]
+                cl = ",".join(f'"{c}"' for c in new_cols if c in old_cols)
+                con.execute(f'INSERT INTO "{t}__new"({cl}) SELECT {cl} FROM "{t}"')
+                n_old = con.execute(f'SELECT count(*) FROM "{t}"').fetchone()[0]
+                n_new = con.execute(f'SELECT count(*) FROM "{t}__new"').fetchone()[0]
+                if n_old != n_new:
+                    raise RebuildError(f"{t}：拷贝后行数对不上（原 {n_old}，新 {n_new}）")
+                con.execute(f'DROP TABLE "{t}"')
+                con.execute(f'ALTER TABLE "{t}__new" RENAME TO "{t}"')
+                for s in idxs:
+                    if re.search(rf"\bON {t}\(", s):
+                        con.execute(s if "IF NOT EXISTS" in s else
+                                    s.replace("INDEX ", "INDEX IF NOT EXISTS ", 1))
+                result["rebuilt"].append((t, n_old))
+            bad = [r for r in con.execute("PRAGMA foreign_key_check").fetchall()
+                   if r not in before_fk]
+            if bad:
+                raise RebuildError(f"外键检查不通过（{bad[:3]}）")
+            con.execute("COMMIT")
+        except Exception as e:
+            if started:
+                con.execute("ROLLBACK")
+            result["rebuilt"] = []
+            if isinstance(e, RebuildError):
+                raise RebuildError(f"迁移 重建 失败，已回滚，原表和数据没动（备份 "
+                                   f"{result['backup']}）：{e}") from e
+            which = f"（{t}）" if t else ""
+            raise RebuildError(f"迁移 重建{which} 失败，已回滚，原表和数据没动（备份 "
+                               f"{result['backup']}）：{type(e).__name__}: {e}") from e
+        finally:
+            con.execute("PRAGMA foreign_keys=ON")
+        return result
+    finally:
+        con.close()
+        want.close()
+
+
+def report_rebuild(result: dict) -> list:
+    """rebuild_tables 的结果写成给人看的几行。什么都没动也没有警告时是空列表。"""
+    lines = []
+    if result.get("rebuilt"):
+        lines.append("  [迁移 重建] 重建了表：" + "、".join(
+            f"{t}（{n} 行）" for t, n in result["rebuilt"]) + f"；备份 {result['backup']}")
+    lines.extend(f"  [迁移警告] {w}" for w in result.get("warnings") or [])
+    return lines
+
+
+def rebuild_names(routes_dir) -> list:
+    """路由目录里顶层「迁移 重建 表…」点名的表（多行合并、去重、保持顺序）。"""
+    from .dsl_http import top_level_matches
+    names = []
+    for m in top_level_matches(Path(routes_dir), REBUILD_RE):
+        names.extend(m.group(1).split())
+    return list(dict.fromkeys(names))
+
+
+def report(result: dict, rebuilding=()) -> list:
+    """migrate_additive 的结果写成给人看的几行。什么都没补、也没有警告时是空列表。
+
+    rebuilding：这次马上要重建的表。「用 迁移 重建 X 处理」的警告对它们是废话，不出。
+    """
     lines = []
     if result.get("tables"):
         lines.append(f"  已有的库里补建了表：{'、'.join(result['tables'])}")
@@ -213,7 +371,8 @@ def report(result: dict) -> list:
         lines.append(f"  已有的表里补了列：{'、'.join(result['columns'])}")
     if result.get("indexes"):
         lines.append(f"  补了索引：{'、'.join(result['indexes'])}")
-    lines.extend(f"  [迁移警告] {w}" for w in result.get("warnings") or [])
+    lines.extend(f"  [迁移警告] {w}" for w in result.get("warnings") or []
+                 if not any(w.endswith(f"用 迁移 重建 {t} 处理") for t in rebuilding))
     return lines
 
 
@@ -230,6 +389,12 @@ def migrate_project(root, routes_dir=None, db_name: str = "app.db") -> list:
     可以另给。
     """
     root = Path(root)
-    if not switch_on(Path(routes_dir) if routes_dir else root / "routes"):
-        return []
-    return report(migrate_additive(root / db_name, root / "entities"))
+    routes = Path(routes_dir) if routes_dir else root / "routes"
+    lines = []
+    if switch_on(routes):
+        lines += report(migrate_additive(root / db_name, root / "entities"),
+                        rebuild_names(routes))
+    names = rebuild_names(routes)
+    if names:
+        lines += report_rebuild(rebuild_tables(root / db_name, root / "entities", names))
+    return lines

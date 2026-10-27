@@ -76,6 +76,15 @@ nav.nav-role-teacher a.active { background:#b4690e; border-color:#b4690e; }
   font:inherit; font-size:13px; padding:4px 10px; border-radius:4px;
 }
 .nav-user .nav-logout:hover { background:var(--tool); color:var(--ink); }
+<% if has_me is defined and has_me and '"subject_switch"' in endpoints_json %>
+/* 顶栏科目切换器（项目声明了 subject_switch 动作、auth_me 返回多个 subjects 时才出现） */
+.nav-subject {
+  font:inherit; font-size:13px; padding:3px 6px; border:1px solid var(--line);
+  border-radius:4px; background:#fff; color:var(--ink); margin-left:auto;
+}
+.nav-user .nav-subject { margin-left:0; }
+.app-nav .nav-subject + .nav-user-name, .app-nav .nav-subject + .nav-logout { margin-left:0; }
+<% endif %>
 
 /* 提示条：固定在底部中间，几秒后自己消失，点一下也能关。给没有消息流的
    界面用——保存成功、后端报错，总得有个地方说一声。早先这类界面的消息

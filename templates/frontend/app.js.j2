@@ -10,6 +10,9 @@
 <% if shared_json is not defined %><% set shared_json = "{}" %><% endif %>
 <% if endpoints_json is not defined %><% set endpoints_json = "{}" %><% endif %>
 <% if clears_json is not defined %><% set clears_json = "{}" %><% endif %>
+{#- 科目切换器（顶栏下拉）：项目声明了动作 subject_switch（远程端点里有它）且开着 auth_me
+    才生成。没声明的项目（现有的 kg、kg_v4）一行相关代码都不生成。 -#}
+<% set has_subject_switch = (has_me is defined and has_me and '"subject_switch"' in endpoints_json) %>
 <% if echoes_json is not defined %><% set echoes_json = "{}" %><% endif %>
 <% if screen_streams_json is not defined %><% set screen_streams_json = "{}" %><% endif %>
 <% if file_fields_json is not defined %><% set file_fields_json = "{}" %><% endif %>
@@ -479,7 +482,7 @@ const _app = createApp({
     //   badge  顶栏最前面的标识（「教师端」），nav 加 class nav-role-<role>
     // 这只是界面上藏起来——真正把关的是后端接口的「角色」「只许」（403）。
     // 没开登录时 user 是空串：什么都不藏、不分端，顶栏什么都不多。
-    const NOBODY = { user: "", label: "", hide: [], role: "", roleLabel: "", badge: "" };
+    const NOBODY = { user: "", label: "", hide: [], role: "", roleLabel: "", badge: ""<% if has_subject_switch %>, subjects: [], subject: null<% endif %> };
     const me = ref({ ...NOBODY });
     // fresh：刚在这一页登录（登录接口回来的 @来处）。返回 true 表示这个人不是
     // 这一页的端，已经送走或拒了（见 checkEnd）
@@ -491,7 +494,10 @@ const _app = createApp({
         const d = await r.json();
         me.value = { user: d.user || "", label: d.label || d.user || "",
                      hide: Array.isArray(d.hide) ? d.hide : [],
-                     role: d.role || "", roleLabel: d.role_label || "", badge: d.badge || "" };
+                     role: d.role || "", roleLabel: d.role_label || "", badge: d.badge || ""<% if has_subject_switch %>,
+                     // auth_me 多返回 subjects [{id,name}…] 和 subject（当前 id）时才有切换器
+                     subjects: Array.isArray(d.subjects) ? d.subjects : [],
+                     subject: d.subject === undefined ? null : d.subject<% endif %> };
       } catch (e) {
         me.value = { ...NOBODY };
       }
@@ -499,6 +505,31 @@ const _app = createApp({
       guardSide();
       return false;
     }
+<% if has_subject_switch %>
+    // 顶栏下拉选了另一个科目：调项目声明的动作 subject_switch（参数 subject=<id>），成功后
+    // 整页 reload——地址 hash 还在，还是同一个界面，「进入时」动作、auth_me、列表都按新科目
+    // 重拉，不用逐项清状态（代价：当前界面没交的输入会丢）。失败则弹提示、下拉退回原值。
+    async function switchSubject(ev) {
+      const sel = ev.target;
+      const s = me.value.subjects.find(x => String(x.id) === sel.value);
+      const back = () => { sel.value = me.value.subject == null ? "" : String(me.value.subject); };
+      if (!s) { back(); return; }
+      let resp;
+      try {
+        resp = await postTo(endpoints.subject_switch, { action: "subject_switch", form: { subject: s.id } });
+      } catch (e) {
+        showNotice("切换科目失败，请稍后再试", "no");
+        back();
+        return;
+      }
+      if (!resp || resp.error) {
+        showNotice((resp && resp.error) || "切换科目失败", "no");
+        back();
+        return;
+      }
+      location.reload();
+    }
+<% endif %>
     // 登录的人是别的端的（拆成几个页面时，见 PAGE）：
     //   他那一端不是主页面（教师在 / 上）  送到他那一端（/teacher），先提示一句
     //   他那一端是主页面（学生在 /teacher 上）  这一页不收：刚在这儿登录的退出、
@@ -1241,7 +1272,7 @@ const _app = createApp({
 <% endif %>
     }
 <% endif %>
-    return { route, params, forms, form, rowsOf, lists, notice, nav, PAGE, AUTH_SCREENS, current<% if has_me %>, me<% endif %>, visible, busy, pending, go, isHref, hrefOf, targetOf, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_row_remote %>, onRowRemote<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
+    return { route, params, forms, form, rowsOf, lists, notice, nav, PAGE, AUTH_SCREENS, current<% if has_me %>, me<% endif %><% if has_subject_switch %>, switchSubject<% endif %>, visible, busy, pending, go, isHref, hrefOf, targetOf, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_row_remote %>, onRowRemote<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
   },
   template: `
 {#- 顶部导航。两种来路：
@@ -1260,6 +1291,11 @@ const _app = createApp({
       <a v-for="n in nav" :key="n.target"
          :class="{ active: n.group.includes(current.name) }"
          href="#" @click.prevent="go(n.target)">{{ n.label }}</a>
+<% if has_subject_switch %>
+      <select v-if="me.user && me.subjects && me.subjects.length > 1" class="nav-subject" @change="switchSubject">
+        <option v-for="s in me.subjects" :key="s.id" :value="s.id" :selected="s.id === me.subject">{{ s.name }}</option>
+      </select>
+<% endif %>
 <% if nav_logout %>
 {#- 退出登录是个动作，不是跳转，所以用 button 而不是 a：键盘和读屏软件
     认得出区别，测试里按文字找按钮也才找得到。样式上跟导航项一致。 -#}
@@ -1294,6 +1330,11 @@ const _app = createApp({
 <% if has_me %>
 {#- 开着登录时：谁登录着、改密码、退出。没开登录（单人用）user 是空串，不显示 -#}
       <span v-if="me.user" class="nav-user">
+<% if has_subject_switch %>
+        <select v-if="me.subjects && me.subjects.length > 1" class="nav-subject" @change="switchSubject">
+          <option v-for="s in me.subjects" :key="s.id" :value="s.id" :selected="s.id === me.subject">{{ s.name }}</option>
+        </select>
+<% endif %>
         <span class="nav-user-name">{{ me.label }}</span>
         <a v-if="screens.some(s => s.name === '改密码')" href="#" @click.prevent="go('改密码')">改密码</a>
 <% if has_logout %>
