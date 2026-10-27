@@ -1,1 +1,1 @@
-INSERT INTO progress_answer (learner, point_code, question_no, correct, answer, at) VALUES (:learner, :point_code, :question_no, CAST(:correct AS INTEGER), :answer, :at)
+INSERT INTO progress_answer (learner, point_code, question_no, correct, answer, at, subject_id) VALUES (:learner, :point_code, :question_no, CAST(:correct AS INTEGER), :answer, :at, CAST(:subject_id AS INTEGER))
