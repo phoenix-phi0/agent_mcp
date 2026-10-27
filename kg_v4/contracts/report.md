@@ -174,7 +174,7 @@
   伪代码 student_recent：recent 的 answers 每条 {at, point_label: 知识点 title（kg.取知识点 subject=subject_id，取不到用编号）, stem_brief: 取题干 的缩略（40 字），取不到空串, given_text: answer, result: correct 为 1 是「对」否则「错」}，顺序同 recent（新的在前）
   伪代码 student_book：g.wrong_book 每项 {label: kanji 与 kana 不同时「{kanji}【{kana}】{meaning}」，否则「{kana} {meaning}」, direction_label: direction 为 zh2jp 是「看中文写日语」否则「看汉字写读音」, last_wrong: last_at}
   伪代码 student_chat：调用 tutor.列对话 learner=student limit=40 subject=subject_id，messages 每条 {chat_who: role 为 teacher 是「老师」否则「学生」, chat_text: content 的缩略（120 字）, chat_at: at, chat_notes: 老师那条调用 teacher_rules.取回复用到 reply_id=该条 id subject=subject_id 取 text，学生那条空串}，旧的在前（取回复用到 按 reply_id 和本科目关联：对话本来就只列本科目的，回复用到记录也带本科目 subject_id，不传 subject 会落到 1 号科目、非日语科目取不到）
-  伪代码 student_notes=调用 teacher_rules.设定列表 student=student subject=subject_id；student_relays=调用 teacher_rules.传达列表 student=student subject=subject_id
+  伪代码 student_notes=调用 teacher_rules.设定列表 student=student learner=learner current_role=current_role auth_mode=auth_mode subject=subject_id；student_relays=调用 teacher_rules.传达列表 student=student learner=learner current_role=current_role auth_mode=auth_mode subject=subject_id（带上登录信息，行上 note_subject_label/relay_subject_label 与 can_edit 才按当前登录的人算；学生页两张表的行原样透传）
   伪代码 返回上述九个键
 
 公开 函数 写学情总结页面 student current_user current_role? auth_mode? subject?

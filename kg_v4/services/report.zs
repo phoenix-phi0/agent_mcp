@@ -970,8 +970,8 @@
       设 co.chat_notes = {nt}
       设 sch = 列表加项 {sch} {co}
     结束
-    设 snotes = 调用 teacher_rules.设定列表 student={student} subject={subject_id}
-    设 srel = 调用 teacher_rules.传达列表 student={student} subject={subject_id}
+    设 snotes = 调用 teacher_rules.设定列表 student={student} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
+    设 srel = 调用 teacher_rules.传达列表 student={student} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
     设 out.student = {so}
     设 out.student_summary = {ssm}
     设 out.student_points = {spts}

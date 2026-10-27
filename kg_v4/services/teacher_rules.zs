@@ -386,7 +386,19 @@
   公开 函数 设定列表 student? learner? current_role? auth_mode? subject?
     设 sr = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 sid = {sr.subject_id}
-    设 rows = 查询 app.db teacher_rules_note_rows student={student} subj={sid}
+    设 own = 1
+    设 wr = 1
+    如果 {auth_mode} 等于 on
+      设 a1 = 调用 subject.科目访问 learner={learner} current_role={current_role} subject_id={sid} need=settings auth_mode={auth_mode}
+      设 own = {a1.ok}
+      设 a2 = 调用 subject.科目访问 learner={learner} current_role={current_role} subject_id={sid} need=write auth_mode={auth_mode}
+      设 wr = {a2.ok}
+    结束
+    设 sname = 查一值 app.db teacher_rules_subject_name id={sid}
+    如果 {sname 或} 为空
+      设 sname = 科目{sid}
+    结束
+    设 rows = 查询 app.db teacher_rules_note_rows student={student} subj={sid} sname={sname} own={own} wr={wr}
     设 tv = 替换 文本=xtruex 正则=x
     设 fv = 替换 文本=xfalsex 正则=x
     设 items = 解析JSON []
@@ -417,7 +429,19 @@
         设 studs = {studs},{u.username}
       结束
     结束
-    设 rows = 查询 app.db teacher_rules_relay_rows student={student} today={today} studs={studs} total={total} subj={sid}
+    设 own = 1
+    设 wr = 1
+    如果 {auth_mode} 等于 on
+      设 a1 = 调用 subject.科目访问 learner={learner} current_role={current_role} subject_id={sid} need=settings auth_mode={auth_mode}
+      设 own = {a1.ok}
+      设 a2 = 调用 subject.科目访问 learner={learner} current_role={current_role} subject_id={sid} need=write auth_mode={auth_mode}
+      设 wr = {a2.ok}
+    结束
+    设 sname = 查一值 app.db teacher_rules_subject_name id={sid}
+    如果 {sname 或} 为空
+      设 sname = 科目{sid}
+    结束
+    设 rows = 查询 app.db teacher_rules_relay_rows student={student} today={today} studs={studs} total={total} subj={sid} sname={sname} own={own} wr={wr}
     返回 {rows}
   结束
 
@@ -467,9 +491,9 @@
   公开 函数 设定首页页面 learner? current_role? auth_mode? subject?
     设 sr = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 sid = {sr.subject_id}
-    设 notes_r = 调用 设定列表 subject={sid}
+    设 notes_r = 调用 设定列表 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
     设 notes = {notes_r.items}
-    设 relays = 调用 传达列表 subject={sid}
+    设 relays = 调用 传达列表 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
     设 states = 调用 传达状态列表 subject={sid}
     设 st = 调用 account.列学生
     设 studs = ,
@@ -491,6 +515,17 @@
     设 out.note_students = {opts}
     设 out.class_relays = {relays}
     设 out.class_relay_states = {states}
+    设 own = 1
+    如果 {auth_mode} 等于 on
+      设 a1 = 调用 subject.科目访问 learner={learner} current_role={current_role} subject_id={sid} need=settings auth_mode={auth_mode}
+      设 own = {a1.ok}
+    结束
+    设 sname = 查一值 app.db teacher_rules_subject_name id={sid}
+    如果 {sname 或} 为空
+      设 sname = 科目{sid}
+    结束
+    设 out.note_is_owner = {own}
+    设 out.subject_head = {sname}的AI老师设定（含全部科目的）
     返回 {out}
   结束
 
@@ -498,7 +533,7 @@
     设 sr = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 sid = {sr.subject_id}
     如果 {note_id} 为空
-      返回 {"student": "{student}", "note_kind": "记忆", "note_keywords": "", "note_content": "", "note_once": "false"}
+      返回 {"student": "{student}", "note_kind": "记忆", "note_keywords": "", "note_content": "", "note_once": "false", "note_subject_scope": "当前科目"}
     结束
     设 p = 调用 取设定 setting_id={note_id} subject={sid}
     如果 {p.student 或 _} 不等于 {student 或 _}
@@ -512,6 +547,11 @@
     结束
     设 tv = 替换 文本=xtruex 正则=x
     设 fv = 替换 文本=xfalsex 正则=x
+    设 scope_cn = 当前科目
+    如果 {p.subject_id} 等于 0
+      设 scope_cn = 全部科目
+    结束
+    设 out.note_subject_scope = {scope_cn}
     设 out.student = {student}
     设 out.note_kind = {kindcn}
     设 out.note_keywords = {p.keywords}
@@ -524,9 +564,17 @@
     返回 {out}
   结束
 
-  公开 函数 保存设定页面 note_content current_user note_kind? note_id? student? note_keywords? note_once? current_role? auth_mode? subject?
+  公开 函数 保存设定页面 note_content current_user note_kind? note_id? student? note_keywords? note_once? note_subject_scope? current_role? auth_mode? subject?
     设 sr = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
     设 sid = {sr.subject_id}
+    设 scope_v = {blank 或}
+    如果 {note_subject_scope 或} 等于 当前科目 或 {note_subject_scope 或} 等于 current
+      设 scope_v = current
+    否则如果 {note_subject_scope 或} 等于 全部科目 或 {note_subject_scope 或} 等于 all
+      设 scope_v = all
+    否则如果 {note_subject_scope 或} 不为空
+      报错 400 范围不对
+    结束
     设 kind_v = {note_kind}
     如果 {note_kind 或 _} 等于 记忆 或 {note_kind 或 _} 等于 _
       设 kind_v = memory
@@ -552,8 +600,8 @@
     如果 {raw_once} 等于 是 或 {raw_once} 等于 True 或 {raw_once} 等于 true 或 {raw_once} 等于 TRUE 或 {raw_once} 等于 1
       设 once_v = 1
     结束
-    设 saved = 调用 保存设定 kind={kind_v} content={note_content} current_user={current_user} setting_id={note_id} student={student} keywords={note_keywords} once={once_v} current_role={current_role} auth_mode={auth_mode} subject={sid}
-    设 notes_r = 调用 设定列表 student={student} subject={sid}
+    设 saved = 调用 保存设定 kind={kind_v} content={note_content} current_user={current_user} setting_id={note_id} student={student} keywords={note_keywords} once={once_v} scope={scope_v} current_role={current_role} auth_mode={auth_mode} subject={sid}
+    设 notes_r = 调用 设定列表 student={student} learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={sid}
     设 notes = {notes_r.items}
     如果 {student} 为空
       设 out.class_notes = {notes}
@@ -571,7 +619,7 @@
       报错 404 没有这条设定
     结束
     设 u = 调用 设置设定启用 setting_id={note_id} enabled={enabled} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
-    设 notes_r = 调用 设定列表 student={student} subject={sid}
+    设 notes_r = 调用 设定列表 student={student} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
     设 notes = {notes_r.items}
     如果 {student} 为空
       设 out.class_notes = {notes}
@@ -589,7 +637,7 @@
       报错 404 没有这条设定
     结束
     设 u = 调用 删除设定 setting_id={note_id} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
-    设 notes_r = 调用 设定列表 student={student} subject={sid}
+    设 notes_r = 调用 设定列表 student={student} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
     设 notes = {notes_r.items}
     如果 {student} 为空
       设 out.class_notes = {notes}
@@ -640,7 +688,7 @@
     设 sr = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 sid = {sr.subject_id}
     如果 {relay_id} 为空
-      返回 {"student": "{student}", "relay_point": "", "relay_urgency": "尽快", "relay_voice": "以老师名义", "relay_facts": "", "relay_keywords": "", "relay_rounds": 3, "relay_due": ""}
+      返回 {"student": "{student}", "relay_point": "", "relay_urgency": "尽快", "relay_voice": "以老师名义", "relay_facts": "", "relay_keywords": "", "relay_rounds": 3, "relay_due": "", "relay_subject_scope": "当前科目"}
     结束
     设 p = 调用 取传达 relay_id={relay_id} subject={sid}
     如果 {p.student 或 _} 不等于 {student 或 _}
@@ -659,11 +707,16 @@
     设 out.relay_facts = {p.facts 或}
     设 out.relay_keywords = {p.keywords 或}
     设 out.relay_rounds = {p.rounds}
+    设 scope_cn = 当前科目
+    如果 {p.subject_id} 等于 0
+      设 scope_cn = 全部科目
+    结束
+    设 out.relay_subject_scope = {scope_cn}
     设 out.relay_due = {p.deadline 或}
     返回 {out}
   结束
 
-  公开 函数 保存传达页面 relay_point current_user relay_id? student? relay_urgency? relay_voice? relay_facts? relay_keywords? relay_rounds? relay_due? current_role? auth_mode? subject?
+  公开 函数 保存传达页面 relay_point current_user relay_id? student? relay_urgency? relay_voice? relay_facts? relay_keywords? relay_rounds? relay_due? relay_subject_scope? current_role? auth_mode? subject?
     设 sr = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
     设 sid = {sr.subject_id}
     如果 {student} 不为空
@@ -678,6 +731,14 @@
         报错 404 没有这条传达
       结束
     结束
+    设 scope_v = {blank 或}
+    如果 {relay_subject_scope 或} 等于 当前科目 或 {relay_subject_scope 或} 等于 current
+      设 scope_v = current
+    否则如果 {relay_subject_scope 或} 等于 全部科目 或 {relay_subject_scope 或} 等于 all
+      设 scope_v = all
+    否则如果 {relay_subject_scope 或} 不为空
+      报错 400 范围不对
+    结束
     设 urg = normal
     如果 {relay_urgency 或 _} 等于 立即
       设 urg = urgent
@@ -688,14 +749,14 @@
     如果 {rounds_v} 等于 0
       设 rounds_v = 3
     结束
-    设 saved = 调用 保存传达 urgency={urg} must_info={relay_point} rounds={rounds_v} current_user={current_user} relay_id={relay_id} tone={relay_voice} deadline={relay_due} student={student} facts={relay_facts} keywords={relay_keywords} current_role={current_role} auth_mode={auth_mode} subject={sid}
+    设 saved = 调用 保存传达 urgency={urg} must_info={relay_point} rounds={rounds_v} current_user={current_user} relay_id={relay_id} tone={relay_voice} deadline={relay_due} student={student} facts={relay_facts} keywords={relay_keywords} scope={scope_v} current_role={current_role} auth_mode={auth_mode} subject={sid}
     如果 {student} 为空
-      设 rl = 调用 传达列表 subject={sid}
+      设 rl = 调用 传达列表 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={sid}
       设 rs = 调用 传达状态列表 subject={sid}
       设 out.class_relays = {rl}
       设 out.class_relay_states = {rs}
     否则
-      设 rl = 调用 传达列表 student={student} subject={sid}
+      设 rl = 调用 传达列表 student={student} learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={sid}
       设 out.student_relays = {rl}
     结束
     返回 {out}
@@ -710,12 +771,12 @@
     结束
     设 u = 调用 设置传达启用 relay_id={relay_id} enabled={enabled} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
     如果 {student} 为空
-      设 rl = 调用 传达列表 subject={sid}
+      设 rl = 调用 传达列表 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
       设 rs = 调用 传达状态列表 subject={sid}
       设 out.class_relays = {rl}
       设 out.class_relay_states = {rs}
     否则
-      设 rl = 调用 传达列表 student={student} subject={sid}
+      设 rl = 调用 传达列表 student={student} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
       设 out.student_relays = {rl}
     结束
     返回 {out}
@@ -730,12 +791,12 @@
     结束
     设 u = 调用 删除传达 relay_id={relay_id} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
     如果 {student} 为空
-      设 rl = 调用 传达列表 subject={sid}
+      设 rl = 调用 传达列表 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
       设 rs = 调用 传达状态列表 subject={sid}
       设 out.class_relays = {rl}
       设 out.class_relay_states = {rs}
     否则
-      设 rl = 调用 传达列表 student={student} subject={sid}
+      设 rl = 调用 传达列表 student={student} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
       设 out.student_relays = {rl}
     结束
     返回 {out}

@@ -17,7 +17,10 @@ SELECT s.id AS note_id,
   CASE WHEN COALESCE(s.student, '') = :student THEN 1 ELSE 0 END AS mine,
   s.content AS note_content,
   s.once AS note_once,
-  COALESCE(s.student, '') AS student
+  COALESCE(s.student, '') AS student,
+  CASE WHEN s.subject_id = 0 THEN '全部科目' ELSE :sname END AS note_subject_label,
+  CASE WHEN s.subject_id = 0 THEN '全部科目' ELSE '当前科目' END AS note_subject_scope,
+  CASE WHEN s.subject_id = 0 THEN CAST(:own AS INTEGER) ELSE CAST(:wr AS INTEGER) END AS can_edit
 FROM teacher_rules_setting s
 WHERE (s.subject_id = CAST(:subj AS INTEGER) OR s.subject_id = 0) AND ((:student = '' AND COALESCE(s.student, '') = '') OR (:student <> '' AND (COALESCE(s.student, '') = '' OR s.student = :student)))
 ORDER BY CASE s.kind WHEN 'memory' THEN 0 WHEN 'note' THEN 1 ELSE 2 END, CASE WHEN COALESCE(s.student, '') = '' THEN 0 ELSE 1 END, s.id

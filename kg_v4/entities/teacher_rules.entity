@@ -85,4 +85,9 @@
   字段 relay_excerpt 文本 AI原话列
   字段 relay_msg_ask 长文本 传达记录学生问
   字段 relay_msg_reply 长文本 传达记录AI老师的回复
+  字段 note_subject_scope 枚举 当前科目,全部科目 编辑设定适用范围
+  字段 relay_subject_scope 枚举 当前科目,全部科目 编辑传达适用范围
+  字段 note_subject_label 文本 设定表科目列
+  字段 relay_subject_label 文本 传达表科目列
+  字段 subject_head 文本 设定页抬头
 结束

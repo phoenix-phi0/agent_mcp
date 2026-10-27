@@ -56,6 +56,7 @@ run 库出错      $PY tests/http/test_db_errors.py
 run 服务并发    $PY tests/http/test_concurrent.py
 run 块识别当重复 $PY tests/http/test_block_openers.py
 LIMIT=150 run kg_v4项目  $PY tests/kg_v4/test_project.py
+run 设定行科目列  $PY tests/kg_v4/test_tr_rows.py
 run 模板命名    $PY tests/gen/test_templates.py
 run 按端拆页面  $PY tests/gen/test_ends.py
 run 界面序      $PY tests/gen/test_order.py

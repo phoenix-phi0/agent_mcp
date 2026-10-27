@@ -74,7 +74,7 @@
 结束
 
 接口 POST /teacher_rules/note/save 动作 teacher_note_save 角色 teacher
-  设 r = 调用 teacher_rules.保存设定页面 note_content={note_content} current_user={current_user} note_kind={note_kind 或} note_id={note_id 或} student={student 或} note_keywords={note_keywords 或} note_once={note_once 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  设 r = 调用 teacher_rules.保存设定页面 note_content={note_content} current_user={current_user} note_kind={note_kind 或} note_id={note_id 或} student={student 或} note_keywords={note_keywords 或} note_once={note_once 或} note_subject_scope={note_subject_scope 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   设 _msg = 设定已保存
   消息 系统 {_msg} ok
   响应 state {r}
@@ -112,7 +112,7 @@
 结束
 
 接口 POST /teacher_rules/relay/page-save 动作 teacher_relay_save 角色 teacher
-  设 r = 调用 teacher_rules.保存传达页面 relay_point={relay_point} current_user={current_user} relay_id={relay_id 或} student={student 或} relay_urgency={relay_urgency 或} relay_voice={relay_voice 或} relay_facts={relay_facts 或} relay_keywords={relay_keywords 或} relay_rounds={relay_rounds 或} relay_due={relay_due 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  设 r = 调用 teacher_rules.保存传达页面 relay_point={relay_point} current_user={current_user} relay_id={relay_id 或} student={student 或} relay_urgency={relay_urgency 或} relay_voice={relay_voice 或} relay_facts={relay_facts 或} relay_keywords={relay_keywords 或} relay_rounds={relay_rounds 或} relay_due={relay_due 或} relay_subject_scope={relay_subject_scope 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   设 _msg = 传达已保存
   消息 系统 {_msg} ok
   响应 state {r}
