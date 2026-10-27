@@ -243,7 +243,7 @@ PREAMBLE = """这是批量任务里的一条，没有人在旁边看着，也没
 
 # allowed_tools 放行了 gsb_tools 时追加在 PREAMBLE 后面，没放行就不写，免得提示不存在的工具。
 # 为什么要写：这些工具在子进程里是延迟加载的（只有名字没有 schema），任务书又全是写死的
-# shell 命令，不提醒的话执行端一次都不会调，全靠 Bash（K69：118 次 Bash，gsb 工具 0 次）。
+# shell 命令，不提醒的话执行端一次都不会调，全靠 Bash（K69：71 次 Bash，gsb 工具 0 次）。
 # 第 5 条的「sleep 后再查」和 run_wait / wait_pid 冲突，这时换成下面第 8 条。
 GSB_TOOLS_PREFIX = "mcp__gsb_tools"
 PREAMBLE_TOOLS = """工具用法（gsb_tools）：
@@ -251,8 +251,8 @@ PREAMBLE_TOOLS = """工具用法（gsb_tools）：
 7. 读文件用 read_files（可一次多个、带行号范围、glob），不要用 shell 的 cat/head/tail/sed -n 读；grep/rg 搜索照用，看搜到的内容再回 read_files。同一文件改 2 处以上、或一次改多个文件，用 multi_edit。
 8. 测试、构建等长命令用 run_wait 阻塞等结果，后台进程用 wait_pid；不要 sleep 轮询，sleep 超过 10 秒一律改用 wait_pid。（取代第 5 条括号里的 sleep 做法，其余照第 5 条：必须拿到结果再汇报。）
 9. 要读很多文件再对照 / 总结时，派给 probe（只读）只收结论，互不相干的几块 wait=false 并行派再 probe_wait；探针不改文件，改代码自己做，关键结论自己抽查。
-10. 改了代码的任务，在 commit/push 和写最终报告前调 review 做初步审查；意见只是线索不是定论，核实后再改，报告里附上审查结论。
-11. 全量回归、起服务实测、基线对比交给 verify（wait=false + verify_wait 可并行），不要自己现写一次性验证脚本；跑完核对结论和证据再采信。"""
+10. 改了代码的任务，等代码改完、报告草稿写好后，在 commit/push 前调 review 做初步审查（给 task_file，有草稿就给 report_file）；不要做到一半就调，它审的是当时的状态，会把还没做的步骤报成问题。意见只是线索不是定论，核实后再改，报告里附上审查结论。
+11. 全量回归、起服务实测交给 verify（wait=false + verify_wait 可并行），不要自己现写一次性验证脚本；跑完核对结论和证据再采信。verify 的沙箱里被验项目只读（.git 也是），需要 git worktree 的基线对比它做不了，会返回「无法验证」，这种基线对比自己在 shell 里做，并在报告里写明。"""
 
 
 def _system_prompt(o: dict) -> str:
