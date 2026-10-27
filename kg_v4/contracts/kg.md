@@ -5,7 +5,7 @@
 表 kg_point
   code 文本 知识点编号，全局唯一（跨科目不重号：由「<科目编码>.」前缀口径 2 + 导入时的跨科目同编号拒绝保证；所以别的模块按 point_code 查表不会撞到别科目的点）；非日语科目要以「<科目编码>.」开头
   title 文本 中文名
-  subject_id 整数 所属科目，默认 1（1 是日语语法）
+  subject_id 整数 所属科目，默认 1（1 是日语语法；口径说明，各模块通用：kg/lesson/quiz/textbook_import 的编号前缀豁免和 tutor 的等级文案里写的「日语 subject_id 等于 1」，约定 1 号即 jp_grammar，由迁移脚本保证（migrate_subject.py 建 1 号科目），所以直接按 id=1 判断，不再查 subject_info）
 表 kg_edge
   pre_code 文本 前置知识点编号（学后续之前要先会它）
   point_code 文本 后续知识点编号

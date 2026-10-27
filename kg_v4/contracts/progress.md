@@ -264,7 +264,7 @@
   伪代码 返回 {"prog": prog, "doing": doing, "next": next, "recent": recent, "levels": levels, "scores": scores, "dictation": {"text": …, "link": …}}
 
 公开 函数 图谱页面 learner current_role? auth_mode? subject?
-  返回 {graph}；graph={nodes, edges}；知识图谱页「进入时」（动作 node_list）的整页状态，全是读，只含本科目的知识点和边；nodes 每点 {id: 编号, code, label: title, state, badge, desc}；state 是 done（已掌握）/open（可学）/locked（锁定）：mastered=1 是 done，否则所有直接前置都 mastered=1（没有前置也算）是 open，其余 locked；badge 是后代（直接和间接后续）个数（角标，标「往下解锁」的瓶颈）；desc 是直接前置的 title 用「、」连，没有前置是「（起点）」（点开浮层时页面写进 sel.desc）；edges 两类：前置边 {from: pre_code, to: point_code, kind: 空串}，对照边 {from: a_code, to: b_code, kind: 对照}（对照两端都得是本科目的知识点，条目端丢掉；旧行为）
+  返回 {graph, node_count, edge_count}；node_count、edge_count 是顶层计数，等于 graph.nodes、graph.edges 的个数（本科目可见的点数和边数，前置边与对照边都算，丢掉的条目端对照边不算）；graph={nodes, edges}；知识图谱页「进入时」（动作 node_list）的整页状态，全是读，只含本科目的知识点和边；nodes 每点 {id: 编号, code, label: title, state, badge, desc}；state 是 done（已掌握）/open（可学）/locked（锁定）：mastered=1 是 done，否则所有直接前置都 mastered=1（没有前置也算）是 open，其余 locked；badge 是后代（直接和间接后续）个数（角标，标「往下解锁」的瓶颈）；desc 是直接前置的 title 用「、」连，没有前置是「（起点）」（点开浮层时页面写进 sel.desc）；edges 两类：前置边 {from: pre_code, to: point_code, kind: 空串}，对照边 {from: a_code, to: b_code, kind: 对照}（对照两端都得是本科目的知识点，条目端丢掉；旧行为）
   报错 400 subject 不对
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
@@ -272,7 +272,7 @@
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 learner 和 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询都只限这个 subject_id；本函数在本模块内调用其它公开函数、调用 kg. 的函数时一律只传 subject=subject_id（已解析，不再校验）
   伪代码 调用 取状态 learner=learner subject=subject_id 得每点 mastered（right/total 顺带不用）；调用 kg.列知识点 subject=subject_id 得本科目全部点；badge 对每点调用 kg.列后代 code=该点编号 subject=subject_id 取 total；desc 对每点调用 kg.列前置 code=该点编号 subject=subject_id 拼 title
   伪代码 edges 直读 kg_edge 与 kg_contrast（两张表都带 subject_id 列，按本科目过滤，只取 subject_id 等于本科目的行）；对照两端各是知识点或条目，要通过 kg_point（带 subject_id 列，等于本科目）确认两端都是本科目的知识点才收，条目端丢掉（kg_point 的 code 全局唯一，不会误认别科目的点）
-  伪代码 返回 {"graph": {"nodes": 按编号升序, "edges": 前置边在前按 id、对照边按 id}}
+  伪代码 返回 {"graph": {"nodes": 按编号升序, "edges": 前置边在前按 id、对照边按 id}, "node_count": nodes 的个数, "edge_count": edges 的个数}（前端只读 graph，多余键忽略）
 
 公开 函数 知识点页面 learner code current_role? auth_mode? subject?
   返回 {node_tally, node_score, items, forms, point_words}；知识图谱页浮层「载入」（动作 node_detail）的页面状态；node_tally/node_score 铺进共享状态，items/forms/point_words 喂浮层三张表；全部只看本科目
@@ -594,7 +594,7 @@ POST /progress/point -> 知识点页面 动作 node_detail 模板 页面状态 �
   先 数据 kg_edge pre_code=B point_code=C
   先 数据 kg_contrast a_code=A b_code=C
   调用 图谱页面 learner=u1
-  得 有返回
+  得 node_count=3 edge_count=3
 
 用例 图谱页面_前置掌握后解锁
   先 数据 kg_point code=A title=甲
@@ -602,7 +602,7 @@ POST /progress/point -> 知识点页面 动作 node_detail 模板 页面状态 �
   先 数据 kg_edge pre_code=A point_code=B
   先 调用 记作答 learner=u1 point_code=A question_no=Q1 correct=1
   调用 图谱页面 learner=u1
-  得 有返回
+  得 node_count=2 edge_count=1
 
 用例 知识点页面_正常
   先 数据 kg_point code=P1 title=一次函数
@@ -799,7 +799,16 @@ POST /progress/point -> 知识点页面 动作 node_detail 模板 页面状态 �
   先 数据 kg_edge pre_code=math.a point_code=math.b subject_id=2
   先 数据 kg_contrast a_code=math.a b_code=math.b subject_id=2
   调用 图谱页面 learner=u1 subject=2
-  得 有返回
+  得 node_count=2 edge_count=2
+
+用例 跨科目_图谱页面计数不含别科目
+  先 数据 kg_point code=P1 title=一次函数
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_point code=math.b title=几何 subject_id=2
+  先 数据 kg_edge pre_code=math.a point_code=math.b subject_id=2
+  先 数据 kg_contrast a_code=math.a b_code=math.b subject_id=2
+  调用 图谱页面 learner=u1
+  得 node_count=1 edge_count=0
 
 用例 跨科目_知识点页面本科目
   先 数据 kg_point code=math.a title=代数 subject_id=2
