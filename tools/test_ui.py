@@ -476,6 +476,35 @@ def test_side_poll_row_remote():
           [i.code for i in bad2.get("issues", []) if "每隔" in i.message], ["missing_endpoint"])
 
 
+def test_order_narrow():
+    print("\n[界面「序」、窄屏样式]")
+    from tools.ui import dump
+    ss = parse("界面 自定义 问老师 端 学生 序 1 侧 看看\n  文案 a\n结束\n"
+               "界面 自定义 做题\n  文案 b\n结束\n")
+    check("「序 1」进 order，不进名字，跟端、侧一起写互不干扰",
+          (ss[0].name, ss[0].order, ss[0].audience, ss[0].side), ("问老师", 1, "学生", "看看"))
+    check("没写序的是 None（不是 0：序 0 是合法的）", (ss[1].order, one("界面 自定义 甲 序 0\n  文案 a\n结束\n").order),
+          (None, 0))
+    check("dump 带「序=1」", "序=1" in dump(ss), True)
+    act = one("界面 自定义 甲\n  动作 go 提交 序 1\n结束\n").children[0]
+    check("「序」只认界面上的：写在动作上不进 order", act.order, None)
+    check_raises("序不是非负整数：解析报错、说清写的是什么",
+                 lambda: parse("界面 自定义 甲 序 一\n  文案 a\n结束\n"), "「序」要写非负整数")
+    check_raises("负数也报", lambda: parse("界面 自定义 甲 序 -1\n  文案 a\n结束\n"), "序")
+    css = compile_ui("界面 自定义 甲\n  文案 x\n结束\n", backend="vue",
+                     fields={})["result"]["files"]["style.css"]
+    check("样式表有窄屏那段 @media", "@media (max-width:640px)" in css, True)
+    narrow = css[css.index("@media (max-width:640px)"):]
+    check("窄屏：导航不换行横滚、横排里的区域占整行（堆叠）、表格横滚、网格单列",
+          all(x in narrow for x in ("flex-wrap:nowrap; overflow-x:auto",
+                                    "> .region", "flex:1 1 100% !important",
+                                    ".table-wrap { overflow-x:auto", "grid-template-columns:1fr !important")),
+          True)
+    check("宽屏规则没动：@media 前面 nav、.row 还是原样",
+          ("nav {\n  display:flex; gap:8px; align-items:center;\n  padding:12px 20px 0;" in css,
+           ".row { display:flex; gap:12px; align-items:flex-start; }" in css), (True, True))
+
+
 def test_state_lists_sync():
     print("\n[页面状态里的列表同步进 lists]")
     ui = ("界面 自定义 学情 载入 report_home\n"
@@ -540,6 +569,7 @@ def main() -> int:
         test_dynamic_select,
         test_side_poll_row_remote,
         test_audience,
+        test_order_narrow,
         test_state_lists_sync,
     ]:
         try:

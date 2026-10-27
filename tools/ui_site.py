@@ -21,7 +21,9 @@ computed，每个界面的 form 上挂 `v-if="current.name === '界面名'"`。
 
 **入口**：`screens[0]` 是 hash 为空时的默认界面。单文件时那是「第一个
 界面」，多文件时变成「合并顺序的第一个」——那取决于字典序，不该由它
-决定。所以 `entry` 参数显式指定，指定的那个排到最前。
+决定。所以界面可以写「序 n」：合并后按序排，没写序的排在写了的后面、
+保持文件名序（一个都没写就跟原来一样）。`entry` 参数（`--入口`）仍然优先，
+指定的那个排到最前。
 
 ## 跨文件的「切到」检查
 
@@ -39,8 +41,12 @@ class SiteError(Exception):
 def merge(files: dict, entry: str = "") -> tuple:
     """合并几个 .ui。files 是 {文件名: 文本}，返回 (screens, 问题列表)。
 
-    entry 指定哪个界面是入口（hash 为空时显示的那个），不给就用第一个
-    文件的第一个界面。
+    顺序：写了「序 n」的按 n 从小到大在前，没写的在后；同序、都没写序的
+    按文件名序（同一文件里按书写先后）。同序的在问题列表里提示一声——
+    不拦，但顺序又变成了文件名说了算。
+
+    entry 指定哪个界面是入口（hash 为空时显示的那个），不给就用排序后
+    的第一个界面。
 
     重名直接抛——那是必须修的错，不是可以将就的问题：重名的界面里有
     一个永远打不开，而运行时什么都不会报。
@@ -69,6 +75,26 @@ def merge(files: dict, entry: str = "") -> tuple:
     if not screens:
         问题.append("一个界面都没有")
         return screens, 问题
+
+    # 「序」：sort 是稳定的，同一键里保持上面的文件名序。没写序的不用 999
+    # 之类的大数充——写了「序 1000」的也该排在没写的前面
+    screens.sort(key=lambda s: (0, s.order) if s.order is not None else (1, 0))
+    # 同一端里同序才提示：两端各自从「序 1」排是正常写法（按端拆页后各排各的）
+    同序 = {}
+    for s in screens:
+        if s.order is not None:
+            同序.setdefault((s.audience, s.order), []).append(s)
+    for (_, n), ss in 同序.items():
+        if len(ss) > 1:
+            谁 = "、".join(f"{s.name}（{来自[s.name]}）" for s in ss)
+            问题.append(f"「序 {n}」重复：{谁}，按文件名排")
+    # 但主页面（地址 /）是排第一的界面所在的端（gen/project.py 的 split_pages）：
+    # 几端都写了最小的那个序时是文件名在选，说一声
+    头 = [s for s in screens if s.order is not None and s.order == screens[0].order]
+    if not entry and len({s.audience for s in 头}) > 1:
+        问题.append(f"几端都写了「序 {screens[0].order}」：主页面（/）按文件名取了"
+                  f"{screens[0].name}（{来自[screens[0].name]}）。要指定就把那一端入口的序"
+                  f"写得更小，或者用 --入口")
 
     if entry:
         idx = next((i for i, s in enumerate(screens) if s.name == entry), -1)

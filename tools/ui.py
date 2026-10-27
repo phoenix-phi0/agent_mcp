@@ -176,6 +176,9 @@ class Node:
                                  # 角色看（导航、首页、直接打地址都按它），别的角色
                                  # 看不到；没开登录（单人用）不分端。见 app.js.j2
                                  # 的 visible
+    order: Optional[int] = None  # 界面的「序 1」：导航顺序和入口（hash 为空时的界面）。
+                                 # 合并几个 .ui 时按它排，没写的排在写了的后面、
+                                 # 照文件名序。见 tools/ui_site.py 的 merge
     every: int = 0               # 动作的「每隔 2」：所在界面开着、「当」成立时
                                  # 每 2 秒悄悄提交一次（后台任务的进度轮询）
     required: Optional[bool] = None
@@ -400,6 +403,13 @@ KEYED_MODIFIERS = KEYED_MODIFIERS | {"侧", "每隔"}
 # 不叫「角色」：界面的「角色」已经是表单 / 列表 / 自定义（dump 里的「角色=」）。
 KEYED_MODIFIERS = KEYED_MODIFIERS | {"端"}
 
+# 界面「序 <n>」：项目里界面的先后——导航按它排，排第一的（登录页之外）就是
+# 入口（打开网址、hash 为空时落在哪）。没写序的排在写了的后面，彼此照文件名
+# 序；同序的也照文件名序（合并时提示一声）。n 是非负整数。`gen build/run
+# --入口` 照旧优先。跟「侧」「端」一起用：先按序排，再按侧分左右、按端拆页。
+#   界面 自定义 问老师 端 学生 序 1
+KEYED_MODIFIERS = KEYED_MODIFIERS | {"序"}
+
 # 动作「回车」：答完才出现的那颗「下一题」用。三件事：
 #   1. 一次提交回来、界面上没有输入框可还焦点时，焦点给这颗按钮，并
 #      scrollIntoView({block:'nearest'})——卡片长了按钮不会落在看不见的地方；
@@ -519,6 +529,8 @@ def _apply_keyed(node: Node, keyed: dict):
         node.side = keyed["侧"]
     if "端" in keyed:
         node.audience = keyed["端"]
+    if node.kind == "界面" and "序" in keyed and keyed["序"].isascii() and keyed["序"].isdigit():
+        node.order = int(keyed["序"])   # 只认界面上的；不是非负整数的 parse 那里报错
     if "每隔" in keyed:
         try:
             node.every = max(int(keyed["每隔"]), 0)
@@ -615,6 +627,9 @@ def parse(text: str, types=None) -> list:
                 name = _join_name(name, leftover, keyword, lineno)
                 if not name:
                     raise UiSyntaxError("「界面」要有名字", line=lineno)
+                if "序" in keyed and not (keyed["序"].isascii() and keyed["序"].isdigit()):
+                    raise UiSyntaxError(
+                        f"「序」要写非负整数（写的是「{keyed['序']}」）", line=lineno)
                 node = Node(kind="界面", name=name, modifiers=flags,
                             role=role or DEFAULT_ROLE, line=lineno)
                 _apply_keyed(node, keyed)
@@ -721,6 +736,8 @@ def dump(nodes, indent: int = 0) -> str:
             extras.append(f"侧={n.side}")
         if getattr(n, "audience", ""):
             extras.append(f"端={n.audience}")
+        if getattr(n, "order", None) is not None:
+            extras.append(f"序={n.order}")
         if getattr(n, "every", 0):
             extras.append(f"每隔={n.every}")
         if n.type:
