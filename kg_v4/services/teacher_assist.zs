@@ -1,11 +1,40 @@
 业务 teacher_assist
-  依赖 account report progress kg lesson
+  依赖 account report progress kg lesson subject
   用包 db common text
 
-  函数 取最近对话 current_user limit
+  函数 本科目 learner current_role auth_mode subject need?
+    设 r = 调用 subject.解析科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need={need}
+    返回 {r}
+  结束
+
+  函数 学生范围 subject_id
+    设 blank = {zz 或}
+    设 al = 调用 account.列学生
+    设 ss = 调用 subject.列科目学生 subject_id={subject_id}
+    设 out = {blank}
+    遍历 s 于 {al.students}
+      设 hit = 0
+      遍历 x 于 {ss.students}
+        如果 {x.learner} 等于 {s.username}
+          设 hit = 1
+        结束
+      结束
+      如果 {hit} 等于 1
+        设 it = {"username": "{s.username}", "display_name": "{s.display_name}", "status": "{s.status}", "last_at": "{s.last_at}"}
+        如果 {out} 为空
+          设 out = {it}
+        否则
+          设 out = {out},{it}
+        结束
+      结束
+    结束
+    返回 [{out}]
+  结束
+
+  函数 取最近对话 current_user limit subject_id
     设 blank = {zz 或}
     设 nl = 查一值 app.db teacher_assist_nl
-    设 rows = 查询 app.db teacher_assist_recent teacher={current_user} n={limit}
+    设 rows = 查询 app.db teacher_assist_recent teacher={current_user} n={limit} subject_id={subject_id}
     设 out = {blank}
     遍历 m 于 {rows}
       如果 {m.role} 等于 assistant
@@ -22,34 +51,36 @@
     返回 {out}
   结束
 
-  函数 取上轮聚焦 current_user
+  函数 取上轮聚焦 current_user subject_id
     设 blank = {zz 或}
-    设 row = 查一行 app.db teacher_assist_last_focus teacher={current_user}
+    设 row = 查一行 app.db teacher_assist_last_focus teacher={current_user} subject_id={subject_id}
     设 st = {row.student 或}
     设 pt = {row.point 或}
     设 sname = {blank}
     设 ptitle = {blank}
     如果 {st} 不为空
-      设 r = 调用 account.列学生
-      遍历 s 于 {r.students}
+      设 r = 调用 学生范围 subject_id={subject_id}
+      遍历 s 于 {r}
         如果 {s.username} 等于 {st}
           设 sname = {s.display_name}
         结束
       结束
     结束
     如果 {pt} 不为空
-      设 p = 调用 kg.取知识点 code={pt}
+      设 p = 调用 kg.取知识点 code={pt} subject={subject_id}
       设 ptitle = {p.title 或}
     结束
     返回 {"student": "{st}", "student_name": "{sname}", "point": "{pt}", "point_title": "{ptitle}"}
   结束
 
-  公开 函数 匹配学生 name
+  公开 函数 匹配学生 name learner? current_role? auth_mode? subject?
     设 blank = {zz 或}
-    设 r = 调用 account.列学生
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
+    设 r = 调用 学生范围 subject_id={subject_id}
     设 roster = {blank}
     设 i = 0
-    遍历 s 于 {r.students}
+    遍历 s 于 {r}
       如果 {i} 小于 10
         如果 {roster} 为空
           设 roster = {s.display_name}（{s.username}）
@@ -84,7 +115,7 @@
     设 d2 = {blank}
     设 u3 = {blank}
     设 d3 = {blank}
-    遍历 s 于 {r.students}
+    遍历 s 于 {r}
       设 lu = 查一值 app.db teacher_assist_lower s={s.username}
       设 dl = 查一值 app.db teacher_assist_len t={s.display_name}
       设 it = {"username": "{s.username}", "display_name": "{s.display_name}", "status": "{s.status}"}
@@ -164,8 +195,10 @@
     返回 {"status": "many", "username": "", "display_name": "", "candidates": [{cs}], "roster": "{roster}"}
   结束
 
-  公开 函数 匹配知识点 keyword
+  公开 函数 匹配知识点 keyword learner? current_role? auth_mode? subject?
     设 blank = {zz 或}
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
     如果 {keyword} 为空
       返回 {"status": "none", "code": "", "title": "", "candidates": [], "total": 0}
     结束
@@ -183,7 +216,7 @@
     结束
     设 lk = 查一值 app.db teacher_assist_lower s={k}
     设 klen = 查一值 app.db teacher_assist_len t={k}
-    设 r = 调用 kg.列知识点
+    设 r = 调用 kg.列知识点 subject={subject_id}
     设 n1 = 0
     设 n2 = 0
     设 n3 = 0
@@ -249,7 +282,7 @@
       结束
     结束
     如果 {n1} 等于 0 且 {n2} 等于 0 且 {n3} 等于 0
-      设 its = 调用 kg.列条目
+      设 its = 调用 kg.列条目 subject={subject_id}
       设 seen = ,
       遍历 x 于 {its.items}
         设 xl = 查一值 app.db teacher_assist_len t={x.name}
@@ -263,7 +296,7 @@
         如果 {hit} 等于 1
           如果 {seen} 不包含 ,{x.point_code},
             设 seen = {seen}{x.point_code},
-            设 pp = 调用 kg.取知识点 code={x.point_code}
+            设 pp = 调用 kg.取知识点 code={x.point_code} subject={subject_id}
             如果 {pp} 不为空
               设 it = {"code": "{x.point_code}", "title": "{pp.title}"}
               如果 {c4} 为空
@@ -315,11 +348,11 @@
     返回 {"status": "many", "code": "", "title": "", "candidates": [{cs}], "total": {cnt}}
   结束
 
-  函数 班级上下文 current_user
+  函数 班级上下文 current_user subject_id
     设 blank = {zz 或}
     设 nl = 查一值 app.db teacher_assist_nl
     设 today = 当前时间 日期
-    设 r = 调用 report.取全班学情 sort_by=avg_score
+    设 r = 调用 report.取全班学情 sort_by=avg_score subject={subject_id}
     如果 {r.total} 等于 0
       设 out0 = 今天：{today}{nl}还没有学生账号
       返回 {out0}
@@ -421,10 +454,10 @@
     返回 {out}
   结束
 
-  函数 学生上下文 username display_name last_at
+  函数 学生上下文 username display_name last_at subject_id
     设 blank = {zz 或}
     设 nl = 查一值 app.db teacher_assist_nl
-    设 r = 调用 report.取学生学情 student={username}
+    设 r = 调用 report.取学生学情 student={username} subject={subject_id}
     设 la = 没有作答
     如果 {last_at} 不为空
       设 la = 查一值 app.db teacher_assist_substr t={last_at} n=10
@@ -510,12 +543,12 @@
     返回 {out}
   结束
 
-  函数 知识点上下文 code title
+  函数 知识点上下文 code title subject_id
     设 blank = {zz 或}
     设 nl = 查一值 app.db teacher_assist_nl
-    设 lv = 调用 lesson.取知识点等级 point_code={code}
+    设 lv = 调用 lesson.取知识点等级 point_code={code} subject={subject_id}
     设 level = {lv.level 或}
-    设 its = 调用 kg.按知识点列条目 point_code={code}
+    设 its = 调用 kg.按知识点列条目 point_code={code} subject={subject_id}
     设 inames = {blank}
     设 i = 0
     遍历 x 于 {its.items}
@@ -531,7 +564,7 @@
     如果 {inames} 为空
       设 inames = 没有条目
     结束
-    设 ls = 调用 lesson.按知识点列课文 point_code={code}
+    设 ls = 调用 lesson.按知识点列课文 point_code={code} subject={subject_id}
     设 lt = {blank}
     设 i = 0
     遍历 x 于 {ls.lessons}
@@ -549,8 +582,9 @@
       设 lt = 没有课文
     结束
     设 out = 知识点：{title}（{code}），等级 {level}{nl}条目：{inames}{nl}相关课文：{lt}
-    设 sl = 调用 account.列学生
-    如果 {sl.total} 等于 0
+    设 sl = 调用 学生范围 subject_id={subject_id}
+    设 slt = 列表长度 {sl}
+    如果 {slt} 等于 0
       设 out = {out}{nl}还没有学生账号
       返回 {out}
     结束
@@ -564,8 +598,8 @@
     设 mi = 0
     设 nun = {blank}
     设 ni = 0
-    遍历 s 于 {sl.students}
-      设 stt = 调用 progress.取状态 learner={s.username} point_code={code}
+    遍历 s 于 {sl}
+      设 stt = 调用 progress.取状态 learner={s.username} point_code={code} subject={subject_id}
       设 rt = 0
       设 tt = 0
       设 ms = 0
@@ -614,7 +648,7 @@
     如果 {attn} 大于 0
       设 av = 计算 四舍五入({sum} * 10 / {attn}) / 10
     结束
-    设 out = {out}{nl}全班 {sl.total} 人：已掌握 {a} 人，作答过但未掌握 {b} 人，没作答 {c} 人；有作答的人平均分 {av}
+    设 out = {out}{nl}全班 {slt} 人：已掌握 {a} 人，作答过但未掌握 {b} 人，没作答 {c} 人；有作答的人平均分 {av}
     如果 {b} 大于 0
       设 j = [{items}]
       设 srt = 查询 app.db teacher_assist_sort j={j}
@@ -643,16 +677,16 @@
     返回 {out}
   结束
 
-  函数 建议上下文 current_user
+  函数 建议上下文 current_user subject_id
     设 blank = {zz 或}
     设 nl = 查一值 app.db teacher_assist_nl
-    设 base = 调用 班级上下文 current_user={current_user}
-    设 r = 调用 report.取全班学情
+    设 base = 调用 班级上下文 current_user={current_user} subject_id={subject_id}
+    设 r = 调用 report.取全班学情 subject={subject_id}
     设 out = {base}{nl}可对应的课文：
     设 wi = 0
     遍历 w 于 {r.weak_points}
       如果 {wi} 小于 5
-        设 ls = 调用 lesson.按知识点列课文 point_code={w.point_code}
+        设 ls = 调用 lesson.按知识点列课文 point_code={w.point_code} subject={subject_id}
         设 lt = {blank}
         设 li = 0
         遍历 x 于 {ls.lessons}
@@ -677,9 +711,11 @@
     返回 {out}
   结束
 
-  公开 函数 取助手上下文 intent student? point?
+  公开 函数 取助手上下文 intent student? point? learner? current_role? auth_mode? subject?
     设 blank = {zz 或}
     设 nl = 查一值 app.db teacher_assist_nl
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
     如果 {intent} 不等于 class_overview 且 {intent} 不等于 student_detail 且 {intent} 不等于 point_status 且 {intent} 不等于 teaching_advice 且 {intent} 不等于 chitchat
       报错 400 intent 不合法
     结束
@@ -691,9 +727,9 @@
     设 hint = {blank}
     设 ctx = {blank}
     如果 {intent} 等于 class_overview
-      设 ctx = 调用 班级上下文 current_user=助手
+      设 ctx = 调用 班级上下文 current_user=助手 subject_id={subject_id}
     否则如果 {intent} 等于 student_detail
-      设 m = 调用 匹配学生 name={student}
+      设 m = 调用 匹配学生 name={student} subject={subject_id}
       如果 {student} 为空
         设 status = ask
         设 hint = 你想看哪位学生？现有学生：{m.roster}
@@ -713,18 +749,18 @@
         设 hint = 找到多位：{names}，你指哪一位？
       否则
         设 la = {blank}
-        设 r = 调用 account.列学生
-        遍历 s 于 {r.students}
+        设 r = 调用 学生范围 subject_id={subject_id}
+        遍历 s 于 {r}
           如果 {s.username} 等于 {m.username}
             设 la = {s.last_at}
           结束
         结束
-        设 ctx = 调用 学生上下文 username={m.username} display_name={m.display_name} last_at={la}
+        设 ctx = 调用 学生上下文 username={m.username} display_name={m.display_name} last_at={la} subject_id={subject_id}
         设 st = {m.username}
         设 sname = {m.display_name}
       结束
     否则如果 {intent} 等于 point_status
-      设 m = 调用 匹配知识点 keyword={point}
+      设 m = 调用 匹配知识点 keyword={point} subject={subject_id}
       如果 {point} 为空
         设 status = ask
         设 hint = 你想看哪个知识点？
@@ -743,32 +779,32 @@
         结束
         设 hint = 找到多个：{names}（共 {m.total} 个，最多列 5 个），你指哪一个？
       否则
-        设 ctx = 调用 知识点上下文 code={m.code} title={m.title}
+        设 ctx = 调用 知识点上下文 code={m.code} title={m.title} subject_id={subject_id}
         设 pt = {m.code}
         设 ptitle = {m.title}
       结束
     否则如果 {intent} 等于 teaching_advice
-      设 ctx = 调用 建议上下文 current_user=助手
+      设 ctx = 调用 建议上下文 current_user=助手 subject_id={subject_id}
       如果 {student} 不为空
-        设 m = 调用 匹配学生 name={student}
+        设 m = 调用 匹配学生 name={student} subject={subject_id}
         如果 {m.status} 等于 one
           设 la = {blank}
-          设 r = 调用 account.列学生
-          遍历 s 于 {r.students}
+          设 r = 调用 学生范围 subject_id={subject_id}
+          遍历 s 于 {r}
             如果 {s.username} 等于 {m.username}
               设 la = {s.last_at}
             结束
           结束
-          设 sc = 调用 学生上下文 username={m.username} display_name={m.display_name} last_at={la}
+          设 sc = 调用 学生上下文 username={m.username} display_name={m.display_name} last_at={la} subject_id={subject_id}
           设 ctx = {ctx}{nl}{sc}
           设 st = {m.username}
           设 sname = {m.display_name}
         结束
       结束
       如果 {point} 不为空
-        设 m2 = 调用 匹配知识点 keyword={point}
+        设 m2 = 调用 匹配知识点 keyword={point} subject={subject_id}
         如果 {m2.status} 等于 one
-          设 pc = 调用 知识点上下文 code={m2.code} title={m2.title}
+          设 pc = 调用 知识点上下文 code={m2.code} title={m2.title} subject_id={subject_id}
           设 ctx = {ctx}{nl}{pc}
           设 pt = {m2.code}
           设 ptitle = {m2.title}
@@ -812,32 +848,32 @@
     返回 {"intent": "{intent}", "student": "{st}", "point": "{pt}"}
   结束
 
-  函数 写一轮 current_user user_text reply intent student point status
+  函数 写一轮 current_user user_text reply intent student point status subject_id
     设 now = 当前时间
     事务 app.db
-      设 row1 = {"teacher": "{current_user}", "role": "user", "content": "{user_text}", "intent": "{intent}", "student": "{student}", "point": "{point}", "status": "{status}", "at": "{now}"}
+      设 row1 = {"teacher": "{current_user}", "role": "user", "content": "{user_text}", "intent": "{intent}", "student": "{student}", "point": "{point}", "status": "{status}", "at": "{now}", "subject_id": "{subject_id}"}
       设 n1 = 写库表 app.db teacher_assist_insert {row1}
-      设 row2 = {"teacher": "{current_user}", "role": "assistant", "content": "{reply}", "intent": "{intent}", "student": "{student}", "point": "{point}", "status": "{status}", "at": "{now}"}
+      设 row2 = {"teacher": "{current_user}", "role": "assistant", "content": "{reply}", "intent": "{intent}", "student": "{student}", "point": "{point}", "status": "{status}", "at": "{now}", "subject_id": "{subject_id}"}
       设 n2 = 写库表 app.db teacher_assist_insert {row2}
-      设 rid = 查一值 app.db teacher_assist_last_id teacher={current_user}
+      设 rid = 查一值 app.db teacher_assist_last_id teacher={current_user} subject_id={subject_id}
     结束
     返回 {rid}
   结束
 
-  函数 答一轮 current_user user_text intent context_text student point
+  函数 答一轮 current_user user_text intent context_text student point subject_id
     设 nl = 查一值 app.db teacher_assist_nl
-    设 recent = 调用 取最近对话 current_user={current_user} limit=6
+    设 recent = 调用 取最近对话 current_user={current_user} limit=6 subject_id={subject_id}
     设 sysp = 你是日语学习系统教师端的教学助手，像同事一样和老师说话，只读。回答规则：①数字、人名、名单、知识点名、课号、标题、日期只能原样取自【数据】，不得自己推算新数字，不得写大约、差不多之类的估算，唯一允许的是数一数【数据】里列出的行；②【数据】里没有的就直说「这份数据里没有」，不猜不编，也不要说系统没有的功能；③不要写昨天、上周、几天前这类相对时间，只能原样引用【数据】里写明的日期；④最近对话里出现过的数字可能已过时，以【数据】为准；⑤你只读：不能改设定、不能给学生发话、不能出题、不能起草传达，老师要这些时告诉老师去哪个页面做；⑥只输出纯文本，不用Markdown的标题、加粗、表格、列表符号，不用emoji；名单每人一行，行首用「・」；⑦一般不超过300字，名单最多列10人；⑧给教学建议时先说依据（引用【数据】里的哪几项），再给1到3条具体做法，推荐课文只能用【数据】里的课号和标题；⑨闲聊或问系统用法时简短自然地回应，用法只依据【数据】里的系统功能说明。
     设 full = {sysp}{nl}{nl}【数据】{nl}{context_text}{nl}{nl}【最近对话】{nl}{recent}{nl}{nl}【老师最新一句】{nl}{user_text}
     问 reply = {full} 用 平衡 出错时 e
     如果 {e} 不为空 或 {reply} 为空
       报错 400 助手暂时无法回答
     结束
-    设 rid = 调用 写一轮 current_user={current_user} user_text={user_text} reply={reply} intent={intent} student={student} point={point} status=ok
+    设 rid = 调用 写一轮 current_user={current_user} user_text={user_text} reply={reply} intent={intent} student={student} point={point} status=ok subject_id={subject_id}
     返回 {"reply_id": {rid}, "reply": "{reply}"}
   结束
 
-  公开 函数 问助手 current_user message
+  公开 函数 问助手 current_user message current_role? auth_mode? subject?
     设 blank = {zz 或}
     如果 {current_user} 为空
       报错 400 current_user 不能为空
@@ -849,8 +885,10 @@
     如果 {msg} 为空
       报错 400 消息不能为空
     结束
-    设 recent = 调用 取最近对话 current_user={current_user} limit=6
-    设 f = 调用 取上轮聚焦 current_user={current_user}
+    设 sj = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
+    设 recent = 调用 取最近对话 current_user={current_user} limit=6 subject_id={subject_id}
+    设 f = 调用 取上轮聚焦 current_user={current_user} subject_id={subject_id}
     设 fs = {blank}
     如果 {f.student} 不为空
       设 fs = 学生：{f.student_name}（{f.student}）
@@ -883,19 +921,21 @@
         设 pt = {f.point}
       结束
     结束
-    设 c = 调用 取助手上下文 intent={intent} student={st} point={pt}
+    设 c = 调用 取助手上下文 intent={intent} student={st} point={pt} subject={subject_id}
     如果 {c.status} 等于 ask
-      设 rid = 调用 写一轮 current_user={current_user} user_text={msg} reply={c.hint} intent={intent} student={blank} point={blank} status=ask
+      设 rid = 调用 写一轮 current_user={current_user} user_text={msg} reply={c.hint} intent={intent} student={blank} point={blank} status=ask subject_id={subject_id}
       返回 {"ok": 1, "reply_id": {rid}, "reply": "{c.hint}", "intent": "{intent}", "student": "{c.student}", "point": "{c.point}", "status": "ask"}
     结束
-    设 a = 调用 答一轮 current_user={current_user} user_text={msg} intent={intent} context_text={c.context_text} student={c.student} point={c.point}
+    设 a = 调用 答一轮 current_user={current_user} user_text={msg} intent={intent} context_text={c.context_text} student={c.student} point={c.point} subject_id={subject_id}
     返回 {"ok": 1, "reply_id": {a.reply_id}, "reply": "{a.reply}", "intent": "{intent}", "student": "{c.student}", "point": "{c.point}", "status": "ok"}
   结束
 
-  公开 函数 列对话 current_user limit?
+  公开 函数 列对话 current_user limit? current_role? auth_mode? subject?
     如果 {current_user} 为空
       报错 400 current_user 不能为空
     结束
+    设 sj = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
     设 lim = {limit}
     如果 {lim} 为空
       设 lim = 50
@@ -907,14 +947,16 @@
     如果 {lim} 小于 1
       报错 400 limit 不合法
     结束
-    设 rows = 查询 app.db teacher_assist_list teacher={current_user} n={lim}
+    设 rows = 查询 app.db teacher_assist_list teacher={current_user} n={lim} subject_id={subject_id}
     设 total = 列表长度 {rows}
     返回 {"teacher": "{current_user}", "total": {total}, "messages": {rows}}
   结束
 
-  公开 函数 列对话页面 current_user
+  公开 函数 列对话页面 current_user current_role? auth_mode? subject?
     设 blank = {zz 或}
-    设 r = 调用 列对话 current_user={current_user} limit=40
+    设 sj = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
+    设 r = 调用 列对话 current_user={current_user} limit=40 subject={subject_id}
     设 talk = {blank}
     遍历 x 于 {r.messages}
       如果 {x.role} 等于 assistant
@@ -931,8 +973,10 @@
     返回 {"talk": [{talk}]}
   结束
 
-  公开 函数 问助手页面 current_user message
-    设 r = 调用 问助手 current_user={current_user} message={message}
+  公开 函数 问助手页面 current_user message current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
+    设 r = 调用 问助手 current_user={current_user} message={message} subject={subject_id}
     返回 {r}
   结束
 结束

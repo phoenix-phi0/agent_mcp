@@ -1,1 +1,1 @@
-SELECT role, CASE WHEN role = 'assistant' THEN SUBSTR(content, 1, 150) ELSE SUBSTR(content, 1, 100) END AS content FROM (SELECT id, role, content FROM teacher_assist_message WHERE teacher = :teacher ORDER BY id DESC LIMIT CAST(:n AS INTEGER)) ORDER BY id ASC
+SELECT role, CASE WHEN role = 'assistant' THEN SUBSTR(content, 1, 150) ELSE SUBSTR(content, 1, 100) END AS content FROM (SELECT id, role, content FROM teacher_assist_message WHERE teacher = :teacher AND subject_id = CAST(:subject_id AS INTEGER) ORDER BY id DESC LIMIT CAST(:n AS INTEGER)) ORDER BY id ASC
