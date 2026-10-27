@@ -67,16 +67,28 @@
   伪代码 都没有（比如单人模式、还没分配科目、教师没有偏好）返回 {"subject_id": 1}，保证日语旧行为不变
   伪代码 只读；不调用别的模块
 
-公开 函数 解析科目 learner current_role auth_mode subject?
+公开 函数 解析科目 learner current_role auth_mode subject? need?
   返回 {subject_id}；本次请求用哪个科目
   报错 400 subject 不对
+  报错 400 need 不对
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
+  报错 403 没有权限修改该科目
   报错 404 没有这个科目
+  伪代码 need 缺省或 read：以下行为与旧版完全一致；need 为 write：见最后三条
   伪代码 解析顺序：请求里显式 subject（地址参数，路由注入）→ 偏好 → 第一个已分配 → 1；显式 subject 无权报 403
   伪代码 subject 不为空：不是纯数字，报错 400 subject 不对；auth_mode 不等于 on，直接返回 {"subject_id": 该数字}（单人模式不校验，也不查库）
   伪代码 subject 不为空且 auth_mode 等于 on：按「科目访问 need=read auth_mode=on」判断（空角色也被拒），ok 为 0 时——科目不存在报错 404 没有这个科目；current_role 等于 student 报错 403 该科目未分配给你；否则报错 403 没有权限访问该科目；ok 为 1 返回 {"subject_id": 该数字}
   伪代码 subject 为空：直接返回「当前科目 learner=learner current_role=current_role」的结果（偏好 → 第一个已分配 → 1），不校验、不报错
+  伪代码 need 校验：need 不为空且不是 read、write 之一，报错 400 need 不对（最先检查，不论 auth_mode）
+  伪代码 need 等于 write 且 auth_mode 等于 on：先按上面两条解析出 subject_id（显式 subject 的 400/403/404 照旧），再按「科目访问 need=write auth_mode=on」判断，ok 为 0 时——科目不存在报错 404 没有这个科目，否则报错 403 没有权限修改该科目（学生、没有关系的教师、公共科目的非负责/协作教师都是它）；ok 为 1 返回 {"subject_id": 该数字}。即登录模式下只有科目的负责/协作教师能通过写校验
+  伪代码 need 等于 write 但 auth_mode 不等于 on（单人/不登录）：不校验，同 need 缺省
+
+公开 函数 列科目学生 subject_id
+  返回 {total, students}；students 是 [{learner}]，subject_student 里该科目 status 等于 active 的学生，按 learner 升序（report 用）
+  伪代码 查 subject_student 中 subject_id 相等且 status 等于 active 的行，按 learner 升序，去重
+  伪代码 不校验权限（调用方已解析科目）、只读、不调用别的模块；科目不存在或没人登记返回 {"total": 0, "students": []}
+  伪代码 返回 {"total": 数量, "students": 列表}
 
 公开 函数 切换科目 learner current_role subject
   返回 {ok, subject}；把该用户的当前科目偏好写成 subject
@@ -352,3 +364,69 @@ POST /subject/switch -> 切换科目 动作 subject_switch 模板 提交消息 �
   先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   调用 解析科目 learner=me current_role=空 auth_mode=on subject=1
   报错 403
+
+用例 解析科目_need不对
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 解析科目 learner=t1 current_role=teacher auth_mode=on subject=1 need=abc
+  报错 400
+
+用例 解析科目_need不对单人模式也报
+  调用 解析科目 learner=me current_role=空 auth_mode=off need=abc
+  报错 400
+
+用例 解析科目_need_write公共科目非负责教师403
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 解析科目 learner=t2 current_role=teacher auth_mode=on subject=1 need=write
+  报错 403
+
+用例 解析科目_need_write协作教师通过
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=1 teacher=t2 role=editor created_at=2026-01-01
+  调用 解析科目 learner=t2 current_role=teacher auth_mode=on subject=1 need=write
+  得 subject_id=1
+
+用例 解析科目_need_write负责教师通过
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 解析科目 learner=t1 current_role=teacher auth_mode=on subject=1 need=write
+  得 subject_id=1
+
+用例 解析科目_need_write学生403
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  调用 解析科目 learner=s1 current_role=student auth_mode=on subject=1 need=write
+  报错 403
+
+用例 解析科目_need_write科目不存在404
+  调用 解析科目 learner=t1 current_role=teacher auth_mode=on subject=9 need=write
+  报错 404
+
+用例 解析科目_need_write不传subject按偏好解析再校验
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=b name=乙 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_pref learner=t2 subject_id=2
+  调用 解析科目 learner=t2 current_role=teacher auth_mode=on need=write
+  报错 403
+
+用例 解析科目_need_write单人模式不校验
+  调用 解析科目 learner=me current_role=空 auth_mode=off subject=7 need=write
+  得 subject_id=7
+
+用例 解析科目_need_read公共科目教师照常
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 解析科目 learner=t2 current_role=teacher auth_mode=on subject=1 need=read
+  得 subject_id=1
+
+用例 列科目学生_只列在册的并升序
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=b name=乙 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_student subject_id=2 learner=s2 assigned_by=t1 status=active created_at=2026-01-01
+  先 数据 subject_student subject_id=2 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  先 数据 subject_student subject_id=2 learner=s3 assigned_by=t1 status=revoked created_at=2026-01-01
+  先 数据 subject_student subject_id=1 learner=s4 assigned_by=t1 status=active created_at=2026-01-01
+  调用 列科目学生 subject_id=2
+  得 total=2
+
+用例 列科目学生_没人登记
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 列科目学生 subject_id=1
+  得 total=0

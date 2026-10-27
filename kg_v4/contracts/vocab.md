@@ -90,7 +90,8 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
+  报错 403 没有权限修改该科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 kana 为空，报错 400 假名不能为空
   伪代码 point_code 不为空时，调用 kg.取知识点 code=point_code subject=subject_id，取不到（包括属于别的科目）报错 404 没有这个知识点
   伪代码 在本科目内按 kanji + kana 查 vocab_word，已有则报错 400 单词已存在（别的科目有同样的词不算重复）
@@ -107,12 +108,13 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
+  报错 403 没有权限修改该科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 按 id=word_id 和 subject_id 查 vocab_word，查不到（包括属于别的科目）报错 404 没有这个单词
   伪代码 kana 为空，报错 400 假名不能为空
   伪代码 在本科目内按 kanji + kana 查 vocab_word，若存在且 id 不等于 word_id，报错 400 单词已存在
   伪代码 point_code 不为空时，调用 kg.取知识点 code=point_code subject=subject_id，取不到（包括属于别的科目）报错 404 没有这个知识点
-  伪代码 更新该行的 kanji、kana、meaning、point_code
+  伪代码 更新该行的 kanji、kana、meaning、point_code；更新语句的 SQL 条件同时写 id=word_id 和 subject_id=本科目（属于当前科目才改，纵深防御，不只靠上面的查询）
   伪代码 返回 {"ok": 1, "id": word_id}
 
 公开 函数 删除单词 word_id learner? current_role? auth_mode? subject?
@@ -122,9 +124,10 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
+  报错 403 没有权限修改该科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 按 id=word_id 和 subject_id 查 vocab_word，查不到（包括属于别的科目）报错 404 没有这个单词
-  伪代码 删除该行
+  伪代码 删除该行；删除语句的 SQL 条件同时写 id=word_id 和 subject_id=本科目（属于当前科目才删，纵深防御，不只靠上面的查询）
   伪代码 返回 {"ok": 1}
 
 公开 函数 导入单词 file_path learner? current_role? auth_mode? subject?
@@ -135,7 +138,8 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
+  报错 403 没有权限修改该科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 用 doc 包「读文档」读 file_path 取文本，按行拆开；空行和以 # 开头的行忽略
   伪代码 每行格式「汉字|假名|中文意思|知识点编号」，用 | 分隔；后两项可以省略或为空（缺的尾部字段当空），汉字可以为空；少于 2 项或假名为空，报错 400 导入文件有错（整批不写）
   伪代码 对每个非空的知识点编号，调用 kg.取知识点 code=编号 subject=subject_id，取不到（包括属于别的科目）报错 400 知识点对不上（整批不写）
@@ -143,9 +147,9 @@
   伪代码 同一文件里重复的 汉字+假名，后一行覆盖前一行（按已存在算更新）
   伪代码 返回 {"ok": 1, "total": 有效行数, "created": created, "updated": updated}
 
-函数 本科目 learner current_role auth_mode subject
+函数 本科目 learner current_role auth_mode subject need?
   返回 {subject_id}；本次请求用哪个科目
-  伪代码 调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject，原样返回它的 subject_id（四个入参都是空串时得 1；显式 subject 无权时 解析科目 报 403/404、不是数字报 400，原样抛出）
+  伪代码 调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=need，原样返回它的 subject_id（need 不传按 read；need=write 时登录模式下只有负责/协作教师通过，否则 解析科目 报 403 没有权限修改该科目、原样抛出；四个入参都是空串时得 1；显式 subject 无权时 解析科目 报 403/404、不是数字报 400，原样抛出）
 
 ## 接口
 GET /vocab/words -> 列单词
@@ -469,3 +473,67 @@ POST /vocab/import -> 导入单词 上传 file 类型 md,txt 上限 20MB 角色 
   先 数据 vocab_word kanji=先生 kana=せんせい meaning=老师 subject_id=2
   调用 列默写词 direction=zh2jp only_ids=1,2 subject=2
   得 total=1
+
+用例 跨科目_need_新建单词公共科目非负责教师403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 新建单词 kana=ゼロ meaning=零 learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 vocab_word 共 0 行
+
+用例 跨科目_need_新建单词协作教师可写
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  调用 新建单词 kana=ゼロ meaning=零 learner=t2 current_role=teacher auth_mode=on subject=2
+  得 ok=1
+  库 vocab_word 含 kana=ゼロ meaning=零 subject_id=2
+
+用例 跨科目_need_修改单词公共科目非负责教师403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 vocab_word kanji=先生 kana=せんせい meaning=老师 subject_id=2
+  调用 修改单词 word_id=1 kanji=先生 kana=せんせい meaning=教师 point_code=空 learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 vocab_word 含 kana=せんせい meaning=老师 subject_id=2
+
+用例 跨科目_need_删除单词公共科目非负责教师403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 vocab_word kanji=先生 kana=せんせい meaning=老师 subject_id=2
+  调用 删除单词 word_id=1 learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 vocab_word 共 1 行
+
+用例 跨科目_need_删除单词协作教师可写
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 vocab_word kanji=先生 kana=せんせい meaning=老师 subject_id=2
+  调用 删除单词 word_id=1 learner=t2 current_role=teacher auth_mode=on subject=2
+  得 ok=1
+  库 vocab_word 共 0 行
+
+用例 跨科目_need_导入单词公共科目非负责教师403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 文件 words.md 内容=空|ゼロ|零
+  调用 导入单词 file_path=words.md learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 vocab_word 共 0 行
+
+用例 跨科目_修改单词别的科目的词404且不改
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 vocab_word kanji=学校 kana=がっこう meaning=学校
+  调用 修改单词 word_id=1 kanji=学校 kana=がっこう meaning=改了 point_code=空 subject=2
+  报错 404
+  库 vocab_word 含 kana=がっこう meaning=学校 subject_id=1
+
+用例 跨科目_删除单词别的科目的词404且不删
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 vocab_word kanji=学校 kana=がっこう meaning=学校
+  调用 删除单词 word_id=1 subject=2
+  报错 404
+  库 vocab_word 共 1 行

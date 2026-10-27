@@ -126,7 +126,8 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
+  报错 403 没有权限修改该科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 pre_code 或 point_code 为空，报错 400 编号不能为空
   伪代码 pre_code 等于 point_code，报错 400 不能以自己为前置
   伪代码 pre_code 或 point_code 不在本科目的 kg_point（包括属于别的科目），报错 404 没有这个知识点
@@ -211,7 +212,8 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
+  报错 403 没有权限修改该科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 用 doc 包「读文档」读 file_path 取文本，按行拆开；空行和以 # 开头的行忽略
   伪代码 每行格式「编号|中文名」，用 | 分隔；编号或中文名为空、或没有 | 就报错 400 导入文件有错（整批不写）
   伪代码 编号前缀：每行编号都调用本模块 编号前缀检查 subject_id=subject_id code=编号，不符报错 400 编号要以「<编码>.」开头（整批不写）；日语（subject_id 等于 1）豁免
@@ -230,7 +232,8 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
+  报错 403 没有权限修改该科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 用 doc 包「读文档」读 file_path 取文本，按行拆开；空行和以 # 开头的行忽略
   伪代码 每行格式「编号|名称|知识点编号|接在哪个形式后|前一个条目编号」，用 | 分隔；后三项可以省略或为空（缺的尾部字段当空）；编号、名称、知识点编号任一为空，报错 400 导入文件有错
   伪代码 编号前缀：每行条目编号都调用本模块 编号前缀检查 subject_id=subject_id code=编号，不符报错 400 编号要以「<编码>.」开头（整批不写）；日语（subject_id 等于 1）豁免
@@ -247,16 +250,17 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
+  报错 403 没有权限修改该科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 用 doc 包「读文档」读 file_path 取文本，按行拆开；空行和以 # 开头的行忽略
   伪代码 每行格式「编号A|编号B」，用 | 分隔；任一为空、或两端相同，报错 400 导入文件有错（整批不写）；对照两端可以是知识点也可以是条目，不核对是否存在，不加外键，不做环检查
   伪代码 编号前缀：两端编号都调用本模块 编号前缀检查 subject_id=subject_id code=编号，不符报错 400 编号要以「<编码>.」开头（整批不写）；日语（subject_id 等于 1）豁免
   伪代码 在一个事务里：每行把两端按字符串大小规范化（小的为 a_code），按 (subject_id, a_code, b_code) 查 kg_contrast，没有则插入（带 subject_id）并 created+1，有则 updated+1
   伪代码 返回 {"ok": 1, "total": 有效行数, "created": created, "updated": updated}
 
-函数 本科目 learner current_role auth_mode subject
+函数 本科目 learner current_role auth_mode subject need?
   返回 {subject_id}；本次请求用哪个科目
-  伪代码 调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject，原样返回它的 subject_id（四个入参都是空串时得 1；显式 subject 无权时 解析科目 报 403/404、不是数字报 400，原样抛出）
+  伪代码 调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=need，原样返回它的 subject_id（need 不传按 read；need=write 时登录模式下只有负责/协作教师通过，否则 解析科目 报 403 没有权限修改该科目、原样抛出；四个入参都是空串时得 1；显式 subject 无权时 解析科目 报 403/404、不是数字报 400，原样抛出）
 
 函数 编号前缀检查 subject_id code
   返回 {ok}
@@ -763,3 +767,70 @@ POST /kg/import/contrasts -> 导入对照 上传 file 类型 md,txt 上限 20MB 
 用例 跨科目_显式科目不是数字
   调用 列知识点 subject=abc
   报错 400
+
+用例 跨科目_need_加前置边公共科目非负责教师403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_point code=math.b title=几何 subject_id=2
+  调用 加前置边 pre_code=math.a point_code=math.b learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 kg_edge 共 0 行
+
+用例 跨科目_need_加前置边协作教师可写
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_point code=math.b title=几何 subject_id=2
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  调用 加前置边 pre_code=math.a point_code=math.b learner=t2 current_role=teacher auth_mode=on subject=2
+  得 ok=1 created=1
+  库 kg_edge 含 pre_code=math.a point_code=math.b subject_id=2
+
+用例 跨科目_need_导入知识点公共科目非负责教师403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 文件 kg_in/n1.txt 内容=math.a|代数
+  调用 导入知识点 file_path=kg_in/n1.txt learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 kg_point 共 0 行
+
+用例 跨科目_need_导入知识点协作教师可写
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 文件 kg_in/n2.txt 内容=math.a|代数
+  调用 导入知识点 file_path=kg_in/n2.txt learner=t2 current_role=teacher auth_mode=on subject=2
+  得 ok=1 total=1 created=1 updated=0
+  库 kg_point 含 code=math.a subject_id=2
+
+用例 跨科目_need_导入条目公共科目非负责教师403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 文件 kg_in/n3.txt 内容=math.i1|条目|math.a
+  调用 导入条目 file_path=kg_in/n3.txt learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 kg_item 共 0 行
+
+用例 跨科目_need_导入对照公共科目非负责教师403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 文件 kg_in/n4.txt 内容=math.b|math.a
+  调用 导入对照 file_path=kg_in/n4.txt learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 kg_contrast 共 0 行
+
+用例 跨科目_need_负责教师导入对照可写
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 文件 kg_in/n5.txt 内容=math.b|math.a
+  调用 导入对照 file_path=kg_in/n5.txt learner=t1 current_role=teacher auth_mode=on subject=2
+  得 ok=1 total=1 created=1 updated=0
+
+用例 跨科目_need_读不受影响公共科目非负责教师可读
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  调用 列知识点 learner=t2 current_role=teacher auth_mode=on subject=2
+  得 total=1

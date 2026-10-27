@@ -170,7 +170,8 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
+  报错 403 没有权限修改该科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 series_code 为空，报错 400 series_code 不能为空
   伪代码 sort_order 不为空且不是整数，报错 400 导入文件有错
   伪代码 用 doc 包「读文档」读 file_path 取文本，按行拆开；空行和以 # 开头的行忽略；没有有效行报错 400 导入文件有错
@@ -196,7 +197,8 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
+  报错 403 没有权限修改该科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 series_code 为空，报错 400 series_code 不能为空
   伪代码 rows_json 是 JSON 数组，每个元素是一课：{code, level, title, summary, explain, connection, examples, examples_edited, orig_title, seq, item_codes, point_codes}，item_codes、point_codes 是编号数组（可空）；不是数组或没有任何一课，报错 400 课文数据有错
   伪代码 校验每课：code、title 不能为空；level 必须是 N5 N4 N3 N2 N1 之一；examples_edited 为空当 0，只能是 0 或 1；seq 为空当 0，否则必须是整数；任一不满足报错 400 课文数据有错
@@ -216,7 +218,8 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
+  报错 403 没有权限修改该科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 按 series_code 和本科目 subject_id 查 lesson_series，查不到（包括属于别的科目）报错 404 没有这个系列
   伪代码 先用 移动文件 content/lesson/series/{series_code}.jsonl content/lesson/series/{series_code}.withdrawn.jsonl 挪走内容文件（源不存在返回否，不算错；目标已存在被覆盖），moved 为 1（挪了）或 0（没有文件可挪）
   伪代码 在一个事务里：数出 series_code 系列的课文数 removed_lessons；删除这些课文在 lesson_item_link、lesson_point_link 中的行；删除 lesson_text 中该系列的行；把 lesson_series 该行 sort_order 改为 -1（系列行保留，lesson_pref 不动）
@@ -255,9 +258,9 @@
   伪代码 lesson_items：调用 取课文关联条目 lesson_code=lesson 得 items，逐条转 {code, label: name, point_label: 调用 kg.取知识点 code=point_code 取 title（取不到用 point_code）}；再把 point_codes 按英文逗号拆开的每个直接挂知识点追加 {code: 点编号, label: （整个知识点）, point_label: 该点 title（取不到用编号）}（旧口径：排在条目后面）
   伪代码 lessons/series_options/series_head/lesson_count/form 按 教材页面 的默认形态拼（series 入参为空、lesson_level=「全部」、keyword 空串）；返回 {"reading": reading, "examples": 例句列表, "lesson_items": 条目列表, "lessons": 行列表, "series_options": 选项列表, "series_head": 当前系列 name, "lesson_count": "共{total}课", "form": {"series": 当前系列编号, "lesson_level": "全部", "keyword": ""}}
 
-函数 本科目 learner current_role auth_mode subject
+函数 本科目 learner current_role auth_mode subject need?
   返回 {subject_id}；本次请求用哪个科目
-  伪代码 调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject，原样返回它的 subject_id（四个入参都是空串时得 1；显式 subject 无权时 解析科目 报 403/404、不是数字报 400，原样抛出）
+  伪代码 调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=need，原样返回它的 subject_id（need 不传按 read；need=write 时登录模式下只有负责/协作教师通过，否则 解析科目 报 403 没有权限修改该科目、原样抛出；四个入参都是空串时得 1；显式 subject 无权时 解析科目 报 403/404、不是数字报 400，原样抛出）
 
 函数 编号前缀检查 subject_id code
   返回 {ok}
@@ -780,3 +783,52 @@ content/lesson/series/{series_code}.withdrawn.jsonl 字段 code,level,title,summ
   先 数据 lesson_text code=L1 level=N5 title=甲 series_code=hanabira seq=1
   调用 课文页面 learner=me lesson=L1 subject=2
   得 有返回
+
+用例 跨科目_need_导入课文公共科目非负责教师403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 文件 imports/n1.md 内容=math.L1|N5|标题一|一句话|讲解|接续|例句A^^中文A|0|原标题|1||
+  调用 导入课文 series_code=math.s file_path=imports/n1.md learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 lesson_text 共 0 行
+  库 lesson_series 共 0 行
+
+用例 跨科目_need_导入课文协作教师可写
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 文件 imports/n2.md 内容=math.L1|N5|标题一|一句话|讲解|接续|例句A^^中文A|0|原标题|1||
+  调用 导入课文 series_code=math.s file_path=imports/n2.md series_name=数学教材 learner=t2 current_role=teacher auth_mode=on subject=2
+  得 ok=1 total=1
+  库 lesson_text 含 code=math.L1 subject_id=2
+
+用例 跨科目_need_写入系列课文并重灌公共科目非负责教师403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 写入系列课文并重灌 series_code=math.s rows_json=[{"code":"math.L1","level":"N5","title":"标题一","summary":"","explain":"","connection":"","examples":"","examples_edited":0,"orig_title":"","seq":1,"item_codes":[],"point_codes":[]}] learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 lesson_text 共 0 行
+
+用例 跨科目_need_撤下系列公共科目非负责教师403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 lesson_series code=math.s name=数学教材 sort_order=1 subject_id=2
+  调用 撤下系列 series_code=math.s learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 lesson_series 含 code=math.s sort_order=1
+
+用例 跨科目_need_撤下系列协作教师可写
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 lesson_series code=math.s name=数学教材 sort_order=1 subject_id=2
+  调用 撤下系列 series_code=math.s learner=t2 current_role=teacher auth_mode=on subject=2
+  得 ok=1 series_code=math.s
+  库 lesson_series 含 code=math.s sort_order=-1
+
+用例 跨科目_need_选择系列仍是读_公共科目教师照常
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 lesson_series code=math.s name=数学教材 sort_order=1 subject_id=2
+  调用 选择系列 learner=t2 series_code=math.s current_role=teacher auth_mode=on subject=2
+  得 ok=1
