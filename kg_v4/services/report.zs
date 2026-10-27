@@ -353,7 +353,7 @@
     结束
     设 d = 调用 取学生学情 student={student}
     设 pt = 请根据下面的学情数据，为教师写一段简明的学情总结（中文，不超过300字）。学生：{d.display_name}；近期正确率：{d.recent_accuracy}%；平均得分：{d.avg_score}；已掌握知识点数：{d.mastered_count}；最近答错的题：{d.wrong_answers}；错词本：{d.wrong_book}；薄弱点：{d.weak_points}；问老师的提问摘要：{d.recent_questions}；传达状态：{d.relays}
-    问 reply = {pt} 出错时 qe
+    问 reply = {pt} 用 平衡 出错时 qe
     如果 {qe} 不为空
       报错 400 老师暂时无法回答
     结束

@@ -865,7 +865,7 @@
   结束
 
   函数 抽课 prompt
-    问JSON r = {prompt} 格式 lessons:列表
+    问JSON r = {prompt} 格式 lessons:列表 用 平衡
     返回 {r}
   结束
 

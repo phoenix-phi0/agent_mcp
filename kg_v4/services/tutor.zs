@@ -16,7 +16,7 @@
     # intent 不是 quiz、progress、textbook、explain 之一（含模型出错或返回不合法），取 explain
     # level 不是 N5 N4 N3 N2 N1 之一，取空串；keyword 缺失取空串并去首尾空白
     # 返回 {"intent": intent, "keyword": keyword, "level": level}
-    问JSON j = 判断学生这句话的意图：quiz 表示想做题，progress 表示问学习进度，textbook 表示问教材或课文目录，explain 表示问语法讲解或其他一切。同时抽出学生指名的语法点或课文关键词 keyword（没有则空串）和指定的日语等级 level（只能是 N5 N4 N3 N2 N1 或空串）。学生的话：{message} 格式 intent:文本 keyword?:文本 level?:文本 出错时 ej
+    问JSON j = 判断学生这句话的意图：quiz 表示想做题，progress 表示问学习进度，textbook 表示问教材或课文目录，explain 表示问语法讲解或其他一切。同时抽出学生指名的语法点或课文关键词 keyword（没有则空串）和指定的日语等级 level（只能是 N5 N4 N3 N2 N1 或空串）。学生的话：{message} 格式 intent:文本 keyword?:文本 level?:文本 用 快 出错时 ej
     如果 {ej} 不为空
       设 j.intent = explain
       设 j.keyword = {zz 或}
@@ -152,7 +152,7 @@
       如果 {rid} 不为空
         设 rl = 调用 teacher_rules.取传达 relay_id={rid} 出错时 e
         如果 {e} 为空
-          问JSON j = 下面是老师给学生的一条回复和必须准确传达的信息，判断回复是否已把这条信息传达到，传达到 delivered 为 1，否则为 0。回复：{reply} 必须准确的信息：{rl.must_info} 格式 delivered:数字 出错时 ej
+          问JSON j = 下面是老师给学生的一条回复和必须准确传达的信息，判断回复是否已把这条信息传达到，传达到 delivered 为 1，否则为 0。回复：{reply} 必须准确的信息：{rl.must_info} 格式 delivered:数字 用 快 出错时 ej
           如果 {ej} 为空
             如果 {j.delivered 或 0} 等于 1
               设 jr = 调用 teacher_rules.记传达判定 student={learner} relay_id={rid} delivered=1 出错时 e2
@@ -187,7 +187,7 @@
       设 sysp = {sysp} 以下是传达事项（用「[传达#编号]」标记），请自然地让学生在回复里知道其中必须准确的信息，回复里不要出现标记本身：{rl.prompt_text}
     结束
     设 usrp = {context_text} 最近对话：{recent} 作者注：{eff.note_text} 学生最新一句：{user_text}
-    问 reply = {sysp} 【以下是学生相关内容】{usrp} 出错时 qe
+    问 reply = {sysp} 【以下是学生相关内容】{usrp} 用 平衡 出错时 qe
     如果 {qe} 不为空
       报错 400 老师暂时无法回答
     结束
@@ -519,7 +519,7 @@
       结束
       设 detail = {detail}；知识点{title} 题号{a2.question_no} {ok} 作答{a2.answer}
     结束
-    问 summary = 你是一位中文老师，教中文学习者日语语法。请为学生写一段简明的本轮做题总结，说说做得好的和该复习的。本轮模式：{r.mode}，课：{r.lesson_code}，共 {total} 题，答对 {right} 题。每题情况：{detail} 出错时 qe
+    问 summary = 你是一位中文老师，教中文学习者日语语法。请为学生写一段简明的本轮做题总结，说说做得好的和该复习的。本轮模式：{r.mode}，课：{r.lesson_code}，共 {total} 题，答对 {right} 题。每题情况：{detail} 用 平衡 出错时 qe
     如果 {qe} 不为空
       报错 400 老师暂时无法回答
     结束
