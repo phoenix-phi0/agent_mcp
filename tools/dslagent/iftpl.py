@@ -87,7 +87,22 @@ def _parse(text):
             for ph in PLACEHOLDER_RE.findall(line):
                 if ph not in tpl["参数"]:
                     probs.append(f"主体里的占位符 <<{ph}>> 不是声明的参数")
+    probs += _shadow_problems(tpl["主体"])
     return tpl, probs
+
+
+def _shadow_problems(blocks):
+    """带「当」的块按文件顺序取第一个参数齐的（render），所以条件集是后面某块条件集真子集的块排在前面，
+    会把后者永远遮住：参数给全了也先命中前者。无条件「主体」是缺省块（render 只在带「当」的都不中时才用，
+    与它在文件里的位置无关），不会遮住任何块，所以不参与此检查（也不要求它放最前或最后）。"""
+    probs = []
+    cond = [(i, set(b["当"])) for i, b in enumerate(blocks) if b["当"]]
+    for i, a in cond:
+        for j, b in cond:
+            if j > i and a < b:
+                probs.append(f"「主体 当 {','.join(blocks[j]['当'])}」会被前面的「主体 当 {','.join(blocks[i]['当'])}」遮住"
+                             f"（后者的条件是前者的子集，渲染按文件顺序取第一个参数齐的）；请把条件多的块挪到条件少的块前面")
+    return probs
 
 
 def all_():

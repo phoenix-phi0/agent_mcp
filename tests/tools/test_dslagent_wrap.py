@@ -175,6 +175,34 @@ def t_tpl():
     check(len(zh) == len(set(zh)), "模板中文名不重复", zh)
 
 
+def t_shadow():
+    print("K70 模板块遮挡检查：条件集真子集的块排在前面 → 报错")
+    head = "模板 测试\n用途 x\n参数 谁 可选 free x\n参数 取 可选 snake x\n参数 表 可选 snake x\n"
+    body = lambda *bs: head + "".join(f"{h}\n  消息 {n} ok\n" for h, n in bs)
+    _, p = T._parse(body(("主体", "a"), ("主体 当 取", "b"), ("主体 当 谁,取", "c")))
+    check(len(p) == 1 and "主体 当 谁,取" in p[0] and "遮住" in p[0] and "挪到" in p[0], "子集块在前 → 报遮挡", p)
+    _, p = T._parse(body(("主体", "a"), ("主体 当 谁,取", "c"), ("主体 当 取", "b")))
+    check(p == [], "条件多的块在前 → 通过", p)
+    _, p = T._parse(body(("主体 当 取", "b"), ("主体", "a"), ("主体 当 谁,取", "c")))
+    check(len(p) == 1, "无条件主体夹在中间不影响：子集块仍遮住后者", p)
+    for tail in (("主体", "a"),):
+        _, p = T._parse(body(("主体 当 谁,取", "c"), ("主体 当 取", "b"), tail))
+        check(p == [], "无条件主体放最后也通过", p)
+    _, p = T._parse(body(("主体", "a"), ("主体 当 取", "b"), ("主体 当 谁,表", "c")))
+    check(p == [], "互不包含的条件集（取 / 谁,表）不算遮挡", p)
+    # 渲染语义：无条件主体在最前也只是缺省块
+    check(T.render("回复消息", {"谁": "助手", "取": "reply"}) == ["  消息 助手 {r.reply} ok"], "回复消息 谁+取 → 谁生效")
+    check(T.render("回复消息", {"取": "reply"}) == ["  消息 老师 {r.reply} ok"], "回复消息 只给取 → 老师")
+    check(T.render("回复消息", {"谁": "助手"}) == ["  消息 老师 {r} ok"], "回复消息 只给谁 → 缺省块（谁单独不触发）")
+    check(T.render("回复消息", {}) == ["  消息 老师 {r} ok"], "回复消息 都不给 → 缺省块")
+    # 现有全部模板都通过（all_() 写法不对会抛）
+    try:
+        n = len(T.all_())
+        check(n >= 8, f"现有所有模板通过校验（{n} 个）")
+    except ValueError as e:
+        check(False, "现有所有模板通过校验", e)
+
+
 def t_parse():
     print("约定解析：模板行")
     c, probs = C.parse("模块 note\n依赖 无\n" + GOOD_TAIL)
@@ -726,6 +754,7 @@ def t_router_new():
 
 def main():
     t_tpl()
+    t_shadow()
     t_parse()
     t_compat()
     t_scaffold()
