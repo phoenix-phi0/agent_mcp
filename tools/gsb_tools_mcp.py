@@ -23,8 +23,10 @@ goose 1.55 每轮只执行一个工具，所以这里的工具都一次做完多
   只挂 builtins + gsb_read_files，关 connectors）或 codex（codex exec gpt-6-luna，
   -s read-only）。Codex 用 ~/.codex/auth.json 的 ChatGPT 登录（靠 HOME）；
   两种后端都不需要也不放行任何密钥环境变量。
-- verify / verify_wait（GSB_VERIFY=1 时才有）：始终走 Codex，但用 workspace-write 沙箱、
-  工作目录锁在自己的临时目录 /tmp/verify_<id>/（起本地服务要监听端口，放开 network_access），
+- verify / verify_wait（GSB_VERIFY=1 时才有）：后端由 GSB_VERIFY_BACKEND 选择：claude（默认，Claude CLI
+  claude-haiku-5-5，acceptEdits，整个套在 bwrap 里：文件系统只读、只有自己的临时目录可写，
+  没有 bwrap 就拒绝运行）或 codex（codex exec gpt-6-luna，workspace-write 沙箱、放开 network_access）。
+  两种后端的工作目录都锁在自己的临时目录 /tmp/verify_<id>/（起本地服务要监听端口，保留网络），
   派验证 agent 做全量回归 / 起服务逐接口实测 / 基线对比：它自己摸项目、优先用项目已有入口、
   没有才写临时脚本；被验项目与仓库只读，结束时核对它们的 git status / 文件清单，
   变了在结果里标「违规改动」。最终回复严格按 JSON 交回（必须带「环境」：解释器、引擎、
@@ -95,7 +97,10 @@ REVIEW_BACKEND = _REVIEW_BACKEND_RAW if _REVIEW_BACKEND_RAW in ("codex", "claude
 REVIEW_MODEL = os.environ.get("GSB_REVIEW_MODEL") or (
     "claude-haiku-5-5" if REVIEW_BACKEND == "claude" else "gpt-6-luna")
 VERIFY_ON = os.environ.get("GSB_VERIFY") == "1"
-VERIFY_MODEL = os.environ.get("GSB_VERIFY_MODEL") or "gpt-6-luna"
+_VERIFY_BACKEND_RAW = (os.environ.get("GSB_VERIFY_BACKEND") or "claude").strip().lower()
+VERIFY_BACKEND = _VERIFY_BACKEND_RAW if _VERIFY_BACKEND_RAW in ("codex", "claude") else "claude"
+VERIFY_MODEL = os.environ.get("GSB_VERIFY_MODEL") or (
+    "claude-haiku-5-5" if VERIFY_BACKEND == "claude" else "gpt-6-luna")
 PROBE_EFFORTS = ("low", "medium", "high")
 PROBE_MAX_TIMEOUT = 1800
 PROBE_MAX_REPLY = 30000
@@ -751,6 +756,27 @@ def _claude_bin():
     return os.environ.get("GSB_CLAUDE_BIN") or shutil.which("claude")
 
 
+def _bwrap_bin():
+    p = os.environ.get("GSB_BWRAP_BIN")
+    if p:
+        return p if os.access(p, os.X_OK) else None    # 指到不存在的文件就当没有
+    return shutil.which("bwrap")
+
+
+def _bwrap_prefix(wd):
+    """claude 后端 verify 的写保护（Claude CLI 没有 codex 那种系统级沙箱，用 bwrap 补）：
+    整个文件系统只读，只有验证员自己的临时目录 wd、日志目录和 claude 自己的状态目录可写；
+    网络保留（要起本地服务）。被验项目与仓库因此写不进去，和 codex workspace-write 等效。"""
+    rw = [wd, LOG_DIR]
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    if os.path.isdir(cfg):
+        rw.append(cfg)
+    cmd = [_bwrap_bin(), "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
+    for p in dict.fromkeys(os.path.realpath(x) for x in rw):
+        cmd += ["--bind", p, p]
+    return cmd + ["--share-net", "--unshare-pid", "--die-with-parent", "--chdir", wd, "--"]
+
+
 PROBE_RETRY_WAITS = tuple(int(x) for x in os.environ.get("GSB_PROBE_RETRY_WAITS", "20,40,60,90,120").split(",") if x.strip())
 _CAPACITY_RE = re.compile(
     r"at capacity|overloaded|rate.?limit|too many requests|429|temporarily unavailable", re.I)
@@ -876,6 +902,40 @@ def _review_opts(effort, timeout_secs, model, cwd):
     return backend, eff, to, m, wd, exe
 
 
+def _verify_opts(effort, timeout_secs, model, cwd):
+    """校验验证参数；按 VERIFY_BACKEND 检查对应 CLI。claude 后端的写保护靠 bwrap，
+    找不到就拒绝，不会无保护地跑。"""
+    eff = str(effort or "medium").strip().lower()
+    if eff not in PROBE_EFFORTS:
+        raise ValueError(f"effort 只能是 {' / '.join(PROBE_EFFORTS)}，收到：{effort!r}")
+    to = int(timeout_secs or 900)
+    if not 1 <= to <= PROBE_MAX_TIMEOUT:
+        raise ValueError(f"timeout_secs 要在 1~{PROBE_MAX_TIMEOUT}")
+    backend = VERIFY_BACKEND
+    m = str(model or VERIFY_MODEL).strip()
+    if not _MODEL_RE.match(m):
+        raise ValueError(f"model 不对：{model!r}")
+    wd = _resolve(cwd) if cwd else os.getcwd()
+    if not os.path.isdir(wd):
+        raise ValueError(f"cwd 不是目录：{wd}")
+    if backend == "claude":
+        exe = _claude_bin()
+        if not exe:
+            raise ValueError("找不到 claude（PATH 里没有；或设 GSB_CLAUDE_BIN）")
+        for f, what in ((PROBE_CLAUDE_RUN, "Claude 启动器"), (PROBE_CLAUDE_MCP, "Claude MCP 配置"),
+                        (PROBE_CLAUDE_SETTINGS, "Claude settings")):
+            if not Path(f).is_file():
+                raise ValueError(f"找不到 {what}：{f}")
+        if not _bwrap_bin():
+            raise ValueError("找不到 bwrap（claude 后端的写保护靠它，不会无保护地跑；装 bubblewrap，"
+                             "或设 GSB_VERIFY_BACKEND=codex）")
+    else:
+        exe = _codex_bin()
+        if not exe:
+            raise ValueError("找不到 codex（PATH 里没有）")
+    return backend, eff, to, m, wd, exe
+
+
 def _new_probe_id(kind):
     """probe / review / verify 共用的 id：p1-<pid>-<ts> / r… / v…。"""
     with _PLOCK:
@@ -931,12 +991,13 @@ def _codex_start(kind, prompt, eff, to, m, wd, exe, sandbox="read-only", extra_c
     return pid_
 
 
-def _claude_start(kind, prompt, eff, to, m, wd, exe):
-    """后台起 Claude CLI 只读探针（经 probe_claude_run.py），登记到 _PROBES。"""
+def _claude_start(kind, prompt, eff, to, m, wd, exe, sandbox=False, extra_dirs=(), pid_=None):
+    """后台起 Claude CLI（经 probe_claude_run.py），登记到 _PROBES。默认是只读探针（plan）；
+    sandbox=True 给 verify 用：acceptEdits + 预批 Bash/Write/Edit，整个套在 bwrap 里（只有
+    wd 可写，见 _bwrap_prefix），extra_dirs 是额外可读的目录（被验项目、引擎仓库）。"""
     os.makedirs(LOG_DIR, exist_ok=True)
-    with _PLOCK:
-        _PSEQ[0] += 1
-        pid_ = f"{kind[0]}{_PSEQ[0]}-{os.getpid()}-{int(time.time() * 1000) % 100000}"
+    if pid_ is None:
+        pid_ = _new_probe_id(kind)
     base = os.path.join(LOG_DIR, f"{kind}_{time.strftime('%Y%m%d-%H%M%S')}_{pid_}")
     log, out, prompt_f = base + ".log", base + ".reply.txt", base + ".prompt.txt"
     with open(prompt_f, "w", encoding="utf-8") as f:
@@ -953,8 +1014,19 @@ def _claude_start(kind, prompt, eff, to, m, wd, exe):
            "--prompt-file", prompt_f, "--out", out, "--log", log,
            "--mcp-config", mcp_cfg, "--settings", PROBE_CLAUDE_SETTINGS,
            "--claude-bin", exe]
+    if sandbox:
+        cmd += ["--permission-mode", "acceptEdits", "--tools", "Read,Glob,Grep,Bash,Write,Edit",
+                "--allowed-tools", "Bash,Read,Glob,Grep,Write,Edit,mcp__gsb_read_files"]
+        for d in extra_dirs:
+            if d:
+                cmd += ["--extra-dir", d]
+        cmd = _bwrap_prefix(wd) + cmd
     env = {k: v for k, v in os.environ.items() if not _leaky_env(k, v)}
     env["ENABLE_CLAUDEAI_MCP_SERVERS"] = "0"
+    if sandbox:
+        # claude 自己要在临时目录里建工作目录（否则 Bash 工具起不来），让它落在验证员自己可写的 wd 里，
+        # 不要把整个 /tmp/claude-<uid>（其它会话的工作文件也在那里）放开。
+        env["CLAUDE_CODE_TMPDIR"] = wd
     open(log, "wb").close()
 
     def launch():
@@ -1354,7 +1426,8 @@ def _verify_env_check(d, repo):
 
 def verify(instructions, cwd=None, project=None, base=None, effort="medium",
            timeout_secs=900, wait=True, model=None, engine_repo=None, _cancel=None):
-    """派一个验证 agent：codex workspace-write，-C 锁在 /tmp/verify_<id>/（临时目录），
+    """派一个验证 agent：codex workspace-write 或 claude+bwrap（GSB_VERIFY_BACKEND），
+    工作目录锁在 /tmp/verify_<id>/（临时目录），
     放开 network_access 好起本地服务；被验项目与仓库都不在可写根里，写不进去。
     派前给被验项目 / 仓库拍快照，结束时核对，变了标「违规改动」。
     引擎仓库（engine_repo）按 显式参数 → 被验项目向上探测 → cwd 向上探测 确定，前言和
@@ -1362,7 +1435,7 @@ def verify(instructions, cwd=None, project=None, base=None, effort="medium",
     两者分离时两边都拍快照。"""
     if not isinstance(instructions, str) or not instructions.strip():
         raise ValueError("instructions 要是非空字符串：写清楚验什么（如「kg_v4 全量回归」）")
-    eff, to, m, wd, exe = _codex_opts(effort, timeout_secs, model, cwd, default_model=VERIFY_MODEL)
+    backend, eff, to, m, wd, exe = _verify_opts(effort, timeout_secs, model, cwd)
     proj = os.path.realpath(_resolve(project, wd) if project else wd)
     if not os.path.isdir(proj):
         raise ValueError(f"project 不是目录：{proj}")
@@ -1386,11 +1459,15 @@ def verify(instructions, cwd=None, project=None, base=None, effort="medium",
     prompt = VERIFY_PREAMBLE.format(tmp=tmp, project=proj, base_line=base_line,
                                     instructions=instructions.strip(),
                                     env_py=env_py, env_repo=env_repo)
-    pid2 = _codex_start("verify", prompt, eff, to, m, tmp, exe, sandbox="workspace-write",
-                        extra_cfg=["sandbox_workspace_write.network_access=true"], pid_=pid_)
+    if backend == "claude":
+        pid2 = _claude_start("verify", prompt, eff, to, m, tmp, exe, sandbox=True,
+                             extra_dirs=[proj, repo], pid_=pid_)
+    else:
+        pid2 = _codex_start("verify", prompt, eff, to, m, tmp, exe, sandbox="workspace-write",
+                            extra_cfg=["sandbox_workspace_write.network_access=true"], pid_=pid_)
     _PROBES[pid2].update(verify_watch=watch, project=proj, base=base, verify_repo=repo)
     if not wait:
-        return (f"verify_id：{pid2}\n状态：started（后台验证，模型 {m}，强度 {eff}，超时 {to} 秒）\n"
+        return (f"verify_id：{pid2}\n状态：started（后台验证，模型 {m}，强度 {eff}，超时 {to} 秒，后端 {backend}）\n"
                 f"工作目录 {tmp}（只能写这里），被验项目 {proj} 只读\n"
                 f"用 verify_wait(verify_ids=[\"{pid2}\"]) 等结果")
     return probe_wait([pid2], _cancel=_cancel, _tool="verify_wait", _arg="verify_ids")
@@ -1846,9 +1923,11 @@ REVIEW_TOOLS = [
          "required": ["review_ids"]}},
 ]
 
+_VERIFY_LABEL = (f"Claude CLI 的 {VERIFY_MODEL}，bwrap 只读文件系统沙箱" if VERIFY_BACKEND == "claude"
+                 else f"Codex CLI 的 {VERIFY_MODEL}，workspace-write 沙箱")
 VERIFY_TOOLS = [
     {"name": "verify",
-     "description": (f"派一个专用验证 agent（Codex CLI 的 {VERIFY_MODEL}，workspace-write 沙箱，"
+     "description": (f"派一个专用验证 agent（{_VERIFY_LABEL}，"
                      "工作目录锁在它自己的临时目录 /tmp/verify_<id>/）去做验证：全量回归、起本地服务"
                      "逐接口实测、全套测试基线 vs 改后对比。它自己去摸项目（README / 现有测试 / 回归"
                      "冒烟入口），优先用项目已有入口，没有才写临时脚本；起的服务自己停。被验项目与"

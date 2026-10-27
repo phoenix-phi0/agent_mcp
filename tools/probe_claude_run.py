@@ -72,6 +72,10 @@ def main(argv=None):
     ap.add_argument("--settings", required=True)
     ap.add_argument("--claude-bin", default="")
     ap.add_argument("--tools", default="Read,Glob,Grep,Bash")
+    # verify 用：默认值就是原来的只读探针（plan、不预批工具、只加 --cwd）
+    ap.add_argument("--permission-mode", default="plan")
+    ap.add_argument("--allowed-tools", default="")
+    ap.add_argument("--extra-dir", action="append", default=[])
     args = ap.parse_args(argv)
 
     exe = args.claude_bin or os.environ.get("GSB_CLAUDE_BIN") or shutil.which("claude")
@@ -84,16 +88,17 @@ def main(argv=None):
         exe, "-p",
         "--model", args.model,
         "--effort", args.effort,
-        "--permission-mode", "plan",
+        "--permission-mode", args.permission_mode,
         "--tools", args.tools,
         "--strict-mcp-config",
         "--mcp-config", args.mcp_config,
         "--settings", args.settings,
-        "--add-dir", wd,
+        "--add-dir", wd, *[x for d in args.extra_dir for x in ("--add-dir", d)],
         "--output-format", "json",
-        "--",
-        prompt,
     ]
+    if args.allowed_tools:
+        cmd += ["--allowed-tools", args.allowed_tools]
+    cmd += ["--", prompt]
     _secret_name = re.compile(r"TOKEN|SECRET|PASSW|API_?KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIAL", re.I)
     _secret_in_value = re.compile(
         r"\bexport\s+[A-Z0-9_]*(?:TOKEN|SECRET|PASSW|API_?KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIAL)[A-Z0-9_]*\s*=",

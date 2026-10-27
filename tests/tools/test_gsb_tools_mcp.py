@@ -72,9 +72,13 @@ class Server:
         env.pop("GSB_REVIEW", None)
         env.pop("GSB_REVIEW_BACKEND", None)
         env.pop("GSB_REVIEW_MODEL", None)
+        env.pop("GSB_VERIFY_BACKEND", None)
+        env.pop("GSB_VERIFY_MODEL", None)
+        env.pop("GSB_BWRAP_BIN", None)
         env.pop("GSB_TOOLS_ONLY", None)
         env["GSB_PROBE_BACKEND"] = "codex"  # 大部分用例用假 codex；默认 claude 另测
         env["GSB_REVIEW_BACKEND"] = "codex"
+        env["GSB_VERIFY_BACKEND"] = "codex"
         env.update(extra)
         env = {k: v for k, v in env.items() if v is not None}
         self.p = subprocess.Popen([sys.executable, str(SCRIPT)], cwd=str(TMP), env=env,
@@ -156,6 +160,7 @@ with open(rec, "a") as f:
     f.write(json.dumps({"argv": argv, "cwd": os.getcwd(), "prompt": prompt,
                         "env_keys": sorted(os.environ),
                         "enable_mcp": os.environ.get("ENABLE_CLAUDEAI_MCP_SERVERS"),
+                        "tmpdir": os.environ.get("CLAUDE_CODE_TMPDIR"),
                         "secret_seen": any("SECRET-0123" in v or v.startswith("ghp_")
                                            for v in os.environ.values())}) + "\\n")
 task = prompt.split("任务：")[-1] if "任务：" in prompt else prompt
@@ -175,6 +180,28 @@ if "你是代码审查员" in prompt:
     emit("结论：有问题\\n问题清单：\\n- [阻断] calc.py:2 — 负数没处理。依据：读了文件\\n"
          "- [应修] README 也要更新。依据：任务书\\n- [建议] calc.py:1 — 可以加类型注解\\n"
          "必查项：\\n(a) 漏了负数要求\\n(b) 无\\n(c) 无\\n(d) 无报告草稿\\n(e) 无", tok_in=4321)
+if "你是验证 agent" in prompt:
+    for w in task.split():
+        if w.startswith("SLOW"):
+            time.sleep(float(w[4:]))
+    wrote = "n/a"
+    tgt = os.environ.get("FAKE_VERIFY_TARGET")
+    if tgt and "WRITE" in task:
+        try:
+            open(tgt, "a").write("bad\\n")
+            wrote = "written"
+        except OSError as e:
+            wrote = e.strerror
+    try:
+        open("inside.txt", "w").write("ok")
+        inside = "ok"
+    except OSError as e:
+        inside = e.strerror
+    proj = [l.split("：", 1)[1] for l in prompt.splitlines() if l.startswith("被验项目：")][0]
+    emit(json.dumps({"状态": "成功", "结果": {"结论": "通过", "环境": {
+        "python": proj + "/.venv/bin/python", "引擎": proj + "/gen/__init__.py " + proj + "/tools/__init__.py",
+        "起法": "fake"}, "检查": [{"项": "smoke", "通过": True,
+        "证据": "wrote=%s inside=%s" % (wrote, inside)}], "发现": [], "说明": "ok"}}, ensure_ascii=False))
 if "FAIL" in task:
     emit("", is_error=True, rc=1, err="ERROR: something broke badly")
 if "HANG" in task:
@@ -201,6 +228,17 @@ emit("结论：" + task.strip() + "（a.txt:2）")
 def pid_of(text):
     m = re.search(r"probe_id：([\w-]+)", text)
     return m.group(1) if m else None
+
+
+# 假 bwrap：记下参数，然后直接执行 "--" 后面的命令（不真的套沙箱）
+FAKE_BWRAP = """#!/usr/bin/env python3
+import json, os, sys
+a = sys.argv[1:]
+i = a.index("--")
+with open(os.environ["FAKE_BWRAP_REC"], "a") as f:
+    f.write(json.dumps({"argv": a[:i], "cmd": a[i + 1:]}) + "\\n")
+os.execv(a[i + 1], a[i + 1:])
+"""
 
 
 def recs(path):
@@ -430,6 +468,9 @@ def probe_claude_tests():
         t, e = s.call("probe", {"instructions": "OK 看看第二行"})
         c = recs(rec)[-1]
         a = c["argv"]
+        check(a[a.index("--permission-mode") + 1] == "plan" and "--allowed-tools" not in a
+              and a.count("--add-dir") == 1 and "CLAUDE_CODE_TMPDIR" not in c["env_keys"],
+              "probe 默认行为没变：plan、不预批工具、只 add-dir cwd、不设 CLAUDE_CODE_TMPDIR", a)
         check(not e and "状态：done" in t and "结论：OK 看看第二行（a.txt:2）" in t
               and "claude" in t,
               "done + 最终回复 + 后端标记", t)
@@ -993,6 +1034,103 @@ def k32_tests():
         check("状态：done" in t and "自动重试了 1 次" in t, "瞬时限流：仍自动重试", t)
     finally:
         sc.close()
+
+
+def _bwrap_usable():
+    exe = shutil.which("bwrap")
+    if not exe:
+        return False
+    r = subprocess.run([exe, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "true"],
+                       capture_output=True)
+    return r.returncode == 0
+
+
+def k_verify_claude_tests():
+    """verify 的 claude 后端：默认后端和模型、bwrap 包装和权限参数、没有 bwrap 就拒绝、
+    真 bwrap 下写不进被验项目（假 claude；用不了 bwrap 的机器上跳过最后一段）。"""
+    bindir = TMP / "fakebin_vclaude"
+    bindir.mkdir(exist_ok=True)
+    for name, body in (("claude", FAKE_CLAUDE), ("fake_bwrap", FAKE_BWRAP)):
+        (bindir / name).write_text(body)
+        (bindir / name).chmod(0o755)
+    (TMP / "logs").mkdir(exist_ok=True)
+    rec = TMP / "logs" / "vclaude_calls.jsonl"    # 放日志目录里：真 bwrap 下只有它可写
+    brec = TMP / "bwrap_calls.jsonl"
+    proj = TMP / "vcproj"
+    proj.mkdir(exist_ok=True)
+    if not (proj / ".git").exists():
+        git(proj, "init", "-q", "-b", "main")
+        (proj / "app.py").write_text("print('hi')\n")
+        git(proj, "add", "-A")
+        git(proj, "commit", "-q", "-m", "i")
+    env = {"PATH": f"{bindir}:{os.environ.get('PATH', '')}", "FAKE_CLAUDE_REC": str(rec),
+           "FAKE_BWRAP_REC": str(brec), "GSB_BWRAP_BIN": str(bindir / "fake_bwrap"),
+           "GSB_PROBE_RETRY_WAITS": "1,1", "GSB_VERIFY_BACKEND": None,
+           "FAKE_VERIFY_TARGET": str(proj / "app.py")}
+
+    print("verify claude 后端：默认后端 / 模型、bwrap 包装、权限参数")
+    s = Server(max_block=4, GSB_VERIFY="1", **env)
+    try:
+        d = {t["name"]: t for t in s.req("tools/list")["result"]["tools"]}["verify"]["description"]
+        check("Claude CLI" in d and "claude-haiku-5-5" in d and "bwrap" in d and "Codex" not in d,
+              "没设 GSB_VERIFY_BACKEND：默认 claude + haiku，描述写 bwrap", d[:160])
+        t, e = s.call("verify", {"instructions": "VERIFYOK 跑全量回归", "cwd": str(proj)}, timeout=30)
+        c, b = recs(rec)[-1], recs(brec)[-1]
+        a, ba = c["argv"], b["argv"]
+        check(not e and "状态：done" in t and "验证 JSON：已解析" in t and "结论=通过" in t
+              and "claude-haiku-5-5 / medium / claude" in t and "违规改动" not in t,
+              "done + 解析出 JSON + 后端标记 claude，没违规", t)
+        check(a[a.index("--model") + 1] == "claude-haiku-5-5"
+              and a[a.index("--permission-mode") + 1] == "acceptEdits"
+              and "Bash" in a[a.index("--allowed-tools") + 1].split(",")
+              and "mcp__gsb_read_files" in a[a.index("--allowed-tools") + 1].split(",")
+              and os.path.realpath(proj) in [a[i + 1] for i, x in enumerate(a) if x == "--add-dir"]
+              and not any("danger" in x or "bypass" in x for x in a),
+              "claude 参数：haiku、acceptEdits、预批 Bash 和 read_files、被验项目可读、无 danger/bypass", a)
+        check(c["cwd"].startswith("/tmp/verify_") and c["tmpdir"] == c["cwd"],
+              "claude 在验证员自己的临时目录里跑，CLAUDE_CODE_TMPDIR 也指那里", (c["cwd"], c["tmpdir"]))
+        binds = [ba[i + 1] for i, x in enumerate(ba) if x == "--bind"]
+        check(ba[:3] == ["--ro-bind", "/", "/"] and os.path.realpath(c["cwd"]) in binds
+              and not any(p in ("/", str(proj), os.path.realpath(proj), "/tmp", "/workspace") for p in binds)
+              and "--share-net" in ba and "--die-with-parent" in ba
+              and ba[ba.index("--chdir") + 1] == c["cwd"],
+              "bwrap：整个文件系统只读，只有临时目录等可写，保留网络，项目与 /tmp 本身不可写", ba)
+        check(b["cmd"][0] == sys.executable and "probe_claude_run.py" in b["cmd"][1],
+              "bwrap 包的是 Claude 启动器", b["cmd"][:2])
+
+        t, e = s.call("verify", {"instructions": "VERIFYOK SLOW1", "cwd": str(proj), "wait": False})
+        m = re.search(r"verify_id：([\w-]+)", t)
+        check(not e and "后端 claude" in t and m, "wait=false：启动信息写后端 claude", t)
+        if m:
+            t2, e2 = s.call("verify_wait", {"verify_ids": [m.group(1)]}, timeout=30)
+            check(not e2 and "状态：done" in t2 and "验证 JSON：已解析" in t2, "verify_wait 取到结果", t2)
+    finally:
+        s.close()
+
+    print("verify claude 后端：没有 bwrap 就拒绝（不会无保护地跑）")
+    s = Server(max_block=4, GSB_VERIFY="1", **dict(env, GSB_BWRAP_BIN="/nonexistent/bwrap"))
+    try:
+        n, nb = len(recs(rec)), len(recs(brec))
+        t, e = s.call("verify", {"instructions": "VERIFYOK x", "cwd": str(proj)})
+        check(e and "bwrap" in t and len(recs(rec)) == n and len(recs(brec)) == nb,
+              "GSB_BWRAP_BIN 指到不存在的文件：拒绝，没启动 claude", t)
+    finally:
+        s.close()
+
+    if not _bwrap_usable():
+        print("  （这台机器用不了 bwrap，跳过真 bwrap 的写保护测试）")
+        return
+    print("verify claude 后端：真 bwrap 下写不进被验项目，临时目录能写")
+    s = Server(max_block=4, GSB_VERIFY="1", **dict(env, GSB_BWRAP_BIN=None))
+    try:
+        before = (proj / "app.py").read_text()
+        t, e = s.call("verify", {"instructions": "VERIFYOK WRITE", "cwd": str(proj)}, timeout=60)
+        check(not e and "验证 JSON：已解析" in t and "wrote=Read-only file system" in t and "inside=ok" in t,
+              "往被验项目写被拒（Read-only file system），写自己的临时目录成功", t)
+        check((proj / "app.py").read_text() == before and "违规改动" not in t,
+              "被验项目文件没变，也没标违规改动", t)
+    finally:
+        s.close()
 
 
 def k34_tests():
@@ -1568,6 +1706,7 @@ def main():
         iface_tests()
         k32_tests()
         k34_tests()
+        k_verify_claude_tests()
         k38_tests()
         k47_tests()
     finally:
