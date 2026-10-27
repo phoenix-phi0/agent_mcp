@@ -1,5 +1,5 @@
 模块 lesson
-依赖 kg
+依赖 kg subject
 
 ## 表
 表 lesson_series
@@ -9,6 +9,7 @@
   source 文本 来源，可空
   license 文本 许可，可空
   sort_order 整数 排序，小于 0 表示已撤下，不在下拉里出现
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 表 lesson_text
   code 文本 课文编号，唯一
   level 文本 等级 N5/N4/N3/N2/N1
@@ -21,15 +22,19 @@
   orig_title 文本 原标题，可空
   series_code 文本 所属系列编号
   seq 整数 课序（线性教材显示第 N 课）
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 表 lesson_item_link
   lesson_code 文本 课文编号
   item_code 文本 表达方式条目编号（来自 kg_item）
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 表 lesson_point_link
   lesson_code 文本 课文编号
   point_code 文本 知识点编号（来自 kg_point）
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 表 lesson_pref 学习记录
-  learner 文本 学习者，唯一
+  learner 文本 学习者；learner + subject_id 唯一
   series_code 文本 所选当前系列编号（偏好，导入和撤下都不清空）
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 
 ## 页面字段
 页面 lesson_view 教材页面
@@ -50,7 +55,7 @@
 
 公开 函数 取当前系列 learner
   返回 {learner, series_code, name, is_default}；is_default 为 1 表示没选或所选系列已不可用，用了默认系列 hanabira
-  伪代码 按 learner 查 lesson_pref 一行
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 lesson_pref 一行
   伪代码 有记录时，按其 series_code 查 lesson_series，存在且 sort_order 不小于 0，则返回 {"learner": learner, "series_code": 该编号, "name": 该系列 name, "is_default": 0}
   伪代码 否则按 hanabira 查 lesson_series，name 取其 name，没有这行时 name 取 "hanabira"
   伪代码 返回 {"learner": learner, "series_code": "hanabira", "name": name, "is_default": 1}
@@ -59,7 +64,7 @@
   返回 {ok, learner, series_code}
   报错 404 没有这个系列
   伪代码 按 series_code 查 lesson_series，查不到或 sort_order 小于 0，报错 404 没有这个系列
-  伪代码 按 learner 查 lesson_pref，没有则插入 (learner, series_code)，有则更新 series_code
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 lesson_pref，没有则插入 (learner, subject_id, series_code)，有则更新 series_code
   伪代码 返回 {"ok": 1, "learner": learner, "series_code": series_code}
 
 公开 函数 列课文 series_code? level? keyword?

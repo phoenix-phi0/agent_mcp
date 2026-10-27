@@ -1,5 +1,5 @@
 模块 account
-依赖 progress
+依赖 progress subject
 
 ## 表
 表 account_user
@@ -75,6 +75,16 @@
   伪代码 auth_mode 等于 off，返回 {"auth_mode": "off", "username": learner, "display_name": learner, "role": "student"}
   伪代码 否则调用 取我是谁 learner=learner（查不到报 404 没有这个账号）
   伪代码 返回 {"auth_mode": auth_mode, "username": 其 username, "display_name": 其 display_name, "role": 其 role}
+
+公开 函数 认证信息 current_user current_role auth_mode
+  返回 {user, label, role, role_label, badge, hide, mode, subjects, subject}；给前端顶栏用（auth_me）：user 是登录的用户名（单人模式或没登录是空串），label 是显示名，role 是角色代号，role_label 是「学生」或「教师」，badge 与 hide 恒为空串与空数组，mode 是 auth_mode 原值，subjects 是当前用户可见的科目 [{id, name}]，subject 是当前科目编号（没登录是 1，subjects 为空数组）
+  伪代码 auth_mode 不等于 on 或 current_user 为空，返回 {"user": "", "label": "", "role": "", "role_label": "", "badge": "", "hide": [], "mode": auth_mode, "subjects": [], "subject": 1}
+  伪代码 按 current_user 查 account_user；查不到或 disabled 等于 1，同样返回上面那个没登录的空对象
+  伪代码 调用 subject.列我的科目 learner=current_user current_role=该行 role，取返回的 subjects，只保留 id 和 name 两个键，得到 subjects 数组
+  伪代码 调用 subject.当前科目 learner=current_user，取 subject_id 作为 subject
+  伪代码 role_label：role 等于 teacher 取「教师」，等于 student 取「学生」，其他取空串
+  伪代码 返回 {"user": current_user, "label": 该行 display_name, "role": 该行 role, "role_label": role_label, "badge": "", "hide": [], "mode": "on", "subjects": subjects, "subject": subject}
+  伪代码 依赖方向：account 依赖 subject（subject 是叶子，不依赖 account；角色由 account 查出后以 current_role 传给 subject）
 
 公开 函数 退出 learner
   返回 {ok}
@@ -231,6 +241,32 @@ POST /account/students/enable -> 设置学生停用 动作 student_enable 模板
 用例 我是谁_账号不存在
   调用 我是谁 learner=ghost auth_mode=on
   报错 404
+
+用例 认证信息_单人模式
+  调用 认证信息 current_user=空 current_role=空 auth_mode=off
+  得 user=空 subject=1
+
+用例 认证信息_学生一个科目
+  先 数据 account_user username=s1 password_hash=x display_name=小明 role=student disabled=0 created_at=2026-01-01
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  调用 认证信息 current_user=s1 current_role=student auth_mode=on
+  得 user=s1 label=小明 role=student role_label=学生 subject=1
+
+用例 认证信息_学生两个科目偏好2
+  先 数据 account_user username=s1 password_hash=x display_name=小明 role=student disabled=0 created_at=2026-01-01
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=b name=乙 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  先 数据 subject_student subject_id=2 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  先 数据 subject_pref learner=s1 subject_id=2
+  调用 认证信息 current_user=s1 current_role=student auth_mode=on
+  得 user=s1 subject=2
+
+用例 认证信息_教师
+  先 数据 account_user username=t1 password_hash=x display_name=王老师 role=teacher disabled=0 created_at=2026-01-01
+  调用 认证信息 current_user=t1 current_role=teacher auth_mode=on
+  得 user=t1 label=王老师 role=teacher role_label=教师 subject=1
 
 用例 退出_正常
   调用 退出 learner=s1

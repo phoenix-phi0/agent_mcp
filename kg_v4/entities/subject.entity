@@ -1,0 +1,48 @@
+实体 subject_info subject_info
+  字段 code 文本 必填 唯一 科目编码，小写字母数字下划线，日语是
+  字段 name 文本 必填 显示名
+  字段 intro 长文本 说明，可空
+  字段 kind 文本 必填 类型：language
+  字段 caps 文本 必填 能力开关
+  字段 levels 文本 自定义等级列表，英文逗号分隔有序，空表示不分级
+  字段 qtypes 文本 必填 启用的题型，逗号分隔
+  字段 visibility 文本 必填 public
+  字段 owner 文本 必填 创建者教师用户名
+  字段 status 文本 必填 active
+  字段 created_at 文本 必填 建于时间
+  字段 updated_at 文本 必填 改于时间
+结束
+
+实体 subject_teacher subject_teacher
+  字段 subject_id 整数 必填 科目编号
+  字段 teacher 文本 必填 教师用户名
+  字段 role 文本 必填 owner
+  字段 created_at 文本 必填 建于时间
+  唯一 subject_id teacher
+结束
+
+实体 subject_student subject_student
+  字段 subject_id 整数 必填 科目编号
+  字段 learner 文本 必填 索引 学生用户名
+  字段 assigned_by 文本 必填 分配的教师，迁移登记的是空串
+  字段 status 文本 必填 active
+  字段 created_at 文本 必填 建于时间
+  唯一 subject_id learner
+结束
+
+实体 subject_pref subject_pref
+  字段 learner 文本 必填 唯一 学习者
+  字段 subject_id 整数 必填 当前科目编号
+结束
+
+实体 subject_ai subject_ai
+  字段 subject_id 整数 必填 唯一 科目编号
+  字段 persona 长文本 老师人设，可空
+  字段 tutor_prompt 长文本 问老师提示词，可空
+  字段 assist_prompt 长文本 教师助手提示词，可空
+  字段 summary_prompt 长文本 学情总结提示词，可空
+  字段 import_prompt 长文本 教材导入提示词，可空
+  字段 kg_gen_prompt 长文本 图谱生成提示词，可空
+  字段 updated_by 文本 最后修改的教师，可空
+  字段 updated_at 文本 最后修改时间，可空
+结束

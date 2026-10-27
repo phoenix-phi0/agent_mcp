@@ -1,5 +1,5 @@
 业务 quiz
-  依赖 kg lesson progress
+  依赖 kg lesson progress subject
   用包 common db text doc
 
   函数 取轮大小 mode
@@ -265,7 +265,8 @@
     # 选题 返回空：r.asked_count 等于 0 报错 404 没有可出的题；否则返回 finished=1 的对象（不改库）
     # 在一个事务里更新 quiz_progress 该行：current_no=选中的题号，answered=0，last_correct=0，asked_nos=（原为空则只写题号，否则原值+","+题号），asked_count+1，seq=new_seq
     # 返回 {"finished": 0, "question": 组题面(question_no=选中题号, seq=new_seq), "asked_count": 新 asked_count, "round_size": round_size, "right_count": r.right_count}
-    设 r = 查一行 app.db quiz_p_get learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner}
+    设 r = 查一行 app.db quiz_p_get learner={learner} subject_id={sj.subject_id}
     设 mode = {r.mode 或}
     设 rs = 调用 取轮大小 mode={mode}
     如果 {r.asked_count} 不小于 {rs}
@@ -287,7 +288,7 @@
     结束
     设 nc = 计算 {r.asked_count} + 1
     事务 app.db
-      设 w = 写库 app.db quiz_p_next learner={learner} current_no={qn} asked_nos={nos} asked_count={nc} seq={ns}
+      设 w = 写库 app.db quiz_p_next learner={learner} current_no={qn} asked_nos={nos} asked_count={nc} seq={ns} subject_id={sj.subject_id}
     结束
     设 qf = 调用 组题面 question_no={qn} seq={ns}
     返回 {"finished": 0, "question": {qf}, "asked_count": {nc}, "round_size": {rs}, "right_count": {r.right_count}}
@@ -304,15 +305,16 @@
     # 返回 出下一题 的结果
     设 rng = 调用 progress.取区间作答 learner={learner} start_id=0
     设 rsid = {rng.max_id 或 0}
-    设 ex = 查一行 app.db quiz_p_get learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner}
+    设 ex = 查一行 app.db quiz_p_get learner={learner} subject_id={sj.subject_id}
     事务 app.db
       如果 {ex} 为空
-        设 w = 写库 app.db quiz_p_insert learner={learner} level={level} category={category} mode={mode} lesson_code={lesson_code} round_start_id={rsid}
+        设 w = 写库 app.db quiz_p_insert learner={learner} level={level} category={category} mode={mode} lesson_code={lesson_code} round_start_id={rsid} subject_id={sj.subject_id}
       否则
         如果 {mode} 为空
-          设 w = 写库 app.db quiz_p_reset_free learner={learner} level={level} category={category} mode={mode} lesson_code={lesson_code} round_start_id={rsid}
+          设 w = 写库 app.db quiz_p_reset_free learner={learner} level={level} category={category} mode={mode} lesson_code={lesson_code} round_start_id={rsid} subject_id={sj.subject_id}
         否则
-          设 w = 写库 app.db quiz_p_reset_other learner={learner} mode={mode} lesson_code={lesson_code} round_start_id={rsid}
+          设 w = 写库 app.db quiz_p_reset_other learner={learner} mode={mode} lesson_code={lesson_code} round_start_id={rsid} subject_id={sj.subject_id}
         结束
       结束
       设 res = 调用 出下一题 learner={learner}
@@ -441,7 +443,8 @@
     # 有则 started=1，mode 库里空值转为 free，round_size = 取轮大小，round_key = round_start_id
     # current_no 不为空时 question = 组题面 question_no=current_no seq=该行 seq（题已不在库则为空串），否则空串
     # 返回上述对象
-    设 r = 查一行 app.db quiz_p_get learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner}
+    设 r = 查一行 app.db quiz_p_get learner={learner} subject_id={sj.subject_id}
     如果 {r} 为空
       返回 {"learner": "{learner}", "started": 0, "mode": "free", "level": "", "category": "", "lesson_code": "", "current_no": "", "answered": 0, "right_count": 0, "asked_count": 0, "round_size": 10, "last_correct": 0, "round_key": 0, "question": ""}
     结束
@@ -505,7 +508,8 @@
     # 按 learner 查 quiz_progress，没有报错 400 还没有开始
     # current_no 不为空且 answered 不等于 1，报错 400 先答完当前题
     # 调用 出下一题 learner=learner，返回其结果
-    设 r = 查一行 app.db quiz_p_get learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner}
+    设 r = 查一行 app.db quiz_p_get learner={learner} subject_id={sj.subject_id}
     如果 {r} 为空
       报错 400 还没有开始
     结束
@@ -542,7 +546,8 @@
     如果 {a2} 为空
       报错 400 答案不能为空
     结束
-    设 r = 查一行 app.db quiz_p_get learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner}
+    设 r = 查一行 app.db quiz_p_get learner={learner} subject_id={sj.subject_id}
     设 cn = {r.current_no 或}
     如果 {r} 为空 或 {cn} 为空
       报错 400 还没有出题
@@ -639,7 +644,7 @@
     设 nr = 计算 {r.right_count} + {correct}
     事务 app.db
       设 pr = 调用 progress.记作答 learner={learner} point_code={it.point_code} question_no={cn} correct={correct} answer={stored} pass_line={pass_line} fall_line={fall_line}
-      设 w = 写库 app.db quiz_p_answer learner={learner} right_count={nr} last_correct={correct}
+      设 w = 写库 app.db quiz_p_answer learner={learner} right_count={nr} last_correct={correct} subject_id={sj.subject_id}
     结束
     返回 {"ok": 1, "repeated": 0, "question_no": "{cn}", "correct": {correct}, "correct_answer": "{ca}", "explain": "{ex}", "round_done": {rd}, "right_count": {nr}, "asked_count": {r.asked_count}, "round_size": {rs}, "score": {pr.score}, "mastered": {pr.mastered}}
   结束
@@ -651,7 +656,8 @@
     # 按 learner 查 quiz_progress，没有报错 400 还没有开始
     # 调用 开新轮 learner=learner mode=该行 mode level=该行 level category=该行 category lesson_code=该行 lesson_code（沿用上一轮的模式、等级、考点、课）
     # 返回其结果
-    设 r = 查一行 app.db quiz_p_get learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner}
+    设 r = 查一行 app.db quiz_p_get learner={learner} subject_id={sj.subject_id}
     如果 {r} 为空
       报错 400 还没有开始
     结束
@@ -665,7 +671,8 @@
     # 调用 progress.取区间作答 learner=learner start_id=该行 round_start_id，得 total 和 answers
     # mode 库里空值转为 free
     # 返回 {"learner": learner, "round_key": round_start_id, "start_id": round_start_id, "mode": mode, "lesson_code": lesson_code, "total": total, "answers": answers}
-    设 r = 查一行 app.db quiz_p_get learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner}
+    设 r = 查一行 app.db quiz_p_get learner={learner} subject_id={sj.subject_id}
     如果 {r} 为空
       返回 {"learner": "{learner}", "round_key": 0, "start_id": 0, "mode": "free", "lesson_code": "", "total": 0, "answers": []}
     结束
@@ -679,7 +686,8 @@
     # 按 learner 查 quiz_progress，没有则返回默认对象
     # 有则 has_round=1，mode 空值转 free，round_size=取轮大小，round_key=round_start_id，其余取该行字段
     # 返回上述对象
-    设 r = 查一行 app.db quiz_p_get learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner}
+    设 r = 查一行 app.db quiz_p_get learner={learner} subject_id={sj.subject_id}
     如果 {r} 为空
       返回 {"learner": "{learner}", "has_round": 0, "mode": "free", "lesson_code": "", "level": "", "category": "", "round_key": 0, "asked_count": 0, "round_size": 10, "right_count": 0, "answered": 0}
     结束

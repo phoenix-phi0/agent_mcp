@@ -12,6 +12,7 @@
   links 长文本 链接列表，JSON 数组文本 [{label, url}]，没有链接时为空，可空
   summary_round 文本 只有「本轮总结」那条老师消息有值，值为轮次标识（round_key 的十进制文本，如 0、15）；其它消息为空串，可空
   at 文本 时间 YYYY-MM-DD HH:MM:SS
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 
 页面链接约定（只是字符串，不在本模块校验）：读课文 /lesson?code=<课文编号>；按课做题 /quiz?mode=lesson&lesson_code=<课文编号>；按等级做题 /quiz?mode=free&level=<等级>；复习薄弱点 /quiz?mode=review；不带参数的做题页 /quiz。
 

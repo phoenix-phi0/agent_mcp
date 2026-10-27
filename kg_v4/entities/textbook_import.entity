@@ -14,6 +14,7 @@
   字段 lesson_level 文本 等级范围（全部或N5到N1，给模型的候选条目按等级预筛），可空，空按全部
   字段 rewrite 整数 是否让模型改写讲解和例句（1/0），可空，空按1
   字段 overwrite 整数 是否允许覆盖已有系列（1/0），可空，空按0
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
 结束
 
 实体 textbook_import_chunk textbook_import_chunk

@@ -1,5 +1,5 @@
 模块 dictation
-依赖 vocab
+依赖 vocab subject
 
 ## 表
 表 dictation_attempt 学习记录
@@ -10,6 +10,7 @@
   correct 整数 对错（1/0）
   hinted 整数 是否看了提示（1/0）
   at 文本 作答时间（格式 2026-01-01 09:00:00）
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 
 表 dictation_progress 学习记录
   learner 文本 学习者，每人一行
@@ -23,6 +24,7 @@
   asked_count 整数 这一轮出了几个
   right_count 整数 这一轮答对几个
   round_start 整数 这一轮起点：开轮时该学习者 dictation_attempt 的最大 id（没有则 0），id 大于它的作答属于本轮
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 
 ## 页面字段
 页面 dictation_view 默写页面
@@ -34,7 +36,7 @@
 ## 函数
 公开 函数 取状态 learner
   返回 没有进度时 {has_progress: 0}；有进度时 {has_progress: 1, direction, level, source, word_id, prompt, answered, hinted, asked_count, right_count, finished}。prompt 是题面（zh2jp 为中文意思，kanji2kana 为汉字），不含答案；word_id 为 0 时 finished=1 且 prompt 为空串
-  伪代码 按 learner 查 dictation_progress 一行，查不到返回 {"has_progress": 0}
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 dictation_progress 一行，查不到返回 {"has_progress": 0}
   伪代码 current_word_id 为 0：prompt 为空串，word_id=0，finished=1
   伪代码 current_word_id 不为 0：调用 vocab.取单词 word_id=current_word_id，取不到则 prompt 为空串；取到则 prompt = 题面(direction, 该词)；finished=0
   伪代码 返回 {"has_progress": 1, "direction": direction, "level": level, "source": source, "word_id": current_word_id, "prompt": prompt, "answered": answered, "hinted": hinted, "asked_count": asked_count, "right_count": right_count, "finished": finished}
@@ -50,7 +52,7 @@
   返回 同「开始」
   报错 400 还没有开始
   报错 400 没有可出的词
-  伪代码 按 learner 查 dictation_progress，查不到报错 400 还没有开始
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 dictation_progress，查不到报错 400 还没有开始
   伪代码 用该行已存的 direction、level、source 调用 开新轮
   伪代码 返回开新轮的结果
 
@@ -58,7 +60,7 @@
   返回 {ok} 加上 取状态 的全部字段；这一轮结束时 finished=1
   报错 400 还没有开始
   报错 400 当前词还没交答案
-  伪代码 按 learner 查 dictation_progress，查不到报错 400 还没有开始
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 dictation_progress，查不到报错 400 还没有开始
   伪代码 current_word_id 不为 0 且 answered 等于 0，报错 400 当前词还没交答案
   伪代码 选词 用库里记的 direction、level、source 和 asked_ids（learner 传本人）。current_word_id 为 0，或 asked_count 不小于 10，或 选词 返回空（没有可出的词）：在库里把 current_word_id 置 0、answered 置 1，返回 {"ok": 1} 加 取状态 的字段（finished=1）
   伪代码 否则在一个事务里更新 dictation_progress：current_word_id=新词 id，answered=0，hinted=0，asked_ids 末尾追加新词 id，asked_count 加 1
@@ -70,10 +72,10 @@
   报错 400 当前没有词
   报错 400 当前词已经交过答案
   报错 404 当前词已不存在
-  伪代码 按 learner 查 dictation_progress，查不到报错 400 还没有开始
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 dictation_progress，查不到报错 400 还没有开始
   伪代码 current_word_id 为 0，报错 400 当前没有词；answered 等于 1，报错 400 当前词已经交过答案
   伪代码 调用 vocab.取单词 word_id=current_word_id，取不到报错 404 当前词已不存在
-  伪代码 把 dictation_progress 的 hinted 置 1
+  伪代码 把 dictation_progress（该 learner 在当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）下那行）的 hinted 置 1
   伪代码 返回 {"ok": 1, "hinted": 1, "first_kana": 假名第一个字, "length": 假名字数}
 
 公开 函数 交答案 learner answer
@@ -84,7 +86,7 @@
   报错 400 当前词已经交过答案
   报错 404 当前词已不存在
   伪代码 answer 去掉首尾空白后为空，报错 400 答案不能为空
-  伪代码 按 learner 查 dictation_progress，查不到报错 400 还没有开始
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 dictation_progress，查不到报错 400 还没有开始
   伪代码 判的永远是库里记的 current_word_id，不信前端传的；current_word_id 为 0 报错 400 当前没有词
   伪代码 answered 等于 1，报错 400 当前词已经交过答案（同一个词交两次只算一次，不写库）
   伪代码 调用 vocab.取单词 word_id=current_word_id，取不到报错 404 当前词已不存在
@@ -95,7 +97,7 @@
 
 公开 函数 列本轮错词 learner
   返回 {learner, total, words}，words 是 [{word_id, direction, kanji, kana, meaning, answer}]，按作答 id 升序；没有进度时 total 为 0、words 为空
-  伪代码 按 learner 查 dictation_progress，查不到返回 {"learner": learner, "total": 0, "words": []}
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 dictation_progress，查不到返回 {"learner": learner, "total": 0, "words": []}
   伪代码 查 dictation_attempt 中 learner 相等、id 大于 round_start、correct 等于 0 的行，按 id 升序
   伪代码 对每行调用 vocab.取单词 word_id=该行 word_id，取不到的行跳过；其余拼出 {word_id, direction, kanji, kana, meaning, answer}
   伪代码 返回 {"learner": learner, "total": 行数, "words": 列表}
@@ -209,7 +211,7 @@
   伪代码 direction 不是 zh2jp 也不是 kanji2kana，报错 400 方向不对
   伪代码 调用 选词 learner=learner direction=direction level=level source=source asked_ids=空串，返回空则报错 400 没有可出的词
   伪代码 base = dictation_attempt 中该 learner 的最大 id，没有则 0
-  伪代码 在一个事务里：该 learner 在 dictation_progress 已有行则更新，没有则插入；写入 direction、level、source、current_word_id=新词 id、answered=0、hinted=0、asked_ids=新词 id、asked_count=1、right_count=0、round_start=base
+  伪代码 在一个事务里：该 learner 在当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）下 dictation_progress 已有行则更新，没有则插入（插入时写 subject_id）；写入 direction、level、source、current_word_id=新词 id、answered=0、hinted=0、asked_ids=新词 id、asked_count=1、right_count=0、round_start=base
   伪代码 返回 {"ok": 1} 加 取状态 的字段
 
 函数 判词 direction word answer
@@ -242,7 +244,7 @@
 
 函数 空错词状态 learner direction level
   返回 {dphase, dempty, dcard, dstat}；dphase=empty，dempty=「「{方向名}」这个方向（等级：{level 为空填全部}）的错词本是空的——没有答错过的词，或者都已经连续答对两次了。先随机练一轮吧。」，dcard、dstat 空串
-  伪代码 记下这次的选择（下次进页面顶栏还是它）：该 learner 在 dictation_progress 已有行则只更新 direction、level、source=review（本轮其余字段不动），没有则插入（current_word_id=0、answered=1、hinted=0、asked_ids 空、asked_count=0、right_count=0、round_start=该 learner dictation_attempt 最大 id，没有为 0）
+  伪代码 记下这次的选择（下次进页面顶栏还是它）：该 learner 在当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）下 dictation_progress 已有行则只更新 direction、level、source=review（本轮其余字段不动），没有则插入（subject_id 取当前科目，current_word_id=0、answered=1、hinted=0、asked_ids 空、asked_count=0、right_count=0、round_start=该 learner dictation_attempt 最大 id，没有为 0）
 
 函数 开轮页面 learner direction level source
   返回 {dphase, dcard, dstat}；出得了词 dphase=ask，dcard 是新词卡，dstat 是「这一轮 0/0」；source 等于 review 但错词本里没有可出的词时返回 空错词状态 的结果

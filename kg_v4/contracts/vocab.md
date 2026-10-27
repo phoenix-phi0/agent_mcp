@@ -7,6 +7,7 @@
   kana 文本 假名，必填
   meaning 文本 中文意思，可空（假名表条目没有意思）
   point_code 文本 所属知识点编号，可空（空表示孤儿词）；不加外键
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 
 ## 函数
 公开 函数 列单词 keyword? point_code?

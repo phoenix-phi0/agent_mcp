@@ -5,6 +5,7 @@
   字段 correct 整数 必填 是否答对（1/0）
   字段 answer 文本 作答内容，可空
   字段 at 文本 必填 作答时间，格式
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
 结束
 
 实体 progress_mastery progress_mastery
@@ -15,6 +16,7 @@
   字段 mastered 整数 必填 是否已掌握（1/0）
   字段 updated_at 文本 必填 更新时间
   唯一 learner point_code
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
 结束
 
 实体 progress_score progress_score
@@ -22,6 +24,7 @@
   字段 point_code 文本 必填 知识点编号
   字段 score 整数 必填 得分
   字段 at 文本 必填 打分时间
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
 结束
 
 # 页面 实体：只撑学习进度页/知识图谱页上的列（表里不存东西，同 report_view）。

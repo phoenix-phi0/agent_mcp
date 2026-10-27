@@ -1,5 +1,5 @@
 业务 account
-  依赖 progress
+  依赖 progress subject
   用包 common db text auth
 
   公开 函数 核对身份 username
@@ -157,6 +157,42 @@
     结束
     设 w = 调用 取我是谁 learner={learner}
     返回 {"auth_mode": "{auth_mode}", "username": "{w.username}", "display_name": "{w.display_name}", "role": "{w.role}"}
+  结束
+
+  公开 函数 认证信息 current_user current_role auth_mode
+    # 返回 {user, label, role, role_label, badge, hide, mode, subjects, subject}
+    # auth_mode 不等于 on 或 current_user 为空，返回空用户对象
+    # 按 current_user 查 account_user；查不到或 disabled 等于 1，同样返回空用户对象
+    # 调用 subject.列我的科目 取 subjects 只保留 id name；调用 subject.当前科目 取 subject_id
+    设 okf = 0
+    设 u = 解析JSON {}
+    如果 {auth_mode} 等于 on 且 {current_user} 不为空
+      设 u = 查一行 app.db account_user_by_name username={current_user}
+      如果 {u.username 或} 不为空
+        如果 {u.disabled} 不等于 1
+          设 okf = 1
+        结束
+      结束
+    结束
+    如果 {okf} 不等于 1
+      返回 {"user": "", "label": "", "role": "", "role_label": "", "badge": "", "hide": [], "mode": "{auth_mode}", "subjects": [], "subject": 1}
+    结束
+    设 sl = 调用 subject.列我的科目 learner={current_user} current_role={u.role}
+    设 list = 解析JSON []
+    遍历 s 于 {sl.subjects}
+      设 it.id = {s.id}
+      设 it.name = {s.name}
+      设 list = 列表加项 {list} {it}
+    结束
+    设 sc = 调用 subject.当前科目 learner={current_user}
+    设 rl = 
+    如果 {u.role} 等于 teacher
+      设 rl = 教师
+    结束
+    如果 {u.role} 等于 student
+      设 rl = 学生
+    结束
+    返回 {"user": "{current_user}", "label": "{u.display_name}", "role": "{u.role}", "role_label": "{rl}", "badge": "", "hide": [], "mode": "on", "subjects": {list}, "subject": {sc.subject_id}}
   结束
 
   公开 函数 退出 learner

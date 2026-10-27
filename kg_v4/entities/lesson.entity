@@ -5,6 +5,7 @@
   字段 source 文本 来源，可空
   字段 license 文本 许可，可空
   字段 sort_order 整数 必填 排序，小于
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
 结束
 
 实体 lesson_text lesson_text
@@ -19,21 +20,26 @@
   字段 orig_title 文本 原标题，可空
   字段 series_code 文本 必填 所属系列编号
   字段 seq 整数 必填 课序（线性教材显示第
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
 结束
 
 实体 lesson_item_link lesson_item_link
   字段 lesson_code 文本 必填 课文编号
   字段 item_code 文本 必填 表达方式条目编号（来自
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
 结束
 
 实体 lesson_point_link lesson_point_link
   字段 lesson_code 文本 必填 课文编号
   字段 point_code 文本 必填 知识点编号（来自
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
 结束
 
 实体 lesson_pref lesson_pref
-  字段 learner 文本 必填 唯一 学习者，唯一
+  字段 learner 文本 必填 学习者
   字段 series_code 文本 必填 所选当前系列编号（偏好，导入和撤下都不清空）
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
+  唯一 learner subject_id
 结束
 页面 实体 lesson_view 教材页面
   字段 series 文本 系列编号（选项来自series_options）

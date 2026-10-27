@@ -9,10 +9,11 @@
   字段 accepted 文本 可接受写法，用
   字段 explain 长文本 解析，可空
   字段 item_code 文本 必填 所属表达方式条目编号（来自
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
 结束
 
 实体 quiz_progress quiz_progress
-  字段 learner 文本 必填 唯一 学习者，唯一
+  字段 learner 文本 必填 学习者
   字段 level 文本 上次选的等级，可空
   字段 category 文本 上次选的考点类别，可空
   字段 current_no 文本 当前题题号，可空
@@ -25,6 +26,8 @@
   字段 round_start_id 整数 必填 这一轮起点（开轮时该学习者
   字段 seq 整数 必填 每出一题加
   字段 last_correct 整数 必填 当前题（或刚答完的题）判题结果
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
+  唯一 learner subject_id
 结束
 
 页面 实体 quiz_view 做题页面

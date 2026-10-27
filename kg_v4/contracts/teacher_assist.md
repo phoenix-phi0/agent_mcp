@@ -11,6 +11,7 @@
   point 文本 本轮聚焦的知识点编号（匹配成功才写），可空
   status 文本 ok（按数据回答）/ ask（没找到或有多个，用模板回复、没调回答模型），老师那条与助手那条相同
   at 文本 时间 YYYY-MM-DD HH:MM:SS
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 
 ## 函数
 函数 取最近对话 current_user limit

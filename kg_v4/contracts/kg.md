@@ -5,18 +5,22 @@
 表 kg_point
   code 文本 知识点编号，唯一
   title 文本 中文名
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 表 kg_edge
   pre_code 文本 前置知识点编号（学后续之前要先会它）
   point_code 文本 后续知识点编号
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 表 kg_contrast
   a_code 文本 对照一端编号（知识点或表达方式条目，不加外键）；两端按字符串大小规范化，小的放 a_code
   b_code 文本 对照另一端编号
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 表 kg_item
   code 文本 条目编号，唯一
   name 文本 条目名称
   point_code 文本 所属知识点（结构点）编号
   after_form 文本 接在哪个形式后，可空
   prev_code 文本 前一个条目编号（只用来排学习顺序），可空
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 
 ## 函数
 公开 函数 取知识点 code

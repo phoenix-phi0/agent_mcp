@@ -1,0 +1,1 @@
+SELECT i.id AS id, i.code AS code, i.name AS name, i.kind AS kind, i.visibility AS visibility FROM subject_info i JOIN subject_student s ON s.subject_id = i.id WHERE s.learner = :learner AND s.status = 'active' AND i.status = 'active' ORDER BY i.id

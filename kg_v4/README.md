@@ -8,9 +8,9 @@
 
 | 目录 | 内容 |
 |---|---|
-| `contracts/` | 12 个模块的约定（公开函数、用例）；约定检查、回归都以它为准 |
+| `contracts/` | 13 个模块的约定（公开函数、用例）；约定检查、回归都以它为准 |
 | `entities/` `queries/` | 实体（表）和查询 SQL |
-| `services/` `routes/` `scripts/` | 业务函数、62 个接口、教材导入用的脚本 |
+| `services/` `routes/` `scripts/` | 业务函数、64 个接口、教材导入用的脚本 |
 | `ui/` | 12 个 .ui，编译出 13 个界面（学生端 `/` 8 个，教师端 `/teacher` 5 个） |
 | `plan/top.zs` | 模块清单和依赖（约定检查、回归会读） |
 | `setup/init_data.py` | 数据初始化 |
@@ -20,6 +20,14 @@
 
 教师端页面（`/teacher`，按 `ui/*.ui` 文件名排序）：学情（`report.ui`，首页）→ 学生管理（`student.ui`）→ 教师助手（`teacher_assist.ui`）→ AI老师设定（`teacher_note.ui`）→ 教材导入（`textbook_import.ui`）。
 教师助手（`teacher_assist` 模块）只读：问全班概况、某个学生、某个知识点全班掌握、教学建议，也能闲聊/问系统用法；每位教师各自一份对话（`teacher_assist_message`）；数字和名单由后端拼进数据段，模型只读；找不到学生/知识点或有多个时用模板话追问，不调回答模型。
+
+## 多科目底座（M1）
+
+`subject` 模块（叶子，不依赖任何模块；角色由调用方以 `current_role` 传入）：科目 `subject_info`、科目-教师 `subject_teacher`、科目-学生 `subject_student`、当前科目偏好 `subject_pref`、科目 AI 配置 `subject_ai`（本期只建表）。公开函数：`科目访问`（读/写/设置/分配）、`列我的科目`、`当前科目`（偏好 → 第一个已分配 → 1）、`解析科目`（请求 subject → 当前科目）、`切换科目`；接口 `GET /subject/mine`、`POST /subject/switch`（动作 `subject_switch`）。
+- 23 张业务表加了 `subject_id`（默认 1 = 日语语法；`teacher_rules_setting` / `teacher_rules_relay` 默认 0 = 所有科目）；`quiz_progress`、`dictation_progress`、`lesson_pref` 的唯一键改为 `(learner, subject_id)`，路由顶层 `迁移 重建` 负责重建旧库（先备份 `app.db.bak-<时间>`）。这三张表的读写按「当前科目」定位；其余表本期只有列、没有按科目过滤（M2）。
+- 顶栏 `auth_me`（`routes/_project.zs` 的 `POST /auth/me`，调 `account.认证信息`，account 依赖 subject）返回 `subjects`、`subject`；可见科目多于 1 个时顶栏出科目下拉，选了调 `subject_switch` 后整页刷新。开了 `auth_me` 后顶栏会显示登录用户名，学生账号打开教师端会被送回登录页并提示（以前是 403 且无提示）。
+- 迁移：`.venv/bin/python kg_v4/setup/migrate_subject.py [项目目录]`（先 `ensure_db`，再建 1 号科目、登记现有学生/教师；幂等）；`init_data.py` 新库初始化时同样调用。
+- M1 没做：建/改科目、分配学生等写函数（M3，现在只能 SQL 手工建）；新建的学生账号不会自动登记进 1 号科目（没有分配时当前科目回退到 1，行为不变）。
 
 ## 初始化数据
 
@@ -59,7 +67,7 @@
 ## 检查与测试
 
 ```
-.venv/bin/python tests/kg_v4/test_project.py     # 约定检查 + 全量回归 12/12 + 编译 62 接口 + 初始化脚本（约 1 分钟）
+.venv/bin/python tests/kg_v4/test_project.py     # 约定检查 + 全量回归 13/13 + 编译 64 接口 + 初始化脚本（约 1 分钟）
 ```
 
 `tests/run_all.sh` 里有「kg_v4 项目」一行。

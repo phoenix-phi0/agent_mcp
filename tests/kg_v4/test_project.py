@@ -4,9 +4,9 @@
     cd /workspace/agent_mcp && .venv/bin/python tests/kg_v4/test_project.py
 
 拷一份 kg_v4（不带 app.db / web / uploads）到临时目录再检查，不动仓库里的文件。离线，不调模型。
-  一、12 个模块的约定检查 + 全局检查 + 加载检查
-  二、全量回归（每个模块的约定用例在临时库上跑）11/11
-  三、gen build：62 个接口
+  一、13 个模块的约定检查 + 全局检查 + 加载检查
+  二、全量回归（每个模块的约定用例在临时库上跑）13/13
+  三、gen build：64 个接口
   四、setup/init_data.py：用裁小的单词表（200 条）+ 仓库题库灌一遍，各类条数对；
       再跑一次，已有数据全部跳过、条数不变
 """
@@ -34,7 +34,7 @@ def check(ok, msg, detail=None):
     print(("  ✓ " if ok else "  ✗ ") + msg + ("" if ok or detail is None else f"\n      {detail}"))
 
 
-NAMES = "kg lesson progress account quiz vocab dictation teacher_rules tutor report textbook_import teacher_assist".split()
+NAMES = "subject kg lesson progress account quiz vocab dictation teacher_rules tutor report textbook_import teacher_assist".split()
 tmp = Path(tempfile.mkdtemp(prefix="kg_v4_test_"))
 proj = tmp / "kg_v4"
 shutil.copytree(SRC, proj, ignore=shutil.ignore_patterns("app.db", "web", "uploads", "sessions", ".auth_secret", "__pycache__"))
@@ -71,7 +71,7 @@ try:
 
     print("三、编译")
     r = subprocess.run([sys.executable, "-m", "gen", "build", str(proj)], cwd=ROOT, capture_output=True, text=True)
-    check(r.returncode == 0 and "62 个接口" in r.stdout, "gen build：62 个接口", (r.stdout + r.stderr)[-300:])
+    check(r.returncode == 0 and "64 个接口" in r.stdout, "gen build：64 个接口", (r.stdout + r.stderr)[-300:])
 
     print("四、数据初始化脚本")
     content = tmp / "content"
@@ -95,9 +95,21 @@ try:
     check(r.returncode == 0 and c1 == {"kg_point": 69, "kg_edge": 112, "kg_item": 192, "kg_contrast": 20,
                                       "lesson_text": 125, "vocab_word": 200, "quiz_question": 466},
           "初始化：69/112/192/20/125 课/200 词/466 题", (c1, r.stdout[-300:], r.stderr[-300:]))
+    def subj():
+        con = sqlite3.connect(proj / "app.db")
+        try:
+            return (con.execute("select id, code, visibility, status from subject_info").fetchall(),
+                    con.execute("select count(*) from subject_student").fetchone()[0],
+                    con.execute("select count(*) from subject_teacher").fetchone()[0])
+        finally:
+            con.close()
+    s1 = subj() if (proj / "app.db").is_file() else None
+    check(s1 is not None and s1[0] == [(1, "jp_grammar", "public", "active")],
+          "初始化：建好 1 号科目（日语语法，公共，启用）", s1)
     r2 = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     check(r2.returncode == 0 and r2.stdout.count("已有数据，跳过") == 7 and counts() == c1,
           "再跑一次：7 类全部跳过、条数不变", r2.stdout[-300:])
+    check(subj() == s1, "再跑一次：科目、登记行数不变（幂等）", (s1, subj()))
     r3 = subprocess.run(cmd[:2] + ["/nonexistent"], capture_output=True, text=True)
     check(r3.returncode == 2, "项目目录不对：退出码 2")
 finally:

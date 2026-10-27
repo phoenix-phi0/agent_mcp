@@ -3,6 +3,7 @@
   字段 summary 长文本 必填 AI
   字段 author 文本 必填 写的人（教师用户名）
   字段 created_at 文本 必填 写的时间，格式
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
 结束
 
 页面 实体 report_view 学情页面

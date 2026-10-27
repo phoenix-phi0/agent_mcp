@@ -12,6 +12,7 @@
   version 整数 版本号，新建为 1，改了内容或重新启用时加 1，用来判断"只用于下一条"是否重新可用
   author 文本 写的人（教师用户名）
   updated_at 文本 更新时间（YYYY-MM-DD HH:MM:SS）
+  subject_id 整数 所属科目，0 表示所有科目，默认 0
 
 表 teacher_rules_setting_use
   reply_id 整数 老师回复编号
@@ -32,6 +33,7 @@
   enabled 整数 是否启用（1/0）
   author 文本 写的人（教师用户名）
   updated_at 文本 更新时间
+  subject_id 整数 所属科目，0 表示所有科目，默认 0
 
 表 teacher_rules_relay_state
   relay_id 整数 传达编号

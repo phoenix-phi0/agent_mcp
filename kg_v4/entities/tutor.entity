@@ -8,4 +8,5 @@
   字段 links 长文本 链接列表
   字段 summary_round 文本 本轮总结轮次
   字段 at 文本 必填 时间
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
 结束

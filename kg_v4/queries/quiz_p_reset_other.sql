@@ -1,1 +1,1 @@
-UPDATE quiz_progress SET current_no = '', answered = 0, right_count = 0, asked_nos = '', asked_count = 0, mode = :mode, lesson_code = :lesson_code, round_start_id = CAST(:round_start_id AS INTEGER) WHERE learner = :learner
+UPDATE quiz_progress SET current_no = '', answered = 0, right_count = 0, asked_nos = '', asked_count = 0, mode = :mode, lesson_code = :lesson_code, round_start_id = CAST(:round_start_id AS INTEGER) WHERE learner = :learner AND subject_id = CAST(:subject_id AS INTEGER)

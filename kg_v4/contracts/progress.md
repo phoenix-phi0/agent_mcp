@@ -9,6 +9,7 @@
   correct 整数 是否答对（1/0）
   answer 文本 作答内容，可空
   at 文本 作答时间，格式 YYYY-MM-DD HH:MM:SS
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 表 progress_mastery 学习记录
   learner 文本 学习者
   point_code 文本 知识点编号；learner + point_code 唯一
@@ -16,11 +17,13 @@
   total_count 整数 累计答题数
   mastered 整数 是否已掌握（1/0）
   updated_at 文本 更新时间
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 表 progress_score 学习记录
   learner 文本 学习者
   point_code 文本 知识点编号
   score 整数 得分 0–100
   at 文本 打分时间
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 
 ## 页面字段
 页面 progress_view 学习进度页面

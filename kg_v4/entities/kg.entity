@@ -1,16 +1,19 @@
 实体 kg_point kg_point
   字段 code 文本 必填 唯一 知识点编号
   字段 title 文本 必填 中文名
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
 结束
 
 实体 kg_edge kg_edge
   字段 pre_code 文本 必填 前置知识点编号（学后续之前要先会它）
   字段 point_code 文本 必填 后续知识点编号
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
 结束
 
 实体 kg_contrast kg_contrast
   字段 a_code 文本 必填 对照一端编号（知识点或表达方式条目，不加外键）；两端按字符串大小规范化，小的放
   字段 b_code 文本 必填 对照另一端编号
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
 结束
 
 实体 kg_item kg_item
@@ -19,4 +22,5 @@
   字段 point_code 文本 必填 所属知识点（结构点）编号
   字段 after_form 文本 接在哪个形式后，可空
   字段 prev_code 文本 前一个条目编号（只用来排学习顺序），可空
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
 结束

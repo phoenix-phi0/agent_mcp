@@ -1,5 +1,5 @@
 业务 lesson
-  依赖 kg
+  依赖 kg subject
   用包 common db text doc data
 
   公开 函数 列系列
@@ -17,7 +17,8 @@
     # 按 learner 查 lesson_pref 一行
     # 有记录时，按其 series_code 查 lesson_series，存在且 sort_order 不小于 0，则返回 {"learner": learner, "series_code": 该编号, "name": 该系列 name, "is_default": 0}
     # 否则按 hanabira 查 lesson_series，name 取其 name，没有这行时 name 取 "hanabira"
-    设 pref = 查一行 app.db lesson_pref_get learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner}
+    设 pref = 查一行 app.db lesson_pref_get learner={learner} subject_id={sj.subject_id}
     如果 {pref} 不为空
       设 s = 查一行 app.db lesson_series_get code={pref.series_code}
       如果 {s} 不为空
@@ -54,11 +55,12 @@
     如果 {s.sort_order} 小于 0
       报错 404 没有这个系列
     结束
-    设 pref = 查一行 app.db lesson_pref_get learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner}
+    设 pref = 查一行 app.db lesson_pref_get learner={learner} subject_id={sj.subject_id}
     如果 {pref} 为空
-      设 n = 写库 app.db lesson_pref_insert learner={learner} series_code={series_code}
+      设 n = 写库 app.db lesson_pref_insert learner={learner} subject_id={sj.subject_id} series_code={series_code}
     否则
-      设 n = 写库 app.db lesson_pref_update learner={learner} series_code={series_code}
+      设 n = 写库 app.db lesson_pref_update learner={learner} subject_id={sj.subject_id} series_code={series_code}
     结束
     设 out.ok = 1
     设 out.learner = {learner}

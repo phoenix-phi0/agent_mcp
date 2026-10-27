@@ -1,5 +1,5 @@
 业务 dictation
-  依赖 vocab
+  依赖 vocab subject
   用包 common db text japanese
 
   公开 函数 取状态 learner
@@ -8,7 +8,8 @@
     # current_word_id 为 0：prompt 为空串，word_id=0，finished=1
     # current_word_id 不为 0：调用 vocab.取单词 word_id=current_word_id，取不到则 prompt 为空串；取到则 prompt = 题面(direction, 该词)；finished=0
     # 返回 {"has_progress": 1, "direction": direction, "level": level, "source": source, "word_id": current_word_id, "prompt": prompt, "answered": answered, "hinted": hinted, "asked_count": asked_count, "right_count": right_count, "finished": finished}
-    设 p = 查一行 app.db dictation_progress_get learner={learner}
+    设 sb = 调用 subject.当前科目 learner={learner}
+    设 p = 查一行 app.db dictation_progress_get learner={learner} subject_id={sb.subject_id}
     如果 {p} 为空
       返回 {"has_progress": 0}
     结束
@@ -56,7 +57,8 @@
     # 按 learner 查 dictation_progress，查不到报错 400 还没有开始
     # 用该行已存的 direction、level、source 调用 开新轮
     # 返回开新轮的结果
-    设 p = 查一行 app.db dictation_progress_get learner={learner}
+    设 sb = 调用 subject.当前科目 learner={learner}
+    设 p = 查一行 app.db dictation_progress_get learner={learner} subject_id={sb.subject_id}
     如果 {p} 为空
       报错 400 还没有开始
     结束
@@ -73,7 +75,8 @@
     # current_word_id 为 0，或 asked_count 不小于 10，或 选词 返回空（没有可出的词）：在库里把 current_word_id 置 0、answered 置 1，返回 {"ok": 1} 加 取状态 的字段（finished=1）
     # 否则在一个事务里更新 dictation_progress：current_word_id=新词 id，answered=0，hinted=0，asked_ids 末尾追加新词 id，asked_count 加 1
     # 返回 {"ok": 1} 加 取状态 的字段
-    设 p = 查一行 app.db dictation_progress_get learner={learner}
+    设 sb = 调用 subject.当前科目 learner={learner}
+    设 p = 查一行 app.db dictation_progress_get learner={learner} subject_id={sb.subject_id}
     如果 {p} 为空
       报错 400 还没有开始
     结束
@@ -82,11 +85,11 @@
     结束
     设 w = 调用 选词 learner={learner} direction={p.direction} level={p.level} source={p.source} asked_ids={p.asked_ids}
     如果 {p.current_word_id} 等于 0 或 {p.asked_count} 不小于 10 或 {w} 为空
-      设 n = 写库 app.db dictation_progress_finish learner={learner}
+      设 n = 写库 app.db dictation_progress_finish learner={learner} subject_id={sb.subject_id}
     否则
       设 new_ids = {p.asked_ids},{w.id}
       事务 app.db
-        设 n = 写库 app.db dictation_progress_advance learner={learner} word_id={w.id} asked_ids={new_ids}
+        设 n = 写库 app.db dictation_progress_advance learner={learner} word_id={w.id} asked_ids={new_ids} subject_id={sb.subject_id}
       结束
     结束
     设 s = 调用 取状态 learner={learner}
@@ -105,7 +108,8 @@
     # 调用 vocab.取单词 word_id=current_word_id，取不到报错 404 当前词已不存在
     # 把 dictation_progress 的 hinted 置 1
     # 返回 {"ok": 1, "hinted": 1, "first_kana": 假名第一个字, "length": 假名字数}
-    设 p = 查一行 app.db dictation_progress_get learner={learner}
+    设 sb = 调用 subject.当前科目 learner={learner}
+    设 p = 查一行 app.db dictation_progress_get learner={learner} subject_id={sb.subject_id}
     如果 {p} 为空
       报错 400 还没有开始
     结束
@@ -119,7 +123,7 @@
     如果 {w} 为空
       报错 404 当前词已不存在
     结束
-    设 n = 写库 app.db dictation_progress_hint learner={learner}
+    设 n = 写库 app.db dictation_progress_hint learner={learner} subject_id={sb.subject_id}
     设 chars = 找全部 {w.kana} .
     设 len = 列表长度 {chars}
     设 fk = 截取 {w.kana} 1 1
@@ -150,7 +154,8 @@
     如果 {a} 为空
       报错 400 答案不能为空
     结束
-    设 p = 查一行 app.db dictation_progress_get learner={learner}
+    设 sb = 调用 subject.当前科目 learner={learner}
+    设 p = 查一行 app.db dictation_progress_get learner={learner} subject_id={sb.subject_id}
     如果 {p} 为空
       报错 400 还没有开始
     结束
@@ -177,7 +182,7 @@
     设 row.at = {now}
     事务 app.db
       设 n1 = 写库表 app.db dictation_attempt_insert {row}
-      设 n2 = 写库 app.db dictation_progress_answered learner={learner} correct={correct}
+      设 n2 = 写库 app.db dictation_progress_answered learner={learner} correct={correct} subject_id={sb.subject_id}
     结束
     设 rc = 计算 {p.right_count} + {correct}
     设 out.ok = 1
@@ -198,7 +203,8 @@
     # 查 dictation_attempt 中 learner 相等、id 大于 round_start、correct 等于 0 的行，按 id 升序
     # 对每行调用 vocab.取单词 word_id=该行 word_id，取不到的行跳过；其余拼出 {word_id, direction, kanji, kana, meaning, answer}
     # 返回 {"learner": learner, "total": 行数, "words": 列表}
-    设 p = 查一行 app.db dictation_progress_get learner={learner}
+    设 sb = 调用 subject.当前科目 learner={learner}
+    设 p = 查一行 app.db dictation_progress_get learner={learner} subject_id={sb.subject_id}
     设 words = 解析JSON []
     设 out.learner = {learner}
     如果 {p} 为空
@@ -370,8 +376,10 @@
       报错 400 没有可出的词
     结束
     设 base = 查一值 app.db dictation_attempt_max_id learner={learner}
-    设 p = 查一行 app.db dictation_progress_get learner={learner}
+    设 sb = 调用 subject.当前科目 learner={learner}
+    设 p = 查一行 app.db dictation_progress_get learner={learner} subject_id={sb.subject_id}
     设 row.learner = {learner}
+    设 row.subject_id = {sb.subject_id}
     设 row.direction = {direction}
     设 row.level = {level}
     设 row.source = {source}
@@ -554,7 +562,8 @@
   结束
 
   函数 空错词状态 learner direction level
-    设 n = 写库 app.db dictation_progress_settings learner={learner} direction={direction} level={level} source=review
+    设 sb = 调用 subject.当前科目 learner={learner}
+    设 n = 写库 app.db dictation_progress_settings learner={learner} direction={direction} level={level} source=review subject_id={sb.subject_id}
     设 dn = 调用 方向名 direction={direction}
     设 lv = 全部
     如果 {level} 不为空

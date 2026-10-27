@@ -18,6 +18,7 @@
   lesson_level 文本 等级范围（全部 或 N5 到 N1；给模型的候选条目按等级预筛），可空，空按全部
   rewrite 整数 是否让模型改写讲解和例句（1/0），可空，空按 1（默认改写）
   overwrite 整数 是否允许覆盖已有系列（1/0），可空，空按 0
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 表 textbook_import_chunk
   task_id 整数 所属任务 id
   seq 整数 块序号，从 1 起

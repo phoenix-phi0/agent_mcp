@@ -46,6 +46,7 @@ def _find_repo():
 
 REPO = _find_repo()
 sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 DEFAULT_PROJECT = HERE.parents[1]
 DEFAULT_CONTENT = REPO / "kg" / "content"
@@ -275,6 +276,9 @@ def main(argv=None):
     db = root / "app.db"
     if a.teacher:
         make_teacher(root, a.teacher, a.teacher_name, pw)
+    from migrate_subject import ensure_subject    # 同目录；1 号科目「日语语法」（幂等）
+    sub = ensure_subject(db)
+    print(f"科目：新建 {sub['科目']}、登记学生 {sub['学生']}、登记教师 {sub['教师']}")
 
     # 不登录模式（单人）：导入接口的「角色 teacher」不校验，不需要账号；不占端口
     app, _router = make_app(root, real=False, login=False)

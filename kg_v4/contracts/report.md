@@ -7,6 +7,7 @@
   summary 长文本 AI 写的学情总结
   author 文本 写的人（教师用户名）
   created_at 文本 写的时间，格式 YYYY-MM-DD HH:MM:SS
+  subject_id 整数 所属科目，默认 1（1 是日语语法）
 
 ## 页面字段
 页面 report_view 学情页面

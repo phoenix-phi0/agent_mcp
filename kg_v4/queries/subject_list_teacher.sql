@@ -1,0 +1,1 @@
+SELECT i.id AS id, i.code AS code, i.name AS name, i.kind AS kind, i.visibility AS visibility FROM subject_info i WHERE i.owner = :learner OR i.id IN (SELECT subject_id FROM subject_teacher WHERE teacher = :learner) OR (i.visibility = 'public' AND i.status <> 'draft') ORDER BY i.id
