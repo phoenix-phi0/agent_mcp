@@ -207,6 +207,33 @@ def main():
     check(all("--permission-mode" not in c["argv"] for c in cs), "默认不放开权限")
     check(all(not c["leak"] for c in cs), "CLAUDECODE / CLAUDE_CODE_* 没漏给子进程",
           cs[0]["leak"])
+    check("工具用法" not in pre and "ToolSearch" not in pre and cbatch._system_prompt(
+        {"allowed_tools": tools_of(cs[0])}) == cbatch.PREAMBLE == pre,
+          "默认没放行 gsb_tools：交代和原来一字不差，不提示不存在的工具", pre)
+
+    print("gsb_tools：放行了才追加工具用法")
+    LOG.unlink()
+    j = cbatch.submit(["甲"], name="带工具", cwd=str(TMP), allowed_tools=["Read", "mcp__gsb_tools"])
+    cbatch.wait(j["job_id"], timeout=30, every=0.2)
+    a = calls()[0]["argv"]
+    pre2 = a[a.index("--append-system-prompt") + 1]
+    check(pre2.startswith(cbatch.PREAMBLE) and pre2 == cbatch.PREAMBLE + "\n" + cbatch.PREAMBLE_TOOLS,
+          "放行 mcp__gsb_tools：原交代后面原样追加工具用法", pre2[-80:])
+    check(all(w in pre2 for w in ("ToolSearch", "read_files", "multi_edit", "run_wait", "wait_pid",
+                                  "probe", "review", "verify")),
+          "工具用法覆盖 ToolSearch 加载、读/改文件、等长命令、probe、review、verify")
+    sel = pre2[pre2.index("select:"):].split("\"")[0][len("select:"):].split(",")
+    check(len(sel) == 10 and all(s.startswith("mcp__gsb_tools__") for s in sel),
+          "ToolSearch 里列的是 10 个 mcp__gsb_tools__ 全名", sel)
+    check("取代第 5 条" in pre2 and "不要 sleep 轮询" in pre2,
+          "第 8 条说明取代第 5 条的 sleep 做法")
+    check(cbatch._system_prompt({"allowed_tools": ["mcp__gsb_tools__read_files"]}).endswith(cbatch.PREAMBLE_TOOLS)
+          and "工具用法" not in cbatch._system_prompt({"allowed_tools": ["Bash(ls:*)", "mcp__other"]}),
+          "按前缀判断：只放行单个 gsb 工具也追加；放行别的 MCP 不追加")
+    LOG.unlink()
+    j = cbatch.submit(["乙"], name="无交代", cwd=str(TMP), allowed_tools=["mcp__gsb_tools"], preamble=False)
+    cbatch.wait(j["job_id"], timeout=30, every=0.2)
+    check("--append-system-prompt" not in calls()[0]["argv"], "preamble=False 时一个字都不追加")
 
     print("share：后一条接前一条的会话，失败后断开")
     LOG.unlink()
@@ -311,8 +338,8 @@ def main():
     check(d["status"] == "done", "评估失败不影响任务照跑", d["status"])
 
     print("列表和概况")
-    js = cbatch.jobs()
-    check(len(js) == 8 and js[0]["id"] == j["job_id"], "jobs 新的在前", [x["id"] for x in js])
+    js = cbatch.jobs(limit=50)
+    check(len(js) == 10 and js[0]["id"] == j["job_id"], "jobs 新的在前", [x["id"] for x in js])
     check("最近 5 个任务" in cbatch.describe(), "describe 能用")
 
     print("engine：参数检查")
