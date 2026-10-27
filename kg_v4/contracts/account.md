@@ -112,13 +112,13 @@
   返回 刷新后的学生列表（「列学生页面」的口径，数组），建完号页面直接用它刷新表格
   报错 400 用户名和密码不能为空
   报错 400 用户名只能用字母、数字、汉字和 _ . @ -，不能有空格，最长 40
-  报错 400 密码至少 6 位
   报错 409 用户名已存在
+  报错 400 密码至少 6 位
   伪代码 username 或 password 为空，报错 400 用户名和密码不能为空
   伪代码 username 不符合用户名字符集（字母、数字、汉字和 _ . @ -，不能有空格，最长 40；口径同原 kg tools/auth.py 的 USERNAME_RE），报错 400 用户名只能用字母、数字、汉字和 _ . @ -，不能有空格，最长 40
-  伪代码 password 不足 6 位，报错 400 密码至少 6 位（口径同原 kg tools/auth.py 的 MIN_PASSWORD）
-  伪代码 display_name 为空则取 username
   伪代码 account_user 已有该 username，报错 409 用户名已存在
+  伪代码 先查重（409）再校验密码长度（400）：password 不足 6 位，报错 400 密码至少 6 位（口径同原 kg tools/auth.py 的 MIN_PASSWORD）
+  伪代码 display_name 为空则取 username
   伪代码 用 auth 包的哈希密码 算 password 的哈希
   伪代码 往 account_user 插入 (username, password_hash, display_name, role=student, disabled=0, created_at=当前时间)
   伪代码 调用 列学生页面，返回刷新后的学生列表（数组）
