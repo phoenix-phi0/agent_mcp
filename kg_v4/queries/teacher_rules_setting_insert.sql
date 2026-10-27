@@ -1,1 +1,1 @@
-INSERT INTO teacher_rules_setting (kind, student, keywords, content, enabled, once, version, author, updated_at) VALUES (:kind, :student, :keywords, :content, 1, CAST(:once AS INTEGER), 1, :author, datetime('now', 'localtime'))
+INSERT INTO teacher_rules_setting (kind, student, keywords, content, enabled, once, version, author, updated_at, subject_id) VALUES (:kind, :student, :keywords, :content, 1, CAST(:once AS INTEGER), 1, :author, datetime('now', 'localtime'), CAST(:subj AS INTEGER))

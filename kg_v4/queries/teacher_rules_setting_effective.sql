@@ -1,6 +1,6 @@
 WITH RECURSIVE
 sp(rest_i, rest_v, sid, sver) AS (
-  SELECT replace(COALESCE(setting_ids, ''), ' ', '') || ',', replace(COALESCE(setting_versions, ''), ' ', '') || ',', '', '' FROM teacher_rules_setting_use WHERE student = :student
+  SELECT replace(COALESCE(setting_ids, ''), ' ', '') || ',', replace(COALESCE(setting_versions, ''), ' ', '') || ',', '', '' FROM teacher_rules_setting_use WHERE student = :student AND subject_id = CAST(:subj AS INTEGER)
   UNION ALL
   SELECT substr(rest_i, instr(rest_i, ',') + 1), substr(rest_v, instr(rest_v, ',') + 1), substr(rest_i, 1, instr(rest_i, ',') - 1), substr(rest_v, 1, instr(rest_v, ',') - 1) FROM sp WHERE rest_i <> ''
 ),
@@ -15,6 +15,7 @@ eff AS (
     CASE WHEN COALESCE(s.student, '') = '' THEN 0 ELSE 1 END AS g
   FROM teacher_rules_setting s
   WHERE s.enabled = 1
+    AND (s.subject_id = CAST(:subj AS INTEGER) OR s.subject_id = 0)
     AND (COALESCE(s.student, '') = '' OR s.student = :student)
     AND s.kind IN ('memory', 'note', 'card')
     AND NOT (s.kind = 'note' AND s.once = 1 AND EXISTS (SELECT 1 FROM sp WHERE sp.sid = CAST(s.id AS TEXT) AND sp.sver = CAST(s.version AS TEXT)))

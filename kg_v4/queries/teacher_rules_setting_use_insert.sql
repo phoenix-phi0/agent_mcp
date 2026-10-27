@@ -1,1 +1,1 @@
-INSERT INTO teacher_rules_setting_use (reply_id, student, setting_ids, setting_versions, at) VALUES (CAST(:reply_id AS INTEGER), :student, :setting_ids, :setting_versions, datetime('now', 'localtime'))
+INSERT INTO teacher_rules_setting_use (reply_id, student, setting_ids, setting_versions, at, subject_id) VALUES (CAST(:reply_id AS INTEGER), :student, :setting_ids, :setting_versions, datetime('now', 'localtime'), CAST(:subj AS INTEGER))

@@ -1,0 +1,1 @@
+SELECT count(*) FROM teacher_rules_setting s WHERE (s.subject_id = CAST(:subj AS INTEGER) OR s.subject_id = 0) AND ((:student = '' AND COALESCE(s.student, '') = '') OR (:student <> '' AND (COALESCE(s.student, '') = '' OR s.student = :student)))

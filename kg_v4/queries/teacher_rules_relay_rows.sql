@@ -20,5 +20,5 @@ SELECT r.id AS relay_id,
 FROM teacher_rules_relay r
 LEFT JOIN (SELECT relay_id, count(*) AS n FROM teacher_rules_relay_state WHERE confirmed = 1 AND instr(',' || :studs || ',', ',' || student || ',') > 0 GROUP BY relay_id) d ON d.relay_id = r.id
 LEFT JOIN teacher_rules_relay_state st ON st.relay_id = r.id AND st.student = :student
-WHERE (:student = '' AND COALESCE(r.student, '') = '') OR (:student <> '' AND (COALESCE(r.student, '') = '' OR r.student = :student))
+WHERE (r.subject_id = CAST(:subj AS INTEGER) OR r.subject_id = 0) AND ((:student = '' AND COALESCE(r.student, '') = '') OR (:student <> '' AND (COALESCE(r.student, '') = '' OR r.student = :student)))
 ORDER BY CASE WHEN COALESCE(r.student, '') = '' THEN 0 ELSE 1 END, r.id

@@ -17,6 +17,7 @@
   字段 setting_ids 文本 必填 这条回复用到的设定编号，半角逗号隔开，按拼进提示词的顺序
   字段 setting_versions 文本 必填 与
   字段 at 文本 必填 记录时间
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
 结束
 
 实体 teacher_rules_relay teacher_rules_relay
@@ -48,6 +49,7 @@
   字段 student 文本 必填 学生用户名
   字段 relay_ids 文本 必填 这条回复带上的传达编号，半角逗号隔开
   字段 at 文本 必填 记录时间
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
 结束
 
 页面 实体 teacher_rules_view AI老师设定页面
