@@ -277,6 +277,7 @@
     设 f.display_name = {dn}
     设 f.created_at = {ca}
     设 n = 写库表 app.db account_user_insert {f}
+    设 rg = 调用 subject.登记学生 learner={username} code=jp_grammar
     设 out = 调用 列学生页面
     返回 {out}
   结束

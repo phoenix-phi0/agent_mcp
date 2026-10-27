@@ -118,7 +118,7 @@
   结束
 
   公开 函数 加前置边 pre_code point_code learner? current_role? auth_mode? subject?
-    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
     # 返回 {ok, created}，created 为 1 表示新加，0 表示这条边已存在
     # 报错 400 编号不能为空
     # 报错 400 不能以自己为前置
@@ -254,7 +254,7 @@
   结束
 
   公开 函数 导入知识点 file_path learner? current_role? auth_mode? subject?
-    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
     # 返回 {ok, total, created, updated}
     # 报错 400 导入文件有错
     # 用 doc 包「读文档」读 file_path 取文本，按行拆开；空行和以
@@ -317,7 +317,7 @@
   结束
 
   公开 函数 导入条目 file_path learner? current_role? auth_mode? subject?
-    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
     # 返回 {ok, total, created, updated}
     # 报错 400 导入文件有错
     # 报错 400 条目对不上知识点
@@ -390,7 +390,7 @@
   结束
 
   公开 函数 导入对照 file_path learner? current_role? auth_mode? subject?
-    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
     # 返回 {ok, total, created, updated}，重复的对照（不分顺序）算 updated，不新增行
     # 报错 400 导入文件有错
     # 用 doc 包「读文档」读 file_path 取文本，按行拆开；空行和以
@@ -445,9 +445,9 @@
     返回 {"ok": 1, "total": {total}, "created": {created}, "updated": {updated}}
   结束
 
-  函数 本科目 learner current_role auth_mode subject
+  函数 本科目 learner current_role auth_mode subject need?
     # 返回 {subject_id}；本次请求用哪个科目
-    设 r = 调用 subject.解析科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 r = 调用 subject.解析科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need={need 或}
     返回 {"subject_id": {r.subject_id}}
   结束
 

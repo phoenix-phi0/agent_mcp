@@ -2,8 +2,8 @@
   依赖 kg subject
   用包 common db text doc data
 
-  函数 本科目 learner current_role auth_mode subject
-    设 r = 调用 subject.解析科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+  函数 本科目 learner current_role auth_mode subject need?
+    设 r = 调用 subject.解析科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need={need}
     返回 {"subject_id": {r.subject_id}}
   结束
 
@@ -415,7 +415,7 @@
     如果 {doc.error} 不为空
       报错 400 导入文件有错
     结束
-    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
     设 r = 调用 导入课文数据 series_code={series_code} lessons_text={doc.text} subject_id={sj.subject_id} series_name={series_name} intro={intro} source={source} license={license} sort_order={sort_order}
     返回 {r}
   结束
@@ -518,7 +518,7 @@
     如果 {series_code} 为空
       报错 400 series_code 不能为空
     结束
-    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
     设 sid = {sj.subject_id}
     设 mt = 匹配 {rows_json} ^\s*\[
     如果 {mt.matched} 不等于 是
@@ -709,7 +709,7 @@
     # 报错 404 没有这个系列
     # 按 series_code 查 lesson_series，查不到报错 404 没有这个系列
     # 在一个事务里：数出 series_code 系列的课文数 removed_lessons；删除这些课文在 lesson_item_link、lesson_point_link 中的行；删除 lesson_text 中该系列的行；把 lesson_series 该行 sort_order 改为 -1（系列行保留，lesson_pref 不动）
-    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
     设 sid = {sj.subject_id}
     设 s = 查一行 app.db lesson_series_get_subject code={series_code} subject_id={sid}
     如果 {s} 为空
