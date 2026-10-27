@@ -327,7 +327,7 @@
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入或调用方传 subject=已解析的科目编号），四个都不传得 1，行为同旧；这是学习者自己那一轮产生的记录，按读处理（不传 need=write）；下面的校验和写入都只限「当前科目 ∪ 0」
   伪代码 relay_ids 为空：返回 {"ok": 1, "recorded": 0}，不写库
   伪代码 relay_ids 按逗号拆开，其中任一编号在 teacher_rules_relay 查不到，或属于别的科目（subject_id 既不等于本科目也不是 0），报错 404 没有这条传达（别的科目的传达当作不存在）
-  伪代码 任一传达的 student 不为空且不等于入参 student，报错 400 这条传达不是发给该学生的（口径同 对学生发传达）
+  伪代码 任一传达的 student 不为空且不等于入参 student，报错 400 这条传达不是发给该学生的（口径同 对学生发传达；注意与 记传达判定 不同：那边学生对不上报 404 没有传达状态，因为判定面向「已经有状态行」的传达）
   伪代码 在一个事务里：往 teacher_rules_relay_use 插入一行 (reply_id, student, relay_ids, at=当前时间, subject_id=本科目)；对每个编号，在 teacher_rules_relay_state 里找 (relay_id, student)，没有则插入 rounds_done=1，有则 rounds_done 加 1；若 rounds_done 不小于该传达的 rounds 则 finished=1；confirmed 保持原值，新建为 0；更新 updated_at
   伪代码 返回 {"ok": 1, "recorded": 1}
 
@@ -343,7 +343,7 @@
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入或调用方传 subject=已解析的科目编号），四个都不传得 1，行为同旧；这是学习者自己那一轮产生的记录，按读处理（不传 need=write）；下面的校验和写入都只限「当前科目 ∪ 0」
   伪代码 delivered 不是 0 也不是 1，报错 400 delivered 只能是 0 或 1
   伪代码 按 relay_id 查 teacher_rules_relay，查不到、或属于别的科目（subject_id 既不等于本科目也不是 0），报错 404 没有这条传达
-  伪代码 传达的 student 不为空且不等于入参 student，报错 404 没有传达状态（学生与传达对不上）
+  伪代码 传达的 student 不为空且不等于入参 student，报错 404 没有传达状态（学生与传达对不上；注意与 记回复传达 不同：那边学生对不上报 400 这条传达不是发给该学生的，因为它还在建状态行之前）
   伪代码 查 teacher_rules_relay_state 的 (relay_id, student)，查不到报错 404 没有传达状态
   伪代码 delivered 等于 1 时，把该状态行 confirmed 设为 1、finished 设为 1，更新 updated_at；等于 0 时不改状态
   伪代码 返回该状态行的 {"ok": 1, "relay_id": …, "student": …, "confirmed": …, "finished": …}

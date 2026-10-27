@@ -295,6 +295,7 @@
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
   伪代码 调用 取做题状态 learner=learner subject=subject_id，得 started、question；作答取值同旧页：默认取 given，question 不为空且 is_choice 等于 1 则取 choice（两个键都可能留着旧值，按题型取才不会拿错）
+  伪代码 取做题状态 得到的 question 为空（started 为 1 但题已不在库）时，跳过下面取旧分这一步（prev_score 不取），直接往下调 提交答案，由 提交答案 报 404（本页不自己报）
   伪代码 先取作答前旧分：由 question_no（取做题状态 得到的 question.question_no）查 app.db quiz_q_by_no 得 item_code（限本科目 subject_id），调 kg.取条目 code=item_code subject=subject_id 取 point_code；调用 progress.列得分 learner=learner subject=subject_id，取该 point_code 那一行的 score 作 prev_score，没有这一行（该知识点作答前从未记过分）prev_score 视为 0；这一步必须在 提交答案 之前（提交答案 内部的 记作答 会写新得分行）
   伪代码 调用 提交答案 learner=learner answer=作答 subject=subject_id，得 repeated、question_no、correct、correct_answer、explain、right_count、asked_count、score、changed、point_code（400/404 原样向上抛）
   伪代码 card 用 拼题卡 按 question 重建（和作答前同一张，code 不变不翻页）；选择题 options 逐项补 state：letter 等于 correct_answer 记 right、等于本次所交字母记 wrong、其余 dim；card 的 mine=本次作答；verdict=correct 等于 1 则「○ 答对了」否则「✗ 正确答案是 {correct_answer}」；explain 末尾拼「\n\n考的是：条目名」（查 app.db quiz_q_by_no 得 item_code，查询限本科目 subject_id；调 kg.取条目 code=item_code subject=subject_id 取 name），有课文再拼「　课文《标题》summary」（调 lesson.按条目列课文 item_code=item_code subject=subject_id 取第一课，取不到课就不拼那半句）
@@ -955,7 +956,7 @@ POST /quiz/import -> 导入题库 上传 file 类型 md,txt 上限 20MB 角色 t
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 文件 quiz/n9.md 内容=math.q1|C1|N5|接续|题干一|甲^乙|A||解析一|math.i1
-  调用 导入题库 file_path=quiz/n9.md subject=9
+  调用 导入题库 file_path=quiz/n9.md learner=t1 current_role=teacher auth_mode=on subject=9
   报错 404
   库 quiz_question 共 0 行
 

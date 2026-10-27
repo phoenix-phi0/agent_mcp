@@ -226,11 +226,13 @@
   伪代码 返回 {"learner": learner, "start_id": start_id, "max_id": max_id, "total": 行数, "answers": 列表}
 
 公开 函数 统计作答 learner? current_role? auth_mode? subject? student?
+  报错 403 只有老师可以查看作答统计
   返回 {total, learners}；learners 是 [{learner, answer_count, last_at}]，本科目每个有过作答的学习者一行，last_at 是其在本科目最后一次作答的 at；筛选学习者 = student 不为空取 student，否则在非登录模式（auth_mode 不是 on）下取 learner（旧行为，旧调用 统计作答 learner=u1 不变），登录模式下 learner 只是调用者身份、不作筛选；筛选不为空时只返回该学习者；按 learner 升序
   报错 400 subject 不对
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 先校验角色：auth_mode 等于 on 且 current_role 不等于 teacher（学生、空），报错 403 只有老师可以查看作答统计；非登录模式不校验（account 的 列学生、列学生页面 不传 auth_mode，走这一支）；这一步在 本科目 之前
   伪代码 科目：调用本模块 本科目 learner=（auth_mode 等于 on 取 learner，否则空串） current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject、student 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询都只限这个 subject_id；角色消歧：解析科目用的是调用者身份（learner 仅在 auth_mode=on 时就是登录用户并传给 本科目，非登录模式不传），被查的学习者是筛选条件，登录模式下一律用新增的可选入参 student 传，不再占用 learner，所以教师按学生筛选不会按被查学生去解析科目（避免 403 或解析错科目）
   伪代码 查 progress_answer 中 subject_id 等于本科目的行，按 learner 分组统计行数 answer_count，last_at 取该组 id 最大一行的 at
   伪代码 筛选学习者（student 不为空取 student，否则非登录模式取 learner）不为空时只留该学习者
@@ -560,6 +562,11 @@ POST /progress/point -> 知识点页面 动作 node_detail 模板 页面状态 �
   先 数据 progress_answer learner=u2 point_code=P1 question_no=Q1 correct=1 at=2025-12-03
   调用 统计作答 learner=u1
   得 total=1
+
+用例 统计作答_学生被拒
+  先 数据 progress_answer learner=u1 point_code=P1 question_no=Q1 correct=1 at=2025-12-01
+  调用 统计作答 learner=u1 current_role=student auth_mode=on
+  报错 403
 
 用例 统计作答_没有作答
   调用 统计作答

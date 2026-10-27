@@ -18,7 +18,9 @@
      - teacher_rules_setting / teacher_rules_relay 的 subject_id 默认值是 0（0=全部科目）：ADD COLUMN 之后旧行会变成 0，
        不改的话日语既有设定会混进别的科目的提示词。所以「这是第一次迁移」时把这两张表的 0 全改成 1。
        「第一次」的判据（任一成立）：迁移前这两张表还没有 subject_id 列；迁移前 subject_info 里还没有 1 号科目。
-       之后重跑不会再动（新建的「全部科目」设定存 0，是合法的）
+       判据成立时先在 setup_meta（本脚本建：key 文本主键, value 文本）写 rules_subject_fix=pending 持久标记，
+       0→1 回填与标记改 done 在同一事务里提交；所以回填中途失败后重跑，标记仍是 pending，会补修；
+       成功后标记是 done，重跑不再动（新建的「全部科目」设定存 0，是合法的）。没有标记的库（已迁移完的旧库）也不动
 重复运行不新增任何行（返回的计数全是 0）。init_data.py 新库初始化时也会调用 ensure_subject()。
 """
 import json
@@ -34,10 +36,12 @@ JP_CAPS = {"vocab": 1, "dictation": 1, "lesson": 1, "levels": 1, "jp_judge": 1, 
 SKIP_BACKFILL = {"subject_info", "subject_teacher", "subject_student", "subject_pref", "subject_ai",
                  "teacher_rules_setting", "teacher_rules_relay"}
 RULES_TABLES = ("teacher_rules_setting", "teacher_rules_relay")
+META_KEY = "rules_subject_fix"      # setup_meta 里的持久标记：pending=待修规则表的 0→1，done=已修
 
 
 def pre_state(db):
-    """ensure_db 之前调用：返回 {规则表缺列: bool, 无1号科目: bool}，决定要不要把 teacher_rules 的 0 改成 1。"""
+    """ensure_db 之前调用：返回 {规则表缺列: bool, 无1号科目: bool}，决定要不要把 teacher_rules 的 0 改成 1。
+    判据成立且 setup_meta 里还没有标记时，写 pending 标记（持久，回填成功才改 done）。"""
     con = sqlite3.connect(str(db))
     try:
         def cols(t):
@@ -45,7 +49,23 @@ def pre_state(db):
         missing = any(cols(t) and "subject_id" not in cols(t) for t in RULES_TABLES)
         has_info = bool(cols("subject_info"))
         no_one = (not has_info) or not con.execute("SELECT 1 FROM subject_info WHERE id = 1").fetchone()
+        if missing or no_one:
+            con.execute("CREATE TABLE IF NOT EXISTS setup_meta (key TEXT PRIMARY KEY, value TEXT)")
+            con.execute("INSERT OR IGNORE INTO setup_meta (key, value) VALUES (?, 'pending')", (META_KEY,))
+            con.commit()
         return {"规则表缺列": missing, "无1号科目": no_one}
+    finally:
+        con.close()
+
+
+def rules_fix_pending(db):
+    """setup_meta 里 rules_subject_fix 是 pending 才返回 True（没有表、没有标记、done 都是 False）。"""
+    con = sqlite3.connect(str(db))
+    try:
+        if not con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='setup_meta'").fetchone():
+            return False
+        r = con.execute("SELECT value FROM setup_meta WHERE key = ?", (META_KEY,)).fetchone()
+        return bool(r) and r[0] == "pending"
     finally:
         con.close()
 
@@ -69,6 +89,8 @@ def backfill_subject_id(db, fix_rules):
             n = con.execute(f'UPDATE "{t}" SET subject_id = 1 WHERE subject_id IS NULL OR subject_id = 0').rowcount
             if n:
                 out[t] = n
+        if fix_rules:
+            con.execute("UPDATE setup_meta SET value = 'done' WHERE key = ?", (META_KEY,))
         con.commit()
     except BaseException:
         con.rollback()
@@ -121,11 +143,12 @@ def main(argv=None):
     sys.path.insert(0, str(repo))
     from gen.project import ensure_db
     db = root / "app.db"
-    pre = pre_state(db) if db.is_file() else {"规则表缺列": False, "无1号科目": False}   # 库不存在：ensure_db 新建，没有旧行
+    if db.is_file():
+        pre_state(db)       # 旧库：判据成立就写 pending 标记
     print(ensure_db(root))
     r = ensure_subject(db)
     print(f"多科目迁移：新建科目 {r['科目']}、新登记学生 {r['学生']}、新登记教师 {r['教师']}")
-    fix_rules = pre["规则表缺列"] or pre["无1号科目"]
+    fix_rules = rules_fix_pending(db)       # 看持久标记，不看 pre：上次回填中途失败时 pre 已全是 False
     bf = backfill_subject_id(db, fix_rules)
     print(f"subject_id 回填 1：{bf if bf else '没有需要改的行'}（teacher_rules 的 0→1：{'做' if fix_rules else '不做（不是第一次迁移）'}）")
     return 0

@@ -13,7 +13,7 @@
   subject_id 整数 所属科目，默认 1（1 是日语语法）
 
 表 dictation_progress 学习记录
-  learner 文本 学习者，每人每个科目一行
+  learner 文本 学习者，每人每个科目一行（learner + subject_id 唯一）
   direction 文本 方向：zh2jp 或 kanji2kana
   level 文本 等级N5到N1，可空（非空时只出意思以[等级]开头的词，单词意思开头的[N4]就是等级）
   source 文本 题源，可空（空表示全部单词；review表示只出错词本里的词；否则是知识点编号，只出该知识点下的单词）
