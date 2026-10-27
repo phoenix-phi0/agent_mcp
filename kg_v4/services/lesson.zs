@@ -405,6 +405,19 @@
     如果 {series_code} 为空
       报错 400 series_code 不能为空
     结束
+    设 fm1 = 匹配 {series_code} ^[a-z][a-z0-9_-]*$
+    设 ov = 截取 {series_code} 41
+    设 fm2 = 匹配 {series_code} ^[a-z][a-z0-9_]*\.[A-Za-z0-9_-]+$
+    设 okfmt = 0
+    如果 {fm1.matched} 等于 是 且 {ov} 为空
+      设 okfmt = 1
+    结束
+    如果 {fm2.matched} 等于 是
+      设 okfmt = 1
+    结束
+    如果 {okfmt} 等于 0
+      报错 400 series_code 格式不对
+    结束
     如果 {sort_order} 不为空
       设 m = 匹配 {sort_order} ^-?\d+$
       如果 {m.matched} 不等于 是
@@ -502,9 +515,9 @@
       否则
         设 w = 写库表 app.db lesson_series_update {p}
       结束
-      设 w = 写库 app.db lesson_item_link_delete_series series_code={series_code}
-      设 w = 写库 app.db lesson_point_link_delete_series series_code={series_code}
-      设 w = 写库 app.db lesson_text_delete_series series_code={series_code}
+      设 w = 写库 app.db lesson_item_link_delete_series series_code={series_code} subject_id={subject_id}
+      设 w = 写库 app.db lesson_point_link_delete_series series_code={series_code} subject_id={subject_id}
+      设 w = 写库 app.db lesson_text_delete_series series_code={series_code} subject_id={subject_id}
       遍历 vl 于 {valid}
         设 x = 调用 写入行 line={vl} series_code={series_code} subject_id={subject_id}
         设 il = 计算 {il} + {x.i}
@@ -517,6 +530,19 @@
   公开 函数 写入系列课文并重灌 series_code rows_json series_name? source? license? learner? current_role? auth_mode? subject?
     如果 {series_code} 为空
       报错 400 series_code 不能为空
+    结束
+    设 fm1 = 匹配 {series_code} ^[a-z][a-z0-9_-]*$
+    设 ov = 截取 {series_code} 41
+    设 fm2 = 匹配 {series_code} ^[a-z][a-z0-9_]*\.[A-Za-z0-9_-]+$
+    设 okfmt = 0
+    如果 {fm1.matched} 等于 是 且 {ov} 为空
+      设 okfmt = 1
+    结束
+    如果 {fm2.matched} 等于 是
+      设 okfmt = 1
+    结束
+    如果 {okfmt} 等于 0
+      报错 400 series_code 格式不对
     结束
     设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
     设 sid = {sj.subject_id}
@@ -644,9 +670,9 @@
         结束
         设 w = 写库表 app.db lesson_series_update {p}
       结束
-      设 w = 写库 app.db lesson_item_link_delete_series series_code={series_code}
-      设 w = 写库 app.db lesson_point_link_delete_series series_code={series_code}
-      设 w = 写库 app.db lesson_text_delete_series series_code={series_code}
+      设 w = 写库 app.db lesson_item_link_delete_series series_code={series_code} subject_id={sid}
+      设 w = 写库 app.db lesson_point_link_delete_series series_code={series_code} subject_id={sid}
+      设 w = 写库 app.db lesson_text_delete_series series_code={series_code} subject_id={sid}
       遍历 gw 于 {good}
         设 q.code = {gw.code}
         设 q.level = {gw.level}
@@ -720,12 +746,12 @@
     如果 {mv} 等于 是 或 {mv} 等于 True 或 {mv} 等于 true
       设 moved = 1
     结束
-    设 cnt = 查一值 app.db lesson_text_count_series series_code={series_code}
+    设 cnt = 查一值 app.db lesson_text_count_series series_code={series_code} subject_id={sid}
     事务 app.db
-      设 w = 写库 app.db lesson_item_link_delete_series series_code={series_code}
-      设 w = 写库 app.db lesson_point_link_delete_series series_code={series_code}
-      设 w = 写库 app.db lesson_text_delete_series series_code={series_code}
-      设 w = 写库 app.db lesson_series_withdraw code={series_code}
+      设 w = 写库 app.db lesson_item_link_delete_series series_code={series_code} subject_id={sid}
+      设 w = 写库 app.db lesson_point_link_delete_series series_code={series_code} subject_id={sid}
+      设 w = 写库 app.db lesson_text_delete_series series_code={series_code} subject_id={sid}
+      设 w = 写库 app.db lesson_series_withdraw code={series_code} subject_id={sid}
     结束
     返回 {"ok": 1, "series_code": "{series_code}", "removed_lessons": {cnt}, "moved": {moved}}
   结束
