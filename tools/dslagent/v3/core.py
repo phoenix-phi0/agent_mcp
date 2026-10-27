@@ -67,9 +67,9 @@ class Ctx:
         return self.M.cost + self.module_cost
 
     def guard(self):
-        """花费到上限就让整个流程「终止 超出预期」。"""
+        """花费到上限就让整个流程「终止 超出预期」。派代理 / 并行派代理 / 做模块 调用前后查，模型客户端（GuardedClient）每次调用前查。"""
         if self.cost_cap is not None and self.cost() >= self.cost_cap:
-            raise ScriptHalt("超出预期", f"花费 ${self.cost():.2f} 达到上限 ${self.cost_cap:.2f}", "")
+            raise ScriptHalt("超出预期", f"花费 ${self.cost():.2f} 达到上限 ${self.cost_cap:.2f}，不再调用模型（已花费 ${self.cost():.2f}）", "")
 
     def take_call(self, n=1):
         """记 n 次模型调用进预算（v3.zs 的「预算 调用 N」）；超了抛 ScriptHalt。"""
@@ -110,6 +110,24 @@ class Ctx:
             st.setdefault("模块", {})[module] = {"通过": True, "约定hash": h, "时间": time.strftime("%Y-%m-%d %H:%M:%S")}
             self.state_path().parent.mkdir(parents=True, exist_ok=True)
             self.state_path().write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+class GuardedClient(V2.Client):
+    """每次模型调用（派任务 / 问JSON 等经 chat_messages，工具模式经 run_tool）之前先过 ctx.guard()：花费已到 --cost-cap 就抛 ScriptHalt「超出预期」，
+    不再发起这次调用。ScriptHalt 是 ScriptReturn，派任务 / 并行派任务原样往外抛，整个流程按「终止 超出预期」结束。
+    超出幅度不会超过「上限之前最后一次调用」的花费（一次调用内部无法中断）。"""
+
+    def __init__(self, M, ctx):
+        super().__init__(M)
+        self.ctx = ctx
+
+    def chat_messages(self, messages, *a, **kw):
+        self.ctx.guard()
+        return super().chat_messages(messages, *a, **kw)
+
+    def run_tool(self, *a, **kw):
+        self.ctx.guard()
+        return super().run_tool(*a, **kw)
 
 
 class V3Engine(DSLEngine):
@@ -160,7 +178,7 @@ def run(req, project, out, stop_after=None, backend=None, cost_cap=None, wall=WA
             k += 1
         old.rename(out / f"result_run{k}.json")
     ctx = Ctx(project, out, req, M, cost_cap=cost_cap, module_cmd=module_cmd, module_wall=module_wall)
-    eng = V3Engine(client=V2.Client(M), workdir=project, verbose=False, verbs_root=C.VERBS)
+    eng = V3Engine(client=GuardedClient(M, ctx), workdir=project, verbose=False, verbs_root=C.VERBS)
     eng.v3, ctx.usage = ctx, eng.usage
     eng.vars.update({"req": req, "project": str(project), "stop_after": stop, **({"skip": skip} if skip else {})})
     res, err = {"status": "成功", "reason": "", "at": ""}, None
@@ -192,10 +210,10 @@ def run_entry(script, project, out, req, extra_vars=None, backend=None, cost_cap
     prev_calls = _load_json(out / "calls.json", [])
     ctx = Ctx(project, out, req, M, cost_cap=cost_cap, module_cmd=module_cmd, module_wall=module_wall,
               module_calls=module_calls)
-    eng = V3Engine(client=V2.Client(M), workdir=project, verbose=False, verbs_root=C.VERBS)
+    eng = V3Engine(client=GuardedClient(M, ctx), workdir=project, verbose=False, verbs_root=C.VERBS)
     eng.v3, ctx.usage = ctx, eng.usage
     syntax = syntax_text(ctx)
-    eng.vars.update({"req": req, "syntax": syntax, **(extra_vars or {})})
+    eng.vars.update({"req": req, "syntax": syntax, "scope": "", "modules": "", **(extra_vars or {})})   # scope / modules：audit2 / fix2 的模块范围，缺省空 = 全部
     res, err = {"status": "成功", "reason": "", "at": ""}, None
     try:
         eng.run_file(HERE / f"{script}.zs")

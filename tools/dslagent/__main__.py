@@ -54,13 +54,14 @@ def main(argv=None):
     v.add_argument("--project", required=True, help="项目目录（不存在就建）")
     v.add_argument("--out", required=True, help="记录目录：每步产物、检查结果、重写次数、每个模块的 v2 记录目录、花费")
     v.add_argument("--stop-after", choices=("top", "contract", "build"), default=None, help="跑到这一步的产物写出并通过检查就停（只对 build 有效）")
-    v.add_argument("--cost-cap", type=float, default=None, help="花费上限（美元），达到就以「超出预期」结束")
+    v.add_argument("--cost-cap", type=float, default=None, help="花费上限（美元）：每次调模型之前先查，已花费达到上限就不再调、以「超出预期」结束（原因里写已花费）；最后一次调用可能略超")
     v.add_argument("--wall", type=int, default=None, help="整个流程的墙钟秒数（缺省 36000）")
     v.add_argument("--module-wall", type=int, default=1800, help="做一个模块时 v2 子进程的墙钟秒数")
     v.add_argument("--skip", default=None, help="（build2）逗号隔开的模块名：直接跳过不做，依赖它们的模块也跳过（续跑时先跳过已知会失败的模块）")
     v.add_argument("--task", default=None, help="（audit / change）这一轮要完成的具体任务，不写就是纯核查 / 按问题清单改")
     v.add_argument("--issues", default="latest", help="（change）读哪份问题清单：路径或 latest（默认最新一份）")
     v.add_argument("--llm", default="sonnet", help="（audit / change / audit2 / fix2）调模型用的模型名")
+    v.add_argument("--modules", default=None, help="（audit2 / fix2）只审这些模块，逗号隔开（如 lesson,quiz；必须是有 contracts/<名>.md 的模块）：plan/audit2.json 只含它们的问题，范围外模块的全量回归不过、以及核查员指出「问题出在范围外模块」的 contract_issue / module_issue 不终止，记进 skipped_issues 后继续审；范围内模块自己的 contract_issue 照旧；缺省 = 审全部模块")
     v.add_argument("--rounds", type=int, default=5, help="（fix2）核查→修改最多几轮")
     v.add_argument("--max-turns", type=int, default=8, help="（change2）每个 modify_module 代理（v2 子进程）里计划「预算 调用 N」的下限：规划写的 N 小于它就被提到它，只放宽不收紧；缺省 8，传 0 = 不干预（规划自己定）。背景：K29b 两轮 modify_module 都只用了 2 次模型调用（1 规划 + 1 派任务）就收尾，quiz 要新增 9 个函数装不下；agents.jsonl 每条记 v2_calls（上限）和 num_turns（实际）。只对 change2 生效，audit2 / fix2 / build2 / 修改 不受影响")
     ag = sp.add_parser("agents", help="子 agent 管理：角色登记表、调度层账本")
@@ -82,8 +83,17 @@ def main(argv=None):
         signal.signal(signal.SIGTERM, on_term)
         req_text = Path(a.req).read_text(encoding="utf-8")
         if a.action in ("audit2", "change2", "fix2"):   # 最小主干：audit2.zs / change2.zs / fix2.zs（循环：核查→改）
+            if a.modules and a.action == "change2":
+                ap.error("--modules 只对 audit2 / fix2 有效")
+            names = [m.strip() for m in (a.modules or "").split(",") if m.strip()]
+            if a.modules is not None and not names:
+                ap.error("--modules 不能是空的")
+            miss = [m for m in names if not (Path(a.project) / "contracts" / f"{m}.md").is_file()]
+            if miss:
+                ap.error(f"--modules 里的模块没有 contracts/<名>.md：{','.join(miss)}")
+            scope = {"scope": "|" + "|".join(names) + "|", "modules": ",".join(names)} if names else {}
             extra = ({"issues": a.issues} if a.action == "change2"
-                     else {"llm": a.llm, "rounds": a.rounds} if a.action == "fix2" else {"llm": a.llm})
+                     else {"llm": a.llm, "rounds": a.rounds, **scope} if a.action == "fix2" else {"llm": a.llm, **scope})
             res = V3.run_entry(a.action, a.project, a.out, req_text, extra_vars=extra,
                                cost_cap=a.cost_cap, **({"wall": a.wall} if a.wall else {}), module_wall=a.module_wall,
                                **({"module_calls": a.max_turns} if a.action == "change2" else {}))

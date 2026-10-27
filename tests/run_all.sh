@@ -124,6 +124,7 @@ run DSL试调 $PY tests/tools/test_dslagent_trial.py
 run DSL接口约定 $PY tests/tools/test_dslagent_contract.py
 run DSL规划骨架 $PY tests/tools/test_dslagent_dslplan.py
 run DSLv3流程 $PY tests/tools/test_dslagent_v3.py
+run DSLaudit2范围 $PY tests/tools/test_dslagent_k77.py
 run 批量opencode $PY tests/tools/test_obatch.py
 run 批量codex   $PY tests/tools/test_cxbatch.py
 run 批量goose   $PY tests/tools/test_gsbatch.py

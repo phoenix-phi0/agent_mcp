@@ -28,6 +28,16 @@
   regress.py    全量回归 / 接口冒烟 的检查实现（只报告，不重做、不改 state）
   v3.zs         流程脚本
 
+核查2 / 修改2 / 修复2（最小主干，audit2.zs / change2.zs / fix2.zs）：
+  python -m tools.dslagent v3 audit2|change2|fix2 --req F --project DIR --out DIR [--llm sonnet] [--modules a,b] [--cost-cap USD]
+  audit2   全量回归 + 每个有代码的模块派一次 派任务，汇总成 plan/audit2.json（result：contract_issue > module_issue > unchecked > ok）。
+           --modules a,b：只对点名模块派任务，audit2.json 只含它们的问题并带 scope；范围外模块的全量回归不过、范围内模块的核查员指出
+           「问题出在范围外模块」（owner）的问题，都不终止，记进 skipped_issues（module/owner/kind[contract_issue|module_issue|regression]/issue/basis/reason）后继续；
+           范围内模块自己的 contract_issue 仍 result=contract_issue。不传 --modules = 审全部，输出与旧版一致（没有 scope / skipped_issues）。
+           change2 只读 result / issues，对新增字段不受影响；fix2 把 --modules 原样传给每次核查。
+  --cost-cap  每次调模型之前先查（GuardedClient.chat_messages / run_tool、派代理 前后），已花费 ≥ 上限就不再调、以「超出预期」结束并写明已花费；
+              上限是调用前检查，最后一次已发出的调用可能让总花费略超上限。
+
 续跑规则：断了重跑同一命令。已存在且检查通过的规划（top / 约定）不重写；骨架已有的文件不覆盖；build.zs 每次按 top 重新生成；
 模块在 plan/state.json 记了通过且约定 hash 没变才跳过，约定改了就重做；做模块在上一轮留下的文件上接着改。
 记录（--out）：result.json（状态、花费、用时、各步记录）、v3_log.jsonl（每次写 / 检查 / 做模块 / 验收一行）、steps/（每次写出的规划原文）、
