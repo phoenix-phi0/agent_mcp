@@ -52,8 +52,8 @@
   伪代码 在一个事务里：
   伪代码 往 tutor_message 插入学生那条 (learner, role=user, content=user_text, intent, lesson_code, link 空, links 空, summary_round 空串, at=当前时间, subject_id=入参 subject_id)
   伪代码 往 tutor_message 插入老师那条 (learner, role=teacher, content=reply, intent, lesson_code, link, links=links_json, summary_round 空串, at=当前时间, subject_id=入参 subject_id)，取其新行 id 为 reply_id
-  伪代码 调用 teacher_rules.记回复用到设定 reply_id=reply_id student=learner setting_ids=setting_ids setting_versions=setting_versions（setting_ids 为空时它不写库）
-  伪代码 调用 teacher_rules.记回复传达 reply_id=reply_id student=learner relay_ids=relay_ids（relay_ids 为空时它不写库）
+  伪代码 调用 teacher_rules.记回复用到设定 reply_id=reply_id student=learner setting_ids=setting_ids setting_versions=setting_versions subject=subject_id（setting_ids 为空时它不写库；use 记录带科目，once 设定按科目判定）
+  伪代码 调用 teacher_rules.记回复传达 reply_id=reply_id student=learner relay_ids=relay_ids subject=subject_id（relay_ids 为空时它不写库；传达必须属于当前科目或全部科目(0)）
   伪代码 上面任一步报错，整个事务回滚、整轮不记，错误原样向上抛
   伪代码 返回 reply_id
 
@@ -62,7 +62,7 @@
   伪代码 relay_ids 为空直接返回
   伪代码 按英文逗号拆开，逐个编号：调用 teacher_rules.取传达 relay_id=编号 subject=subject_id 取 must_info，出错（如 404）跳过这个编号
   伪代码 问JSON（快档）：给模型这条回复 reply 和 must_info，问回复是否已把必须准确的信息传达到，要求返回 {"delivered": 1 或 0}
-  伪代码 delivered 等于 1 时调用 teacher_rules.记传达判定 student=learner relay_id=编号 delivered=1，出错忽略
+  伪代码 delivered 等于 1 时调用 teacher_rules.记传达判定 student=learner relay_id=编号 delivered=1 subject=subject_id，出错忽略
   伪代码 模型出错或返回不合法时按 delivered=0 处理（兜底，不调用记传达判定，不报错）
 
 函数 答一轮 learner user_text intent lesson_code context_text link links_json subject_id
@@ -418,6 +418,12 @@ POST /tutor/summarize-round -> 总结本轮 角色 student
   先 数据 tutor_message learner=u1 role=user content=数学问题 at=2026-01-01 subject_id=2
   调用 列对话页面 learner=u1 subject=2
   得 有返回
+
+用例 跨科目_列对话页面别的科目没有对话
+  先 数据 tutor_message learner=u1 role=user content=日语问题 at=2026-01-01 subject_id=1
+  先 数据 tutor_message learner=u1 role=user content=数学问题 at=2026-01-01 subject_id=2
+  调用 列对话页面 learner=u1 subject=3
+  得 talk=[]
 
 用例 跨科目_讲解一课别的科目的课当不存在
   先 数据 lesson_text code=L1 level=N5 title=はとが summary=主题助词 explain=はは提示主题 connection=名词 examples=私は学生です examples_edited=0 orig_title=はとが series_code=hanabira seq=1

@@ -12,7 +12,7 @@
   subject_id 整数 所属科目，默认 1（1 是日语语法）
 表 progress_mastery 学习记录
   learner 文本 学习者
-  point_code 文本 知识点编号；learner + point_code 唯一
+  point_code 文本 知识点编号；learner + point_code 唯一（point_code 全局唯一，由 kg 口径 2 的编号前缀和跨科目重号拒绝保证，所以不必把 subject_id 放进唯一键；但读写本表一律再带 subject_id 条件，防止万一撞号时两个科目的掌握状态互串）
   right_count 整数 累计答对数
   total_count 整数 累计答题数
   mastered 整数 是否已掌握（1/0）
@@ -51,14 +51,14 @@
   伪代码 返回 {"pass_line": pass_line, "fall_line": fall_line}
 
 函数 重算点 learner point_code pass_line fall_line subject_id
-  返回 {score, mastered, changed}；调用方保证 progress_mastery 里已有该 learner + point_code 的行；subject_id 是已解析的科目编号（整数）
+  返回 {score, mastered, changed}；调用方保证 progress_mastery 里已有该 learner + point_code（subject_id 等于传入值）的行；subject_id 是已解析的科目编号（整数）
   伪代码 取 progress_answer 中该 learner、该 point_code、subject_id 等于传入值的最近 10 条（按 id 降序），数量 n，答对数 r
   伪代码 score = 四舍五入(r * 100 / n)，n 为 0 时 score 为 0
-  伪代码 读 progress_mastery 该行的旧 mastered 记为 prev
+  伪代码 读 progress_mastery 该行（learner + point_code + subject_id 等于传入值）的旧 mastered 记为 prev
   伪代码 prev 等于 1：score 不小于 fall_line 则 mastered=1 否则 0；prev 不等于 1：score 不小于 pass_line 则 mastered=1 否则 0（掌握看得分，不看累计正确率）
   伪代码 取 progress_score 中该 learner、该 point_code、subject_id 等于传入值的最新一行（按 id 降序第一条）
   伪代码 没有，或其 score 不等于新 score：往 progress_score 插入 (learner, point_code, score, at=当前时间, subject_id=传入值)，changed=1；否则 changed=0（变了才记一行）
-  伪代码 更新 progress_mastery 该行的 mastered、updated_at=当前时间
+  伪代码 更新 progress_mastery 该行（learner + point_code + subject_id 等于传入值）的 mastered、updated_at=当前时间
   伪代码 返回 {"score": score, "mastered": mastered, "changed": changed}
 
 公开 函数 记作答 learner point_code question_no correct answer? pass_line? fall_line? current_role? auth_mode? subject?
@@ -79,9 +79,9 @@
   伪代码 调用 核对分数线 pass_line=pass_line fall_line=fall_line，得到两条线
   伪代码 在一个事务里（中途出错全部不算）：
   伪代码 往 progress_answer 插入 (learner, point_code, question_no, correct, answer, at=当前时间, subject_id=subject_id)
-  伪代码 按 learner + point_code 查 progress_mastery：没有则插入 (right_count=correct, total_count=1, mastered=0, updated_at=当前时间, subject_id=subject_id)；有则 total_count+1、right_count+correct、updated_at=当前时间
+  伪代码 按 learner + point_code + subject_id（等于本科目）查 progress_mastery：没有则插入 (right_count=correct, total_count=1, mastered=0, updated_at=当前时间, subject_id=subject_id)；有则 total_count+1、right_count+correct、updated_at=当前时间
   伪代码 调用 重算点 learner point_code 两条线 subject_id，得到 score、mastered、changed
-  伪代码 事务结束后读 progress_mastery 该行的 right_count、total_count
+  伪代码 事务结束后读 progress_mastery 该行（learner + point_code + subject_id 等于本科目）的 right_count、total_count
   伪代码 返回 {"ok": 1, "total": total_count, "right": right_count, "score": score, "mastered": mastered, "changed": changed}
 
 公开 函数 取状态 learner point_code? current_role? auth_mode? subject?
@@ -95,7 +95,7 @@
   伪代码 point_code 不为空：调用 kg.取知识点 code=point_code subject=subject_id，取不到（包括编号属于别的科目）报错 404 没有这个知识点，只处理这一个点
   伪代码 point_code 为空：调用 kg.列知识点 subject=subject_id，处理本科目全部点
   伪代码 对每个点：读 progress_mastery 该 learner + point_code（subject_id 等于本科目）的行得 right、total、mastered（没有全为 0）；读 progress_score 同条件最新一行得 score（没有为 0）
-  伪代码 对每个点：调用 kg.列前置 code=该点编号 subject=subject_id，所有前置在 progress_mastery 里 mastered=1 则 unlocked=1，否则 0
+  伪代码 对每个点：调用 kg.列前置 code=该点编号 subject=subject_id，所有前置在 progress_mastery 里（该 learner、subject_id 等于本科目）mastered=1 则 unlocked=1，否则 0
   伪代码 mastered_count 是 points 中 mastered=1 的个数，unlocked_count 是 unlocked=1 的个数
   伪代码 返回 {"learner": learner, "total": 点数, "mastered_count": mastered_count, "unlocked_count": unlocked_count, "points": 列表}
 
@@ -166,7 +166,7 @@
   伪代码 调用 核对分数线 pass_line=pass_line fall_line=fall_line
   伪代码 在一个事务里：
   伪代码 取 progress_answer 中全部不同的 (learner, point_code, subject_id)
-  伪代码 每对：若 progress_mastery 没有该行，按 progress_answer 统计 right_count、total_count 插入 (mastered=0, updated_at=当前时间, subject_id=该对的 subject_id)
+  伪代码 每对：若 progress_mastery 没有该 learner + point_code + subject_id（该对的科目）的行，按 progress_answer 同条件统计 right_count、total_count 插入 (mastered=0, updated_at=当前时间, subject_id=该对的 subject_id)
   伪代码 每对：调用 重算点 learner point_code 两条线 subject_id（只新增得分行、更新掌握标记，不删除旧得分行，不改作答流水）
   伪代码 累计 pairs 和 changed
   伪代码 返回 {"ok": 1, "pairs": pairs, "changed": changed}
@@ -194,7 +194,7 @@
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 learner 和 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询都只限这个 subject_id
   伪代码 limit 为空取 10；不是大于等于 1 的整数，报错 400 limit 不合法
   伪代码 查 progress_answer 中该 learner、subject_id 等于本科目且 correct=0 的行，按 id 降序取前 limit 条
-  伪代码 每行读 progress_score 该点（subject_id 等于本科目）最新一行的 score，progress_mastery 该点的 mastered
+  伪代码 每行读 progress_score 该点（subject_id 等于本科目）最新一行的 score，progress_mastery 该点（learner、subject_id 等于本科目）的 mastered
   伪代码 返回 {"learner": learner, "total": 条数, "wrongs": 列表}
 
 公开 函数 列久未做已掌握点 learner days? limit? current_role? auth_mode? subject?
@@ -225,15 +225,15 @@
   伪代码 max_id 取该 learner 在 progress_answer 里 subject_id 等于本科目的最大的 id，没有为 0
   伪代码 返回 {"learner": learner, "start_id": start_id, "max_id": max_id, "total": 行数, "answers": 列表}
 
-公开 函数 统计作答 learner? current_role? auth_mode? subject?
-  返回 {total, learners}；learners 是 [{learner, answer_count, last_at}]，本科目每个有过作答的学习者一行，last_at 是其在本科目最后一次作答的 at；learner 不为空时只返回该学习者；按 learner 升序
+公开 函数 统计作答 learner? current_role? auth_mode? subject? student?
+  返回 {total, learners}；learners 是 [{learner, answer_count, last_at}]，本科目每个有过作答的学习者一行，last_at 是其在本科目最后一次作答的 at；筛选学习者 = student 不为空取 student，否则在非登录模式（auth_mode 不是 on）下取 learner（旧行为，旧调用 统计作答 learner=u1 不变），登录模式下 learner 只是调用者身份、不作筛选；筛选不为空时只返回该学习者；按 learner 升序
   报错 400 subject 不对
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询都只限这个 subject_id；这里 learner 是「只看这个学习者」的筛选条件，同时也是解析科目用的用户名
+  伪代码 科目：调用本模块 本科目 learner=（auth_mode 等于 on 取 learner，否则空串） current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject、student 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询都只限这个 subject_id；角色消歧：解析科目用的是调用者身份（learner 仅在 auth_mode=on 时就是登录用户并传给 本科目，非登录模式不传），被查的学习者是筛选条件，登录模式下一律用新增的可选入参 student 传，不再占用 learner，所以教师按学生筛选不会按被查学生去解析科目（避免 403 或解析错科目）
   伪代码 查 progress_answer 中 subject_id 等于本科目的行，按 learner 分组统计行数 answer_count，last_at 取该组 id 最大一行的 at
-  伪代码 learner 不为空时只留该学习者
+  伪代码 筛选学习者（student 不为空取 student，否则非登录模式取 learner）不为空时只留该学习者
   伪代码 返回 {"total": 学习者数, "learners": 列表}
 
 函数 取点级映射 subject_id
@@ -260,7 +260,7 @@
   伪代码 recent：调用 列最近作答 learner=learner limit=20 subject=subject_id；每行 {at, label: 该点 title（调 kg.取知识点 code=该点编号 subject=subject_id，取不到用 point_code）, item_label: 空串（v4 作答流水不记条目）, result: correct=1 是「对」否则「错」}
   伪代码 levels：调用 按级统计掌握 learner=learner subject=subject_id 得五行；每行 {level, tally: 「{mastered}/{total}」, answers: 该级知识点的作答行数合计}（answers 用 取点级映射 subject_id=subject_id 把本科目 progress_answer 各行按所属点归级计数；v4 题不挂等级，与旧「按题挂级」口径的差别见报告）
   伪代码 scores：对 sc.scores 每行 {label: title, value: score, delta, at: last[code]}；delta：once[code]=1 是「首次」；本次分大于上次「+{差}」、小于「−{差}」（全角减号）、相等「±0」；顺序沿用 列得分（分低的在前、同分按编号）
-  伪代码 dictation：调用 dictation.取默写概况 learner=learner subject=subject_id 得 d；练过词数 words = dictation_attempt 中该 learner、subject_id 等于本科目的不同 word_id 的个数；text=「练过 {words} 个词，默写 {d.total} 次，正确率 {d.total 大于 0 时 d.accuracy% 否则 —}，错词本 {d.wrong_book_count} 个」；link 在 wrong_book_count 大于 0 时是「#%E9%BB%98%E5%86%99?source=review」否则「#%E9%BB%98%E5%86%99」
+  伪代码 dictation：调用 dictation.取默写概况 learner=learner subject=subject_id 得 d；练过词数 words = dictation_attempt（表带 subject_id 列，按本科目过滤）中该 learner、subject_id 等于本科目的不同 word_id 的个数；text=「练过 {words} 个词，默写 {d.total} 次，正确率 {d.total 大于 0 时 d.accuracy% 否则 —}，错词本 {d.wrong_book_count} 个」；link 在 wrong_book_count 大于 0 时是「#%E9%BB%98%E5%86%99?source=review」否则「#%E9%BB%98%E5%86%99」
   伪代码 返回 {"prog": prog, "doing": doing, "next": next, "recent": recent, "levels": levels, "scores": scores, "dictation": {"text": …, "link": …}}
 
 公开 函数 图谱页面 learner current_role? auth_mode? subject?
@@ -271,7 +271,7 @@
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 learner 和 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询都只限这个 subject_id；本函数在本模块内调用其它公开函数、调用 kg. 的函数时一律只传 subject=subject_id（已解析，不再校验）
   伪代码 调用 取状态 learner=learner subject=subject_id 得每点 mastered（right/total 顺带不用）；调用 kg.列知识点 subject=subject_id 得本科目全部点；badge 对每点调用 kg.列后代 code=该点编号 subject=subject_id 取 total；desc 对每点调用 kg.列前置 code=该点编号 subject=subject_id 拼 title
-  伪代码 edges 直读 kg_edge 与 kg_contrast，都只取 subject_id 等于本科目的行；对照两端都必须在 kg_point 里（subject_id 等于本科目）才收
+  伪代码 edges 直读 kg_edge 与 kg_contrast（两张表都带 subject_id 列，按本科目过滤，只取 subject_id 等于本科目的行）；对照两端各是知识点或条目，要通过 kg_point（带 subject_id 列，等于本科目）确认两端都是本科目的知识点才收，条目端丢掉（kg_point 的 code 全局唯一，不会误认别科目的点）
   伪代码 返回 {"graph": {"nodes": 按编号升序, "edges": 前置边在前按 id、对照边按 id}}
 
 公开 函数 知识点页面 learner code current_role? auth_mode? subject?
@@ -784,13 +784,12 @@ POST /progress/point -> 知识点页面 动作 node_detail 模板 页面状态 �
   库 progress_mastery 含 learner=u1 point_code=math.a subject_id=2
 
 用例 跨科目_进度页面只看本科目
-  先 数据 kg_point code=P1 title=一次函数
   先 数据 kg_point code=math.a title=代数 subject_id=2
   先 数据 kg_point code=math.b title=几何 subject_id=2
   先 数据 kg_edge pre_code=math.a point_code=math.b subject_id=2
   先 调用 记作答 learner=u1 point_code=math.a question_no=Q1 correct=1 subject=2
-  调用 进度页面 learner=u1 subject=2
-  得 有返回
+  调用 进度页面 learner=u1
+  得 doing=[] next=[] recent=[] scores=[]
   库 progress_answer 共 1 行
 
 用例 跨科目_图谱页面只看本科目
@@ -807,10 +806,126 @@ POST /progress/point -> 知识点页面 动作 node_detail 模板 页面状态 �
   先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
   先 数据 vocab_word kanji=式 kana=しき meaning=公式 point_code=math.a subject_id=2
   先 调用 记作答 learner=u1 point_code=math.a question_no=Q1 correct=1 subject=2
+  先 数据 progress_score learner=u1 point_code=math.a score=30 at=2099-01-01 subject_id=1
   调用 知识点页面 learner=u1 code=math.a subject=2
-  得 有返回
+  得 node_score=100
+
+用例 跨科目_知识点页面条目和单词不串科目
+  先 数据 kg_point code=P1 title=一次函数
+  先 数据 kg_item code=math.i1 name=条目 point_code=P1 after_form=P1 subject_id=2
+  先 数据 vocab_word kanji=式 kana=しき meaning=公式 point_code=P1 subject_id=2
+  调用 知识点页面 learner=u1 code=P1
+  得 items=[] forms=[] point_words=[]
 
 用例 跨科目_知识点页面别的科目的点404
   先 数据 kg_point code=math.a title=代数 subject_id=2
   调用 知识点页面 learner=u1 code=math.a
   报错 404
+
+用例 登录模式_记作答学生已分配科目可记作答
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_student subject_id=2 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  调用 记作答 learner=s1 point_code=math.a question_no=Q1 correct=1 current_role=student auth_mode=on subject=2
+  得 ok=1 total=1 right=1
+  库 progress_answer 含 learner=s1 point_code=math.a subject_id=2
+
+用例 登录模式_记作答学生未分配科目被拒
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  调用 记作答 learner=s1 point_code=math.a question_no=Q1 correct=1 current_role=student auth_mode=on subject=2
+  报错 403
+  库 progress_answer 共 0 行
+  库 progress_mastery 共 0 行
+
+用例 登录模式_记作答科目不存在
+  调用 记作答 learner=s1 point_code=math.a question_no=Q1 correct=1 current_role=student auth_mode=on subject=9
+  报错 404
+  库 progress_answer 共 0 行
+
+用例 登录模式_记作答科目不是数字
+  调用 记作答 learner=s1 point_code=P1 question_no=Q1 correct=1 subject=abc
+  报错 400
+  库 progress_answer 共 0 行
+
+用例 登录模式_取状态科目不存在
+  调用 取状态 learner=s1 current_role=student auth_mode=on subject=9
+  报错 404
+
+用例 登录模式_算下一步科目不是数字
+  调用 算下一步 learner=u1 subject=abc
+  报错 400
+
+用例 登录模式_取概览无权科目被拒
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 取概览 learner=t9 current_role=teacher auth_mode=on subject=2
+  报错 403
+
+用例 登录模式_列得分科目不存在
+  调用 列得分 learner=s1 current_role=student auth_mode=on subject=9
+  报错 404
+
+用例 登录模式_列最近作答科目不是数字
+  调用 列最近作答 learner=u1 subject=abc
+  报错 400
+
+用例 登录模式_按级统计掌握无权科目被拒
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 按级统计掌握 learner=s1 current_role=student auth_mode=on subject=2
+  报错 403
+
+用例 登录模式_列低分点科目不存在
+  调用 列低分点 learner=s1 current_role=student auth_mode=on subject=9
+  报错 404
+
+用例 登录模式_列错题科目不是数字
+  调用 列错题 learner=u1 subject=abc
+  报错 400
+
+用例 登录模式_列久未做已掌握点无权科目被拒
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 列久未做已掌握点 learner=t9 current_role=teacher auth_mode=on subject=2
+  报错 403
+
+用例 登录模式_取区间作答科目不存在
+  调用 取区间作答 learner=s1 start_id=0 current_role=student auth_mode=on subject=9
+  报错 404
+
+用例 登录模式_统计作答科目不是数字
+  调用 统计作答 learner=u1 subject=abc
+  报错 400
+
+用例 登录模式_进度页面无权科目被拒
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 进度页面 learner=s1 current_role=student auth_mode=on subject=2
+  报错 403
+
+用例 登录模式_图谱页面科目不存在
+  调用 图谱页面 learner=s1 current_role=student auth_mode=on subject=9
+  报错 404
+
+用例 登录模式_知识点页面科目不是数字
+  调用 知识点页面 learner=u1 code=math.a subject=abc
+  报错 400
+
+用例 登录模式_统计作答教师按学生筛选
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 progress_answer learner=s1 point_code=math.a question_no=Q1 correct=1 at=2026-01-02 subject_id=2
+  先 数据 progress_answer learner=s2 point_code=math.a question_no=Q1 correct=0 at=2026-01-03 subject_id=2
+  调用 统计作答 learner=t1 current_role=teacher auth_mode=on subject=2 student=s1
+  得 total=1
+
+用例 登录模式_统计作答不带筛选看全部
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 progress_answer learner=s1 point_code=math.a question_no=Q1 correct=1 at=2026-01-02 subject_id=2
+  先 数据 progress_answer learner=s2 point_code=math.a question_no=Q1 correct=0 at=2026-01-03 subject_id=2
+  调用 统计作答 learner=t1 current_role=teacher auth_mode=on subject=2
+  得 total=2

@@ -41,13 +41,12 @@
 ## 函数
 函数 本科目 learner current_role auth_mode subject need?
   返回 {subject_id}；本次请求用哪个科目
-  伪代码 调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=need，原样返回它的 subject_id（四个入参都是空串时得 1；显式 subject 无权时 解析科目 报 403/404、不是数字报 400，原样抛出）；本模块没有传 need=write 的函数（写学情总结只是教师请 AI 生成并存一份总结，不改科目内容，按读处理）
+  伪代码 调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=need，原样返回它的 subject_id（四个入参都是空串时得 1；显式 subject 无权时 解析科目 报 403/404、不是数字报 400，原样抛出）；本模块只有 写学情总结、写学情总结页面 传 need=write（往 report_summary 写一行带科目、别的教师会读的总结，属于写科目数据，只有负责/协作教师可写），其余函数按读
 
 函数 学生范围 subject_id
   返回 [{username, display_name, status, last_at}]；本科目的学生范围，按 account.列学生 的顺序
   伪代码 调用 account.列学生，得全部学生（含停用），带出 username、display_name、status、last_at
-  伪代码 subject_id 等于 1（日语）：返回全部学生账号（保持旧行为，现有用例的种子里没有 subject_student 行）
-  伪代码 否则调用 subject.列科目学生 subject_id=subject_id，得 students；只留 username 在 students 各项 learner 里的学生（科目里登记且 active 的学生；没有登记的学生不出现），顺序不变
+  伪代码 所有科目（含 1 号日语）统一：调用 subject.列科目学生 subject_id=subject_id，得 students；只留 username 在 students 各项 learner 里的学生（科目里登记且 active 的学生；没有登记或已撤销的学生不出现），顺序不变。不再有「1 号=全部学生」的特例，也不按 id=1 判断：新建的学生由 account.建学生 自动登记进日语科目（jp_grammar），已有学生由 migrate_subject.py 补登记
 
 函数 取点等级 point_code subject_id
   返回 等级文本（N5 到 N1），取不到返回空串
@@ -81,7 +80,7 @@
   伪代码 返回 {"total": 学生数, "students": 列表, "weak_point_count": …, "weak_item_count": …, "weak_points": 前10, "weak_items": 前10}
 
 公开 函数 取学生学情 student learner? current_role? auth_mode? subject?
-  返回 {student, display_name, status, answer_total, recent_accuracy, avg_score, mastered_count, wrong_count, wrong_answers, wrong_book_count, wrong_book, weak_count, weak_points, question_count, dialog_last_at, recent_questions, relay_count, relays, has_summary, summary, summary_author, summary_at}；wrong_answers 是最近答错的题 [{point_code, title, question_no, answer, at, score, mastered}]（题干由 quiz 持有，本模块不依赖 quiz，故只给题号与知识点标题）；wrong_book 是错词本 [{word_id, direction, kanji, kana, meaning, last_answer, last_at}]；weak_points 是前 10 个低分点 [{point_code, title, score, level}]；recent_questions 是最近 5 条学生提问 [{content, intent, at}]；relays 是该生的传达状态 [{relay_id, must_info, rounds, rounds_done, finished, confirmed}]；has_summary 为 1 时 summary、summary_author、summary_at 是最近一份学情总结，否则为空串。只读；所有数据只取本科目；学生不在本科目学生范围里（日语之外没有登记）与不存在一样，包括登记在别的科目的学生
+  返回 {student, display_name, status, answer_total, recent_accuracy, avg_score, mastered_count, wrong_count, wrong_answers, wrong_book_count, wrong_book, weak_count, weak_points, question_count, dialog_last_at, recent_questions, relay_count, relays, has_summary, summary, summary_author, summary_at}；wrong_answers 是最近答错的题 [{point_code, title, question_no, answer, at, score, mastered}]（题干由 quiz 持有，本模块不依赖 quiz，故只给题号与知识点标题）；wrong_book 是错词本 [{word_id, direction, kanji, kana, meaning, last_answer, last_at}]；weak_points 是前 10 个低分点 [{point_code, title, score, level}]；recent_questions 是最近 5 条学生提问 [{content, intent, at}]；relays 是该生的传达状态 [{relay_id, must_info, rounds, rounds_done, finished, confirmed}]；has_summary 为 1 时 summary、summary_author、summary_at 是最近一份学情总结，否则为空串。只读；所有数据只取本科目；学生不在本科目学生范围里（没有登记或已撤销，含只登记在别的科目的学生）与不存在一样
   报错 400 student 不能为空
   报错 404 没有这个学生
   报错 400 subject 不对
@@ -110,8 +109,9 @@
   报错 400 subject 不对
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
+  报错 403 没有权限修改该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（用户名取 current_user；路由层注入角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用其它模块的函数时一律带 subject=subject_id（已解析，不再校验）
+  伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；current_role、auth_mode、subject 都可选（用户名取 current_user；路由层注入角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），都不传得 1，行为同旧；auth_mode 等于 on 时只有该科目的负责/协作教师能写，公共科目的其他教师、学生报 403 没有权限修改该科目（单人模式不校验）；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用其它模块的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 student 为空，报错 400 student 不能为空；current_user 为空，报错 400 current_user 不能为空
   伪代码 调用 取学生学情 student=student subject=subject_id（学生不存在、不是学生或不在本科目学生范围里则报 404 没有这个学生）
   伪代码 问（回答档）：把学情（近期正确率、平均得分、已掌握数、最近答错的题、错词本、薄弱点、问老师的提问摘要、传达状态）交给模型，要求写一段给教师看的学情总结；模型出错报错 400 老师暂时无法回答，不写库
@@ -186,9 +186,10 @@
   报错 400 subject 不对
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
+  报错 403 没有权限修改该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（用户名取 current_user；路由层注入角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
-  伪代码 调用 写学情总结 student=student current_user=current_user subject=subject_id（错误原样向上抛，不写库）
+  伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；current_role、auth_mode、subject 都可选（用户名取 current_user；路由层注入角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），都不传得 1，行为同旧；auth_mode 等于 on 时只有该科目的负责/协作教师能写（否则 403 没有权限修改该科目）；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
+  伪代码 调用 写学情总结 student=student current_user=current_user subject=subject_id（权限已在上一步校验，这里只传已解析的科目；错误原样向上抛，不写库）
   伪代码 调用 取最近总结 student=student subject=subject_id，返回 {"student_summary": {"student": student, "head": 「AI 学情总结（{created_at}，{author} 请的）」, "text": summary}}
 
 ## 接口
@@ -204,7 +205,9 @@ POST /report/summary -> 写学情总结页面 动作 report_summary 模板 页�
 用例 全班学情_正常
   先 数据 account_user username=t1 password_hash=x display_name=老师 role=teacher disabled=0 created_at=2025-12-01
   先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 account_user username=s2 password_hash=x display_name=小二 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s2 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 kg_point code=P1 title=一次函数
   先 数据 kg_point code=P2 title=二次函数
   先 数据 kg_item code=I1 name=条目一 point_code=P1
@@ -223,7 +226,9 @@ POST /report/summary -> 写学情总结页面 动作 report_summary 模板 页�
 
 用例 全班学情_按学生过滤
   先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 account_user username=s2 password_hash=x display_name=小二 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s2 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 kg_point code=P1 title=一次函数
   先 数据 progress_answer learner=s1 point_code=P1 question_no=q1 correct=0 at=2026-01-01
   先 数据 progress_score learner=s1 point_code=P1 score=40 at=2026-01-01
@@ -242,6 +247,7 @@ POST /report/summary -> 写学情总结页面 动作 report_summary 模板 页�
 
 用例 学生学情_正常
   先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 kg_point code=P1 title=一次函数
   先 数据 kg_point code=P2 title=二次函数
   先 数据 progress_answer learner=s1 point_code=P1 question_no=q1 correct=1 at=2026-01-01
@@ -266,6 +272,7 @@ POST /report/summary -> 写学情总结页面 动作 report_summary 模板 页�
 
 用例 写学情总结_正常
   先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 kg_point code=P1 title=一次函数
   先 数据 progress_answer learner=s1 point_code=P1 question_no=q1 correct=0 at=2026-01-01
   先 数据 progress_score learner=s1 point_code=P1 score=0 at=2026-01-01
@@ -293,7 +300,9 @@ POST /report/summary -> 写学情总结页面 动作 report_summary 模板 页�
 
 用例 学情首页页面_正常
   先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 account_user username=s2 password_hash=x display_name=小二 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s2 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 kg_point code=P1 title=一次函数
   先 数据 kg_item code=I1 name=条目一 point_code=P1
   先 数据 progress_answer learner=s1 point_code=P1 question_no=q1 correct=0 at=2026-01-01
@@ -305,7 +314,9 @@ POST /report/summary -> 写学情总结页面 动作 report_summary 模板 页�
 
 用例 学情首页页面_平均得分没打过分的排最后
   先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 account_user username=s2 password_hash=x display_name=小二 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s2 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 kg_point code=P1 title=一次函数
   先 数据 progress_answer learner=s2 point_code=P1 question_no=q1 correct=1 at=2026-01-01
   先 数据 progress_score learner=s2 point_code=P1 score=90 at=2026-01-01
@@ -318,6 +329,7 @@ POST /report/summary -> 写学情总结页面 动作 report_summary 模板 页�
 
 用例 学生页面_正常
   先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 kg_point code=P1 title=一次函数
   先 数据 progress_answer learner=s1 point_code=P1 question_no=q1 correct=0 at=2026-01-01
   先 数据 progress_answer learner=s1 point_code=P1 question_no=q2 correct=1 at=2026-01-01
@@ -340,6 +352,7 @@ POST /report/summary -> 写学情总结页面 动作 report_summary 模板 页�
 
 用例 写学情总结页面_正常
   先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 kg_point code=P1 title=一次函数
   先 数据 progress_answer learner=s1 point_code=P1 question_no=q1 correct=0 at=2026-01-01
   先 数据 progress_score learner=s1 point_code=P1 score=0 at=2026-01-01
@@ -370,6 +383,8 @@ POST /report/summary -> 写学情总结页面 动作 report_summary 模板 页�
 用例 跨科目_2号科目数据对1号不可见
   先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
   先 数据 account_user username=s2 password_hash=x display_name=小二 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  先 数据 subject_student subject_id=1 learner=s2 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 subject_student subject_id=2 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 kg_point code=math.a title=代数 subject_id=2
   先 数据 progress_answer learner=s1 point_code=math.a question_no=math.q1 correct=0 at=2026-01-01 subject_id=2
@@ -405,6 +420,7 @@ POST /report/summary -> 写学情总结页面 动作 report_summary 模板 页�
 
 用例 跨科目_取学生学情日语不受影响
   先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 kg_point code=P1 title=甲
   先 数据 kg_point code=math.a title=代数 subject_id=2
   先 数据 progress_answer learner=s1 point_code=P1 question_no=q1 correct=1 at=2026-01-01
@@ -460,6 +476,7 @@ POST /report/summary -> 写学情总结页面 动作 report_summary 模板 页�
   先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
   调用 学生页面 student=s1 subject=2
   得 有返回
+  得 student_points=空 student_wrong=空
 
 用例 跨科目_学生页面本科目
   先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
@@ -505,3 +522,84 @@ POST /report/summary -> 写学情总结页面 动作 report_summary 模板 页�
 用例 跨科目_科目不是数字
   调用 取全班学情 subject=abc
   报错 400
+
+用例 日语科目_学生范围只看登记的学生
+  先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 account_user username=s2 password_hash=x display_name=小二 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  调用 取全班学情
+  得 total=1
+
+用例 日语科目_撤销的学生不显示
+  先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 account_user username=s2 password_hash=x display_name=小二 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  先 数据 subject_student subject_id=1 learner=s2 assigned_by=t1 status=revoked created_at=2026-01-01
+  调用 取全班学情
+  得 total=1
+
+用例 日语科目_没登记的学生取学情当不存在
+  先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  调用 取学生学情 student=s1
+  报错 404
+
+用例 日语科目_学生页面没登记不报错
+  先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  调用 学生页面 student=s1
+  得 有返回
+  得 student_points=空 student_wrong=空
+
+用例 跨科目_2号科目撤销的学生不显示
+  先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 account_user username=s2 password_hash=x display_name=小二 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=2 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  先 数据 subject_student subject_id=2 learner=s2 assigned_by=t1 status=revoked created_at=2026-01-01
+  调用 取全班学情 subject=2
+  得 total=1
+
+用例 写学情总结_登录模式公共科目非负责教师被拒
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=2 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  调用 写学情总结 student=s1 current_user=t9 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 report_summary 共 0 行
+
+用例 写学情总结_登录模式学生被拒
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  调用 写学情总结 student=s1 current_user=s1 current_role=student auth_mode=on subject=1
+  报错 403
+  库 report_summary 共 0 行
+
+用例 写学情总结_登录模式协作教师可写
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=2 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 progress_answer learner=s1 point_code=math.a question_no=math.q1 correct=0 at=2026-01-01 subject_id=2
+  调用 写学情总结 student=s1 current_user=t2 current_role=teacher auth_mode=on subject=2
+  得 ok=1 author=t2
+  库 report_summary 含 student=s1 author=t2 subject_id=2
+
+用例 写学情总结页面_登录模式公共科目非负责教师被拒
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=2 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  调用 写学情总结页面 student=s1 current_user=t9 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 report_summary 共 0 行
+
+用例 写学情总结_单人模式不校验写权限
+  先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  先 数据 kg_point code=P1 title=一次函数
+  先 数据 progress_answer learner=s1 point_code=P1 question_no=q1 correct=0 at=2026-01-01
+  调用 写学情总结 student=s1 current_user=t1 subject=1
+  得 ok=1
+  库 report_summary 共 1 行

@@ -83,7 +83,7 @@
   伪代码 按 learner 和当前科目 subject_id（本科目 得到的 subject_id）查 dictation_progress，查不到报错 400 还没有开始
   伪代码 current_word_id 不为 0 且 answered 等于 0，报错 400 当前词还没交答案
   伪代码 选词 用库里记的 direction、level、source 和 asked_ids（learner 传本人，subject_id 传本科目）。current_word_id 为 0，或 asked_count 不小于 10，或 选词 返回空（没有可出的词）：在库里把 current_word_id 置 0、answered 置 1，返回 {"ok": 1} 加 取状态 的字段（finished=1）
-  伪代码 否则在一个事务里更新 dictation_progress：current_word_id=新词 id，answered=0，hinted=0，asked_ids 末尾追加新词 id，asked_count 加 1
+  伪代码 否则在一个事务里更新 dictation_progress（按 learner 和本科目 subject_id 定位那一行，同上）：current_word_id=新词 id，answered=0，hinted=0，asked_ids 末尾追加新词 id，asked_count 加 1
   伪代码 返回 {"ok": 1} 加 取状态 的字段
 
 公开 函数 提示 learner current_role? auth_mode? subject?
@@ -354,7 +354,7 @@
 函数 空错词状态 learner direction level subject_id
   返回 {dphase, dempty, dcard, dstat}；dphase=empty，dempty=「「{方向名}」这个方向（等级：{level 为空填全部}）的错词本是空的——没有答错过的词，或者都已经连续答对两次了。先随机练一轮吧。」，dcard、dstat 空串
   伪代码 subject_id 是调用方传入的已解析科目编号（整数）；下面所有查询和写入都只限这个 subject_id；调用 vocab. 的函数时一律带 subject=subject_id
-  伪代码 记下这次的选择（下次进页面顶栏还是它）：该 learner 在当前科目 subject_id（调用方传入）下 dictation_progress 已有行则只更新 direction、level、source=review（本轮其余字段不动），没有则插入（subject_id 取当前科目，current_word_id=0、answered=1、hinted=0、asked_ids 空、asked_count=0、right_count=0、round_start=该 learner 在本科目 subject_id 下 dictation_attempt 的最大 id，没有为 0）
+  伪代码 记下这次的选择（下次进页面顶栏还是它）：该 learner 在当前科目 subject_id（调用方传入）下 dictation_progress 已有行：current_word_id 为 0（没有进行中的题）时才只更新 direction、level、source=review（本轮其余字段不动），current_word_id 不为 0（有进行中的题，不管答没答）时不改这三项，免得当前词的题面方向中途变掉（返回照常给空错词状态）；没有行则插入（subject_id 取当前科目，current_word_id=0、answered=1、hinted=0、asked_ids 空、asked_count=0、right_count=0、round_start=该 learner 在本科目 subject_id 下 dictation_attempt 的最大 id，没有为 0）
 
 函数 开轮页面 learner direction level source subject_id
   返回 {dphase, dcard, dstat}；出得了词 dphase=ask，dcard 是新词卡，dstat 是「这一轮 0/0」；source 等于 review 但错词本里没有可出的词时返回 空错词状态 的结果
@@ -1183,7 +1183,10 @@ GET /dictation/overview -> 取默写概况 角色 student
   先 数据 vocab_word kanji=数 kana=かず meaning=数字 point_code=P2 subject_id=2
   先 调用 开始 learner=me direction=zh2jp
   调用 默写页面 learner=me subject=2
-  得 有返回
+  得 dstat=空
+  库 dictation_progress 共 1 行
+  库 dictation_progress 含 learner=me subject_id=1 current_word_id=1
+  库 dictation_progress 无 learner=me subject_id=2
 
 用例 跨科目_判答案页面作答落当前科目
   先 数据 vocab_word kanji=数 kana=かず meaning=数字 point_code=P2 subject_id=2
@@ -1223,3 +1226,78 @@ GET /dictation/overview -> 取默写概况 角色 student
 用例 跨科目_科目不是数字400
   调用 取错词本 learner=me subject=abc
   报错 400
+
+用例 进度每人每科目一行_对2号科目的操作不动1号行
+  先 数据 vocab_word kanji=学校 kana=がっこう meaning=学校 point_code=P1
+  先 数据 vocab_word kanji=数 kana=かず meaning=数字 point_code=P2 subject_id=2
+  先 数据 vocab_word kanji=円 kana=えん meaning=圆 point_code=P2 subject_id=2
+  先 数据 dictation_progress learner=me direction=zh2jp current_word_id=1 answered=0 hinted=0 asked_ids=1 asked_count=1 right_count=0 round_start=0
+  先 数据 dictation_progress learner=me direction=zh2jp current_word_id=2 answered=1 hinted=0 asked_ids=2 asked_count=1 right_count=1 round_start=0 subject_id=2
+  调用 下一个 learner=me subject=2
+  得 ok=1 word_id=3 asked_count=2 right_count=1
+  库 dictation_progress 共 2 行
+  库 dictation_progress 含 learner=me subject_id=2 current_word_id=3 asked_count=2 answered=0
+  库 dictation_progress 含 learner=me subject_id=1 current_word_id=1 asked_count=1 answered=0 asked_ids=1
+
+用例 进度每人每科目一行_同一学生两科目各开一轮不互相覆盖
+  先 数据 vocab_word kanji=学校 kana=がっこう meaning=学校 point_code=P1
+  先 数据 vocab_word kanji=数 kana=かず meaning=数字 point_code=P2 subject_id=2
+  先 调用 开始 learner=me direction=zh2jp
+  先 调用 开始 learner=me direction=kanji2kana subject=2
+  调用 开始 learner=me direction=zh2jp subject=2
+  得 ok=1 word_id=2 asked_count=1
+  库 dictation_progress 共 2 行
+  库 dictation_progress 含 learner=me subject_id=1 direction=zh2jp current_word_id=1
+  库 dictation_progress 含 learner=me subject_id=2 direction=zh2jp current_word_id=2
+
+用例 开新轮_round_start按本科目最大id不取全局
+  先 数据 vocab_word kanji=学校 kana=がっこう meaning=学校 point_code=P1
+  先 数据 vocab_word kanji=数 kana=かず meaning=数字 point_code=P2 subject_id=2
+  先 数据 dictation_attempt learner=me word_id=1 direction=zh2jp answer=x correct=0 hinted=0 at=2026-01-01
+  先 数据 dictation_attempt learner=me word_id=2 direction=zh2jp answer=x correct=0 hinted=0 at=2026-01-02 subject_id=2
+  先 数据 dictation_attempt learner=me word_id=2 direction=zh2jp answer=y correct=0 hinted=0 at=2026-01-03 subject_id=2
+  调用 开始 learner=me direction=zh2jp
+  得 ok=1 word_id=1
+  库 dictation_progress 含 learner=me subject_id=1 round_start=1
+  库 dictation_progress 无 learner=me round_start=3
+
+用例 开新轮_2号科目没有作答时round_start为0不取别科目的id
+  先 数据 vocab_word kanji=数 kana=かず meaning=数字 point_code=P2 subject_id=2
+  先 数据 dictation_attempt learner=me word_id=1 direction=zh2jp answer=x correct=0 hinted=0 at=2026-01-01
+  调用 开始 learner=me direction=zh2jp subject=2
+  得 ok=1 word_id=1
+  库 dictation_progress 含 learner=me subject_id=2 round_start=0
+
+用例 判词_同义词不跨科目
+  先 数据 vocab_word kanji=学校 kana=がっこう meaning=[N5]学校 point_code=P1
+  先 数据 vocab_word kanji=校舎 kana=こうしゃ meaning=[N4]学校 point_code=P1 subject_id=2
+  先 调用 开始 learner=me direction=zh2jp level=N5
+  调用 交答案 learner=me answer=こうしゃ
+  得 ok=1 correct=0 right_count=0
+  库 dictation_attempt 含 learner=me word_id=1 answer=こうしゃ correct=0 subject_id=1
+
+用例 判词_别科目的同词不判对
+  先 数据 vocab_word kanji=学校 kana=がっこう meaning=学校 point_code=P1
+  先 数据 vocab_word kanji=数 kana=かず meaning=数字 point_code=P2 subject_id=2
+  先 调用 开始 learner=me direction=kanji2kana subject=2
+  调用 交答案 learner=me answer=がっこう subject=2
+  得 ok=1 correct=0 right_count=0
+  库 dictation_attempt 含 learner=me word_id=2 correct=0 subject_id=2
+
+用例 空错词状态_有进行中的题不改方向等级题源
+  先 数据 vocab_word kanji=学校 kana=がっこう meaning=学校 point_code=P1
+  先 数据 dictation_progress learner=me direction=zh2jp current_word_id=1 answered=0 hinted=0 asked_ids=1 asked_count=1 right_count=0 round_start=0
+  调用 开始页面 learner=me dict_direction=看汉字写读音 dict_level=N5 dict_source=错词复习
+  得 dphase=empty
+  库 dictation_progress 共 1 行
+  库 dictation_progress 含 learner=me direction=zh2jp current_word_id=1 answered=0 asked_count=1
+  库 dictation_progress 无 learner=me direction=kanji2kana
+  库 dictation_progress 无 learner=me source=review
+
+用例 空错词状态_没有进行中的题才写方向等级题源
+  先 数据 vocab_word kanji=学校 kana=がっこう meaning=学校 point_code=P1
+  先 数据 dictation_progress learner=me direction=zh2jp current_word_id=0 answered=1 hinted=0 asked_ids=1 asked_count=1 right_count=1 round_start=0
+  调用 开始页面 learner=me dict_direction=看汉字写读音 dict_level=N5 dict_source=错词复习
+  得 dphase=empty
+  库 dictation_progress 共 1 行
+  库 dictation_progress 含 learner=me direction=kanji2kana level=N5 source=review current_word_id=0 asked_count=1 right_count=1

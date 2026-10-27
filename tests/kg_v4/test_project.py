@@ -4,7 +4,7 @@
     cd /workspace/agent_mcp && .venv/bin/python tests/kg_v4/test_project.py
 
 拷一份 kg_v4（不带 app.db / web / uploads）到临时目录再检查，不动仓库里的文件。离线，不调模型。
-  一、13 个模块的约定检查 + 全局检查 + 加载检查
+  一、13 个模块的约定检查 + 全局检查 + 加载检查 + 跨模块调用核对（xcall，见 test_xcall.py）
   二、全量回归（每个模块的约定用例在临时库上跑）13/13
   三、gen build：64 个接口
   四、setup/init_data.py：用裁小的单词表（200 条）+ 仓库题库灌一遍，各类条数对；
@@ -59,6 +59,11 @@ try:
     check(not (gp.get("条数", 0) if isinstance(gp, dict) else len(gp)), "全局检查 0 重复", gp)
     lp = loadcheck.check_project(str(proj), scripts=True)
     check(not lp, "加载检查 0 问题", lp[:3])
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import test_xcall                       # 跨模块调用参数名核对（常驻；K79 固化）
+    xr = test_xcall.run_xcall(proj)
+    xbad = [f"[{c}] {w}: {m}" for c, w, m in xr["跨模块不一致"] + xr["模块内疑点"]] + xr["top问题"] + xr["提供未列"]
+    check(not xbad, f"跨模块调用核对（xcall）{xr['总数']} 处 0 不一致", xbad[:3])
 
     print("二、全量回归")
     from tools.dslagent.v3 import regress as R

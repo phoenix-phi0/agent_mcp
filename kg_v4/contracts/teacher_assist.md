@@ -21,8 +21,7 @@
 函数 学生范围 subject_id
   返回 [{username, display_name, status, last_at}]；本科目的学生范围，按 account.列学生 的顺序（与 report 的学生范围同一规则，report 的该函数是私有的，这里按同样规则做一份）
   伪代码 调用 account.列学生，得全部学生（含停用），带出 username、display_name、status、last_at
-  伪代码 subject_id 等于 1（日语）：返回全部学生账号（保持旧行为）
-  伪代码 否则调用 subject.列科目学生 subject_id=subject_id，得 students；只留 username 在 students 各项 learner 里的学生（科目里登记且 active 的学生），顺序不变
+  伪代码 所有科目（含 1 号日语）统一：调用 subject.列科目学生 subject_id=subject_id，得 students；只留 username 在 students 各项 learner 里的学生（科目里登记且 active 的学生；没有登记或已撤销的不出现），顺序不变。不再有「1 号=全部学生」的特例，也不按 id=1 判断；学生范围的规则只在 subject.列科目学生 一处（本函数与 report 的同名私有函数都只是它加 account.列学生 的过滤）
 
 函数 取最近对话 current_user limit subject_id
   返回 文本，本科目最近 limit 条对话，按 id 升序，每条一行，老师写「老师：内容」，助手写「助手：内容」；老师那条截取前 100 个字，助手那条截取前 150 个字；没有则空串
@@ -199,28 +198,35 @@ GET /teacher_assist/messages -> 列对话 角色 teacher
 ## 用例
 用例 匹配学生_显示名唯一
   先 数据 account_user username=s1 password_hash=x display_name=小明 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 account_user username=s2 password_hash=x display_name=小红 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s2 assigned_by=t1 status=active created_at=2026-01-01
   调用 匹配学生 name=小明
   得 status=one username=s1 display_name=小明
 
 用例 匹配学生_带同学二字
   先 数据 account_user username=s1 password_hash=x display_name=小明 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   调用 匹配学生 name=小明同学
   得 status=one username=s1
 
 用例 匹配学生_用户名忽略大小写
   先 数据 account_user username=ab12 password_hash=x display_name=小明 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=ab12 assigned_by=t1 status=active created_at=2026-01-01
   调用 匹配学生 name=AB12
   得 status=one username=ab12
 
 用例 匹配学生_模糊匹配到多个
   先 数据 account_user username=s1 password_hash=x display_name=王小明 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 account_user username=s2 password_hash=x display_name=李小明 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s2 assigned_by=t1 status=active created_at=2026-01-01
   调用 匹配学生 name=小明
   得 status=many
 
 用例 匹配学生_没有这个人
   先 数据 account_user username=s1 password_hash=x display_name=小明 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   调用 匹配学生 name=张三
   得 status=none
 
@@ -258,7 +264,9 @@ GET /teacher_assist/messages -> 列对话 角色 teacher
 
 用例 取助手上下文_全班概况
   先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 account_user username=s2 password_hash=x display_name=小二 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s2 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 kg_point code=P1 title=一次函数
   先 数据 progress_answer learner=s1 point_code=P1 question_no=q1 correct=0 at=2026-01-01
   先 数据 progress_score learner=s1 point_code=P1 score=40 at=2026-01-01
@@ -268,6 +276,7 @@ GET /teacher_assist/messages -> 列对话 角色 teacher
 
 用例 取助手上下文_学生详情
   先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 kg_point code=P1 title=一次函数
   先 数据 progress_answer learner=s1 point_code=P1 question_no=q1 correct=0 at=2026-01-01
   先 数据 progress_score learner=s1 point_code=P1 score=40 at=2026-01-01
@@ -276,12 +285,15 @@ GET /teacher_assist/messages -> 列对话 角色 teacher
 
 用例 取助手上下文_学生没找到要追问
   先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   调用 取助手上下文 intent=student_detail student=张三
   得 status=ask student=空
 
 用例 取助手上下文_学生有多个要追问
   先 数据 account_user username=s1 password_hash=x display_name=王小明 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 account_user username=s2 password_hash=x display_name=李小明 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s2 assigned_by=t1 status=active created_at=2026-01-01
   调用 取助手上下文 intent=student_detail student=小明
   得 status=ask
 
@@ -291,7 +303,9 @@ GET /teacher_assist/messages -> 列对话 角色 teacher
 
 用例 取助手上下文_知识点掌握
   先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 account_user username=s2 password_hash=x display_name=小二 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s2 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 kg_point code=P1 title=一次函数
   先 数据 progress_answer learner=s1 point_code=P1 question_no=q1 correct=0 at=2026-01-01
   先 数据 progress_mastery learner=s1 point_code=P1 right_count=0 total_count=1 mastered=0 updated_at=2026-01-01
@@ -306,6 +320,7 @@ GET /teacher_assist/messages -> 列对话 角色 teacher
 
 用例 取助手上下文_教学建议
   先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 kg_point code=P1 title=一次函数
   先 数据 lesson_text code=L1 level=N5 title=はとが summary=主题助词 explain=x connection=x examples=x examples_edited=0 orig_title=x series_code=hanabira seq=1
   先 数据 lesson_point_link lesson_code=L1 point_code=P1
@@ -397,8 +412,8 @@ GET /teacher_assist/messages -> 列对话 角色 teacher
 用例 跨科目_列对话页面只看本科目
   先 数据 teacher_assist_message teacher=t1 role=user content=日语问题 status=ok at=2026-01-01
   先 数据 teacher_assist_message teacher=t1 role=user content=数学问题一 status=ok at=2026-01-01 subject_id=2
-  调用 列对话页面 current_user=t1 subject=2
-  得 有返回
+  调用 列对话页面 current_user=t1 subject=3
+  得 talk=[]
 
 用例 跨科目_问助手对话落当前科目
   调用 问助手 current_user=t1 message=你好 subject=2
@@ -427,12 +442,19 @@ GET /teacher_assist/messages -> 列对话 角色 teacher
   调用 匹配学生 name=小明 subject=2
   得 status=one username=s1 display_name=小明
 
-用例 跨科目_匹配学生不传科目是日语全部学生
+用例 跨科目_匹配学生不传科目是日语登记的学生
   先 数据 account_user username=s1 password_hash=x display_name=小明 role=student disabled=0 created_at=2025-12-01
   先 数据 account_user username=s2 password_hash=x display_name=小红 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s2 assigned_by=t1 status=active created_at=2026-01-01
   先 数据 subject_student subject_id=2 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   调用 匹配学生 name=小红
   得 status=one username=s2
+
+用例 跨科目_匹配学生日语没登记的匹配不到
+  先 数据 account_user username=s1 password_hash=x display_name=小明 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=2 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  调用 匹配学生 name=小明
+  得 status=none
 
 用例 跨科目_匹配知识点只看本科目
   先 数据 kg_point code=P1 title=助词は

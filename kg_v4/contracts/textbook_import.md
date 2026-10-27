@@ -1474,6 +1474,7 @@ GET /textbook_import/chunk/prompt -> 块提示词 角色 teacher
   先 数据 textbook_import_task series_code=math.s series_name=数学教材 code_prefix=math. file_name=m.md raw_text=y status=待审阅 created_at=2026-01-01 subject_id=2
   调用 任务视图 task_id=1
   得 有返回
+  得 import_chunks=空 import_drafts=空
 
 用例 跨科目_修改草稿课别的科目404
   先 数据 textbook_import_task series_code=math.s series_name=数学教材 code_prefix=math. file_name=m.md raw_text=y status=待审阅 created_at=2026-01-01 subject_id=2

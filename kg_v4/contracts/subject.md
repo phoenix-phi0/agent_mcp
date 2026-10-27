@@ -74,21 +74,32 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 403 没有权限修改该科目
+  报错 403 只有科目负责人可以操作
   报错 404 没有这个科目
-  伪代码 need 缺省或 read：以下行为与旧版完全一致；need 为 write：见最后三条
+  伪代码 上面的 403、404（含各模块函数头「报错 404 没有这个科目」「报错 403 …」那几行）只在登录模式（auth_mode 等于 on）下出现；单人/不登录模式不校验权限、不查库，显式 subject 原样返回，所以「学生也能改」的印象只会来自误用单人模式（README 要写明）
+  伪代码 need 缺省或 read：以下行为与旧版完全一致；need 为 write：见最后三条；need 为 own：见最后一条
   伪代码 解析顺序：请求里显式 subject（地址参数，路由注入）→ 偏好 → 第一个已分配 → 1；显式 subject 无权报 403
   伪代码 subject 不为空：不是纯数字，报错 400 subject 不对；auth_mode 不等于 on，直接返回 {"subject_id": 该数字}（单人模式不校验，也不查库）
   伪代码 subject 不为空且 auth_mode 等于 on：按「科目访问 need=read auth_mode=on」判断（空角色也被拒），ok 为 0 时——科目不存在报错 404 没有这个科目；current_role 等于 student 报错 403 该科目未分配给你；否则报错 403 没有权限访问该科目；ok 为 1 返回 {"subject_id": 该数字}
   伪代码 subject 为空：直接返回「当前科目 learner=learner current_role=current_role」的结果（偏好 → 第一个已分配 → 1），不校验、不报错
-  伪代码 need 校验：need 不为空且不是 read、write 之一，报错 400 need 不对（最先检查，不论 auth_mode）
+  伪代码 need 校验：need 不为空且不是 read、write、own 之一，报错 400 need 不对（最先检查，不论 auth_mode）
   伪代码 need 等于 write 且 auth_mode 等于 on：先按上面两条解析出 subject_id（显式 subject 的 400/403/404 照旧），再按「科目访问 need=write auth_mode=on」判断，ok 为 0 时——科目不存在报错 404 没有这个科目，否则报错 403 没有权限修改该科目（学生、没有关系的教师、公共科目的非负责/协作教师都是它）；ok 为 1 返回 {"subject_id": 该数字}。即登录模式下只有科目的负责/协作教师能通过写校验
   伪代码 need 等于 write 但 auth_mode 不等于 on（单人/不登录）：不校验，同 need 缺省
+  伪代码 need 等于 own（仅负责人通过，给改「全部科目(0)」的内容用）且 auth_mode 等于 on：先按上面两条解析出 subject_id（显式 subject 的 400/403/404 照旧），再按「科目访问 need=settings auth_mode=on」判断，ok 为 0 时——科目不存在报错 404 没有这个科目，否则报错 403 只有科目负责人可以操作（协作教师、公共科目的其他教师、学生都是它）；ok 为 1 返回 {"subject_id": 该数字}；need 等于 own 但 auth_mode 不等于 on：不校验，同 need 缺省
 
 公开 函数 列科目学生 subject_id
-  返回 {total, students}；students 是 [{learner}]，subject_student 里该科目 status 等于 active 的学生，按 learner 升序（report 用）
+  返回 {total, students}；students 是 [{learner}]，subject_student 里该科目 status 等于 active 的学生，按 learner 升序（report、teacher_assist 用；学生范围的唯一规则，没有「1 号=全部学生」的特例）
   伪代码 查 subject_student 中 subject_id 相等且 status 等于 active 的行，按 learner 升序，去重
   伪代码 不校验权限（调用方已解析科目）、只读、不调用别的模块；科目不存在或没人登记返回 {"total": 0, "students": []}
   伪代码 返回 {"total": 数量, "students": 列表}
+
+公开 函数 登记学生 learner code?
+  返回 {registered, subject_id}；把学生登记进一个科目（code 缺省为 jp_grammar，即日语语法），给 account.建学生 用（account 不直接写 subject 的表，依赖方向 account → subject，不成环）
+  伪代码 learner 为空返回 {"registered": 0, "subject_id": 0}，不报错
+  伪代码 code 为空取 jp_grammar；按 code 查 subject_info（不按 id=1 判断），查不到返回 {"registered": 0, "subject_id": 0}，不报错（库里还没有该科目时建学生照常成功）
+  伪代码 subject_student 已有 (subject_id, learner) 的行（不论 active 还是 revoked）就不动，返回 {"registered": 0, "subject_id": 该科目 id}（幂等，不把被撤销的学生重新加回来）
+  伪代码 否则插入 subject_student (subject_id, learner, assigned_by=空串, status=active, created_at=当前时间)，返回 {"registered": 1, "subject_id": 该科目 id}
+  伪代码 不校验权限、不检查 learner 是否真是学生（调用方负责）、不调用别的模块
 
 公开 函数 切换科目 learner current_role subject
   返回 {ok, subject}；把该用户的当前科目偏好写成 subject
@@ -430,3 +441,83 @@ POST /subject/switch -> 切换科目 动作 subject_switch 模板 提交消息 �
   先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   调用 列科目学生 subject_id=1
   得 total=0
+
+用例 登记学生_默认登记进日语科目
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 登记学生 learner=s1
+  得 registered=1 subject_id=1
+  库 subject_student 含 subject_id=1 learner=s1 status=active
+
+用例 登记学生_按code登记不按id
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 登记学生 learner=s1
+  得 registered=1 subject_id=2
+  库 subject_student 含 subject_id=2 learner=s1 status=active
+  库 subject_student 无 subject_id=1 learner=s1
+
+用例 登记学生_指定code
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 登记学生 learner=s1 code=math
+  得 registered=1 subject_id=2
+
+用例 登记学生_重复登记不新增
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  调用 登记学生 learner=s1
+  得 registered=0 subject_id=1
+  库 subject_student 共 1 行
+
+用例 登记学生_已撤销的不加回
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=revoked created_at=2026-01-01
+  调用 登记学生 learner=s1
+  得 registered=0
+  库 subject_student 含 subject_id=1 learner=s1 status=revoked
+
+用例 登记学生_科目不存在不报错
+  调用 登记学生 learner=s1
+  得 registered=0 subject_id=0
+  库 subject_student 共 0 行
+
+用例 登记学生_learner为空
+  调用 登记学生 learner=空
+  得 registered=0
+  库 subject_student 共 0 行
+
+用例 解析科目_need_own负责人通过
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 解析科目 learner=t1 current_role=teacher auth_mode=on subject=1 need=own
+  得 subject_id=1
+
+用例 解析科目_need_own协作教师被拒
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=1 teacher=t2 role=editor created_at=2026-01-01
+  调用 解析科目 learner=t2 current_role=teacher auth_mode=on subject=1 need=own
+  报错 403
+
+用例 解析科目_need_own协作教师仍可write
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=1 teacher=t2 role=editor created_at=2026-01-01
+  调用 解析科目 learner=t2 current_role=teacher auth_mode=on subject=1 need=write
+  得 subject_id=1
+
+用例 解析科目_need_own公共科目其他教师被拒
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 解析科目 learner=t9 current_role=teacher auth_mode=on subject=1 need=own
+  报错 403
+
+用例 解析科目_need_own学生被拒
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  调用 解析科目 learner=s1 current_role=student auth_mode=on subject=1 need=own
+  报错 403
+
+用例 解析科目_need_own科目不存在
+  调用 解析科目 learner=t1 current_role=teacher auth_mode=on subject=9 need=own
+  报错 404
+
+用例 解析科目_need_own单人模式不校验
+  调用 解析科目 learner=me current_role=空 auth_mode=off subject=7 need=own
+  得 subject_id=7

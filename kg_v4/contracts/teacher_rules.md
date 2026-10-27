@@ -20,6 +20,7 @@
   setting_ids 文本 这条回复用到的设定编号，半角逗号隔开，按拼进提示词的顺序
   setting_versions 文本 与 setting_ids 一一对应的版本号，半角逗号隔开
   at 文本 记录时间
+  subject_id 整数 这条回复所属科目，默认 1（用来让「只用于下一条」按科目判定；旧行回填 1；实体需新增该列，默认 1，索引）
 
 表 teacher_rules_relay
   urgency 文本 紧急程度：low（顺便）/ normal（尽快）/ urgent（立即），旧数据的 normal、urgent 含义不变
@@ -48,6 +49,7 @@
   student 文本 学生用户名
   relay_ids 文本 这条回复带上的传达编号，半角逗号隔开
   at 文本 记录时间
+  subject_id 整数 这条回复所属科目，默认 1（取回复用到按科目过滤；旧行回填 1；实体需新增该列，默认 1，索引）
 
 ## 页面字段
 页面 teacher_rules_view AI老师设定页面
@@ -87,7 +89,7 @@
 ## 函数
 函数 本科目 learner current_role auth_mode subject need?
   返回 {subject_id}；本次请求用哪个科目
-  伪代码 调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=need，原样返回它的 subject_id（四个入参都是空串时得 1；显式 subject 无权时 解析科目 报 403/404、不是数字报 400、need 不对报 400、auth_mode 等于 on 且 need 等于 write 无写权限报 403 没有权限修改该科目，原样抛出）
+  伪代码 调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=need，原样返回它的 subject_id（四个入参都是空串时得 1；显式 subject 无权时 解析科目 报 403/404、不是数字报 400、need 不对报 400、auth_mode 等于 on 且 need 等于 write 无写权限报 403 没有权限修改该科目、need 等于 own 而不是该科目负责人报 403 只有科目负责人可以操作，原样抛出；need 取值 read / write / own，own 只用于改「全部科目(0)」的内容）
 
 公开 函数 列设定 kind? student? learner? current_role? auth_mode? subject?
   返回 {items, total}，items 每项 {id, kind, student, keywords, content, enabled, once, version, author, updated_at}，按 id 升序
@@ -123,8 +125,10 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  报错 403 只有科目负责人可以操作
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；current_role、auth_mode、subject 都可选（用户名取 current_user；路由层注入登录角色、登录模式和地址参数 subject），三个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；这是教师内容写操作，传 need=write：auth_mode 等于 on 时只有该科目的负责/协作教师能写，其它人（含公开科目的其他教师、学生）报 403 没有权限修改该科目；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
   伪代码 scope 不为空且不是 current、all 之一，报错 400 范围不对（scope 空或 current 是「当前科目」，all 是「全部科目」，存 subject_id=0）
+  伪代码 own 校验【全部科目(0)的内容只有科目负责人能改】：scope 等于 all，或 setting_id 不为空且旧行（先按 id 查，查不到 404）的 subject_id 等于 0（新建「全部科目」设定、编辑/停用/迁移已有的「全部科目」设定）时，写库之前再调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject_id need=own；auth_mode 等于 on 且不是该科目的负责人（公共科目的协作教师、其他教师、学生都不行）报 403 只有科目负责人可以操作，单人/不登录模式不校验；目标行不存在的 404 先于它
   伪代码 kind 不是 memory、note、card 之一，报错 400 种类只能是 memory、note、card
   伪代码 content 去掉首尾空白后为空，报错 400 内容必填
   伪代码 规整 keywords：全角逗号、顿号、空白全部换成半角逗号，连续逗号合并为一个，去掉首尾逗号
@@ -142,9 +146,11 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  报错 403 只有科目负责人可以操作
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；这是教师内容写操作，传 need=write：auth_mode 等于 on 时只有该科目的负责/协作教师能写，其它人（含公开科目的其他教师、学生）报 403 没有权限修改该科目；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
   伪代码 enabled 不是 0 也不是 1，报错 400 enabled 只能是 0 或 1
   伪代码 按 id 查 teacher_rules_setting，查不到（包括属于别的科目）报错 404 没有这条设定
+  伪代码 own 校验【全部科目(0)的内容只有科目负责人能改】：该行 subject_id 等于 0时，写库之前再调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject_id need=own；auth_mode 等于 on 且不是该科目的负责人（公共科目的协作教师、其他教师、学生都不行）报 403 只有科目负责人可以操作，单人/不登录模式不校验；目标行不存在的 404 先于它
   伪代码 旧 enabled 为 0 且新 enabled 为 1 时 version 加 1（重新启用等于重新可用），否则 version 不变
   伪代码 更新 enabled, version, updated_at=当前时间
   伪代码 返回 {"id": id, "enabled": enabled, "version": version}
@@ -157,8 +163,10 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  报错 403 只有科目负责人可以操作
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；这是教师内容写操作，传 need=write：auth_mode 等于 on 时只有该科目的负责/协作教师能写，其它人（含公开科目的其他教师、学生）报 403 没有权限修改该科目；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
   伪代码 按 id 查 teacher_rules_setting，查不到（包括属于别的科目）报错 404 没有这条设定
+  伪代码 own 校验【全部科目(0)的内容只有科目负责人能改】：该行 subject_id 等于 0时，写库之前再调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject_id need=own；auth_mode 等于 on 且不是该科目的负责人（公共科目的协作教师、其他教师、学生都不行）报 403 只有科目负责人可以操作，单人/不登录模式不校验；目标行不存在的 404 先于它
   伪代码 删除该行（teacher_rules_setting_use 里的历史记录保留）
   伪代码 返回 {"ok": 1}
 
@@ -171,17 +179,24 @@
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
   伪代码 读 teacher_rules_setting 中 enabled 等于 1 且（student 为空 或 student 等于入参 student）且 subject_id 等于本科目或等于 0 的行，排序：全班（student 为空）在前，个人在后，同组按 id 升序
   伪代码 memory 行：全部生效
-  伪代码 note 行：once 等于 0 的生效；once 等于 1 的，读 teacher_rules_setting_use 中该 student 的所有行，把 setting_ids 与 setting_versions 按位置配对，若有配对 (设定 id, 设定当前 version) 完全相同说明已用过，不生效，否则生效
+  伪代码 note 行：once 等于 0 的生效；once 等于 1 的，读 teacher_rules_setting_use 中该 student 且 subject_id 等于本科目的行（once 按科目判定：别的科目用过不影响本科目，包括「全部科目(0)」的 once 设定在日语用过、数学里仍然生效），把 setting_ids 与 setting_versions 按位置配对，若有配对 (设定 id, 设定当前 version) 完全相同说明已用过，不生效，否则生效
   伪代码 card 行：keywords 不为空且 recent_text 包含其中任意一个关键词才生效（recent_text 为空则都不生效）
   伪代码 按 memory、note、card 顺序汇总，拼出三段文本、setting_ids、setting_versions、count
   伪代码 返回 {"memory_text": …, "note_text": …, "card_text": …, "setting_ids": …, "setting_versions": …, "count": …}
 
-公开 函数 记回复用到设定 reply_id student setting_ids setting_versions
+公开 函数 记回复用到设定 reply_id student setting_ids setting_versions learner? current_role? auth_mode? subject?
   返回 {ok, recorded}，recorded 为 1 表示写了一行，0 表示没有用到设定
   报错 400 设定编号与版本号个数不一致
+  报错 404 没有这条设定
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入或调用方传 subject=已解析的科目编号），四个都不传得 1，行为同旧；这是学习者自己那一轮产生的记录，按读处理（不传 need=write）；下面的校验和写入都只限「当前科目 ∪ 0」
   伪代码 setting_ids 为空：返回 {"ok": 1, "recorded": 0}，不写库
   伪代码 setting_ids 与 setting_versions 按逗号拆开后个数不同，报错 400 设定编号与版本号个数不一致
-  伪代码 往 teacher_rules_setting_use 插入一行 (reply_id, student, setting_ids, setting_versions, at=当前时间)；调用方（问老师）在写回复的同一个事务里调用本函数，这样与回复一起成败
+  伪代码 归属校验：setting_ids 里每个编号，在 teacher_rules_setting 里查得到但其 subject_id 既不等于本科目也不是 0（属于别的科目），报错 404 没有这条设定；查不到的编号（设定后来被删了）照记，不报错（保持旧行为）
+  伪代码 往 teacher_rules_setting_use 插入一行 (reply_id, student, setting_ids, setting_versions, at=当前时间, subject_id=本科目)；调用方（问老师）在写回复的同一个事务里调用本函数，这样与回复一起成败
   伪代码 返回 {"ok": 1, "recorded": 1}
 
 公开 函数 列传达 learner? current_role? auth_mode? subject?
@@ -217,8 +232,10 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  报错 403 只有科目负责人可以操作
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；current_role、auth_mode、subject 都可选（用户名取 current_user；路由层注入登录角色、登录模式和地址参数 subject），三个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；这是教师内容写操作，传 need=write：auth_mode 等于 on 时只有该科目的负责/协作教师能写，其它人（含公开科目的其他教师、学生）报 403 没有权限修改该科目；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
   伪代码 scope 不为空且不是 current、all 之一，报错 400 范围不对（scope 空或 current 是「当前科目」，all 是「全部科目」，存 subject_id=0）
+  伪代码 own 校验【全部科目(0)的内容只有科目负责人能改】：scope 等于 all，或 relay_id 不为空且旧行（先按 id 查，查不到 404）的 subject_id 等于 0时，写库之前再调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject_id need=own；auth_mode 等于 on 且不是该科目的负责人（公共科目的协作教师、其他教师、学生都不行）报 403 只有科目负责人可以操作，单人/不登录模式不校验；目标行不存在的 404 先于它
   伪代码 urgency 不是 low、normal、urgent 之一，报错 400 紧急程度只能是 low、normal 或 urgent
   伪代码 must_info 去掉首尾空白后为空，报错 400 必须准确的信息必填
   伪代码 rounds 不是整数或小于 1，报错 400 轮数必须是不小于 1 的整数
@@ -236,9 +253,11 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  报错 403 只有科目负责人可以操作
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；这是教师内容写操作，传 need=write：auth_mode 等于 on 时只有该科目的负责/协作教师能写，其它人（含公开科目的其他教师、学生）报 403 没有权限修改该科目；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
   伪代码 enabled 不是 0 也不是 1，报错 400 enabled 只能是 0 或 1
   伪代码 按 id 查 teacher_rules_relay，查不到（包括属于别的科目）报错 404 没有这条传达
+  伪代码 own 校验【全部科目(0)的内容只有科目负责人能改】：该行 subject_id 等于 0时，写库之前再调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject_id need=own；auth_mode 等于 on 且不是该科目的负责人（公共科目的协作教师、其他教师、学生都不行）报 403 只有科目负责人可以操作，单人/不登录模式不校验；目标行不存在的 404 先于它
   伪代码 更新 enabled 和 updated_at=当前时间
   伪代码 返回 {"id": id, "enabled": enabled}
 
@@ -250,8 +269,10 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  报错 403 只有科目负责人可以操作
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；这是教师内容写操作，传 need=write：auth_mode 等于 on 时只有该科目的负责/协作教师能写，其它人（含公开科目的其他教师、学生）报 403 没有权限修改该科目；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
   伪代码 按 id 查 teacher_rules_relay，查不到（包括属于别的科目）报错 404 没有这条传达
+  伪代码 own 校验【全部科目(0)的内容只有科目负责人能改】：该行 subject_id 等于 0时，写库之前再调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject_id need=own；auth_mode 等于 on 且不是该科目的负责人（公共科目的协作教师、其他教师、学生都不行）报 403 只有科目负责人可以操作，单人/不登录模式不校验；目标行不存在的 404 先于它
   伪代码 在一个事务里：删除 teacher_rules_relay 该行，并删除 teacher_rules_relay_state 里 relay_id 相同的行（teacher_rules_relay_use 的历史记录保留）
   伪代码 返回 {"ok": 1}
 
@@ -295,21 +316,34 @@
   伪代码 查 teacher_rules_relay_state 的 (relay_id, student)：存在且 finished 等于 1 的去掉
   伪代码 剩下的拼出 relay_ids、prompt_text、count 返回；没有则 {"relay_ids": "", "prompt_text": "", "count": 0}
 
-公开 函数 记回复传达 reply_id student relay_ids
+公开 函数 记回复传达 reply_id student relay_ids learner? current_role? auth_mode? subject?
   返回 {ok, recorded}，recorded 为 1 表示写了一行，0 表示没带传达
   报错 404 没有这条传达
+  报错 400 这条传达不是发给该学生的
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入或调用方传 subject=已解析的科目编号），四个都不传得 1，行为同旧；这是学习者自己那一轮产生的记录，按读处理（不传 need=write）；下面的校验和写入都只限「当前科目 ∪ 0」
   伪代码 relay_ids 为空：返回 {"ok": 1, "recorded": 0}，不写库
-  伪代码 relay_ids 按逗号拆开，其中任一编号在 teacher_rules_relay 查不到，报错 404 没有这条传达
-  伪代码 在一个事务里：往 teacher_rules_relay_use 插入一行 (reply_id, student, relay_ids, at=当前时间)；对每个编号，在 teacher_rules_relay_state 里找 (relay_id, student)，没有则插入 rounds_done=1，有则 rounds_done 加 1；若 rounds_done 不小于该传达的 rounds 则 finished=1；confirmed 保持原值，新建为 0；更新 updated_at
+  伪代码 relay_ids 按逗号拆开，其中任一编号在 teacher_rules_relay 查不到，或属于别的科目（subject_id 既不等于本科目也不是 0），报错 404 没有这条传达（别的科目的传达当作不存在）
+  伪代码 任一传达的 student 不为空且不等于入参 student，报错 400 这条传达不是发给该学生的（口径同 对学生发传达）
+  伪代码 在一个事务里：往 teacher_rules_relay_use 插入一行 (reply_id, student, relay_ids, at=当前时间, subject_id=本科目)；对每个编号，在 teacher_rules_relay_state 里找 (relay_id, student)，没有则插入 rounds_done=1，有则 rounds_done 加 1；若 rounds_done 不小于该传达的 rounds 则 finished=1；confirmed 保持原值，新建为 0；更新 updated_at
   伪代码 返回 {"ok": 1, "recorded": 1}
 
-公开 函数 记传达判定 student relay_id delivered
+公开 函数 记传达判定 student relay_id delivered learner? current_role? auth_mode? subject?
   返回 {ok, relay_id, student, confirmed, finished}
   报错 400 delivered 只能是 0 或 1
   报错 404 没有这条传达
   报错 404 没有传达状态
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入或调用方传 subject=已解析的科目编号），四个都不传得 1，行为同旧；这是学习者自己那一轮产生的记录，按读处理（不传 need=write）；下面的校验和写入都只限「当前科目 ∪ 0」
   伪代码 delivered 不是 0 也不是 1，报错 400 delivered 只能是 0 或 1
-  伪代码 按 relay_id 查 teacher_rules_relay，查不到报错 404 没有这条传达
+  伪代码 按 relay_id 查 teacher_rules_relay，查不到、或属于别的科目（subject_id 既不等于本科目也不是 0），报错 404 没有这条传达
+  伪代码 传达的 student 不为空且不等于入参 student，报错 404 没有传达状态（学生与传达对不上）
   伪代码 查 teacher_rules_relay_state 的 (relay_id, student)，查不到报错 404 没有传达状态
   伪代码 delivered 等于 1 时，把该状态行 confirmed 设为 1、finished 设为 1，更新 updated_at；等于 0 时不改状态
   伪代码 返回该状态行的 {"ok": 1, "relay_id": …, "student": …, "confirmed": …, "finished": …}
@@ -354,14 +388,14 @@
   伪代码 relay_state_text：停用的传达前缀「停用·」；该 (传达, 学生) 有状态行且 confirmed 等于 1：「已传达（{状态行 updated_at}）」；否则 deadline 不为空且小于今天：「已过期（截止 {deadline}，没传达到）」；否则「待传达（已带入 {rounds_done，没状态行为 0} 轮）」，状态行 finished 等于 1 的再接「·已带满」
 
 公开 函数 取回复用到 reply_id learner? current_role? auth_mode? subject?
-  返回 {text}；学情学生页「问老师记录」里老师那条回答当时用到的设定和传达，写成「记忆#3、作者注#5、传达#2」，没有为空串；本函数按 reply_id 关联，设定、传达按编号查、不加科目条件（use 表没有 subject_id，回复本身已是某科目对话里的回复），带科目入参只用来校验调用者能访问该科目
+  返回 {text}；学情学生页「问老师记录」里老师那条回答当时用到的设定和传达，写成「记忆#3、作者注#5、传达#2」，没有为空串；本函数按 reply_id 关联，两张 use 表都带 subject_id，只认本科目的记录（别科目的回复编号取不到，得空串）；设定、传达按编号查时只认「当前科目 ∪ 0」，别的科目的或已被删的都写成「已删#…」，不漏出别科目的内容
   报错 400 subject 不对
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
-  伪代码 查 teacher_rules_setting_use 中 reply_id 相等的行（取 id 最大的一行）：setting_ids 按逗号拆开，每个编号按 id 查 teacher_rules_setting，查到的写「{种类中文}#{编号}」，设定后来被删了的写「已删#{编号}」
-  伪代码 查 teacher_rules_relay_use 中 reply_id 相等的行（取 id 最大的一行）：relay_ids 按逗号拆开，每个编号查 teacher_rules_relay，查到的写「传达#{编号}」，被删了的写「已删传达#{编号}」
+  伪代码 查 teacher_rules_setting_use 中 reply_id 相等且 subject_id 等于本科目的行（取 id 最大的一行）：setting_ids 按逗号拆开，每个编号按 id 查 teacher_rules_setting（只认 subject_id 等于本科目或 0 的行），查到的写「{种类中文}#{编号}」，设定后来被删了或属于别的科目的写「已删#{编号}」
+  伪代码 查 teacher_rules_relay_use 中 reply_id 相等且 subject_id 等于本科目的行（取 id 最大的一行）：relay_ids 按逗号拆开，每个编号查 teacher_rules_relay（只认 subject_id 等于本科目或 0 的行），查到的写「传达#{编号}」，被删了或属于别的科目的写「已删传达#{编号}」
   伪代码 把设定的写法和传达的写法按顺序用「、」连接得 text；两处都没有为空串
 
 公开 函数 设定首页页面 learner? current_role? auth_mode? subject?
@@ -397,11 +431,12 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  报错 403 只有科目负责人可以操作
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；current_role、auth_mode、subject 都可选（用户名取 current_user；路由层注入登录角色、登录模式和地址参数 subject），三个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；这是教师内容写操作，传 need=write：auth_mode 等于 on 时只有该科目的负责/协作教师能写，其它人（含公开科目的其他教师、学生）报 403 没有权限修改该科目；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
   伪代码 前端键收旧口径：note_kind 是中文「记忆」「作者注」「关键词卡」，空当「记忆」，转成 memory、note、card；其它值原样交给 保存设定（由它报 400 种类只能是 memory、note、card）
   伪代码 student 不为空：调用 account.取账号 username=student，取不到或 role 不等于 student，报错 404 没有这个学生
   伪代码 note_id 不为空：调用 取设定 setting_id=note_id subject=subject_id（取不到报 404，包括属于别的科目），其 student（空按空串）不等于入参 student（空按空串），报错 404 没有这条设定（全班的设定要到「AI老师设定」页改，个人的要到学生页改）
-  伪代码 once：note_once（不用文本动词，直接比较）等于 是、True、true、TRUE 或 1 时为 1，否则 0（前端开关提交的 JSON 布尔 true 在 DSL 里的文本是「是」（false 是「否」），字符串 True/true 也要认；note_once 没传按 0，不要对它用归一化/转大写等文本动词）；调用 保存设定 kind=转换后 content=note_content current_user=current_user setting_id=note_id student=student keywords=note_keywords once=once subject=subject_id（不传 scope：新建落当前科目，编辑不改所属科目）
+  伪代码 once：note_once（不用文本动词，直接比较）等于 是、True、true、TRUE 或 1 时为 1，否则 0（前端开关提交的 JSON 布尔 true 在 DSL 里的文本是「是」（false 是「否」），字符串 True/true 也要认；note_once 没传按 0，不要对它用归一化/转大写等文本动词）；调用 保存设定 kind=转换后 content=note_content current_user=current_user setting_id=note_id student=student keywords=note_keywords once=once current_role=current_role auth_mode=auth_mode subject=subject_id（把登录角色和登录模式一并传下去，由 保存设定 自己做 write/own 校验；不传 scope：新建落当前科目，编辑不改所属科目）
   伪代码 返回刷新后的设定表（student 为空 {"class_notes": 调用 设定列表 subject=subject_id（student 空）}，否则 {"student_notes": 调用 设定列表 student=student subject=subject_id}）
 
 公开 函数 设置设定启用页面 note_id enabled student? learner? current_role? auth_mode? subject?
@@ -413,9 +448,10 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  报错 403 只有科目负责人可以操作
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；这是教师内容写操作，传 need=write：auth_mode 等于 on 时只有该科目的负责/协作教师能写，其它人（含公开科目的其他教师、学生）报 403 没有权限修改该科目；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
   伪代码 note_id 对应的设定（调用 取设定 setting_id=note_id subject=subject_id）取不到（包括属于别的科目），或其 student（空按空串）不等于入参 student（空按空串），报错 404 没有这条设定
-  伪代码 调用 设置设定启用 setting_id=note_id enabled=enabled subject=subject_id，再返回刷新后的设定表
+  伪代码 调用 设置设定启用 setting_id=note_id enabled=enabled learner=learner current_role=current_role auth_mode=auth_mode subject=subject_id（登录角色和登录模式一并传下去，由它做 write/own 校验，改全部科目(0)的设定要求科目负责人），再返回刷新后的设定表
 
 公开 函数 删除设定页面 note_id student? learner? current_role? auth_mode? subject?
   返回 刷新后的设定表，形状同 保存设定页面
@@ -425,8 +461,9 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  报错 403 只有科目负责人可以操作
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；这是教师内容写操作，传 need=write：auth_mode 等于 on 时只有该科目的负责/协作教师能写，其它人（含公开科目的其他教师、学生）报 403 没有权限修改该科目；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
-  伪代码 校验同 设置设定启用页面；调用 删除设定 setting_id=note_id subject=subject_id，再返回刷新后的设定表
+  伪代码 校验同 设置设定启用页面；调用 删除设定 setting_id=note_id learner=learner current_role=current_role auth_mode=auth_mode subject=subject_id（同上，删全部科目(0)的设定要求科目负责人），再返回刷新后的设定表
 
 公开 函数 设定预览页面 preview_student preview_message learner? current_role? auth_mode? subject?
   返回 {preview, preview_hits}；preview 是 {ids, relay_pick, layout}，preview_hits 是命中的关键词卡 [{note_id, hit_keyword, note_brief, hit_placed}]；只读，不写库，「只用于下一条」不会被用掉
@@ -470,10 +507,11 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  报错 403 只有科目负责人可以操作
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；current_role、auth_mode、subject 都可选（用户名取 current_user；路由层注入登录角色、登录模式和地址参数 subject），三个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；这是教师内容写操作，传 need=write：auth_mode 等于 on 时只有该科目的负责/协作教师能写，其它人（含公开科目的其他教师、学生）报 403 没有权限修改该科目；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
   伪代码 student 不为空：调用 account.取账号 校验同 保存设定页面（报 404 没有这个学生）；relay_id 不为空：调用 取传达 relay_id=relay_id subject=subject_id，取不到（包括属于别的科目）或其 student（空按空串）不等于入参 student，报错 404 没有这条传达
   伪代码 前端键收旧口径：relay_point 存为 must_info；relay_urgency 是「顺便」「尽快」「立即」：顺便→low、尽快→normal（空或其他值也按 normal，旧口径兜底）、立即→urgent；relay_voice 存为 tone（空串不存）；relay_facts 存为 facts、relay_keywords 存为 keywords（原样存，不规整）；relay_rounds 空或 0 当 3；relay_due 空串当没有
-  伪代码 调用 保存传达 urgency=转换后 must_info=relay_point rounds=转换后 current_user=current_user relay_id=relay_id tone=relay_voice deadline=relay_due student=student facts=relay_facts keywords=relay_keywords subject=subject_id（不传 scope：新建落当前科目，编辑不改所属科目；校验报错原样向上抛）
+  伪代码 调用 保存传达 urgency=转换后 must_info=relay_point rounds=转换后 current_user=current_user relay_id=relay_id tone=relay_voice deadline=relay_due student=student facts=relay_facts keywords=relay_keywords current_role=current_role auth_mode=auth_mode subject=subject_id（登录角色和登录模式一并传下去，由 保存传达 自己做 write/own 校验；不传 scope：新建落当前科目，编辑不改所属科目；校验报错原样向上抛）
   伪代码 返回刷新后的传达表（调用 传达列表、传达状态列表 时带 subject=subject_id）
 
 公开 函数 设置传达启用页面 relay_id enabled student? learner? current_role? auth_mode? subject?
@@ -485,8 +523,9 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  报错 403 只有科目负责人可以操作
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；这是教师内容写操作，传 need=write：auth_mode 等于 on 时只有该科目的负责/协作教师能写，其它人（含公开科目的其他教师、学生）报 403 没有权限修改该科目；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
-  伪代码 relay_id 对应的传达（调用 取传达 relay_id=relay_id subject=subject_id）取不到（包括属于别的科目），或其 student（空按空串）不等于入参 student（空按空串），报错 404 没有这条传达；调用 设置传达启用 relay_id=relay_id enabled=enabled subject=subject_id，再返回刷新后的传达表
+  伪代码 relay_id 对应的传达（调用 取传达 relay_id=relay_id subject=subject_id）取不到（包括属于别的科目），或其 student（空按空串）不等于入参 student（空按空串），报错 404 没有这条传达；调用 设置传达启用 relay_id=relay_id enabled=enabled learner=learner current_role=current_role auth_mode=auth_mode subject=subject_id（登录角色和登录模式一并传下去，改全部科目(0)的传达要求科目负责人），再返回刷新后的传达表
 
 公开 函数 删除传达页面 relay_id student? learner? current_role? auth_mode? subject?
   返回 刷新后的传达表，形状同 保存传达页面
@@ -496,8 +535,9 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  报错 403 只有科目负责人可以操作
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；这是教师内容写操作，传 need=write：auth_mode 等于 on 时只有该科目的负责/协作教师能写，其它人（含公开科目的其他教师、学生）报 403 没有权限修改该科目；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
-  伪代码 校验同 设置传达启用页面；调用 删除传达 relay_id=relay_id subject=subject_id（同时清掉该传达的状态行），再返回刷新后的传达表
+  伪代码 校验同 设置传达启用页面；调用 删除传达 relay_id=relay_id learner=learner current_role=current_role auth_mode=auth_mode subject=subject_id（登录角色和登录模式一并传下去，删全部科目(0)的传达要求科目负责人；同时清掉该传达的状态行），再返回刷新后的传达表
 
 公开 函数 传达记录页面 message_id learner? current_role? auth_mode? subject?
   返回 回填表单 {relay_msg_ask, relay_msg_reply, relay_excerpt}，三项都是占位「（暂不记录原话）」（v4 不存 AI 原话，后续单独立项）
@@ -1226,7 +1266,7 @@ POST /teacher_rules/relay/message -> 传达记录页面 动作 teacher_relay_mes
   先 数据 teacher_rules_setting kind=memory content=B enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=2
   先 数据 teacher_rules_setting kind=memory content=C enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00
   调用 设定列表 subject=2
-  得 有返回
+  得 total=2
 
 用例 跨科目_保存设定页面落当前科目
   调用 保存设定页面 note_kind=记忆 note_content=多用中文解释 current_user=t1 subject=2
@@ -1272,6 +1312,12 @@ POST /teacher_rules/relay/message -> 传达记录页面 动作 teacher_relay_mes
   先 数据 teacher_rules_setting kind=card keywords=ばかり content=乙卡 enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=2
   调用 设定预览页面 preview_student=s1 preview_message=ばかり是什么 subject=2
   得 有返回
+
+用例 跨科目_设定预览页面别的科目的卡不命中
+  先 数据 teacher_rules_setting kind=card keywords=ばかり content=甲卡 enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=1
+  先 数据 teacher_rules_setting kind=card keywords=ばかり content=乙卡 enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=2
+  调用 设定预览页面 preview_student=s1 preview_message=ばかり是什么 subject=3
+  得 preview_hits=[]
 
 用例 跨科目_need_公开科目的非负责教师写设定403
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
@@ -1380,3 +1426,388 @@ POST /teacher_rules/relay/message -> 传达记录页面 动作 teacher_relay_mes
   调用 保存传达页面 relay_point=下周三小测 current_user=t2 current_role=teacher auth_mode=on subject=2
   得 有返回
   库 teacher_rules_relay 含 must_info=下周三小测 subject_id=2
+
+用例 跨科目_need_公开科目的非负责教师启停传达403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 teacher_rules_relay urgency=normal must_info=X rounds=2 enabled=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=2
+  调用 设置传达启用 relay_id=1 enabled=0 learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_relay 含 id=1 enabled=1
+
+
+用例 跨科目_need_公开科目的非负责教师启停设定页面403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 teacher_rules_setting kind=memory content=A enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=2
+  调用 设置设定启用页面 note_id=1 enabled=0 learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_setting 含 id=1 enabled=1
+
+
+用例 跨科目_need_公开科目的非负责教师启停传达页面403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 teacher_rules_relay urgency=normal must_info=X rounds=2 enabled=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=2
+  调用 设置传达启用页面 relay_id=1 enabled=0 learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_relay 含 id=1 enabled=1
+
+
+用例 跨科目_need_公开科目的非负责教师删设定页面403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 teacher_rules_setting kind=memory content=A enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=2
+  调用 删除设定页面 note_id=1 learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_setting 共 1 行
+
+
+用例 跨科目_need_公开科目的非负责教师删传达页面403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 teacher_rules_relay urgency=normal must_info=X rounds=2 enabled=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=2
+  调用 删除传达页面 relay_id=1 learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_relay 共 1 行
+
+
+用例 跨科目_need_公开科目的非负责教师保存传达页面403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 保存传达页面 relay_point=下周三小测 current_user=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_relay 共 0 行
+
+
+用例 跨科目_need_学生启停传达403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_student subject_id=2 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  先 数据 teacher_rules_relay urgency=normal must_info=X rounds=2 enabled=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=2
+  调用 设置传达启用 relay_id=1 enabled=0 learner=s1 current_role=student auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_relay 含 id=1 enabled=1
+
+
+用例 全部科目_协作教师新建全部科目设定403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  调用 保存设定 kind=memory content=X scope=all current_user=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_setting 共 0 行
+
+
+用例 全部科目_负责人新建全部科目设定
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 保存设定 kind=memory content=X scope=all current_user=t1 current_role=teacher auth_mode=on subject=2
+  得 kind=memory
+  库 teacher_rules_setting 含 id=1 subject_id=0 author=t1
+
+
+用例 全部科目_协作教师编辑全部科目设定403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 teacher_rules_setting kind=memory content=A enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 保存设定 setting_id=1 kind=memory content=改了 current_user=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_setting 含 id=1 content=A
+
+
+用例 全部科目_负责人编辑全部科目设定
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 teacher_rules_setting kind=memory content=A enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 保存设定 setting_id=1 kind=memory content=改了 current_user=t1 current_role=teacher auth_mode=on subject=2
+  得 id=1 content=改了
+  库 teacher_rules_setting 含 id=1 content=改了 subject_id=0
+
+
+用例 全部科目_协作教师把本科目设定迁到全部科目403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 teacher_rules_setting kind=memory content=A enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=2
+  调用 保存设定 setting_id=1 kind=memory content=A scope=all current_user=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_setting 含 id=1 subject_id=2
+
+
+用例 全部科目_协作教师仍可编辑本科目设定
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 teacher_rules_setting kind=memory content=A enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=2
+  调用 保存设定 setting_id=1 kind=memory content=改了 current_user=t2 current_role=teacher auth_mode=on subject=2
+  得 id=1 content=改了
+  库 teacher_rules_setting 含 id=1 subject_id=2 content=改了
+
+
+用例 全部科目_协作教师启停全部科目设定403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 teacher_rules_setting kind=memory content=A enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 设置设定启用 setting_id=1 enabled=0 learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_setting 含 id=1 enabled=1
+
+
+用例 全部科目_负责人启停全部科目设定
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 teacher_rules_setting kind=memory content=A enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 设置设定启用 setting_id=1 enabled=0 learner=t1 current_role=teacher auth_mode=on subject=2
+  得 id=1 enabled=0
+  库 teacher_rules_setting 含 id=1 enabled=0
+
+
+用例 全部科目_协作教师删全部科目设定403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 teacher_rules_setting kind=memory content=A enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 删除设定 setting_id=1 learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_setting 共 1 行
+
+
+用例 全部科目_负责人删全部科目设定
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 teacher_rules_setting kind=memory content=A enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 删除设定 setting_id=1 learner=t1 current_role=teacher auth_mode=on subject=2
+  得 ok=1
+  库 teacher_rules_setting 共 0 行
+
+
+用例 全部科目_协作教师新建全部科目传达403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  调用 保存传达 urgency=normal must_info=X rounds=2 scope=all current_user=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_relay 共 0 行
+
+
+用例 全部科目_负责人新建全部科目传达
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 保存传达 urgency=normal must_info=X rounds=2 scope=all current_user=t1 current_role=teacher auth_mode=on subject=2
+  得 enabled=1
+  库 teacher_rules_relay 含 id=1 subject_id=0 author=t1
+
+
+用例 全部科目_协作教师编辑全部科目传达403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 teacher_rules_relay urgency=normal must_info=X rounds=2 enabled=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 保存传达 relay_id=1 urgency=urgent must_info=改了 rounds=2 current_user=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_relay 含 id=1 urgency=normal
+
+
+用例 全部科目_协作教师启停全部科目传达403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 teacher_rules_relay urgency=normal must_info=X rounds=2 enabled=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 设置传达启用 relay_id=1 enabled=0 learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_relay 含 id=1 enabled=1
+
+
+用例 全部科目_负责人启停全部科目传达
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 teacher_rules_relay urgency=normal must_info=X rounds=2 enabled=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 设置传达启用 relay_id=1 enabled=0 learner=t1 current_role=teacher auth_mode=on subject=2
+  得 id=1 enabled=0
+
+
+用例 全部科目_协作教师删全部科目传达403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 teacher_rules_relay urgency=normal must_info=X rounds=2 enabled=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 删除传达 relay_id=1 learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_relay 共 1 行
+
+
+用例 全部科目_协作教师删全部科目设定页面403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 teacher_rules_setting kind=memory content=A enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 删除设定页面 note_id=1 learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_setting 共 1 行
+
+
+用例 全部科目_协作教师启停全部科目设定页面403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 teacher_rules_setting kind=memory content=A enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 设置设定启用页面 note_id=1 enabled=0 learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_setting 含 id=1 enabled=1
+
+
+用例 全部科目_协作教师删全部科目传达页面403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 teacher_rules_relay urgency=normal must_info=X rounds=2 enabled=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 删除传达页面 relay_id=1 learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_relay 共 1 行
+
+
+用例 全部科目_协作教师启停全部科目传达页面403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 teacher_rules_relay urgency=normal must_info=X rounds=2 enabled=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 设置传达启用页面 relay_id=1 enabled=0 learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_relay 含 id=1 enabled=1
+
+
+用例 全部科目_协作教师保存设定页面改全部科目设定403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 teacher_rules_setting kind=memory content=A enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 保存设定页面 note_kind=记忆 note_content=改了 note_id=1 current_user=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_setting 含 id=1 content=A
+
+
+用例 全部科目_协作教师保存传达页面改全部科目传达403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 teacher_rules_relay urgency=normal must_info=X rounds=2 enabled=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 保存传达页面 relay_point=改了 relay_id=1 current_user=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 teacher_rules_relay 含 id=1 must_info=X
+
+
+用例 全部科目_单人模式不校验负责人
+  调用 保存设定 kind=memory content=X scope=all current_user=t2
+  得 kind=memory
+  库 teacher_rules_setting 含 id=1 subject_id=0
+
+
+用例 跨科目_记回复传达别的科目的传达当不存在
+  先 数据 teacher_rules_relay urgency=normal must_info=X rounds=2 enabled=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=3
+  调用 记回复传达 reply_id=7 student=s1 relay_ids=1 subject=2
+  报错 404
+  库 teacher_rules_relay_use 共 0 行
+  库 teacher_rules_relay_state 共 0 行
+
+
+用例 跨科目_记回复传达全部科目的传达可记
+  先 数据 teacher_rules_relay urgency=normal must_info=X rounds=2 enabled=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 记回复传达 reply_id=7 student=s1 relay_ids=1 subject=2
+  得 ok=1 recorded=1
+  库 teacher_rules_relay_use 含 reply_id=7 subject_id=2
+  库 teacher_rules_relay_state 含 relay_id=1 student=s1 rounds_done=1
+
+
+用例 跨科目_记回复传达传达不是发给该学生的
+  先 数据 teacher_rules_relay urgency=normal must_info=X rounds=2 student=s2 enabled=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 记回复传达 reply_id=7 student=s1 relay_ids=1
+  报错 400
+  库 teacher_rules_relay_use 共 0 行
+
+
+用例 跨科目_记传达判定别的科目的传达当不存在
+  先 数据 teacher_rules_relay urgency=normal must_info=X rounds=2 enabled=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=3
+  先 数据 teacher_rules_relay_state relay_id=1 student=s1 rounds_done=1 finished=0 confirmed=0 updated_at=2026-01-01_09:00:00
+  调用 记传达判定 student=s1 relay_id=1 delivered=1 subject=2
+  报错 404
+  库 teacher_rules_relay_state 含 relay_id=1 student=s1 confirmed=0
+
+
+用例 跨科目_记传达判定本科目的传达可判定
+  先 数据 teacher_rules_relay urgency=normal must_info=X rounds=2 enabled=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=2
+  先 数据 teacher_rules_relay_state relay_id=1 student=s1 rounds_done=1 finished=0 confirmed=0 updated_at=2026-01-01_09:00:00
+  调用 记传达判定 student=s1 relay_id=1 delivered=1 subject=2
+  得 ok=1 confirmed=1
+
+
+用例 跨科目_记传达判定传达不是发给该学生的
+  先 数据 teacher_rules_relay urgency=normal must_info=X rounds=2 student=s2 enabled=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  先 数据 teacher_rules_relay_state relay_id=1 student=s1 rounds_done=1 finished=0 confirmed=0 updated_at=2026-01-01_09:00:00
+  调用 记传达判定 student=s1 relay_id=1 delivered=1
+  报错 404
+
+
+用例 跨科目_记回复用到设定别的科目的设定当不存在
+  先 数据 teacher_rules_setting kind=memory content=A enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=3
+  调用 记回复用到设定 reply_id=5 student=s1 setting_ids=1 setting_versions=1 subject=2
+  报错 404
+  库 teacher_rules_setting_use 共 0 行
+
+
+用例 跨科目_记回复用到设定写入本科目
+  先 数据 teacher_rules_setting kind=memory content=A enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  调用 记回复用到设定 reply_id=5 student=s1 setting_ids=1 setting_versions=1 subject=2
+  得 ok=1 recorded=1
+  库 teacher_rules_setting_use 含 reply_id=5 student=s1 subject_id=2
+
+
+用例 跨科目_记回复用到设定已删的设定照记
+  调用 记回复用到设定 reply_id=5 student=s1 setting_ids=9 setting_versions=1 subject=2
+  得 ok=1 recorded=1
+
+
+用例 跨科目_once设定在别的科目用过本科目仍生效
+  先 数据 teacher_rules_setting kind=note content=只一次 enabled=1 once=1 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  先 数据 teacher_rules_setting_use reply_id=5 student=s1 setting_ids=1 setting_versions=1 at=2026-01-01 subject_id=1
+  调用 取生效设定 student=s1 subject=2
+  得 count=1
+
+
+用例 跨科目_once设定在本科目用过就不带
+  先 数据 teacher_rules_setting kind=note content=只一次 enabled=1 once=1 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  先 数据 teacher_rules_setting_use reply_id=5 student=s1 setting_ids=1 setting_versions=1 at=2026-01-01 subject_id=2
+  调用 取生效设定 student=s1 subject=2
+  得 count=0
+
+
+用例 跨科目_once设定在日语用过日语不再带
+  先 数据 teacher_rules_setting kind=note content=只一次 enabled=1 once=1 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  先 数据 teacher_rules_setting_use reply_id=5 student=s1 setting_ids=1 setting_versions=1 at=2026-01-01 subject_id=1
+  调用 取生效设定 student=s1
+  得 count=0
+
+
+用例 跨科目_取回复用到别的科目的回复取不到
+  先 数据 teacher_rules_setting kind=memory content=A enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  先 数据 teacher_rules_setting_use reply_id=5 student=s1 setting_ids=1 setting_versions=1 at=2026-01-01 subject_id=3
+  调用 取回复用到 reply_id=5 subject=2
+  得 text=空
+
+
+用例 跨科目_取回复用到本科目的回复
+  先 数据 teacher_rules_setting kind=memory content=A enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=0
+  先 数据 teacher_rules_setting_use reply_id=5 student=s1 setting_ids=1 setting_versions=1 at=2026-01-01 subject_id=2
+  调用 取回复用到 reply_id=5 subject=2
+  得 text=记忆#1
+
+
+用例 跨科目_取回复用到别的科目的设定写成已删
+  先 数据 teacher_rules_setting kind=memory content=A enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=3
+  先 数据 teacher_rules_setting_use reply_id=5 student=s1 setting_ids=1 setting_versions=1 at=2026-01-01 subject_id=2
+  调用 取回复用到 reply_id=5 subject=2
+  得 text=已删#1
+

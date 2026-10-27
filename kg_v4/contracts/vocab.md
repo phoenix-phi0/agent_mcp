@@ -143,7 +143,7 @@
   伪代码 用 doc 包「读文档」读 file_path 取文本，按行拆开；空行和以 # 开头的行忽略
   伪代码 每行格式「汉字|假名|中文意思|知识点编号」，用 | 分隔；后两项可以省略或为空（缺的尾部字段当空），汉字可以为空；少于 2 项或假名为空，报错 400 导入文件有错（整批不写）
   伪代码 对每个非空的知识点编号，调用 kg.取知识点 code=编号 subject=subject_id，取不到（包括属于别的科目）报错 400 知识点对不上（整批不写）
-  伪代码 在一个事务里：逐行在本科目内按 汉字+假名 查 vocab_word，没有则插入 (kanji, kana, meaning, point_code, subject_id) 并 created+1，有则更新 meaning、point_code 并 updated+1
+  伪代码 在一个事务里：逐行在本科目内按 汉字+假名 查 vocab_word，没有则插入 (kanji, kana, meaning, point_code, subject_id) 并 created+1，有则更新 meaning、point_code 并 updated+1（更新语句的 SQL 条件同时写 id=该行 id 和 subject_id=本科目，纵深防御，同 修改单词/删除单词）
   伪代码 同一文件里重复的 汉字+假名，后一行覆盖前一行（按已存在算更新）
   伪代码 返回 {"ok": 1, "total": 有效行数, "created": created, "updated": updated}
 
@@ -537,3 +537,44 @@ POST /vocab/import -> 导入单词 上传 file 类型 md,txt 上限 20MB 角色 
   调用 删除单词 word_id=1 subject=2
   报错 404
   库 vocab_word 共 1 行
+
+用例 跨科目_修改单词不影响别的科目的同词
+  先 数据 vocab_word kanji=食べる kana=たべる meaning=吃
+  先 数据 vocab_word kanji=食べる kana=たべる meaning=进食 subject_id=2
+  调用 修改单词 word_id=1 kanji=食べる kana=たべる meaning=改了 point_code=空
+  得 ok=1 id=1
+  库 vocab_word 含 kana=たべる meaning=改了 subject_id=1
+  库 vocab_word 含 kana=たべる meaning=进食 subject_id=2
+  库 vocab_word 共 2 行
+
+用例 跨科目_修改2号科目的词不撞1号的同词
+  先 数据 vocab_word kanji=食べる kana=たべる meaning=吃
+  先 数据 vocab_word kanji=飲む kana=のむ meaning=喝 subject_id=2
+  调用 修改单词 word_id=2 kanji=食べる kana=たべる meaning=喝 point_code=空 subject=2
+  得 ok=1 id=2
+  库 vocab_word 含 kanji=食べる meaning=吃 subject_id=1
+  库 vocab_word 含 kanji=食べる meaning=喝 subject_id=2
+
+用例 跨科目_修改单词挂别的科目的点被拒且不改
+  先 数据 kg_point code=P1 title=甲
+  先 数据 vocab_word kanji=飲む kana=のむ meaning=喝 subject_id=2
+  调用 修改单词 word_id=1 kanji=飲む kana=のむ meaning=改了 point_code=P1 subject=2
+  报错 404
+  库 vocab_word 含 kana=のむ meaning=喝 subject_id=2
+
+用例 跨科目_修改单词挂本科目的点
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 vocab_word kanji=飲む kana=のむ meaning=喝 subject_id=2
+  调用 修改单词 word_id=1 kanji=飲む kana=のむ meaning=喝 point_code=math.a subject=2
+  得 ok=1 id=1
+  库 vocab_word 含 kana=のむ point_code=math.a subject_id=2
+
+用例 跨科目_导入单词更新不碰别的科目的同词
+  先 数据 vocab_word kanji=食べる kana=たべる meaning=吃
+  先 数据 vocab_word kanji=食べる kana=たべる meaning=进食 subject_id=2
+  先 文件 words.md 内容=食べる|たべる|新义
+  调用 导入单词 file_path=words.md subject=2
+  得 ok=1 total=1 created=0 updated=1
+  库 vocab_word 共 2 行
+  库 vocab_word 含 kana=たべる meaning=吃 subject_id=1
+  库 vocab_word 含 kana=たべる meaning=新义 subject_id=2
