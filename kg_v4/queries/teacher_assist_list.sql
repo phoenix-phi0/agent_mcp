@@ -1,0 +1,1 @@
+SELECT id, role, content, intent, student, point, status, at FROM (SELECT id, role, content, intent, student, point, status, at FROM teacher_assist_message WHERE teacher = :teacher ORDER BY id DESC LIMIT CAST(:n AS INTEGER)) ORDER BY id ASC

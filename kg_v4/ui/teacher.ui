@@ -27,6 +27,7 @@
     文案 当 shared.mode==='mock' 模拟模式：回复不是真模型
   结束
   消息流 talk 占满
+  文案 当 pending==='teacher_send' 老师正在回复…（一般 15 到 60 秒）
   分组 底栏 横排 底栏 间距 10px 对齐 flex-end 内边距 14px,20px
     字段 content 控件 多行 单行高 提示 问老师…（Enter发送，Shift+Enter换行）
     动作 teacher_send 提交 远程 回显 清空 发送

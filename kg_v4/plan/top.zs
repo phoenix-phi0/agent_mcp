@@ -10,3 +10,4 @@
 模块 tutor 依赖 kg lesson progress quiz teacher_rules 提供 列对话,取对话摘要,总结本轮,讲解一课  # 问老师对话记录、意图判断、模板出题、讲解、总结某一轮；列对话：返回学习者对话；取对话摘要：返回学生问老师对话摘要（不含学情总结）；总结本轮：同一轮只调一次模型
 模块 report 依赖 account progress dictation tutor teacher_rules kg lesson  # 教师学情报告与 AI 学情总结的存储（学生、总结、写的人、时间）
 模块 textbook_import 依赖 kg lesson  # 教材导入任务、块、草稿课、审阅与确认导入（映射只引用已有条目/知识点）
+模块 teacher_assist 依赖 account report progress kg lesson  # 教师端 AI 助手（只读）：判意图、取学情数据段、答一轮、按教师存对话；对话存 teacher_assist_message
