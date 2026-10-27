@@ -1016,7 +1016,7 @@ GET /dictation/overview -> 取默写概况 角色 student
   先 数据 vocab_word kanji=数 kana=かず meaning=数字 point_code=P2 subject_id=2
   先 调用 开始 learner=me direction=zh2jp subject=2
   调用 取状态 learner=me subject=2
-  得 has_progress=1 word_id=1 prompt=数字
+  得 has_progress=1 word_id=2 prompt=数字
 
 用例 跨科目_取状态当前词是别的科目的词当不存在
   先 数据 vocab_word kanji=数 kana=かず meaning=数字 point_code=P2 subject_id=2

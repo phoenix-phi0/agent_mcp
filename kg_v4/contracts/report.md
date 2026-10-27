@@ -173,7 +173,7 @@
   伪代码 student_wrong：调用 progress.取区间作答 learner=student start_id=0 subject=subject_id 得全部作答，按 question_no 分组，只留至少答错一次的；每题一行 {label: 取题干 的缩略（30 字），题干取不到用题号, point_label: 该题知识点 title（kg.取知识点 subject=subject_id，取不到用编号）, wrong_n: 答错次数, tally: 「{答对数}/{作答数}」, last_wrong: 最近一次答错的 at}；按 wrong_n 降序、last_wrong 降序，取前 10（口径微差：旧页按条目，v4 按题）
   伪代码 student_recent：recent 的 answers 每条 {at, point_label: 知识点 title（kg.取知识点 subject=subject_id，取不到用编号）, stem_brief: 取题干 的缩略（40 字），取不到空串, given_text: answer, result: correct 为 1 是「对」否则「错」}，顺序同 recent（新的在前）
   伪代码 student_book：g.wrong_book 每项 {label: kanji 与 kana 不同时「{kanji}【{kana}】{meaning}」，否则「{kana} {meaning}」, direction_label: direction 为 zh2jp 是「看中文写日语」否则「看汉字写读音」, last_wrong: last_at}
-  伪代码 student_chat：调用 tutor.列对话 learner=student limit=40 subject=subject_id，messages 每条 {chat_who: role 为 teacher 是「老师」否则「学生」, chat_text: content 的缩略（120 字）, chat_at: at, chat_notes: 老师那条调用 teacher_rules.取回复用到 reply_id=该条 id 取 text，学生那条空串}，旧的在前（取回复用到 按 reply_id 关联，不加科目）
+  伪代码 student_chat：调用 tutor.列对话 learner=student limit=40 subject=subject_id，messages 每条 {chat_who: role 为 teacher 是「老师」否则「学生」, chat_text: content 的缩略（120 字）, chat_at: at, chat_notes: 老师那条调用 teacher_rules.取回复用到 reply_id=该条 id subject=subject_id 取 text，学生那条空串}，旧的在前（取回复用到 按 reply_id 和本科目关联：对话本来就只列本科目的，回复用到记录也带本科目 subject_id，不传 subject 会落到 1 号科目、非日语科目取不到）
   伪代码 student_notes=调用 teacher_rules.设定列表 student=student subject=subject_id；student_relays=调用 teacher_rules.传达列表 student=student subject=subject_id
   伪代码 返回上述九个键
 

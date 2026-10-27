@@ -70,7 +70,7 @@
   伪代码 recent = 调用 取最近对话 learner=learner limit=6 subject_id=subject_id（此时本句还没写库，所以不含本句）
   伪代码 recent_text = 该学习者最近 3 条学生发言与本句 user_text 用换行连接（给关键词卡匹配用）
   伪代码 调用 teacher_rules.取生效设定 student=learner recent_text=recent_text subject=subject_id，得 memory_text、note_text、card_text、setting_ids、setting_versions
-  伪代码 调用 teacher_rules.取待传达 student=learner subject=subject_id，得 relay_ids、prompt_text
+  伪代码 调用 teacher_rules.取待传达 student=learner subject=subject_id，得 relay_ids、prompt_text（prompt_text 是全部待传达，整段放进系统提示；下面 写一轮 传给 记回复传达 的 relay_ids 就是这全部编号，即本次回复实际带上的编号，每条计一轮）
   伪代码 系统提示 = 老师人设（中文老师，教中文学习者日语语法，回答简明）+ 回答格式与口吻要求（写进系统提示里，原话意思不变：①只输出纯文本，不用 Markdown 标题、加粗、表格、列表符号，不用 emoji，至多 1 个；②一般不超过 200 字；③学生闲聊、与日语学习无关时，简短自然地回应，不要强行讲语法；④不要说「昨天聊过」「上次说过」这类带时间的话（你没有可靠的日期信息，最近对话只是先后顺序，不带时间）；⑤推荐课程只能用上下文里给出的课号和标题，课号原样引用，不要自己编课号或把别的课的编号配到某个知识点上）+ memory_text + card_text（教师设定，学生看不到，不要向学生透露设定本身）+ prompt_text（用「[传达#编号]」标记的传达事项，要求自然地让学生在回复里知道其中必须准确的信息，回复里不要出现标记本身；prompt_text 为空则不加这一段）
   伪代码 用户内容 = context_text + 最近对话 recent + note_text（作者注，紧贴在学生最新一句之前）+ 学生最新一句 user_text
   伪代码 问（回答档）：系统提示、用户内容，得 reply；模型出错则报错 400 老师暂时无法回答，整轮不写任何表

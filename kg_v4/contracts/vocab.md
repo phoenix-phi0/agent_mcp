@@ -68,7 +68,7 @@
   伪代码 这是给默写选词用的：筛选、数数、挑第几个都在一条 SQL 里做，不把整张表取回来再逐词循环（8105 个词时要在 1 秒内）。direction 为 zh2jp 或 kanji2kana，其他值当 zh2jp
   伪代码 条件（对 vocab_word 每行，全部满足才算）：⓪subject_id 等于本科目；①direction 为 zh2jp 要求 meaning 不为空；direction 为 kanji2kana 要求 kanji 不为空且不等于 kana；②level 不为空时要求 meaning 以「[level]」开头；③point_code 不为空时要求行的 point_code 等于它；④only_ids 不为空（逗号隔开的单词编号）时要求 id 在其中；⑤skip_ids 不为空（逗号隔开）时要求 id 不在其中
   伪代码 再排除不是词义的词条（和默写原来的口径一字不差）：point_code 是 hiragana katakana youon dakuon potential volitional imperative causative causative-passive counters-sound 之一的不要；把 meaning 开头的「[N1]」到「[N5]」去掉再去首尾空白得 bare：bare 为空的不要；bare 里有「一个非空格字符 + 一个半角空格 + 的」的不要（SQL 里 ' ' || bare GLOB '*[^ ] 的*'）；bare 以「的礼貌形」结尾的不要
-  伪代码 查两条 SQL：先数满足条件的行数 total（total 为 0 直接返回 {"total": 0, "word": 空}）；再按 id 升序取第 (seed 对 total 取余) 行（LIMIT 1 OFFSET）。逗号隔开的编号在 SQL 里用 json_each('[' || :ids || ']') 展开成集合比较（IN / NOT IN），不要用 instr 在长字符串里找
+  伪代码 查两条 SQL：先数满足条件的行数 total（total 为 0 直接返回 {"total": 0, "word": 空}）；再按返回里写的排序取第 (seed 对 total 取余) 行（LIMIT 1 OFFSET）：only_ids 为空按 id 升序；only_ids 不为空按单词编号在 only_ids 里出现的先后（SQL 里 ORDER BY instr(',' || :only_ids || ',', ',' || id || ',')，同 列默写词），再按 id 升序。逗号隔开的编号做集合判断（④ 在其中、⑤ 不在其中）时在 SQL 里用 json_each('[' || :ids || ']') 展开成集合比较（IN / NOT IN），集合判断不要用 instr 在长字符串里找；instr 只用于上面 only_ids 的先后排序
   伪代码 返回 {"total": total, "word": 该行 {"id": id, "kanji": kanji, "kana": kana, "meaning": meaning, "point_code": point_code}}
 
 公开 函数 列默写词 direction level? only_ids skip_ids? learner? current_role? auth_mode? subject?

@@ -1562,15 +1562,15 @@ GET /textbook_import/chunk/prompt -> 块提示词 角色 teacher
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 文件 imports/m.md 内容=第1课は的用法
-  调用 新建导入 series_code=math.s series_name=数学教材 code_prefix=math. file_path=imports/m.md file_name=m.md subject=2
+  调用 新建导入 series_code=math_s series_name=数学教材 code_prefix=math. file_path=imports/m.md file_name=m.md subject=2
   得 ok=1 duplicate=0 chunk_count=1
-  库 textbook_import_task 含 series_code=math.s code_prefix=math. subject_id=2
+  库 textbook_import_task 含 series_code=math_s code_prefix=math. subject_id=2
 
 用例 跨科目_新建导入前缀不符
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 文件 imports/m.md 内容=第1课は的用法
-  调用 新建导入 series_code=math.s series_name=数学教材 code_prefix=m file_path=imports/m.md subject=2
+  调用 新建导入 series_code=math_s series_name=数学教材 code_prefix=m file_path=imports/m.md subject=2
   报错 400
   库 textbook_import_task 共 0 行
 
@@ -1578,7 +1578,7 @@ GET /textbook_import/chunk/prompt -> 块提示词 角色 teacher
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 文件 imports/m.md 内容=第1课は的用法
-  调用 新建导入 series_code=math.s series_name=数学教材 code_prefix=jp. file_path=imports/m.md subject=2
+  调用 新建导入 series_code=math_s series_name=数学教材 code_prefix=jp. file_path=imports/m.md subject=2
   报错 400
   库 textbook_import_task 共 0 行
 
@@ -1587,12 +1587,14 @@ GET /textbook_import/chunk/prompt -> 块提示词 角色 teacher
   先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 文件 imports/m.md 内容=第1课は的用法
   先 调用 新建导入 series_code=s1 series_name=系列一 code_prefix=s1 file_path=imports/m.md
-  调用 新建导入 series_code=math.s series_name=数学教材 code_prefix=math. file_path=imports/m.md subject=2
+  调用 新建导入 series_code=math_s series_name=数学教材 code_prefix=math. file_path=imports/m.md subject=2
   得 ok=1 duplicate=0
   库 textbook_import_task 共 2 行
-  库 textbook_import_task 含 series_code=math.s subject_id=2
+  库 textbook_import_task 含 series_code=math_s subject_id=2
 
 用例 跨科目_确认导入落当前科目
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 kg_point code=math.a title=代数 subject_id=2
   先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
   先 数据 textbook_import_task series_code=math.s series_name=数学教材 code_prefix=math. file_name=m.md raw_text=y status=待审阅 created_at=2026-01-01 subject_id=2
@@ -1650,7 +1652,7 @@ GET /textbook_import/chunk/prompt -> 块提示词 角色 teacher
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 文件 imports/m.md 内容=第1课は的用法
-  调用 新建导入 series_code=math.s series_name=数学教材 code_prefix=math. file_path=imports/m.md learner=t2 current_role=teacher auth_mode=on subject=2
+  调用 新建导入 series_code=math_s series_name=数学教材 code_prefix=math. file_path=imports/m.md learner=t2 current_role=teacher auth_mode=on subject=2
   报错 403
   库 textbook_import_task 共 0 行
 
@@ -1659,9 +1661,9 @@ GET /textbook_import/chunk/prompt -> 块提示词 角色 teacher
   先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
   先 文件 imports/m.md 内容=第1课は的用法
-  调用 新建导入 series_code=math.s series_name=数学教材 code_prefix=math. file_path=imports/m.md learner=t2 current_role=teacher auth_mode=on subject=2
+  调用 新建导入 series_code=math_s series_name=数学教材 code_prefix=math. file_path=imports/m.md learner=t2 current_role=teacher auth_mode=on subject=2
   得 ok=1 duplicate=0
-  库 textbook_import_task 含 series_code=math.s subject_id=2
+  库 textbook_import_task 含 series_code=math_s subject_id=2
 
 用例 跨科目_need_确认导入公共科目非负责教师403
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01

@@ -315,6 +315,7 @@
   伪代码 取运行时的当前日期 today（YYYY-MM-DD，不写死具体日期）；去掉 deadline 不为空且小于 today 的（已过截止日不再传）
   伪代码 查 teacher_rules_relay_state 的 (relay_id, student)：存在且 finished 等于 1 的去掉
   伪代码 剩下的拼出 relay_ids、prompt_text、count 返回；没有则 {"relay_ids": "", "prompt_text": "", "count": 0}
+  伪代码 语义说明：relay_ids 与 prompt_text 一一对应、条数相同；tutor.答一轮 把 prompt_text 整段（全部待传达）放进系统提示，并把 relay_ids 原样传给 记回复传达，所以「这条回复实际带上的编号」就是这里的全部 relay_ids，每条都计一轮；设定预览页面的 relay_pick 只展示排第一的那条，是预览文字，不限制真实回复带几条
 
 公开 函数 记回复传达 reply_id student relay_ids learner? current_role? auth_mode? subject?
   返回 {ok, recorded}，recorded 为 1 表示写了一行，0 表示没带传达
@@ -328,6 +329,7 @@
   伪代码 relay_ids 为空：返回 {"ok": 1, "recorded": 0}，不写库
   伪代码 relay_ids 按逗号拆开，其中任一编号在 teacher_rules_relay 查不到，或属于别的科目（subject_id 既不等于本科目也不是 0），报错 404 没有这条传达（别的科目的传达当作不存在）
   伪代码 任一传达的 student 不为空且不等于入参 student，报错 400 这条传达不是发给该学生的（口径同 对学生发传达；注意与 记传达判定 不同：那边学生对不上报 404 没有传达状态，因为判定面向「已经有状态行」的传达）
+  伪代码 relay_ids = 本次回复实际带上的传达编号（调用方传什么记什么；tutor 传的是 取待传达 的全部 relay_ids，因为它把全部待传达都放进了提示词），下面对其中每个编号都计一轮，不只计第一个
   伪代码 在一个事务里：往 teacher_rules_relay_use 插入一行 (reply_id, student, relay_ids, at=当前时间, subject_id=本科目)；对每个编号，在 teacher_rules_relay_state 里找 (relay_id, student)，没有则插入 rounds_done=1，有则 rounds_done 加 1；若 rounds_done 不小于该传达的 rounds 则 finished=1；confirmed 保持原值，新建为 0；更新 updated_at
   伪代码 返回 {"ok": 1, "recorded": 1}
 
@@ -478,7 +480,7 @@
   伪代码 recent_text：用 app.db 查询 teacher_rules_tutor_exists（sqlite_master 里有没有 tutor_message 表，没有就当没有最近对话——模块用例的库不含下游 tutor 的表），有则查 teacher_rules_recent_asks 取该学生在本科目（tutor_message.subject_id 等于本科目）最近 3 条学生提问（role 为 user，按 id 降序），按旧到新用换行连接；再换行接 preview_message
   伪代码 调用 取生效设定 student=preview_student recent_text=recent_text subject=subject_id 得生效设定；调用 取待传达 student=preview_student subject=subject_id 得待传达
   伪代码 ids：取生效设定 的 setting_ids，为空写「（无）」
-  伪代码 relay_pick：取待传达 的 relay_ids 为空写「（没有待传达的要点）」；否则取第一个编号，调用 取传达 relay_id=该编号 subject=subject_id 得 must_info 摘要（超过 30 字取前 30 加「…」）和 urgency（urgent 写立即、normal 写尽快、low 写顺便），写「传达#{编号}「{摘要}」，这次按「{紧急程度}」带；后面还排着{count-1}条（一条回复只带一条）」
+  伪代码 relay_pick：取待传达 的 relay_ids 为空写「（没有待传达的要点）」；否则取第一个编号，调用 取传达 relay_id=该编号 subject=subject_id 得 must_info 摘要（超过 30 字取前 30 加「…」）和 urgency（urgent 写立即、normal 写尽快、low 写顺便），写「传达#{编号}「{摘要}」，这次按「{紧急程度}」带；后面还排着{count-1}条（一条回复只带一条）」（这句是沿用旧 kg 的预览文案，原样输出不改；它只是预览里点出排第一的那条，不约束真实回复：真实回复由 tutor 带上 取待传达 的全部待传达、全部计入轮数，见 取待传达、记回复传达 的说明）
   伪代码 layout：「【系统提示词】你是一位耐心的日语老师……你不要自己写网址。」接 memory_text（不为空时前加一个换行），再空一行（两个换行）接「【发给模型的提示词】学生现在用的教材：【……】课文、进度等材料：【……】」，card_text 不为空时先换行再接 card_text 再换行，接「最近的对话（旧的在前）：【……】」，待传达的 prompt_text 不为空时先换行再接它，note_text 不为空时先换行再接它，最后换行接「学生现在说：【{preview_message}】请直接回答学生现在这句话。」；某段为空就什么都不接（换行也不接）
   伪代码 preview_hits：读 teacher_rules_setting 中 enabled 等于 1、kind 为 card、student 为空或等于 preview_student、subject_id 等于本科目或等于 0 的行（全班在前，再按 id）；keywords 按逗号拆开，recent_text 包含其中任一个的取第一个命中的为 hit_keyword；note_brief 同 设定列表 的摘要写法，hit_placed 恒为「放进去了」（v4 不设命中卡字数上限）
   伪代码 返回 {"preview": {"ids": ids, "relay_pick": relay_pick, "layout": layout}, "preview_hits": 列表}
