@@ -91,10 +91,11 @@ def _line_arg(v):
     return v if isinstance(v, int) and v >= 1 else False
 
 
-def apply(root, edits, path_check=None):
+def apply(root, edits, path_check=None, deleted=()):
     """在内存里按顺序套 edits。返回 (texts, orig, created, errs)：
     texts {相对路径: 改后全文}、orig {相对路径: 原文，新建为 ""}、created [新建的相对路径]、errs [逐条错误文本]。
-    errs 非空就不该写任何文件。path_check(rel) 返回错误文本或空（测试文件、范围拦截等调用方自己的约束）。"""
+    errs 非空就不该写任何文件。path_check(rel) 返回错误文本或空（测试文件、范围拦截等调用方自己的约束）。
+    deleted：计划里在这之前已 删文件 的相对路径（核对计划用），按「不存在」处理。"""
     root = Path(root).resolve()
     total = len(edits)
     texts, orig, created, touched, errs = {}, {}, [], {}, []
@@ -133,14 +134,18 @@ def apply(root, edits, path_check=None):
                 prev = touched.get(rel, [])
                 bad(k, rel, f"已存在，old 不能为空（与第 {prev[0]} 条冲突：前面已经新建 / 改过它）" if prev
                     else "已存在，old 不能为空")
-            elif p.exists():
-                bad(k, rel, "已存在，old 不能为空；新建只建不存在的文件，改已有文件要把 old 写成原文，整份重写用 写文件")
+            elif p.exists() and rel not in deleted:
+                bad(k, rel, "已存在，old 不能为空；新建只建不存在的文件，改已有文件要把 old 写成原文。整份重写已有文件："
+                    "一条 edit，old 取整个原文；或在段里只写 {file, content}（不写 old / new），用 写文件 {段名}")
             else:
                 texts[rel], orig[rel] = new, ""
                 created.append(rel)
                 touched.setdefault(rel, []).append(k)
             continue
         if rel not in texts:
+            if rel in deleted:
+                bad(k, rel, "没有这个文件（计划前面已 删文件 它；重新建要 old 写成空串）")
+                continue
             if not p.is_file():
                 bad(k, rel, "没有这个文件" + ("（这是新建文件时 old 写成空串）" if not p.exists() else ""))
                 continue

@@ -93,8 +93,9 @@ def is_json_body(body: list) -> bool:
 
 
 def parse_edit_json(body: list):
-    """「#改法」段里直接写 JSON → ({edits}, 问题列表)。内容原样 json.loads（可多行；不展开 {变量}，
+    """「#改法」段里直接写 JSON → ({edits, files}, 问题列表)。内容原样 json.loads（可多行；不展开 {变量}，
     {p} 之类就是字面文本），每条 {file, old, new, line?}，也接受 {"edits": […]} 或单条 {file, old, new}。
+    只有 {file, content}、没有 old / new 的条目是整份内容，归入 files（写文件 {名} 拿它整份新建 / 覆盖），不进 edits。
     每条的细节（file 缺不缺、old 唯一不唯一）不在这里查，交给 改文件 / 核对计划 逐条报。"""
     text = "\n".join(x for x in body if not x.strip().startswith(("#", "```")))
     try:
@@ -109,7 +110,13 @@ def parse_edit_json(body: list):
         return {"edits": [], "files": []}, ["JSON 要是 [{file, old, new, line?}, …] 列表（或 {\"edits\": […]}）"]
     if not v:
         return {"edits": [], "files": []}, ["JSON 列表是空的，至少要有一条改动"]
-    return {"edits": v, "files": []}, []
+    files = [x for x in v if is_file_item(x)]
+    return {"edits": [x for x in v if not is_file_item(x)], "files": files}, []
+
+
+def is_file_item(x) -> bool:
+    """{file, content} 整份内容条目（没有 old / new 键）。"""
+    return isinstance(x, dict) and "content" in x and "old" not in x and "new" not in x
 
 
 def parse_edit_body(body: list, first_lineno: int = 1):

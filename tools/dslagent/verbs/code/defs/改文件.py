@@ -2,7 +2,8 @@
 收 [{file, old, new, line?}, …] 列表，或 {file, old, new} / {edits: [{file, old, new, line?}, …]}（脚本里传 {e1}，引擎转成 JSON 文本）。
 
 脚本末尾「#改法 名」段（tools/dsl_sections）：块里直接写 JSON 列表，解析成 {edits:[…]}，改文件 {e1} 一次套全部条目。
-老的 @@ 标记写法（其它包在用）解析出的 files:[{file, content}] 仍收，当作 old 为空的新建条目排在前面。
+老的 @@ 标记写法（其它包在用）解析出的 files:[{file, content}] 仍收，当作 old 为空的新建条目排在前面（JSON 段里只写 {file, content} 的条目也进 files，
+整份覆盖已有文件要用 写文件 {名}）。
 
 返回 {ok: 是/否, msg, n}。同一文件的多条按顺序在内存里叠加：old 在当时的文本里恰好 1 处就用它；多处时有 line 就选起点离 line 最近的
 （并列报错），没 line 报错；0 处报错并给近似行提示。任何一条失败就整体不改（全有或全无），msg 逐条写第几条、文件、原因。
@@ -13,6 +14,7 @@ CRLF 的文件按原换行写回：old/new 只用 LF 对不上原文时换成 CR
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -21,6 +23,9 @@ PACK_DIR = Path(".")
 
 
 ALIASES = ("path", "filepath", "file_path", "filename", "fname", "文件", "文件名", "路径")
+DEL_RE = re.compile(r"(?:^|=)\s*删文件\s+(\S+)")
+USE_RE = re.compile(r"(?:^|=)\s*(改文件|写文件)\s+\{([^{}\s.]+)\}")
+ALIAS_RE = re.compile(r"^设\s+([^\s=.]+)(?:\.[^\s=]+)?\s*=\s*\{([^{}\s.]+)\}$")
 
 
 def _norm(ed, notes):
@@ -120,16 +125,74 @@ def _do(改法, notes) -> dict:
             "msg": f"{head}：" + "、".join(parts) + "；【代码】区已刷新为改后内容"}
 
 
-def 核对计划(root, sections) -> list:
-    """计划检查用（只读，不改文件）：sections 是 split_sections 给的 {段名: {edits, files}}。
+def _plan_uses(body):
+    """计划主体（段已拿掉）→ (删文件 [(行号, 路径)], {段名: [(行号, 改文件|写文件)]})。
+    「设 w = {e2}」「设 w.files = {e2}」记成别名，之后 写文件 {w} 算消费 e2；路径带 {变量} 的 删文件 不计。"""
+    dels, uses, alias = [], {}, {}
+    for i, raw in enumerate((body or "").splitlines(), 1):
+        s = raw.strip()
+        if not s or s.startswith("#"):
+            continue
+        m = ALIAS_RE.match(s)
+        if m:
+            alias[m.group(1)] = alias.get(m.group(2), m.group(2))
+            continue
+        m = DEL_RE.search(s)
+        if m:
+            if "{" not in m.group(1):
+                dels.append((i, m.group(1).strip("`'\"「」")))
+            continue
+        m = USE_RE.search(s)
+        if m:
+            uses.setdefault(alias.get(m.group(2), m.group(2)), []).append((i, m.group(1)))
+    return dels, uses
+
+
+def _write_problems(root, e, SB):
+    """只给 写文件 用的段：files 条目只查路径 / 测试文件 / 目录（覆盖已有文件允许）；带 old / new 的条目 写文件 不收。"""
+    files = e.get("files") if isinstance(e.get("files"), list) else []
+    edits = e.get("edits") if isinstance(e.get("edits"), list) else []
+    total, out = len(files) + len(edits), []
+    for k, it in enumerate(files, 1):
+        f = str(it.get("file") or "") if isinstance(it, dict) else ""
+        if not f or it.get("content") is None:
+            out.append(f"第 {k} 条（共 {total} 条）：写文件 的条目要是 {{file, content}}")
+            continue
+        p, err = SB.resolve(root, f)
+        why = err or (SB.is_test_rel(str(p.relative_to(root))) and "不许写测试文件") or (p.is_dir() and "是目录")
+        if why:
+            out.append(f"第 {k} 条（共 {total} 条）{f}：{why}")
+    for k, it in enumerate(edits, len(files) + 1):
+        f = it.get("file") if isinstance(it, dict) else ""
+        out.append(f"第 {k} 条（共 {total} 条）{f or ''}：写文件 只收 {{file, content}} 整份内容，这条带 old / new"
+                   "（改局部用 改文件；整份重写只写 file 和 content）")
+    return out
+
+
+def 核对计划(root, sections, body="") -> list:
+    """计划检查用（只读，不改文件）：sections 是 split_sections 给的 {段名: {edits, files}}，body 是拿掉段以后的计划主体。
     每段用 改文件 同一个套用函数（_edits.apply）在内存里顺序套用，返回问题文本列表：
-    文件不存在 / old 出现 0 次 / 多处且 line 选不出（报各处行号）/ 新建的文件已存在 / 路径越界、测试文件。"""
+    文件不存在 / old 出现 0 次 / 多处且 line 选不出（报各处行号）/ 新建的文件已存在 / 路径越界、测试文件。
+    看 body 里的语句：段第一次被消费之前已 删文件 的路径按「不存在」处理（删在后面不算）；只被 写文件 用的段
+    只查 files 条目的路径 / 测试文件（覆盖已有文件允许）。"""
     sys.path.insert(0, str(Path(__file__).parent))
     import _edits as E
+    import _sandbox as SB
     root, probs = Path(root).resolve(), []
+    dels, uses = _plan_uses(body)
     for name, e in sections.items():
+        used = uses.get(name, [])
+        if used and {v for _, v in used} == {"写文件"}:
+            probs += [f"#改法 {name} {x}" for x in _write_problems(root, e, SB)]
+            continue
         items = _items(e, set())
         if not items:
             continue
-        probs += [f"#改法 {name} {x}" for x in E.apply(root, items)[3]]
+        first = min((i for i, _ in used), default=0)
+        deleted = set()
+        for i, f in dels:
+            p, err = SB.resolve(root, f)
+            if i < first and not err:
+                deleted.add(str(p.relative_to(root)))
+        probs += [f"#改法 {name} {x}" for x in E.apply(root, items, deleted=deleted)[3]]
     return probs

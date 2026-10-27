@@ -120,12 +120,13 @@ def check(text, first=True, verbs=SCRIPT_VERBS, heads=SCRIPT_HEADS):
 
 def edit_problems(project, script):
     """计划里写死的 #改法 段对着真实文件核对（只读）：文件在不在、old 出现几次（报行号）、@@ 新建 的文件已存在。
-    复用 改文件 的匹配代码，按它实际的顺序套用方式在内存里模拟。返回问题文本列表。"""
+    复用 改文件 的匹配代码，按它实际的顺序套用方式在内存里模拟；主体一起交过去，段被用之前已 删文件 的路径按不存在算、
+    只给 写文件 用的段允许覆盖。返回问题文本列表。"""
     from .common import _verb_module
-    _, secs, _, _ = split_sections(script)
+    body, secs, _, _ = split_sections(script)
     if not secs:
         return []
-    return _verb_module("改文件").核对计划(project, secs)
+    return _verb_module("改文件").核对计划(project, secs, body)
 
 
 def _dry_cls(base):
