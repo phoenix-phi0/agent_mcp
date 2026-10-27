@@ -640,7 +640,7 @@
       设 item = {"label": "{stitle}", "value": {vr2.score}, "delta": "{dl}", "at": "{vr2.at}"}
       设 scs = 列表加项 {scs} {item}
     结束
-    设 d = 调用 dictation.取默写概况 learner={learner}
+    设 d = 调用 dictation.取默写概况 learner={learner} subject={sid}
     设 words = 查一值 app.db progress_dict_words learner={learner} subject_id={sid}
     设 w5 = 练过
     设 drate = —
