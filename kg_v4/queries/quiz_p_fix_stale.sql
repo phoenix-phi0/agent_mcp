@@ -1,0 +1,1 @@
+UPDATE quiz_progress SET current_no = '', answered = 0, last_correct = 0 WHERE subject_id = CAST(:subject_id AS INTEGER) AND current_no IS NOT NULL AND current_no <> '' AND current_no NOT IN (SELECT question_no FROM quiz_question WHERE subject_id = CAST(:subject_id AS INTEGER))
