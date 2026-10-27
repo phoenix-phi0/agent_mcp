@@ -12,12 +12,12 @@
     返回 {out}
   结束
 
-  公开 函数 取当前系列 learner
+  公开 函数 取当前系列 learner current_role?
     # 返回 {learner, series_code, name, is_default}；is_default 为 1 表示没选或所选系列已不可用，用了默认系列 hanabira
     # 按 learner 查 lesson_pref 一行
     # 有记录时，按其 series_code 查 lesson_series，存在且 sort_order 不小于 0，则返回 {"learner": learner, "series_code": 该编号, "name": 该系列 name, "is_default": 0}
     # 否则按 hanabira 查 lesson_series，name 取其 name，没有这行时 name 取 "hanabira"
-    设 sj = 调用 subject.当前科目 learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
     设 pref = 查一行 app.db lesson_pref_get learner={learner} subject_id={sj.subject_id}
     如果 {pref} 不为空
       设 s = 查一行 app.db lesson_series_get code={pref.series_code}
@@ -43,7 +43,7 @@
     返回 {out}
   结束
 
-  公开 函数 选择系列 learner series_code
+  公开 函数 选择系列 learner series_code current_role?
     # 返回 {ok, learner, series_code}
     # 报错 404 没有这个系列
     # 按 series_code 查 lesson_series，查不到或 sort_order 小于 0，报错 404 没有这个系列
@@ -55,7 +55,7 @@
     如果 {s.sort_order} 小于 0
       报错 404 没有这个系列
     结束
-    设 sj = 调用 subject.当前科目 learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
     设 pref = 查一行 app.db lesson_pref_get learner={learner} subject_id={sj.subject_id}
     如果 {pref} 为空
       设 n = 写库 app.db lesson_pref_insert learner={learner} subject_id={sj.subject_id} series_code={series_code}
@@ -662,7 +662,7 @@
     返回 {rows}
   结束
 
-  公开 函数 教材页面 learner series? lesson_level? keyword?
+  公开 函数 教材页面 learner series? lesson_level? keyword? current_role?
     设 sl = 调用 列系列
     设 qt = 调用 题数表
     设 found = 0
@@ -677,10 +677,10 @@
       结束
     结束
     如果 {found} 等于 1
-      设 sel = 调用 选择系列 learner={learner} series_code={series}
+      设 sel = 调用 选择系列 learner={learner} series_code={series} current_role={current_role 或}
       设 cur_code = {series}
     否则
-      设 cu = 调用 取当前系列 learner={learner}
+      设 cu = 调用 取当前系列 learner={learner} current_role={current_role 或}
       设 cur_code = {cu.series_code}
       设 cur_name = {cu.name}
     结束
@@ -723,11 +723,11 @@
     返回 {out}
   结束
 
-  公开 函数 课文页面 learner lesson?
+  公开 函数 课文页面 learner lesson? current_role?
     如果 {lesson} 为空
       报错 400 lesson 不能为空
     结束
-    设 pg = 调用 教材页面 learner={learner}
+    设 pg = 调用 教材页面 learner={learner} current_role={current_role 或}
     设 lt = 调用 取课文 code={lesson}
     如果 {lt} 为空
       设 o1.reading.code = {lesson}

@@ -41,11 +41,11 @@
   updated_at 文本 最后修改时间，可空
 
 ## 函数
-公开 函数 科目访问 learner current_role subject_id need
+公开 函数 科目访问 learner current_role subject_id need auth_mode?
   返回 {ok, reason, via}；ok 为 1 通过 / 0 拒绝；reason 是拒绝原因（通过时空串）；via 是凭什么通过：assigned（学生已分配）/ owner / editor / public / single（单人模式）/ 空串
   报错 400 need 不对
   伪代码 need 不是 read、write、settings、assign 之一，报错 400 need 不对
-  伪代码 current_role 不是 student 也不是 teacher（单人模式或不登录），返回 {"ok": 1, "reason": "", "via": "single"}，不查库
+  伪代码 current_role 不是 student 也不是 teacher（单人模式或不登录）：auth_mode 等于 on（登录模式却没有角色），返回 {"ok": 0, "reason": "没有权限访问该科目", "via": ""}，不查库；auth_mode 不传或不等于 on，返回 {"ok": 1, "reason": "", "via": "single"}，不查库（不传 auth_mode 时行为同旧）
   伪代码 按 subject_id 查 subject_info，查不到返回 {"ok": 0, "reason": "没有这个科目", "via": ""}
   伪代码 current_role 等于 student：只有 need 等于 read 才可能通过；该科目 status 必须是 active，且 subject_student 有 (subject_id, learner) 的行且 status 等于 active，才返回 {"ok": 1, "reason": "", "via": "assigned"}；否则返回 {"ok": 0, "reason": "该科目未分配给你", "via": ""}（need 不是 read 时 reason 为「学生没有这个权限」）
   伪代码 current_role 等于 teacher：先定身份——科目 owner 等于 learner、或 subject_teacher 有 (subject_id, learner) 且 role 等于 owner，则是 owner；有 (subject_id, learner) 且 role 等于 editor，则是 editor；否则看 visibility 等于 public 且 status 不是 draft 则是 public；其余是 none
@@ -59,10 +59,10 @@
   伪代码 其他 current_role（单人模式或不登录）：visibility 等于 public 且 status 等于 active 的科目
   伪代码 返回 {"total": 数量, "subjects": 列表}
 
-公开 函数 当前科目 learner
+公开 函数 当前科目 learner current_role?
   返回 {subject_id}；当前科目编号，不报错，永远有值
   伪代码 learner 为空，返回 {"subject_id": 1}
-  伪代码 按 learner 查 subject_pref；有行且 subject_info 有该科目、status 不是 draft，并且 (a) subject_student 有 (subject_id, learner) 且 status 等于 active 且科目 status 等于 active，或 (b) 科目 owner 等于 learner，或 (c) subject_teacher 有 (subject_id, learner) 的行，才返回 {"subject_id": 偏好科目}
+  伪代码 按 learner 查 subject_pref；有行且 subject_info 有该科目、status 不是 draft，并且 (a) subject_student 有 (subject_id, learner) 且 status 等于 active 且科目 status 等于 active，或 (b) 科目 owner 等于 learner，或 (c) subject_teacher 有 (subject_id, learner) 的行，或 (d) current_role 等于 teacher 且该科目 visibility 等于 public 且 status 等于 active（教师切到无关系的公共科目也算有效），才返回 {"subject_id": 偏好科目}；current_role 不传或为 student 时没有 (d)，学生仍只认已分配（(a)）
   伪代码 偏好失效或没有偏好：取 subject_student 中该 learner 且 status 等于 active、科目 status 等于 active 的最小 subject_id；有则返回它
   伪代码 都没有（比如单人模式、还没分配科目、教师没有偏好）返回 {"subject_id": 1}，保证日语旧行为不变
   伪代码 只读；不调用别的模块
@@ -73,9 +73,10 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 解析顺序：请求里显式 subject（地址参数，路由注入）→ 偏好 → 第一个已分配 → 1；显式 subject 无权报 403
   伪代码 subject 不为空：不是纯数字，报错 400 subject 不对；auth_mode 不等于 on，直接返回 {"subject_id": 该数字}（单人模式不校验，也不查库）
-  伪代码 subject 不为空且 auth_mode 等于 on：按「科目访问 need=read」判断，ok 为 0 时——科目不存在报错 404 没有这个科目；current_role 等于 student 报错 403 该科目未分配给你；否则报错 403 没有权限访问该科目；ok 为 1 返回 {"subject_id": 该数字}
-  伪代码 subject 为空：直接返回「当前科目」的结果（偏好 → 第一个已分配 → 1），不校验、不报错
+  伪代码 subject 不为空且 auth_mode 等于 on：按「科目访问 need=read auth_mode=on」判断（空角色也被拒），ok 为 0 时——科目不存在报错 404 没有这个科目；current_role 等于 student 报错 403 该科目未分配给你；否则报错 403 没有权限访问该科目；ok 为 1 返回 {"subject_id": 该数字}
+  伪代码 subject 为空：直接返回「当前科目 learner=learner current_role=current_role」的结果（偏好 → 第一个已分配 → 1），不校验、不报错
 
 公开 函数 切换科目 learner current_role subject
   返回 {ok, subject}；把该用户的当前科目偏好写成 subject
@@ -278,3 +279,76 @@ POST /subject/switch -> 切换科目 动作 subject_switch 模板 提交消息 �
   先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   调用 切换科目 learner=t2 current_role=teacher subject=1
   得 ok=1 subject=1
+
+用例 科目访问_空角色登录模式拒绝
+  调用 科目访问 learner=me current_role=空 subject_id=1 need=read auth_mode=on
+  得 ok=0
+
+用例 科目访问_空角色非登录模式放行
+  调用 科目访问 learner=me current_role=空 subject_id=1 need=read auth_mode=off
+  得 ok=1 via=single
+
+用例 科目访问_带auth_mode的学生照常
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  调用 科目访问 learner=s1 current_role=student subject_id=1 need=read auth_mode=on
+  得 ok=1 via=assigned
+
+用例 当前科目_教师偏好无关系的公共科目不回退
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=b name=乙 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_pref learner=t2 subject_id=2
+  调用 当前科目 learner=t2 current_role=teacher
+  得 subject_id=2
+
+用例 当前科目_不传角色时教师偏好公共科目同旧回退1
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=b name=乙 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_pref learner=t2 subject_id=2
+  调用 当前科目 learner=t2
+  得 subject_id=1
+
+用例 当前科目_教师偏好他人私有科目回退1
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=b name=乙 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_pref learner=t2 subject_id=2
+  调用 当前科目 learner=t2 current_role=teacher
+  得 subject_id=1
+
+用例 当前科目_教师偏好停用的公共科目回退1
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=b name=乙 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=disabled created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_pref learner=t2 subject_id=2
+  调用 当前科目 learner=t2 current_role=teacher
+  得 subject_id=1
+
+用例 当前科目_学生传角色仍只认已分配
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=b name=乙 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_pref learner=s1 subject_id=2
+  调用 当前科目 learner=s1 current_role=student
+  得 subject_id=1
+
+用例 解析科目_教师不传subject用偏好的公共科目
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=b name=乙 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_pref learner=t2 subject_id=2
+  调用 解析科目 learner=t2 current_role=teacher auth_mode=on
+  得 subject_id=2
+
+用例 解析科目_显式科目优先于偏好
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=b name=乙 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_pref learner=t2 subject_id=2
+  调用 解析科目 learner=t2 current_role=teacher auth_mode=on subject=1
+  得 subject_id=1
+
+用例 解析科目_教师显式他人私有科目403
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 解析科目 learner=t2 current_role=teacher auth_mode=on subject=1
+  报错 403
+
+用例 解析科目_登录模式空角色显式科目403
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 解析科目 learner=me current_role=空 auth_mode=on subject=1
+  报错 403

@@ -81,7 +81,7 @@
   伪代码 auth_mode 不等于 on 或 current_user 为空，返回 {"user": "", "label": "", "role": "", "role_label": "", "badge": "", "hide": [], "mode": auth_mode, "subjects": [], "subject": 1}
   伪代码 按 current_user 查 account_user；查不到或 disabled 等于 1，同样返回上面那个没登录的空对象
   伪代码 调用 subject.列我的科目 learner=current_user current_role=该行 role，取返回的 subjects，只保留 id 和 name 两个键，得到 subjects 数组
-  伪代码 调用 subject.当前科目 learner=current_user，取 subject_id 作为 subject
+  伪代码 调用 subject.当前科目 learner=current_user current_role=该行 role，取 subject_id 作为 subject（教师偏好公共科目也不回退 1）
   伪代码 role_label：role 等于 teacher 取「教师」，等于 student 取「学生」，其他取空串
   伪代码 返回 {"user": current_user, "label": 该行 display_name, "role": 该行 role, "role_label": role_label, "badge": "", "hide": [], "mode": "on", "subjects": subjects, "subject": subject}
   伪代码 依赖方向：account 依赖 subject（subject 是叶子，不依赖 account；角色由 account 查出后以 current_role 传给 subject）
@@ -267,6 +267,14 @@ POST /account/students/enable -> 设置学生停用 动作 student_enable 模板
   先 数据 account_user username=t1 password_hash=x display_name=王老师 role=teacher disabled=0 created_at=2026-01-01
   调用 认证信息 current_user=t1 current_role=teacher auth_mode=on
   得 user=t1 label=王老师 role=teacher role_label=教师 subject=1
+
+用例 认证信息_教师偏好公共科目
+  先 数据 account_user username=t2 password_hash=x display_name=李老师 role=teacher disabled=0 created_at=2026-01-01
+  先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=b name=乙 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_pref learner=t2 subject_id=2
+  调用 认证信息 current_user=t2 current_role=teacher auth_mode=on
+  得 user=t2 role=teacher subject=2
 
 用例 退出_正常
   调用 退出 learner=s1

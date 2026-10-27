@@ -2,13 +2,13 @@
   依赖 vocab subject
   用包 common db text japanese
 
-  公开 函数 取状态 learner
+  公开 函数 取状态 learner current_role?
     # 返回 没有进度时 {has_progress: 0}；有进度时 {has_progress: 1, direction, level, source, word_id, prompt, answered, hinted, asked_count, right_count, finished}。prompt 是题面（zh2jp 为中文意思，kanji2kana 为汉字），不含答案；word_id 为 0 时 finished=1 且 prompt 为空串
     # 按 learner 查 dictation_progress 一行，查不到返回 {"has_progress": 0}
     # current_word_id 为 0：prompt 为空串，word_id=0，finished=1
     # current_word_id 不为 0：调用 vocab.取单词 word_id=current_word_id，取不到则 prompt 为空串；取到则 prompt = 题面(direction, 该词)；finished=0
     # 返回 {"has_progress": 1, "direction": direction, "level": level, "source": source, "word_id": current_word_id, "prompt": prompt, "answered": answered, "hinted": hinted, "asked_count": asked_count, "right_count": right_count, "finished": finished}
-    设 sb = 调用 subject.当前科目 learner={learner}
+    设 sb = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
     设 p = 查一行 app.db dictation_progress_get learner={learner} subject_id={sb.subject_id}
     如果 {p} 为空
       返回 {"has_progress": 0}
@@ -40,33 +40,33 @@
     返回 {s}
   结束
 
-  公开 函数 开始 learner direction level? source?
+  公开 函数 开始 learner direction level? source? current_role?
     # 返回 {ok} 加上 取状态 的全部字段（新一轮的第一个词）
     # 报错 400 方向不对
     # 报错 400 没有可出的词
     # 调用 开新轮 learner=learner direction=direction level=level source=source
     # 返回开新轮的结果
-    设 r = 调用 开新轮 learner={learner} direction={direction} level={level} source={source}
+    设 r = 调用 开新轮 learner={learner} direction={direction} level={level} source={source} current_role={current_role 或}
     返回 {r}
   结束
 
-  公开 函数 再来一轮 learner
+  公开 函数 再来一轮 learner current_role?
     # 返回 同「开始」
     # 报错 400 还没有开始
     # 报错 400 没有可出的词
     # 按 learner 查 dictation_progress，查不到报错 400 还没有开始
     # 用该行已存的 direction、level、source 调用 开新轮
     # 返回开新轮的结果
-    设 sb = 调用 subject.当前科目 learner={learner}
+    设 sb = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
     设 p = 查一行 app.db dictation_progress_get learner={learner} subject_id={sb.subject_id}
     如果 {p} 为空
       报错 400 还没有开始
     结束
-    设 r = 调用 开新轮 learner={learner} direction={p.direction} level={p.level} source={p.source}
+    设 r = 调用 开新轮 learner={learner} direction={p.direction} level={p.level} source={p.source} current_role={current_role 或}
     返回 {r}
   结束
 
-  公开 函数 下一个 learner
+  公开 函数 下一个 learner current_role?
     # 返回 {ok} 加上 取状态 的全部字段；这一轮结束时 finished=1
     # 报错 400 还没有开始
     # 报错 400 当前词还没交答案
@@ -75,7 +75,7 @@
     # current_word_id 为 0，或 asked_count 不小于 10，或 选词 返回空（没有可出的词）：在库里把 current_word_id 置 0、answered 置 1，返回 {"ok": 1} 加 取状态 的字段（finished=1）
     # 否则在一个事务里更新 dictation_progress：current_word_id=新词 id，answered=0，hinted=0，asked_ids 末尾追加新词 id，asked_count 加 1
     # 返回 {"ok": 1} 加 取状态 的字段
-    设 sb = 调用 subject.当前科目 learner={learner}
+    设 sb = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
     设 p = 查一行 app.db dictation_progress_get learner={learner} subject_id={sb.subject_id}
     如果 {p} 为空
       报错 400 还没有开始
@@ -92,12 +92,12 @@
         设 n = 写库 app.db dictation_progress_advance learner={learner} word_id={w.id} asked_ids={new_ids} subject_id={sb.subject_id}
       结束
     结束
-    设 s = 调用 取状态 learner={learner}
+    设 s = 调用 取状态 learner={learner} current_role={current_role 或}
     设 s.ok = 1
     返回 {s}
   结束
 
-  公开 函数 提示 learner
+  公开 函数 提示 learner current_role?
     # 返回 {ok, hinted, first_kana, length}，first_kana 是当前词假名的第一个字，length 是假名字数
     # 报错 400 还没有开始
     # 报错 400 当前没有词
@@ -108,7 +108,7 @@
     # 调用 vocab.取单词 word_id=current_word_id，取不到报错 404 当前词已不存在
     # 把 dictation_progress 的 hinted 置 1
     # 返回 {"ok": 1, "hinted": 1, "first_kana": 假名第一个字, "length": 假名字数}
-    设 sb = 调用 subject.当前科目 learner={learner}
+    设 sb = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
     设 p = 查一行 app.db dictation_progress_get learner={learner} subject_id={sb.subject_id}
     如果 {p} 为空
       报错 400 还没有开始
@@ -134,7 +134,7 @@
     返回 {out}
   结束
 
-  公开 函数 交答案 learner answer
+  公开 函数 交答案 learner answer current_role?
     # 返回 {ok, correct, hinted, kanji, kana, meaning, asked_count, right_count}，correct 为 1/0，kanji、kana、meaning 是标准答案所在单词
     # 报错 400 答案不能为空
     # 报错 400 还没有开始
@@ -154,7 +154,7 @@
     如果 {a} 为空
       报错 400 答案不能为空
     结束
-    设 sb = 调用 subject.当前科目 learner={learner}
+    设 sb = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
     设 p = 查一行 app.db dictation_progress_get learner={learner} subject_id={sb.subject_id}
     如果 {p} 为空
       报错 400 还没有开始
@@ -197,13 +197,13 @@
     返回 {out}
   结束
 
-  公开 函数 列本轮错词 learner
+  公开 函数 列本轮错词 learner current_role?
     # 返回 {learner, total, words}，words 是 [{word_id, direction, kanji, kana, meaning, answer}]，按作答 id 升序；没有进度时 total 为 0、words 为空
     # 按 learner 查 dictation_progress，查不到返回 {"learner": learner, "total": 0, "words": []}
     # 查 dictation_attempt 中 learner 相等、id 大于 round_start、correct 等于 0 的行，按 id 升序
     # 对每行调用 vocab.取单词 word_id=该行 word_id，取不到的行跳过；其余拼出 {word_id, direction, kanji, kana, meaning, answer}
     # 返回 {"learner": learner, "total": 行数, "words": 列表}
-    设 sb = 调用 subject.当前科目 learner={learner}
+    设 sb = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
     设 p = 查一行 app.db dictation_progress_get learner={learner} subject_id={sb.subject_id}
     设 words = 解析JSON []
     设 out.learner = {learner}
@@ -359,7 +359,7 @@
     返回 {none}
   结束
 
-  函数 开新轮 learner direction level? source?
+  函数 开新轮 learner direction level? source? current_role?
     # 返回 {ok} 加上 取状态 的全部字段
     # 报错 400 方向不对
     # 报错 400 没有可出的词
@@ -376,7 +376,7 @@
       报错 400 没有可出的词
     结束
     设 base = 查一值 app.db dictation_attempt_max_id learner={learner}
-    设 sb = 调用 subject.当前科目 learner={learner}
+    设 sb = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
     设 p = 查一行 app.db dictation_progress_get learner={learner} subject_id={sb.subject_id}
     设 row.learner = {learner}
     设 row.subject_id = {sb.subject_id}
@@ -393,7 +393,7 @@
         设 n = 写库表 app.db dictation_progress_reset {row}
       结束
     结束
-    设 s = 调用 取状态 learner={learner}
+    设 s = 调用 取状态 learner={learner} current_role={current_role 或}
     设 s.ok = 1
     返回 {s}
   结束
@@ -561,8 +561,8 @@
     返回 {out}
   结束
 
-  函数 空错词状态 learner direction level
-    设 sb = 调用 subject.当前科目 learner={learner}
+  函数 空错词状态 learner direction level current_role?
+    设 sb = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
     设 n = 写库 app.db dictation_progress_settings learner={learner} direction={direction} level={level} source=review subject_id={sb.subject_id}
     设 dn = 调用 方向名 direction={direction}
     设 lv = 全部
@@ -576,17 +576,17 @@
     返回 {out}
   结束
 
-  函数 开轮页面 learner direction level source
+  函数 开轮页面 learner direction level source current_role?
     如果 {source} 等于 review
       设 e0 = {zz 或}
       设 cl = 调用 候选词 learner={learner} direction={direction} level={level} source=review asked_ids={e0}
       设 cn = 列表长度 {cl}
       如果 {cn} 等于 0
-        设 es = 调用 空错词状态 learner={learner} direction={direction} level={level}
+        设 es = 调用 空错词状态 learner={learner} direction={direction} level={level} current_role={current_role 或}
         返回 {es}
       结束
     结束
-    设 s = 调用 开始 learner={learner} direction={direction} level={level} source={source}
+    设 s = 调用 开始 learner={learner} direction={direction} level={level} source={source} current_role={current_role 或}
     设 w = 调用 vocab.取单词 word_id={s.word_id}
     设 card = 调用 拼词卡 direction={direction} word={w} asked_count={s.asked_count} hinted=0
     设 st = 调用 成绩文本 s={s}
@@ -596,8 +596,8 @@
     返回 {out}
   结束
 
-  公开 函数 默写页面 learner
-    设 s = 调用 取状态 learner={learner}
+  公开 函数 默写页面 learner current_role?
+    设 s = 调用 取状态 learner={learner} current_role={current_role 或}
     设 st = 调用 成绩文本 s={s}
     设 fm = 调用 表单回填 s={s}
     设 out.dstat = {st}
@@ -605,7 +605,7 @@
     返回 {out}
   结束
 
-  公开 函数 开始页面 learner dict_direction? dict_level? dict_source?
+  公开 函数 开始页面 learner dict_direction? dict_level? dict_source? current_role?
     如果 {dict_direction} 为空
       设 dict_direction = 看中文写日语
     结束
@@ -628,12 +628,12 @@
     否则
       报错 400 题源不对
     结束
-    设 r = 调用 开轮页面 learner={learner} direction={dir} level={lv} source={src}
+    设 r = 调用 开轮页面 learner={learner} direction={dir} level={lv} source={src} current_role={current_role 或}
     返回 {r}
   结束
 
-  公开 函数 随机页面 learner
-    设 s = 调用 取状态 learner={learner}
+  公开 函数 随机页面 learner current_role?
+    设 s = 调用 取状态 learner={learner} current_role={current_role 或}
     设 dir = zh2jp
     设 lv = {zz 或}
     如果 {s.has_progress} 等于 1
@@ -641,7 +641,7 @@
       设 lv = {s.level}
     结束
     设 src = {zz 或}
-    设 r = 调用 开轮页面 learner={learner} direction={dir} level={lv} source={src}
+    设 r = 调用 开轮页面 learner={learner} direction={dir} level={lv} source={src} current_role={current_role 或}
     设 dn = 调用 方向名 direction={dir}
     设 dl = 全部
     如果 {lv} 不为空
@@ -655,15 +655,15 @@
     返回 {r}
   结束
 
-  公开 函数 练错词页面 learner
-    设 s = 调用 取状态 learner={learner}
+  公开 函数 练错词页面 learner current_role?
+    设 s = 调用 取状态 learner={learner} current_role={current_role 或}
     设 dir = zh2jp
     设 lv = {zz 或}
     如果 {s.has_progress} 等于 1
       设 dir = {s.direction}
       设 lv = {s.level}
     结束
-    设 r = 调用 开轮页面 learner={learner} direction={dir} level={lv} source=review
+    设 r = 调用 开轮页面 learner={learner} direction={dir} level={lv} source=review current_role={current_role 或}
     设 dn = 调用 方向名 direction={dir}
     设 dl = 全部
     如果 {lv} 不为空
@@ -677,8 +677,8 @@
     返回 {r}
   结束
 
-  公开 函数 载入页面 learner source? direction? level?
-    设 s = 调用 取状态 learner={learner}
+  公开 函数 载入页面 learner source? direction? level? current_role?
+    设 s = 调用 取状态 learner={learner} current_role={current_role 或}
     设 dir = zh2jp
     设 lv = {zz 或}
     设 src = {zz 或}
@@ -706,7 +706,7 @@
     否则如果 {source} 等于 random
       设 src = {zz 或}
     结束
-    设 r = 调用 开轮页面 learner={learner} direction={dir} level={lv} source={src}
+    设 r = 调用 开轮页面 learner={learner} direction={dir} level={lv} source={src} current_role={current_role 或}
     设 dn = 调用 方向名 direction={dir}
     设 dl = 全部
     如果 {lv} 不为空
@@ -724,9 +724,9 @@
     返回 {r}
   结束
 
-  公开 函数 判答案页面 learner dict_answer?
-    设 s = 调用 取状态 learner={learner}
-    设 r = 调用 交答案 learner={learner} answer={dict_answer}
+  公开 函数 判答案页面 learner dict_answer? current_role?
+    设 s = 调用 取状态 learner={learner} current_role={current_role 或}
+    设 r = 调用 交答案 learner={learner} answer={dict_answer} current_role={current_role 或}
     设 word.id = {s.word_id}
     设 word.kanji = {r.kanji}
     设 word.kana = {r.kana}
@@ -760,9 +760,9 @@
     返回 {out}
   结束
 
-  公开 函数 提示页面 learner
-    设 h = 调用 提示 learner={learner}
-    设 s = 调用 取状态 learner={learner}
+  公开 函数 提示页面 learner current_role?
+    设 h = 调用 提示 learner={learner} current_role={current_role 或}
+    设 s = 调用 取状态 learner={learner} current_role={current_role 或}
     设 w = 调用 vocab.取单词 word_id={s.word_id}
     设 card = 调用 拼词卡 direction={s.direction} word={w} asked_count={s.asked_count} hinted=1
     设 st = 调用 成绩文本 s={s}
@@ -772,8 +772,8 @@
     返回 {out}
   结束
 
-  公开 函数 下一个页面 learner
-    设 s = 调用 下一个 learner={learner}
+  公开 函数 下一个页面 learner current_role?
+    设 s = 调用 下一个 learner={learner} current_role={current_role 或}
     设 st = 调用 成绩文本 s={s}
     如果 {s.finished} 等于 0
       设 w = 调用 vocab.取单词 word_id={s.word_id}
@@ -788,7 +788,7 @@
       设 txt = 这一轮做完了：{s.asked_count} 个全对。
     结束
     设 dr.text = {txt}
-    设 lw = 调用 列本轮错词 learner={learner}
+    设 lw = 调用 列本轮错词 learner={learner} current_role={current_role 或}
     设 rw = 解析JSON []
     遍历 x 于 {lw.words}
       设 bare = 替换 {x.meaning} ^\[N[1-5]\]
@@ -810,8 +810,8 @@
     返回 {out}
   结束
 
-  公开 函数 再来一轮页面 learner
-    设 s = 调用 取状态 learner={learner}
+  公开 函数 再来一轮页面 learner current_role?
+    设 s = 调用 取状态 learner={learner} current_role={current_role 或}
     如果 {s.has_progress} 等于 0
       报错 400 还没有开始
     结束
@@ -820,11 +820,11 @@
       设 cl = 调用 候选词 learner={learner} direction={s.direction} level={s.level} source=review asked_ids={e0}
       设 cn = 列表长度 {cl}
       如果 {cn} 等于 0
-        设 es = 调用 空错词状态 learner={learner} direction={s.direction} level={s.level}
+        设 es = 调用 空错词状态 learner={learner} direction={s.direction} level={s.level} current_role={current_role 或}
         返回 {es}
       结束
     结束
-    设 s2 = 调用 再来一轮 learner={learner}
+    设 s2 = 调用 再来一轮 learner={learner} current_role={current_role 或}
     设 w = 调用 vocab.取单词 word_id={s2.word_id}
     设 card = 调用 拼词卡 direction={s.direction} word={w} asked_count={s2.asked_count} hinted=0
     设 st = 调用 成绩文本 s={s2}

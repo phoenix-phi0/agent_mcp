@@ -184,7 +184,7 @@
       设 it.name = {s.name}
       设 list = 列表加项 {list} {it}
     结束
-    设 sc = 调用 subject.当前科目 learner={current_user}
+    设 sc = 调用 subject.当前科目 learner={current_user} current_role={u.role}
     设 rl = 
     如果 {u.role} 等于 teacher
       设 rl = 教师

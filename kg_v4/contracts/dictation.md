@@ -34,59 +34,65 @@
   dict_answer 文本 写出来的答案
 
 ## 函数
-公开 函数 取状态 learner
+公开 函数 取状态 learner current_role?
   返回 没有进度时 {has_progress: 0}；有进度时 {has_progress: 1, direction, level, source, word_id, prompt, answered, hinted, asked_count, right_count, finished}。prompt 是题面（zh2jp 为中文意思，kanji2kana 为汉字），不含答案；word_id 为 0 时 finished=1 且 prompt 为空串
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 dictation_progress 一行，查不到返回 {"has_progress": 0}
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 dictation_progress 一行，查不到返回 {"has_progress": 0}
   伪代码 current_word_id 为 0：prompt 为空串，word_id=0，finished=1
   伪代码 current_word_id 不为 0：调用 vocab.取单词 word_id=current_word_id，取不到则 prompt 为空串；取到则 prompt = 题面(direction, 该词)；finished=0
   伪代码 返回 {"has_progress": 1, "direction": direction, "level": level, "source": source, "word_id": current_word_id, "prompt": prompt, "answered": answered, "hinted": hinted, "asked_count": asked_count, "right_count": right_count, "finished": finished}
 
-公开 函数 开始 learner direction level? source?
+公开 函数 开始 learner direction level? source? current_role?
   返回 {ok} 加上 取状态 的全部字段（新一轮的第一个词）
   报错 400 方向不对
   报错 400 没有可出的词
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 调用 开新轮 learner=learner direction=direction level=level source=source
   伪代码 返回开新轮的结果
 
-公开 函数 再来一轮 learner
+公开 函数 再来一轮 learner current_role?
   返回 同「开始」
   报错 400 还没有开始
   报错 400 没有可出的词
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 dictation_progress，查不到报错 400 还没有开始
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 dictation_progress，查不到报错 400 还没有开始
   伪代码 用该行已存的 direction、level、source 调用 开新轮
   伪代码 返回开新轮的结果
 
-公开 函数 下一个 learner
+公开 函数 下一个 learner current_role?
   返回 {ok} 加上 取状态 的全部字段；这一轮结束时 finished=1
   报错 400 还没有开始
   报错 400 当前词还没交答案
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 dictation_progress，查不到报错 400 还没有开始
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 dictation_progress，查不到报错 400 还没有开始
   伪代码 current_word_id 不为 0 且 answered 等于 0，报错 400 当前词还没交答案
   伪代码 选词 用库里记的 direction、level、source 和 asked_ids（learner 传本人）。current_word_id 为 0，或 asked_count 不小于 10，或 选词 返回空（没有可出的词）：在库里把 current_word_id 置 0、answered 置 1，返回 {"ok": 1} 加 取状态 的字段（finished=1）
   伪代码 否则在一个事务里更新 dictation_progress：current_word_id=新词 id，answered=0，hinted=0，asked_ids 末尾追加新词 id，asked_count 加 1
   伪代码 返回 {"ok": 1} 加 取状态 的字段
 
-公开 函数 提示 learner
+公开 函数 提示 learner current_role?
   返回 {ok, hinted, first_kana, length}，first_kana 是当前词假名的第一个字，length 是假名字数
   报错 400 还没有开始
   报错 400 当前没有词
   报错 400 当前词已经交过答案
   报错 404 当前词已不存在
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 dictation_progress，查不到报错 400 还没有开始
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 dictation_progress，查不到报错 400 还没有开始
   伪代码 current_word_id 为 0，报错 400 当前没有词；answered 等于 1，报错 400 当前词已经交过答案
   伪代码 调用 vocab.取单词 word_id=current_word_id，取不到报错 404 当前词已不存在
-  伪代码 把 dictation_progress（该 learner 在当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）下那行）的 hinted 置 1
+  伪代码 把 dictation_progress（该 learner 在当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）下那行）的 hinted 置 1
   伪代码 返回 {"ok": 1, "hinted": 1, "first_kana": 假名第一个字, "length": 假名字数}
 
-公开 函数 交答案 learner answer
+公开 函数 交答案 learner answer current_role?
   返回 {ok, correct, hinted, note, kanji, kana, meaning, asked_count, right_count}，correct 为 1/0，note 是给人看的一句补充（同义词也算对、写成了同读音的另一个词、这是另一个读法……，没有为空串），kanji、kana、meaning 是标准答案所在单词
   报错 400 答案不能为空
   报错 400 还没有开始
   报错 400 当前没有词
   报错 400 当前词已经交过答案
   报错 404 当前词已不存在
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 answer 去掉首尾空白后为空，报错 400 答案不能为空
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 dictation_progress，查不到报错 400 还没有开始
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 dictation_progress，查不到报错 400 还没有开始
   伪代码 判的永远是库里记的 current_word_id，不信前端传的；current_word_id 为 0 报错 400 当前没有词
   伪代码 answered 等于 1，报错 400 当前词已经交过答案（同一个词交两次只算一次，不写库）
   伪代码 调用 vocab.取单词 word_id=current_word_id，取不到报错 404 当前词已不存在
@@ -95,9 +101,10 @@
   伪代码 默写不写做题的作答、掌握、得分表，不影响知识点分数
   伪代码 返回 {"ok": 1, "correct": correct, "hinted": progress.hinted, "note": note, "kanji": 汉字, "kana": 假名, "meaning": 意思, "asked_count": asked_count, "right_count": 更新后的 right_count}
 
-公开 函数 列本轮错词 learner
+公开 函数 列本轮错词 learner current_role?
   返回 {learner, total, words}，words 是 [{word_id, direction, kanji, kana, meaning, answer}]，按作答 id 升序；没有进度时 total 为 0、words 为空
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 dictation_progress，查不到返回 {"learner": learner, "total": 0, "words": []}
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 dictation_progress，查不到返回 {"learner": learner, "total": 0, "words": []}
   伪代码 查 dictation_attempt 中 learner 相等、id 大于 round_start、correct 等于 0 的行，按 id 升序
   伪代码 对每行调用 vocab.取单词 word_id=该行 word_id，取不到的行跳过；其余拼出 {word_id, direction, kanji, kana, meaning, answer}
   伪代码 返回 {"learner": learner, "total": 行数, "words": 列表}
@@ -119,70 +126,79 @@
   伪代码 调用 算错词本 learner=learner，wrong_book_count 取列表长度
   伪代码 返回 {"learner": learner, "total": total, "right": right, "accuracy": accuracy, "wrong_book_count": wrong_book_count, "last_at": last_at}
 
-公开 函数 默写页面 learner
+公开 函数 默写页面 learner current_role?
   返回 {dstat, form}；默写页「进入时」的整页状态（进页面不推词卡、不动 dphase）：dstat 是这一轮成绩文本，没练过为空串；form 是顶栏三个下拉的回填 {dict_direction, dict_level, dict_source}，取库里上次选的，没选过填「看中文写日语」「全部」「随机」
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 调用 取状态 learner=learner，得 s
   伪代码 返回 {"dstat": 成绩文本(s), "form": 表单回填(s)}
 
-公开 函数 开始页面 learner dict_direction? dict_level? dict_source?
+公开 函数 开始页面 learner dict_direction? dict_level? dict_source? current_role?
   返回 默写页「开始」的整页状态，同 开轮页面：出得了词为 {dphase, dcard, dstat}，dphase=ask；错词复习但错词本里没有可出的词为 {dphase, dempty, dcard, dstat}，dphase=empty（不报错）
   报错 400 方向不对
   报错 400 题源不对
   报错 400 没有可出的词
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 dict_direction 为空取「看中文写日语」、dict_level 为空取「全部」、dict_source 为空取「随机」（页面下拉的默认）
   伪代码 值域转换：调用 方向代号 得 direction；dict_level 为「全部」时 level 取空串，否则原值；dict_source 为「随机」时 source 取空串，「错词复习」取 review，其余报错 400 题源不对
   伪代码 返回 开轮页面 learner=learner direction=direction level=level source=source 的结果
 
-公开 函数 随机页面 learner
+公开 函数 随机页面 learner current_role?
   返回 默写页「随机练一轮」（错词本空时卡上的按钮）的整页状态：{dphase, dcard, dstat, form}，形状同 开轮页面；form 回填 {dict_direction, dict_level, dict_source}，题源回填「随机」
   报错 400 没有可出的词
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 调用 取状态 learner=learner，得 s；方向、等级照库里记的（没记过取 zh2jp、不限等级），题源随机（source 取空串）
   伪代码 调用 开轮页面 得 r，r 加上 form：方向转中文、等级空填「全部」、dict_source=「随机」
 
-公开 函数 练错词页面 learner
+公开 函数 练错词页面 learner current_role?
   返回 默写页「练错词」（一轮结束时的按钮）的整页状态，形状同 随机页面；题源 review，form 的 dict_source 回填「错词复习」；错词本里没有可出的词时 dphase=empty
   报错 400 方向不对
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 调用 取状态 learner=learner，得 s；方向、等级照库里记的（没记过取 zh2jp、不限等级），题源 review
   伪代码 调用 开轮页面 得 r，r 加上 form：方向转中文、等级空填「全部」、dict_source=「错词复习」
 
-公开 函数 载入页面 learner source? direction? level?
+公开 函数 载入页面 learner source? direction? level? current_role?
   返回 默写页「载入」的整页状态（地址 #默写?source=review 进来，还可带 direction=reading|meaning、level=N4；前端把地址参数并进提交调用）：形状同 随机页面，form 回填本次所选
   报错 400 没有可出的词
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 调用 取状态 learner=learner，得 s；方向默认取库里的（没记过取 zh2jp），direction 参数 reading 换成 kanji2kana、meaning 换成 zh2jp，其他值不理；等级 level 参数不为空取参数（「全部」当空串）否则取库里的；题源默认取库里的（review 保持，其余空串），source 参数 review 换成 review、random 换成空串，其他值不理
   伪代码 调用 开轮页面 得 r，r 加上 form：方向转中文、等级空填「全部」、题源 review 回填「错词复习」否则「随机」
 
-公开 函数 判答案页面 learner dict_answer?
+公开 函数 判答案页面 learner dict_answer? current_role?
   返回 默写页「交」的整页状态：{dphase, dcard, dstat}；dphase=done；dcard 是判完的词卡 {code, head, stem, sub, hint, verdict, right, mine, note}，code 与交之前同一张（前端不翻页），hint 看过提示才有，verdict 是「○对了」/「○对了（看了提示，不算进错词本的「连续答对」）」/「✗不对」，right 是「正确：汉字【读音】意思」（没汉字或汉字等于假名时是「读音 意思」，意思去掉开头的等级），mine 是「你写的：答案」，note 是 判词 的补充句
   报错 400 答案不能为空
   报错 400 还没有开始
   报错 400 当前没有词
   报错 400 当前词已经交过答案
   报错 404 当前词已不存在
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 调用 取状态 learner=learner，得 s（要交之前的 word_id、direction、asked_count）；调用 交答案 learner=learner answer=dict_answer，得 r（报错原样向上抛）
   伪代码 word 取 {id: s.word_id, kanji: r.kanji, kana: r.kana, meaning: r.meaning}；调用 拼词卡 direction=s.direction word=word asked_count=r.asked_count hinted=r.hinted，得 card，再填 verdict、right、mine、note
   伪代码 返回 {"dphase": "done", "dcard": card, "dstat": 「这一轮 {r.right_count}/{r.asked_count}」}
 
-公开 函数 提示页面 learner
+公开 函数 提示页面 learner current_role?
   返回 默写页「提示」的整页状态：{dphase, dcard, dstat}；dphase=ask；dcard 是带提示的词卡（hint 为「提示：第一个假名是「x」，读音一共 n 个字」，verdict、right、mine、note 空串）
   报错 400 还没有开始
   报错 400 当前没有词
   报错 400 当前词已经交过答案
   报错 404 当前词已不存在
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 调用 提示 learner=learner（报错原样向上抛）；调用 取状态 learner=learner，得 s；调用 vocab.取单词 word_id=s.word_id
   伪代码 调用 拼词卡 direction=s.direction word=该词 asked_count=s.asked_count hinted=1，得 card；返回 {"dphase": "ask", "dcard": card, "dstat": 成绩文本(s)}
 
-公开 函数 下一个页面 learner
+公开 函数 下一个页面 learner current_role?
   返回 默写页「下一个」的整页状态：出下一个词为 {dphase, dcard, dstat}，dphase=ask；这一轮结束为 {dphase, dround, dstat, round_wrong}，dphase=end，dround 是 {text}，round_wrong 是这一轮错的词 [{label, mine}]
   报错 400 还没有开始
   报错 400 当前词还没交答案
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 调用 下一个 learner=learner，得 s（报错原样向上抛）
   伪代码 s.finished 等于 0：调用 vocab.取单词 word_id=s.word_id，拼词卡 hinted=0，返回 {dphase: ask, dcard, dstat: 成绩文本(s)}
   伪代码 s.finished 等于 1：dphase=end；dround.text 在 right_count 等于 asked_count 时为「这一轮做完了：{asked_count} 个全对。」否则「这一轮做完了：答对 {right_count} 个，共 {asked_count} 个。」；round_wrong 调用 列本轮错词 learner=learner，逐项转 {label: 「汉字【读音】意思」（没汉字或汉字等于假名时「读音 意思」，意思去掉开头的等级）, mine: answer}
 
-公开 函数 再来一轮页面 learner
+公开 函数 再来一轮页面 learner current_role?
   返回 默写页「再来一轮」的整页状态，形状同 开轮页面（新一轮第一个词 dphase=ask；题源是错词复习但错词本里没有可出的词 dphase=empty）
   报错 400 还没有开始
   报错 400 没有可出的词
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 调用 取状态 learner=learner，得 s；has_progress 等于 0 报错 400 还没有开始
   伪代码 s.source 等于 review 且 调用 候选词 learner=learner direction=s.direction level=s.level source=review asked_ids=空串 得到空列表：返回 空错词状态 learner=learner direction=s.direction level=s.level
   伪代码 否则调用 再来一轮 learner=learner（报错原样向上抛）得 s2；调用 vocab.取单词 word_id=s2.word_id，拼词卡 hinted=0；返回 {dphase: ask, dcard, dstat: 成绩文本(s2)}
@@ -204,14 +220,15 @@
   伪代码 错词本编号串：用一条查询在库里取出该 learner 在 direction 方向上的错词本单词编号，按 last_wrong_id 从大到小，拼成逗号隔开的一个字符串 only_ids（口径同 算错词本 的错词本查询：只是多一个 direction 条件、只取 word_id；不在 DSL 里对错词逐条循环、不逐条调 vocab.取单词）；没有则返回空列表
   伪代码 调用 vocab.列默写词 direction=direction level=level only_ids=only_ids skip_ids=asked_ids（asked_ids 为空或 0 时传空串），它按 only_ids 的先后排序并负责全部排除规则（level 前缀、meaning/kanji 非空、五十音、语法说明、bare 规则、已被删的词自然不在其中）；直接返回它的 words（不再自己逐词循环、不做二重循环对号）
 
-函数 开新轮 learner direction level? source?
+函数 开新轮 learner direction level? source? current_role?
   返回 {ok} 加上 取状态 的全部字段
   报错 400 方向不对
   报错 400 没有可出的词
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 direction 不是 zh2jp 也不是 kanji2kana，报错 400 方向不对
   伪代码 调用 选词 learner=learner direction=direction level=level source=source asked_ids=空串，返回空则报错 400 没有可出的词
   伪代码 base = dictation_attempt 中该 learner 的最大 id，没有则 0
-  伪代码 在一个事务里：该 learner 在当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）下 dictation_progress 已有行则更新，没有则插入（插入时写 subject_id）；写入 direction、level、source、current_word_id=新词 id、answered=0、hinted=0、asked_ids=新词 id、asked_count=1、right_count=0、round_start=base
+  伪代码 在一个事务里：该 learner 在当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）下 dictation_progress 已有行则更新，没有则插入（插入时写 subject_id）；写入 direction、level、source、current_word_id=新词 id、answered=0、hinted=0、asked_ids=新词 id、asked_count=1、right_count=0、round_start=base
   伪代码 返回 {"ok": 1} 加 取状态 的字段
 
 函数 判词 direction word answer
@@ -242,14 +259,16 @@
   返回 {dict_direction, dict_level, dict_source}，都是顶栏下拉的中文值；没有进度时「看中文写日语」「全部」「随机」
   伪代码 有进度：方向按 direction 转中文，level 为空填「全部」，source 等于 review 为「错词复习」其余「随机」
 
-函数 空错词状态 learner direction level
+函数 空错词状态 learner direction level current_role?
   返回 {dphase, dempty, dcard, dstat}；dphase=empty，dempty=「「{方向名}」这个方向（等级：{level 为空填全部}）的错词本是空的——没有答错过的词，或者都已经连续答对两次了。先随机练一轮吧。」，dcard、dstat 空串
-  伪代码 记下这次的选择（下次进页面顶栏还是它）：该 learner 在当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）下 dictation_progress 已有行则只更新 direction、level、source=review（本轮其余字段不动），没有则插入（subject_id 取当前科目，current_word_id=0、answered=1、hinted=0、asked_ids 空、asked_count=0、right_count=0、round_start=该 learner dictation_attempt 最大 id，没有为 0）
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
+  伪代码 记下这次的选择（下次进页面顶栏还是它）：该 learner 在当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）下 dictation_progress 已有行则只更新 direction、level、source=review（本轮其余字段不动），没有则插入（subject_id 取当前科目，current_word_id=0、answered=1、hinted=0、asked_ids 空、asked_count=0、right_count=0、round_start=该 learner dictation_attempt 最大 id，没有为 0）
 
-函数 开轮页面 learner direction level source
+函数 开轮页面 learner direction level source current_role?
   返回 {dphase, dcard, dstat}；出得了词 dphase=ask，dcard 是新词卡，dstat 是「这一轮 0/0」；source 等于 review 但错词本里没有可出的词时返回 空错词状态 的结果
   报错 400 方向不对
   报错 400 没有可出的词
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 source 等于 review：调用 候选词 learner=learner direction=direction level=level source=review asked_ids=空串，为空则返回 空错词状态 learner=learner direction=direction level=level
   伪代码 调用 开始 learner=learner direction=direction level=level source=source，得 s（报错原样向上抛）；调用 vocab.取单词 word_id=s.word_id，拼词卡 hinted=0
   伪代码 返回 {"dphase": "ask", "dcard": card, "dstat": 成绩文本(s)}

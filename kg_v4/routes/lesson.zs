@@ -4,12 +4,12 @@
 结束
 
 接口 GET /lesson/series/current
-  设 r = 调用 lesson.取当前系列 learner={learner}
+  设 r = 调用 lesson.取当前系列 learner={learner} current_role={current_role 或}
   返回 {r}
 结束
 
 接口 POST /lesson/series/select
-  设 r = 调用 lesson.选择系列 learner={learner} series_code={series_code}
+  设 r = 调用 lesson.选择系列 learner={learner} series_code={series_code} current_role={current_role 或}
   返回 {r}
 结束
 
@@ -19,7 +19,7 @@
 结束
 
 接口 POST /lesson/list 动作 lesson_list 角色 student
-  设 r = 调用 lesson.教材页面 learner={learner} series={series 或} lesson_level={lesson_level 或} keyword={keyword 或}
+  设 r = 调用 lesson.教材页面 learner={learner} series={series 或} lesson_level={lesson_level 或} keyword={keyword 或} current_role={current_role 或}
   响应 state {r}
   响应 form {r.form}
 结束
@@ -30,7 +30,7 @@
 结束
 
 接口 POST /lesson/one 动作 lesson_one 角色 student
-  设 r = 调用 lesson.课文页面 learner={learner} lesson={lesson 或}
+  设 r = 调用 lesson.课文页面 learner={learner} lesson={lesson 或} current_role={current_role 或}
   响应 state {r}
   响应 form {r.form}
 结束

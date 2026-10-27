@@ -75,22 +75,24 @@
   伪代码 再收同级条目——调用 lesson.列课文 series_code=本课 series_code level=本课 level，对每一课（跳过本课）调用 lesson.取课文关联条目，取其条目编号，不在 own 里，去重，追加在易混对比条目之后
   伪代码 返回合并后的有序列表（易混对比在前，同级条目在后）
 
-函数 出下一题 learner
+函数 出下一题 learner current_role?
   返回 {finished, question, asked_count, round_size, right_count}；finished 为 1 表示本轮已出满或再无可出的题，此时 question 为空串；否则 question 是 组题面 的对象
   报错 404 没有可出的题
-  伪代码 读 quiz_progress 该 learner 在当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）下的行 r（调用方保证存在），round_size = 取轮大小 mode=r.mode
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
+  伪代码 读 quiz_progress 该 learner 在当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）下的行 r（调用方保证存在），round_size = 取轮大小 mode=r.mode
   伪代码 r.asked_count 不小于 round_size，返回 {"finished": 1, "question": "", "asked_count": r.asked_count, "round_size": round_size, "right_count": r.right_count}
   伪代码 new_seq = r.seq + 1；调用 选题 learner mode=r.mode level=r.level category=r.category lesson_code=r.lesson_code asked_nos=r.asked_nos asked_count=r.asked_count new_seq=new_seq
   伪代码 选题 返回空：r.asked_count 等于 0 报错 404 没有可出的题；否则返回 finished=1 的对象（不改库）
   伪代码 在一个事务里更新 quiz_progress 该行：current_no=选中的题号，answered=0，last_correct=0，asked_nos=（原为空则只写题号，否则原值+","+题号），asked_count+1，seq=new_seq
   伪代码 返回 {"finished": 0, "question": 组题面(question_no=选中题号, seq=new_seq), "asked_count": 新 asked_count, "round_size": round_size, "right_count": r.right_count}
 
-函数 开新轮 learner mode level category lesson_code
+函数 开新轮 learner mode level category lesson_code current_role?
   返回 同 出下一题；调用方已校验参数，mode 为空表示自由练
   报错 404 没有可出的题
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 调用 progress.取区间作答 learner=learner start_id=0，取 max_id 作为 round_start_id
   伪代码 在一个事务里：
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 quiz_progress：没有则插入 (learner, subject_id, level, category, current_no 空, answered=0, right_count=0, asked_nos 空, asked_count=0, mode, lesson_code, round_start_id, seq=0, last_correct=0)
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 quiz_progress：没有则插入 (learner, subject_id, level, category, current_no 空, answered=0, right_count=0, asked_nos 空, asked_count=0, mode, lesson_code, round_start_id, seq=0, last_correct=0)
   伪代码 有则更新：current_no 置空、answered=0、right_count=0、asked_nos 置空、asked_count=0、mode、lesson_code、round_start_id（seq 不动）；mode 为空（自由练）时同时更新 level、category 为入参，其它模式 level、category 保持原值
   伪代码 调用 出下一题 learner=learner，出错（如 404）整个事务回滚、本函数原样报错
   伪代码 返回 出下一题 的结果
@@ -108,20 +110,22 @@
   伪代码 在一个事务里：删除 quiz_question 全部行（整表重灌），再逐题插入其余题 (question_no, course, level, category, stem, options, answer, accepted, explain, item_code)；quiz_progress 不动
   伪代码 返回 {"ok": 1, "total": 有效行数, "imported": 写入数, "skipped": 跳过数, "skipped_nos": 逗号连接}
 
-公开 函数 取做题状态 learner
+公开 函数 取做题状态 learner current_role?
   返回 {learner, started, mode, level, category, lesson_code, current_no, answered, right_count, asked_count, round_size, last_correct, round_key, question}；mode 为 free/lesson/review；question 是当前题的 组题面 对象（含已打乱选项，不含答案），没有当前题时为空串；没有进度行时 started=0、数字项为 0、字符串项为空串、mode=free、round_size=10
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 quiz_progress，没有则返回上述默认对象（started=0）
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 quiz_progress，没有则返回上述默认对象（started=0）
   伪代码 有则 started=1，mode 库里空值转为 free，round_size = 取轮大小，round_key = round_start_id
   伪代码 current_no 不为空时 question = 组题面 question_no=current_no seq=该行 seq（题已不在库则为空串），否则空串
   伪代码 返回上述对象
 
-公开 函数 开始 learner mode? level? category? lesson_code?
+公开 函数 开始 learner mode? level? category? lesson_code? current_role?
   返回 同 出下一题：{finished, question, asked_count, round_size, right_count}
   报错 400 mode 不合法
   报错 400 等级不能为空
   报错 400 lesson_code 不能为空
   报错 404 没有这课
   报错 404 没有可出的题
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 mode 不为空、不等于 free、lesson、review 之一，报错 400 mode 不合法；mode 为空或 free 视为自由练（库里存空）
   伪代码 自由练：level 为空报错 400 等级不能为空；category 为空表示该等级不限考点
   伪代码 按课练：lesson_code 为空报错 400 lesson_code 不能为空；调用 lesson.取课文 code=lesson_code，取不到报错 404 没有这课
@@ -129,23 +133,25 @@
   伪代码 调用 开新轮 learner=learner mode=（自由练传空，否则 lesson/review） level=level category=category lesson_code=（按课练传 lesson_code，否则空）
   伪代码 返回其结果（第一题已出）
 
-公开 函数 下一题 learner
+公开 函数 下一题 learner current_role?
   返回 同 出下一题；finished 为 1 表示本轮结束，没有新题
   报错 400 还没有开始
   报错 400 先答完当前题
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 quiz_progress，没有报错 400 还没有开始
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 quiz_progress，没有报错 400 还没有开始
   伪代码 current_no 不为空且 answered 不等于 1，报错 400 先答完当前题
   伪代码 调用 出下一题 learner=learner，返回其结果
 
-公开 函数 提交答案 learner answer pass_line? fall_line?
+公开 函数 提交答案 learner answer pass_line? fall_line? current_role?
   返回 {ok, repeated, question_no, correct, correct_answer, explain, round_done, right_count, asked_count, round_size, score, mastered}；correct_answer 选择题是正确选项在本次显示中的字母，非选择题是标准答案；round_done 为 1 表示这是本轮最后一题；repeated 为 1 表示这道题已交过、本次不再计分（此时不写任何表，score、mastered 为空串）
   报错 400 答案不能为空
   报错 400 还没有出题
   报错 404 题目不存在
   报错 404 题目对不上条目
   报错 400 分数线不合法
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 answer 去掉首尾空白后为空，报错 400 答案不能为空
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 quiz_progress，没有或 current_no 为空，报错 400 还没有出题；判的永远是库里的 current_no，不接收前端题号
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 quiz_progress，没有或 current_no 为空，报错 400 还没有出题；判的永远是库里的 current_no，不接收前端题号
   伪代码 按 current_no 查 quiz_question，查不到报错 404 题目不存在
   伪代码 选择题（options 不为空，n=选项个数，order = 洗牌顺序 n=n seq=该行 seq，出题和判题算出同一个顺序）：取 answer 去空白转大写后出现的第一个 A–Z 字母，位置 pos=字母序号；没有字母或 pos 不小于 n 则 correct=0、stored_answer=去空白后的原答案；否则原字母 = 第 order[pos] 个选项的字母，correct = 原字母等于标准答案（去空白转大写），stored_answer = 原字母（库里存题库原字母）
   伪代码 选择题的 correct_answer：标准答案的序号 s，找 order 中值为 s 的位置 k，取第 k 个字母；序号越界则取标准答案原文
@@ -158,24 +164,27 @@
   伪代码 round_size = 取轮大小 mode=该行 mode，round_done = asked_count 不小于 round_size 则 1 否则 0
   伪代码 返回 {"ok": 1, "repeated": 0, "question_no": current_no, "correct": correct, "correct_answer": ..., "explain": 解析, "round_done": round_done, "right_count": 新值, "asked_count": asked_count, "round_size": round_size, "score": score, "mastered": mastered}
 
-公开 函数 再来一轮 learner
+公开 函数 再来一轮 learner current_role?
   返回 同 出下一题
   报错 400 还没有开始
   报错 404 没有可出的题
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 quiz_progress，没有报错 400 还没有开始
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 quiz_progress，没有报错 400 还没有开始
   伪代码 调用 开新轮 learner=learner mode=该行 mode level=该行 level category=该行 category lesson_code=该行 lesson_code（沿用上一轮的模式、等级、考点、课）
   伪代码 返回其结果
 
-公开 函数 取本轮作答 learner
+公开 函数 取本轮作答 learner current_role?
   返回 {learner, round_key, start_id, mode, lesson_code, total, answers}；round_key 是轮次标识（这一轮起点 id）；answers 同 progress.取区间作答 的 answers；没有进度行时 round_key=0、start_id=0、mode=free、lesson_code 为空串、total=0、answers 为空列表
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 quiz_progress，没有则返回上述默认对象
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 quiz_progress，没有则返回上述默认对象
   伪代码 调用 progress.取区间作答 learner=learner start_id=该行 round_start_id，得 total 和 answers
   伪代码 mode 库里空值转为 free
   伪代码 返回 {"learner": learner, "round_key": round_start_id, "start_id": round_start_id, "mode": mode, "lesson_code": lesson_code, "total": total, "answers": answers}
 
-公开 函数 取当前轮次信息 learner
+公开 函数 取当前轮次信息 learner current_role?
   返回 {learner, has_round, mode, lesson_code, level, category, round_key, asked_count, round_size, right_count, answered}；mode 为 free/lesson/review；没有进度行时 has_round=0、mode=free、round_size=10、其余数字为 0、字符串为空串
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 quiz_progress，没有则返回默认对象
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 quiz_progress，没有则返回默认对象
   伪代码 有则 has_round=1，mode 空值转 free，round_size=取轮大小，round_key=round_start_id，其余取该行字段
   伪代码 返回上述对象
 
@@ -197,53 +206,59 @@
   伪代码 调用 progress.列低分点 learner=learner limit=3，逐个调用 kg.取知识点 code=编号 取 title（取不到用编号）
   伪代码 有标题则用「、」连接拼「复习薄弱点：…」，否则返回「复习薄弱点」
 
-公开 函数 做题页面 learner
+公开 函数 做题页面 learner current_role?
   返回 {stat, form}；做题页「进入时」的整页状态（进页面不推题卡、不动 phase/card/round/summary，只回顶栏成绩和顶栏下拉回填）：stat 是「这一轮 答对/已出」文本，没做过题为空串；form 是 {pick_level, pick_kind}，取库里上次选的等级考点，没选过填「全部」
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 调用 取做题状态 learner=learner，得 started、right_count、asked_count、level、category
   伪代码 started 等于 1 则 stat=「这一轮 {right_count}/{asked_count}」否则空串；form 的 pick_level 取 level、pick_kind 取 category，为空填「全部」
   伪代码 返回 {"stat": stat, "form": {"pick_level": pick_level, "pick_kind": pick_kind}}
 
-公开 函数 开始页面 learner pick_level? pick_kind?
+公开 函数 开始页面 learner pick_level? pick_kind? current_role?
   返回 做题页「开始」的整页状态：出题为 {phase, qtype, card, scope, stat, cheer, score_change, round, summary, form}，phase=ask、card 新题卡、round 四键空串、cheer/score_change 空串、summary 空串（收起上一轮总结卡）、scope 空串（自由练顶栏不显示范围）；form 回填本次所选（「全部」或具体等级考点）
   报错 404 没有可出的题
   报错 404 没有这课
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 pick_level 为空取「全部」、pick_kind 为空取「全部」（页面下拉默认就是全部）
   伪代码 等级确定：pick_level 不是「全部」直接用它；是「全部」则按 N5,N4,N3,N2,N1 顺序逐级找（pick_kind 为「全部」查 app.db quiz_q_free_all，否则查 quiz_q_free_cat），取第一个有题的等级；全都没有题，报错 404 没有可出的题
   伪代码 调用 开始 learner=learner level=等级 category=（pick_kind 为「全部」传空，否则原值），得 finished、question、asked_count、right_count（400/404 原样向上抛）
   伪代码 调用 拼题卡 question 得 card、qtype；返回 {"phase": "ask", "qtype": qtype, "card": card, "scope": "", "stat": "这一轮 {right_count}/{asked_count}", "cheer": "", "score_change": "", "round": {"text": "", "more": "", "back": "", "explain": ""}, "summary": "", "form": {"pick_level": pick_level, "pick_kind": pick_kind}}
 
-公开 函数 判答案页面 learner choice? given?
+公开 函数 判答案页面 learner choice? given? current_role?
   返回 做题页「作答」判完的整页状态：{phase, card, stat, cheer, score_change}；phase=done，card 是判完的题卡（options 每项补 state：答案那项 right、选错的 wrong、其余 dim；mine 是本次作答；verdict 一行结论；explain 解析末尾拼「考的是」），cheer 达标喜报、score_change 得分变化文本，都没有为空串
   报错 400 答案不能为空
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 调用 取做题状态 learner=learner，得 started、question；作答取值同旧页：默认取 given，question 不为空且 is_choice 等于 1 则取 choice（两个键都可能留着旧值，按题型取才不会拿错）
   伪代码 调用 提交答案 learner=learner answer=作答，得 repeated、question_no、correct、correct_answer、explain、right_count、asked_count（400/404 原样向上抛）
   伪代码 card 用 拼题卡 按 question 重建（和作答前同一张，code 不变不翻页）；选择题 options 逐项补 state：letter 等于 correct_answer 记 right、等于本次所交字母记 wrong、其余 dim；card 的 mine=本次作答；verdict=correct 等于 1 则「○ 答对了」否则「✗ 正确答案是 {correct_answer}」；explain 末尾拼「\n\n考的是：条目名」（查 app.db quiz_q_by_no 得 item_code，调 kg.取条目 code=item_code 取 name），有课文再拼「　课文《标题》summary」（调 lesson.按条目列课文 item_code=item_code 取第一课，取不到课就不拼那半句）
   伪代码 repeated 等于 1（同题交两次）cheer、score_change 都为空串；否则调 progress.列得分 learner=learner，按该题知识点的行拼：score_change=「{title} 得分 {prev_score} → {score}」（delta 等于 0 为空串）；prev_score 小于 80 且 score 不小于 80 则 cheer=「「{title}」达标了，图上它后面的知识点可能解锁了。」
   伪代码 stat=「这一轮 {right_count}/{asked_count}」；返回 {"phase": "done", "card": card, "stat": stat, "cheer": cheer, "score_change": score_change}
 
-公开 函数 下一题页面 learner
+公开 函数 下一题页面 learner current_role?
   返回 做题页「下一题」的整页状态，形状同 开始页面：出题 phase=ask（card 新题卡、round 四键空串、cheer/score_change/summary 空串）；一轮做完 phase=end、round.text 按模式给说明、按课练附三个地址
   报错 400 还没有开始
   报错 400 先答完当前题
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 调用 取当前轮次信息 learner=learner，得 mode、lesson_code
   伪代码 scope：lesson 模式=「本课《{title}》（含对比题）」（调 lesson.取课文 code=lesson_code 取标题）；review 模式=调用 复习薄弱点文案；自由练=空串
   伪代码 调用 下一题 learner=learner，得 finished、question、asked_count、right_count（400 原样向上抛）
   伪代码 finished 等于 0：拼题卡，返回 {phase:ask, qtype, card, scope, stat, cheer 空, score_change 空, round 四键空, summary 空}
   伪代码 finished 等于 1：phase=end；round 按模式：lesson=调用 按课轮尾 lesson_code stat；review 的 text=「这一轮复习做完了（{stat}）。可以请老师总结这一轮，或者再来一轮。」；自由练的 text=「这一轮做完了（{stat}），{asked_count}道题各考一个不同的知识点。可以请老师总结这一轮，或者再来一轮。」，其余三键空串；返回 {phase:end, scope, stat, round, cheer 空, score_change 空}
 
-公开 函数 再来一轮页面 learner
+公开 函数 再来一轮页面 learner current_role?
   返回 做题页「再来一轮」的整页状态，形状与分支同 下一题页面（新一轮第一题；一轮立即做完的 end 形态也按 下一题页面 处理）
   报错 400 还没有开始
   报错 404 没有可出的题
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 调用 取当前轮次信息 learner=learner，得 mode、lesson_code；scope 同 下一题页面
   伪代码 调用 再来一轮 learner=learner，得 finished、question、asked_count、right_count（400/404 原样向上抛）
   伪代码 finished 等于 0 按出题分支拼整页返回，finished 等于 1 按 end 分支拼整页返回（同 下一题页面）
 
-公开 函数 课文页面 learner lesson? mode? level? kind?
+公开 函数 课文页面 learner lesson? mode? level? kind? current_role?
   返回 做题页「载入」的整页状态（地址 #做题?lesson=… / #做题?mode=review / #做题?level=…&kind=… 进来时前端把地址参数并进提交调用）：形状同 开始页面（form 回填）；复习但一道都没答过为 phase=noreview 的轻状态 {phase, card, scope, cheer, score_change, round, summary, form}（除 phase/form 外全空）
   报错 400 没有课文、等级或复习模式
   报错 404 没有这课
   报错 404 没有可出的题
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 lesson 不为空：调用 开始 learner=learner mode=lesson lesson_code=lesson，按出题分支拼整页，scope=「本课《{title}》（含对比题）」；form 回填库里等级考点（调 取做题状态 取 level/category，空填「全部」）；lesson 本身不回填（旧口径：课文只认地址，防止离开这课后台表还带着它）
   伪代码 mode 等于 review：先调 progress.列得分 learner=learner，scores 为空（一道都没答过）则不出题不报错，返回 phase=noreview、card/scope/cheer/score_change/round/summary 全空、form 的 pick_level=N5、pick_kind=「全部」（旧口径：界面让先按等级做几道）
   伪代码 否则（有作答记录）：调用 取当前轮次信息 learner=learner，has_round=1 且 mode=review 且 asked_count 小于 round_size（这轮没出够，刷新/来回切接着这轮）则调用 出下一题 learner=learner，否则调用 开始 learner=learner mode=review；按出题分支拼整页，scope=调用 复习薄弱点文案；end 分支同 下一题页面（text 用复习那句）

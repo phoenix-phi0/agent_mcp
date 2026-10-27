@@ -27,6 +27,7 @@
 - 23 张业务表加了 `subject_id`（默认 1 = 日语语法；`teacher_rules_setting` / `teacher_rules_relay` 默认 0 = 所有科目）；`quiz_progress`、`dictation_progress`、`lesson_pref` 的唯一键改为 `(learner, subject_id)`，路由顶层 `迁移 重建` 负责重建旧库（先备份 `app.db.bak-<时间>`）。这三张表的读写按「当前科目」定位；其余表本期只有列、没有按科目过滤（M2）。
 - 顶栏 `auth_me`（`routes/_project.zs` 的 `POST /auth/me`，调 `account.认证信息`，account 依赖 subject）返回 `subjects`、`subject`；可见科目多于 1 个时顶栏出科目下拉，选了调 `subject_switch` 后整页刷新。开了 `auth_me` 后顶栏会显示登录用户名，学生账号打开教师端会被送回登录页并提示（以前是 403 且无提示）。
 - 迁移：`.venv/bin/python kg_v4/setup/migrate_subject.py [项目目录]`（先 `ensure_db`，再建 1 号科目、登记现有学生/教师；幂等）；`init_data.py` 新库初始化时同样调用。
+- M2a 科目解析收紧：`当前科目` 加可选入参 `current_role`（teacher 时偏好指向的公共启用科目也算有效，不回退 1；学生仍只认已分配）；`科目访问` 加可选入参 `auth_mode`（仅 `on` 时空角色被拒，不传时同旧）；`解析科目` 显式 subject 优先于偏好，无权 403，空角色在登录模式下也被拒。quiz / dictation / lesson 里用到当前科目的 38 个函数加可选 `current_role`（路由注入，不传同旧），`account.认证信息` 同样传角色。
 - M1 没做：建/改科目、分配学生等写函数（M3，现在只能 SQL 手工建）；新建的学生账号不会自动登记进 1 号科目（没有分配时当前科目回退到 1，行为不变）。
 
 ## 初始化数据

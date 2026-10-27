@@ -256,7 +256,7 @@
     返回 {"codes": {out}}
   结束
 
-  函数 出下一题 learner
+  函数 出下一题 learner current_role?
     # 返回 {finished, question, asked_count, round_size, right_count}；finished 为 1 表示本轮已出满或再无可出的题，此时 question 为空串；否则 question 是 组题面 的对象
     # 报错 404 没有可出的题
     # 读 quiz_progress 该 learner 的行 r（调用方保证存在），round_size = 取轮大小 mode=r.mode
@@ -265,7 +265,7 @@
     # 选题 返回空：r.asked_count 等于 0 报错 404 没有可出的题；否则返回 finished=1 的对象（不改库）
     # 在一个事务里更新 quiz_progress 该行：current_no=选中的题号，answered=0，last_correct=0，asked_nos=（原为空则只写题号，否则原值+","+题号），asked_count+1，seq=new_seq
     # 返回 {"finished": 0, "question": 组题面(question_no=选中题号, seq=new_seq), "asked_count": 新 asked_count, "round_size": round_size, "right_count": r.right_count}
-    设 sj = 调用 subject.当前科目 learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
     设 r = 查一行 app.db quiz_p_get learner={learner} subject_id={sj.subject_id}
     设 mode = {r.mode 或}
     设 rs = 调用 取轮大小 mode={mode}
@@ -294,7 +294,7 @@
     返回 {"finished": 0, "question": {qf}, "asked_count": {nc}, "round_size": {rs}, "right_count": {r.right_count}}
   结束
 
-  函数 开新轮 learner mode level category lesson_code
+  函数 开新轮 learner mode level category lesson_code current_role?
     # 返回 同 出下一题；调用方已校验参数，mode 为空表示自由练
     # 报错 404 没有可出的题
     # 调用 progress.取区间作答 learner=learner start_id=0，取 max_id 作为 round_start_id
@@ -305,7 +305,7 @@
     # 返回 出下一题 的结果
     设 rng = 调用 progress.取区间作答 learner={learner} start_id=0
     设 rsid = {rng.max_id 或 0}
-    设 sj = 调用 subject.当前科目 learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
     设 ex = 查一行 app.db quiz_p_get learner={learner} subject_id={sj.subject_id}
     事务 app.db
       如果 {ex} 为空
@@ -317,7 +317,7 @@
           设 w = 写库 app.db quiz_p_reset_other learner={learner} mode={mode} lesson_code={lesson_code} round_start_id={rsid} subject_id={sj.subject_id}
         结束
       结束
-      设 res = 调用 出下一题 learner={learner}
+      设 res = 调用 出下一题 learner={learner} current_role={current_role 或}
     结束
     返回 {res}
   结束
@@ -437,13 +437,13 @@
     返回 {"ok": 1, "total": {total}, "imported": {imp}, "skipped": {sk}, "skipped_nos": "{skn}"}
   结束
 
-  公开 函数 取做题状态 learner
+  公开 函数 取做题状态 learner current_role?
     # 返回 {learner, started, mode, level, category, lesson_code, current_no, answered, right_count, asked_count, round_size, last_correct, round_key, question}；mode 为 free/lesson/review；question 是当前题的 组题面 对象（含已打乱选项，不含答案），没有当前题时为空串；没有进度行时 started=0、数字项为 0、字符串项为空串、mode=free、round_size=10
     # 按 learner 查 quiz_progress，没有则返回上述默认对象（started=0）
     # 有则 started=1，mode 库里空值转为 free，round_size = 取轮大小，round_key = round_start_id
     # current_no 不为空时 question = 组题面 question_no=current_no seq=该行 seq（题已不在库则为空串），否则空串
     # 返回上述对象
-    设 sj = 调用 subject.当前科目 learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
     设 r = 查一行 app.db quiz_p_get learner={learner} subject_id={sj.subject_id}
     如果 {r} 为空
       返回 {"learner": "{learner}", "started": 0, "mode": "free", "level": "", "category": "", "lesson_code": "", "current_no": "", "answered": 0, "right_count": 0, "asked_count": 0, "round_size": 10, "last_correct": 0, "round_key": 0, "question": ""}
@@ -461,7 +461,7 @@
     返回 {"learner": "{learner}", "started": 1, "mode": "{m}", "level": "{r.level 或}", "category": "{r.category 或}", "lesson_code": "{r.lesson_code 或}", "current_no": "{cn}", "answered": {r.answered}, "right_count": {r.right_count}, "asked_count": {r.asked_count}, "round_size": {rs}, "last_correct": {r.last_correct}, "round_key": {r.round_start_id}, "question": {q}}
   结束
 
-  公开 函数 开始 learner mode? level? category? lesson_code?
+  公开 函数 开始 learner mode? level? category? lesson_code? current_role?
     # 返回 同 出下一题：{finished, question, asked_count, round_size, right_count}
     # 报错 400 mode 不合法
     # 报错 400 等级不能为空
@@ -497,18 +497,18 @@
       结束
       设 lc = {lesson_code}
     结束
-    设 res = 调用 开新轮 learner={learner} mode={m2} level={level} category={category} lesson_code={lc}
+    设 res = 调用 开新轮 learner={learner} mode={m2} level={level} category={category} lesson_code={lc} current_role={current_role 或}
     返回 {res}
   结束
 
-  公开 函数 下一题 learner
+  公开 函数 下一题 learner current_role?
     # 返回 同 出下一题；finished 为 1 表示本轮结束，没有新题
     # 报错 400 还没有开始
     # 报错 400 先答完当前题
     # 按 learner 查 quiz_progress，没有报错 400 还没有开始
     # current_no 不为空且 answered 不等于 1，报错 400 先答完当前题
     # 调用 出下一题 learner=learner，返回其结果
-    设 sj = 调用 subject.当前科目 learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
     设 r = 查一行 app.db quiz_p_get learner={learner} subject_id={sj.subject_id}
     如果 {r} 为空
       报错 400 还没有开始
@@ -517,11 +517,11 @@
     如果 {cn} 不为空 且 {r.answered} 不等于 1
       报错 400 先答完当前题
     结束
-    设 res = 调用 出下一题 learner={learner}
+    设 res = 调用 出下一题 learner={learner} current_role={current_role 或}
     返回 {res}
   结束
 
-  公开 函数 提交答案 learner answer pass_line? fall_line?
+  公开 函数 提交答案 learner answer pass_line? fall_line? current_role?
     # 返回 {ok, repeated, question_no, correct, correct_answer, explain, round_done, right_count, asked_count, round_size, score, mastered}；correct_answer 选择题是正确选项在本次显示中的字母，非选择题是标准答案；round_done 为 1 表示这是本轮最后一题；repeated 为 1 表示这道题已交过、本次不再计分（此时不写任何表，score、mastered 为空串）
     # 报错 400 答案不能为空
     # 报错 400 还没有出题
@@ -546,7 +546,7 @@
     如果 {a2} 为空
       报错 400 答案不能为空
     结束
-    设 sj = 调用 subject.当前科目 learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
     设 r = 查一行 app.db quiz_p_get learner={learner} subject_id={sj.subject_id}
     设 cn = {r.current_no 或}
     如果 {r} 为空 或 {cn} 为空
@@ -649,29 +649,29 @@
     返回 {"ok": 1, "repeated": 0, "question_no": "{cn}", "correct": {correct}, "correct_answer": "{ca}", "explain": "{ex}", "round_done": {rd}, "right_count": {nr}, "asked_count": {r.asked_count}, "round_size": {rs}, "score": {pr.score}, "mastered": {pr.mastered}}
   结束
 
-  公开 函数 再来一轮 learner
+  公开 函数 再来一轮 learner current_role?
     # 返回 同 出下一题
     # 报错 400 还没有开始
     # 报错 404 没有可出的题
     # 按 learner 查 quiz_progress，没有报错 400 还没有开始
     # 调用 开新轮 learner=learner mode=该行 mode level=该行 level category=该行 category lesson_code=该行 lesson_code（沿用上一轮的模式、等级、考点、课）
     # 返回其结果
-    设 sj = 调用 subject.当前科目 learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
     设 r = 查一行 app.db quiz_p_get learner={learner} subject_id={sj.subject_id}
     如果 {r} 为空
       报错 400 还没有开始
     结束
-    设 res = 调用 开新轮 learner={learner} mode={r.mode 或} level={r.level 或} category={r.category 或} lesson_code={r.lesson_code 或}
+    设 res = 调用 开新轮 learner={learner} mode={r.mode 或} level={r.level 或} category={r.category 或} lesson_code={r.lesson_code 或} current_role={current_role 或}
     返回 {res}
   结束
 
-  公开 函数 取本轮作答 learner
+  公开 函数 取本轮作答 learner current_role?
     # 返回 {learner, round_key, start_id, mode, lesson_code, total, answers}；round_key 是轮次标识（这一轮起点 id）；answers 同 progress.取区间作答 的 answers；没有进度行时 round_key=0、start_id=0、mode=free、lesson_code 为空串、total=0、answers 为空列表
     # 按 learner 查 quiz_progress，没有则返回上述默认对象
     # 调用 progress.取区间作答 learner=learner start_id=该行 round_start_id，得 total 和 answers
     # mode 库里空值转为 free
     # 返回 {"learner": learner, "round_key": round_start_id, "start_id": round_start_id, "mode": mode, "lesson_code": lesson_code, "total": total, "answers": answers}
-    设 sj = 调用 subject.当前科目 learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
     设 r = 查一行 app.db quiz_p_get learner={learner} subject_id={sj.subject_id}
     如果 {r} 为空
       返回 {"learner": "{learner}", "round_key": 0, "start_id": 0, "mode": "free", "lesson_code": "", "total": 0, "answers": []}
@@ -681,12 +681,12 @@
     返回 {"learner": "{learner}", "round_key": {r.round_start_id}, "start_id": {r.round_start_id}, "mode": "{m}", "lesson_code": "{r.lesson_code 或}", "total": {rng.total}, "answers": {rng.answers}}
   结束
 
-  公开 函数 取当前轮次信息 learner
+  公开 函数 取当前轮次信息 learner current_role?
     # 返回 {learner, has_round, mode, lesson_code, level, category, round_key, asked_count, round_size, right_count, answered}；mode 为 free/lesson/review；没有进度行时 has_round=0、mode=free、round_size=10、其余数字为 0、字符串为空串
     # 按 learner 查 quiz_progress，没有则返回默认对象
     # 有则 has_round=1，mode 空值转 free，round_size=取轮大小，round_key=round_start_id，其余取该行字段
     # 返回上述对象
-    设 sj = 调用 subject.当前科目 learner={learner}
+    设 sj = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
     设 r = 查一行 app.db quiz_p_get learner={learner} subject_id={sj.subject_id}
     如果 {r} 为空
       返回 {"learner": "{learner}", "has_round": 0, "mode": "free", "lesson_code": "", "level": "", "category": "", "round_key": 0, "asked_count": 0, "round_size": 10, "right_count": 0, "answered": 0}
@@ -741,8 +741,8 @@
     返回 {out}
   结束
 
-  公开 函数 做题页面 learner
-    设 st = 调用 取做题状态 learner={learner}
+  公开 函数 做题页面 learner current_role?
+    设 st = 调用 取做题状态 learner={learner} current_role={current_role 或}
     设 lbl = {zz 或 这一轮}
     设 stat = {zz 或}
     如果 {st.started} 等于 1
@@ -754,7 +754,7 @@
     返回 {"stat": "{stat}", "form": {frm}}
   结束
 
-  公开 函数 开始页面 learner pick_level? pick_kind?
+  公开 函数 开始页面 learner pick_level? pick_kind? current_role?
     设 lbl = {zz 或 这一轮}
     设 pl = {pick_level 或 全部}
     设 pk = {pick_kind 或 全部}
@@ -783,7 +783,7 @@
     如果 {pk} 不等于 全部
       设 cat = {pk}
     结束
-    设 res = 调用 开始 learner={learner} level={lv} category={cat}
+    设 res = 调用 开始 learner={learner} level={lv} category={cat} current_role={current_role 或}
     设 stat = {lbl} {res.right_count}/{res.asked_count}
     设 qq = {res.question}
     设 tc = 调用 拼题卡 question={qq}
@@ -793,9 +793,9 @@
     返回 {"phase": "ask", "qtype": "{tc.qtype}", "card": {card}, "scope": "", "stat": "{stat}", "cheer": "", "score_change": "", "round": {rnd}, "summary": "", "form": {frm}}
   结束
 
-  公开 函数 判答案页面 learner choice? given?
+  公开 函数 判答案页面 learner choice? given? current_role?
     设 lbl = {zz 或 这一轮}
-    设 st = 调用 取做题状态 learner={learner}
+    设 st = 调用 取做题状态 learner={learner} current_role={current_role 或}
     设 qs = {st.question}
     设 isc = 0
     如果 {qs} 不为空
@@ -812,7 +812,7 @@
     如果 {isc} 等于 1 且 {ans} 为空
       设 ans = {given 或}
     结束
-    设 res = 调用 提交答案 learner={learner} answer={ans}
+    设 res = 调用 提交答案 learner={learner} answer={ans} current_role={current_role 或}
     设 tc = 调用 拼题卡 question={qs}
     设 sub = {zz 或}
     如果 {isc} 等于 1
@@ -886,9 +886,9 @@
     返回 {out}
   结束
 
-  公开 函数 下一题页面 learner
+  公开 函数 下一题页面 learner current_role?
     设 lbl = {zz 或 这一轮}
-    设 ri = 调用 取当前轮次信息 learner={learner}
+    设 ri = 调用 取当前轮次信息 learner={learner} current_role={current_role 或}
     设 scope = {zz 或}
     如果 {ri.mode} 等于 lesson
       设 ls = 调用 lesson.取课文 code={ri.lesson_code}
@@ -896,7 +896,7 @@
     否则如果 {ri.mode} 等于 review
       设 scope = 调用 复习薄弱点文案 learner={learner}
     结束
-    设 res = 调用 下一题 learner={learner}
+    设 res = 调用 下一题 learner={learner} current_role={current_role 或}
     设 stat = {lbl} {res.right_count}/{res.asked_count}
     设 rnd = {"text": "", "more": "", "back": "", "explain": ""}
     如果 {res.finished} 等于 0
@@ -918,9 +918,9 @@
     返回 {"phase": "end", "scope": "{scope}", "stat": "{stat}", "round": {rnd}, "cheer": "", "score_change": ""}
   结束
 
-  公开 函数 再来一轮页面 learner
+  公开 函数 再来一轮页面 learner current_role?
     设 lbl = {zz 或 这一轮}
-    设 ri = 调用 取当前轮次信息 learner={learner}
+    设 ri = 调用 取当前轮次信息 learner={learner} current_role={current_role 或}
     设 scope = {zz 或}
     如果 {ri.mode} 等于 lesson
       设 ls = 调用 lesson.取课文 code={ri.lesson_code}
@@ -928,7 +928,7 @@
     否则如果 {ri.mode} 等于 review
       设 scope = 调用 复习薄弱点文案 learner={learner}
     结束
-    设 res = 调用 再来一轮 learner={learner}
+    设 res = 调用 再来一轮 learner={learner} current_role={current_role 或}
     设 stat = {lbl} {res.right_count}/{res.asked_count}
     设 rnd = {"text": "", "more": "", "back": "", "explain": ""}
     如果 {res.finished} 等于 0
@@ -950,7 +950,7 @@
     返回 {"phase": "end", "scope": "{scope}", "stat": "{stat}", "round": {rnd}, "cheer": "", "score_change": ""}
   结束
 
-  公开 函数 课文页面 learner lesson? mode? level? kind?
+  公开 函数 课文页面 learner lesson? mode? level? kind? current_role?
     设 lbl = {zz 或 这一轮}
     设 res = {zz 或}
     设 scope = {zz 或}
@@ -959,10 +959,10 @@
     设 cm = {zz 或 free}
     设 lcode = {zz 或}
     如果 {lesson} 不为空
-      设 res = 调用 开始 learner={learner} mode=lesson lesson_code={lesson}
+      设 res = 调用 开始 learner={learner} mode=lesson lesson_code={lesson} current_role={current_role 或}
       设 ls = 调用 lesson.取课文 code={lesson}
       设 scope = 本课《{ls.title}》（含对比题）
-      设 st = 调用 取做题状态 learner={learner}
+      设 st = 调用 取做题状态 learner={learner} current_role={current_role 或}
       设 fl = {st.level 或 全部}
       设 fk = {st.category 或 全部}
       设 cm = {zz 或 lesson}
@@ -974,14 +974,14 @@
         设 frm0 = {"pick_level": "N5", "pick_kind": "全部"}
         返回 {"phase": "noreview", "card": "", "scope": "", "cheer": "", "score_change": "", "round": "", "summary": "", "form": {frm0}}
       结束
-      设 ri = 调用 取当前轮次信息 learner={learner}
+      设 ri = 调用 取当前轮次信息 learner={learner} current_role={current_role 或}
       如果 {ri.has_round} 等于 1 且 {ri.mode} 等于 review 且 {ri.asked_count} 小于 {ri.round_size}
-        设 res = 调用 出下一题 learner={learner}
+        设 res = 调用 出下一题 learner={learner} current_role={current_role 或}
       否则
-        设 res = 调用 开始 learner={learner} mode=review
+        设 res = 调用 开始 learner={learner} mode=review current_role={current_role 或}
       结束
       设 scope = 调用 复习薄弱点文案 learner={learner}
-      设 st = 调用 取做题状态 learner={learner}
+      设 st = 调用 取做题状态 learner={learner} current_role={current_role 或}
       设 fl = {st.level 或 全部}
       设 fk = {st.category 或 全部}
       设 cm = {zz 或 review}
@@ -1016,7 +1016,7 @@
       如果 {pk} 不等于 全部
         设 cat = {pk}
       结束
-      设 res = 调用 开始 learner={learner} level={lv} category={cat}
+      设 res = 调用 开始 learner={learner} level={lv} category={cat} current_role={current_role 或}
       设 fl = {pl}
       设 fk = {pk}
     结束

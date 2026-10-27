@@ -53,18 +53,20 @@
   伪代码 查 lesson_series 中 sort_order 不小于 0 的行，按 sort_order 升序、id 升序
   伪代码 返回 {"total": 行数, "series": 列表}
 
-公开 函数 取当前系列 learner
+公开 函数 取当前系列 learner current_role?
   返回 {learner, series_code, name, is_default}；is_default 为 1 表示没选或所选系列已不可用，用了默认系列 hanabira
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 lesson_pref 一行
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 lesson_pref 一行
   伪代码 有记录时，按其 series_code 查 lesson_series，存在且 sort_order 不小于 0，则返回 {"learner": learner, "series_code": 该编号, "name": 该系列 name, "is_default": 0}
   伪代码 否则按 hanabira 查 lesson_series，name 取其 name，没有这行时 name 取 "hanabira"
   伪代码 返回 {"learner": learner, "series_code": "hanabira", "name": name, "is_default": 1}
 
-公开 函数 选择系列 learner series_code
+公开 函数 选择系列 learner series_code current_role?
   返回 {ok, learner, series_code}
   报错 404 没有这个系列
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 按 series_code 查 lesson_series，查不到或 sort_order 小于 0，报错 404 没有这个系列
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner 得到）查 lesson_pref，没有则插入 (learner, subject_id, series_code)，有则更新 series_code
+  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 lesson_pref，没有则插入 (learner, subject_id, series_code)，有则更新 series_code
   伪代码 返回 {"ok": 1, "learner": learner, "series_code": series_code}
 
 公开 函数 列课文 series_code? level? keyword?
@@ -161,17 +163,19 @@
   伪代码 先查 app.db lesson_qq_exists（sqlite_master 里有没有 quiz_question 表）得 c——模块用例的库只建本模块和上游模块的表，quiz 的表不一定在；c 为 0 则返回空列表（各课题数按 0，整库和接口实测时表在、题数照实）
   伪代码 c 不为 0 则查 app.db lesson_qcount，返回列表
 
-公开 函数 教材页面 learner series? lesson_level? keyword?
+公开 函数 教材页面 learner series? lesson_level? keyword? current_role?
   返回 教材页「进入时/搜索/改系列」（动作 lesson_list）的整页状态：{lessons, series_options, series_head, lesson_count, form}；lessons 是 [{code, level, title, summary, qcount, href}]（qcount 为该课题数、没有为 0，href=#%E6%95%99%E6%9D%90?lesson={code}）；series_options 是可用系列的 [{value, label}]（label 用系列名）；series_head 是当前系列名；lesson_count 是「共{N}课」；form 回填 {series: 当前系列编号, lesson_level: 所选（空填「全部」）, keyword: 所选（可空）}
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 调用 列系列 得可用系列列表；调用 题数表 得题数表
   伪代码 series 不为空且在可用系列里：调用 选择系列 learner=learner series_code=series，当前系列=该系列（编号、name）；否则（series 为空或不在可用系列里，不改偏好）调用 取当前系列 learner=learner，当前系列取其 series_code、name
   伪代码 调用 列课文 series_code=当前系列编号 level=（lesson_level 为空或「全部」传空串，否则原值） keyword=keyword 或空串，得 {total, lessons}
   伪代码 lessons 逐行补 qcount（题数表中 lesson_code 相等的 n，没有为 0）和 href=#%E6%95%99%E6%9D%90?lesson={code}
   伪代码 series_options 为可用系列逐行转 {value: code, label: name}；返回 {"lessons": 行列表, "series_options": 选项列表, "series_head": 当前系列 name, "lesson_count": "共{total}课", "form": {"series": 当前系列编号, "lesson_level": lesson_level 为空取「全部」否则原值, "keyword": keyword 或空串}}
 
-公开 函数 课文页面 learner lesson?
+公开 函数 课文页面 learner lesson? current_role?
   返回 教材页「载入」（地址 #教材?lesson=… 进来时前端调它，动作 lesson_one）的整页状态：正常 {reading, examples, lesson_items, lessons, series_options, series_head, lesson_count, form}（lessons/series_options/series_head/lesson_count/form 同 教材页面 的默认形态：当前系列全部课文、等级全部、关键字空，form 回填 {series: 当前系列编号, lesson_level: 「全部」, keyword: 空串}）；没有这一课不报错，只回 {reading, form}（旧行为）
   报错 400 lesson 不能为空
+  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
   伪代码 lesson 为空，报错 400 lesson 不能为空
   伪代码 调用 取当前系列 learner=learner 得当前系列；调用 取课文 code=lesson，查不到（返回空）则返回 {"reading": {"code": lesson, "missing": "没有这一课（{lesson}），回课文表重新选。", "back": "#%E6%95%99%E6%9D%90"}, "form": {"series": 当前系列编号, "lesson_level": "全部", "keyword": ""}}，不报错
   伪代码 有这一课：题数 n 取题数表中 lesson_code 相等的 n（没有为 0）；reading={"code": code, "level": level, "title": title, "summary": summary 或空串, "formation": connection 或空串, "explanation": explain 或空串, "qcount": n, "head": "《{title}》　{level}　第{N}课（{code}）", "series": series_code, "series_label": 系列名（调 列系列 找 series_code 的 name，找不到用 series_code）, "practice": n 大于 0 则 #%E5%81%9A%E9%A2%98?lesson={code} 否则空串, "quiz_note": n 大于 0 则「这一课有 {n} 道题」否则「这一课还没有题，可以先问老师」, "ask": "#%E9%97%AE%E8%80%81%E5%B8%88", "explain": "#%E9%97%AE%E8%80%81%E5%B8%88?lesson={code}", "back": "#%E6%95%99%E6%9D%90", "missing": 空串}；N 为 seq 不为 0 时取 seq，否则取课号末三位转成整数（不足三位按整体数字）
