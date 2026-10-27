@@ -412,3 +412,38 @@ tr.row-locked td { opacity:.55; }
 
 /* 卡片收紧到 150×52 */
 .kg-node { padding:6px 10px; gap:3px; }
+
+/* 窄屏（手机，≤640px）：只在这里改，宽屏一条不动。
+   - 导航不换行，放不下就横向滚动（6–7 个界面一行挤不下，换行会把顶栏撑成两三行）；
+   - 「横排」里的区域、子布局、表格、字段改成一个占一整行——两栏上下堆叠、表单
+     字段竖排。用换行（flex-wrap）而不是 flex-direction:column：按钮那种横排
+     （「去处」「下一步」）照旧一行排，放不下才折。「比」「宽」是内联 style，
+     要 !important 才压得住；顶栏底栏不动（输入框和发送按钮还是一行）；
+   - 表格容器横向滚动，表格不压到比 560px 窄（不然每格挤成一两个字一行）；
+   - 两侧留白、卡片、浮层收小。 */
+@media (max-width:640px) {
+  nav, .app-nav {
+    flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden;
+    padding:8px 12px 6px; -webkit-overflow-scrolling:touch; scrollbar-width:thin;
+  }
+  nav > *, .nav-side > *, .nav-user > * { flex:none; white-space:nowrap; }
+  .row:not(.bar-top):not(.bar-bottom) { flex-wrap:wrap; }
+  .row:not(.bar-top):not(.bar-bottom) > .region,
+  .row:not(.bar-top):not(.bar-bottom) > .layout,
+  .row:not(.bar-top):not(.bar-bottom) > .table-wrap,
+  .row:not(.bar-top):not(.bar-bottom) > .field {
+    flex:1 1 100% !important; width:auto !important; max-width:100%; min-width:0;
+  }
+  .grid { grid-template-columns:1fr !important; }
+  .table-wrap { overflow-x:auto; max-width:100%; -webkit-overflow-scrolling:touch; }
+  .table-wrap > table { min-width:560px; }
+  .bar-top, .bar-bottom { padding:8px 12px; }
+  .region, .group:not(.bar-top):not(.bar-bottom) { padding:0 12px; }
+  .stream { padding:16px 12px; }
+  .copy { padding:0 12px; }
+  .group.card:not(.bar-top):not(.bar-bottom) {
+    width:calc(100% - 16px); margin:12px auto 8px; padding:16px;
+  }
+  .overlay { padding:8px; }
+  .overlay-box { max-width:96vw; padding:14px; }
+}
