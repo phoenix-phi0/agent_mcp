@@ -2,25 +2,51 @@
   依赖 kg subject
   用包 common db text doc data
 
-  公开 函数 列系列
+  函数 本科目 learner current_role auth_mode subject
+    设 r = 调用 subject.解析科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    返回 {"subject_id": {r.subject_id}}
+  结束
+
+  函数 编号前缀检查 subject_id code
+    如果 {subject_id} 等于 1
+      返回 {"ok": 1}
+    结束
+    设 sc = 查一值 app.db lesson_subject_code subject_id={subject_id}
+    如果 {sc} 为空
+      报错 400 编号要以「<编码>.」开头
+    结束
+    设 m = 匹配 {code} ^[a-z][a-z0-9_]*\.[A-Za-z0-9_-]+$
+    如果 {m.matched} 不等于 是
+      报错 400 编号要以「{sc}.」开头
+    结束
+    设 pre = {sc}.
+    如果 {code} 开头是 {pre}
+      返回 {"ok": 1}
+    结束
+    报错 400 编号要以「{sc}.」开头
+  结束
+
+  公开 函数 列系列 learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
     # 返回 {total, series}，series 是 [{code, name, intro, source, license, sort_order}]，只含 sort_order 不小于 0 的系列，按 sort_order 升序、id 升序
     # 查 lesson_series 中 sort_order 不小于 0 的行，按 sort_order 升序、id 升序
-    设 rows = 查询 app.db lesson_series_list
+    设 rows = 查询 app.db lesson_series_list subject_id={sj.subject_id}
     设 n = 列表长度 {rows}
     设 out.total = {n}
     设 out.series = {rows}
     返回 {out}
   结束
 
-  公开 函数 取当前系列 learner current_role?
+  公开 函数 取当前系列 learner current_role? auth_mode? subject?
     # 返回 {learner, series_code, name, is_default}；is_default 为 1 表示没选或所选系列已不可用，用了默认系列 hanabira
     # 按 learner 查 lesson_pref 一行
     # 有记录时，按其 series_code 查 lesson_series，存在且 sort_order 不小于 0，则返回 {"learner": learner, "series_code": 该编号, "name": 该系列 name, "is_default": 0}
     # 否则按 hanabira 查 lesson_series，name 取其 name，没有这行时 name 取 "hanabira"
-    设 sj = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
-    设 pref = 查一行 app.db lesson_pref_get learner={learner} subject_id={sj.subject_id}
+    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sid = {sj.subject_id}
+    设 pref = 查一行 app.db lesson_pref_get learner={learner} subject_id={sid}
     如果 {pref} 不为空
-      设 s = 查一行 app.db lesson_series_get code={pref.series_code}
+      设 s = 查一行 app.db lesson_series_get_subject code={pref.series_code} subject_id={sid}
       如果 {s} 不为空
         如果 {s.sort_order} 不小于 0
           设 out.learner = {learner}
@@ -32,35 +58,50 @@
       结束
     结束
     设 dname = hanabira
-    设 h = 查一行 app.db lesson_series_get code=hanabira
-    如果 {h} 不为空
-      设 dname = {h.name}
+    设 dcode = hanabira
+    如果 {sid} 等于 1
+      设 h = 查一行 app.db lesson_series_get_subject code=hanabira subject_id=1
+      如果 {h} 不为空
+        设 dname = {h.name}
+      结束
+    否则
+      设 fs = 查一行 app.db lesson_series_first subject_id={sid}
+      如果 {fs} 为空
+        设 out.learner = {learner}
+        设 out.series_code = {zz 或}
+        设 out.name = {zz 或}
+        设 out.is_default = 1
+        返回 {out}
+      结束
+      设 dcode = {fs.code}
+      设 dname = {fs.name}
     结束
     设 out.learner = {learner}
-    设 out.series_code = hanabira
+    设 out.series_code = {dcode}
     设 out.name = {dname}
     设 out.is_default = 1
     返回 {out}
   结束
 
-  公开 函数 选择系列 learner series_code current_role?
+  公开 函数 选择系列 learner series_code current_role? auth_mode? subject?
     # 返回 {ok, learner, series_code}
     # 报错 404 没有这个系列
     # 按 series_code 查 lesson_series，查不到或 sort_order 小于 0，报错 404 没有这个系列
     # 按 learner 查 lesson_pref，没有则插入 (learner, series_code)，有则更新 series_code
-    设 s = 查一行 app.db lesson_series_get code={series_code}
+    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sid = {sj.subject_id}
+    设 s = 查一行 app.db lesson_series_get_subject code={series_code} subject_id={sid}
     如果 {s} 为空
       报错 404 没有这个系列
     结束
     如果 {s.sort_order} 小于 0
       报错 404 没有这个系列
     结束
-    设 sj = 调用 subject.当前科目 learner={learner} current_role={current_role 或}
-    设 pref = 查一行 app.db lesson_pref_get learner={learner} subject_id={sj.subject_id}
+    设 pref = 查一行 app.db lesson_pref_get learner={learner} subject_id={sid}
     如果 {pref} 为空
-      设 n = 写库 app.db lesson_pref_insert learner={learner} subject_id={sj.subject_id} series_code={series_code}
+      设 n = 写库 app.db lesson_pref_insert learner={learner} subject_id={sid} series_code={series_code}
     否则
-      设 n = 写库 app.db lesson_pref_update learner={learner} subject_id={sj.subject_id} series_code={series_code}
+      设 n = 写库 app.db lesson_pref_update learner={learner} subject_id={sid} series_code={series_code}
     结束
     设 out.ok = 1
     设 out.learner = {learner}
@@ -68,7 +109,7 @@
     返回 {out}
   结束
 
-  公开 函数 列课文 series_code? level? keyword?
+  公开 函数 列课文 series_code? level? keyword? learner? current_role? auth_mode? subject?
     # 返回 {total, lessons}，lessons 是 [{code, level, title, summary, series_code, seq}]，按 seq 升序、id 升序
     # 查 lesson_text 全部行
     # series_code 不为空时只留 series_code 相等的行
@@ -77,6 +118,8 @@
     设 q.series_code = {series_code 或}
     设 q.level = {level 或}
     设 q.keyword = {keyword 或}
+    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 q.subject_id = {sj.subject_id}
     设 rows = 查询表 app.db lesson_text_list {q}
     设 n = 列表长度 {rows}
     设 out.total = {n}
@@ -84,15 +127,17 @@
     返回 {out}
   结束
 
-  公开 函数 取课文 code
+  公开 函数 取课文 code learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sid = {sj.subject_id}
     # 返回 {code, level, title, summary, explain, connection, examples, examples_edited, orig_title, series_code, seq, point_codes}；point_codes 是该课挂的知识点编号用英文逗号连接（按挂接顺序）；查不到返回空
     # 按 code 查 lesson_text 一行，查不到则返回空
     # 查 lesson_point_link 中 lesson_code=code 的行，按 id 升序，取 point_code 用英文逗号连接成 point_codes
-    设 r = 查一行 app.db lesson_text_get code={code}
+    设 r = 查一行 app.db lesson_text_get code={code} subject_id={sid}
     如果 {r} 为空
       返回 {r}
     结束
-    设 pcs = 查询 app.db lesson_point_link_codes lesson_code={code}
+    设 pcs = 查询 app.db lesson_point_link_codes lesson_code={code} subject_id={sid}
     设 pc = {zz 或}
     遍历 x 于 {pcs}
       如果 {pc} 为空
@@ -105,16 +150,18 @@
     返回 {r}
   结束
 
-  公开 函数 按条目列课文 item_code
+  公开 函数 按条目列课文 item_code learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sid = {sj.subject_id}
     # 返回 {item_code, total, lessons}，lessons 是 [{code, level, title, summary, series_code, seq}]，按 seq 升序、id 升序
     # 报错 404 没有这个条目
     # 调用 kg.取条目 code=item_code，取不到报错 404 没有这个条目
     # 查 lesson_item_link 中 item_code 相等的行，连 lesson_text 取课文，同一课只算一次，按 seq 升序、id 升序
-    设 k = 调用 kg.取条目 code={item_code}
+    设 k = 调用 kg.取条目 code={item_code} subject={sid}
     如果 {k} 为空
       报错 404 没有这个条目
     结束
-    设 rows = 查询 app.db lesson_by_item item_code={item_code}
+    设 rows = 查询 app.db lesson_by_item item_code={item_code} subject_id={sid}
     设 n = 列表长度 {rows}
     设 out.item_code = {item_code}
     设 out.total = {n}
@@ -122,16 +169,18 @@
     返回 {out}
   结束
 
-  公开 函数 按知识点列课文 point_code
+  公开 函数 按知识点列课文 point_code learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sid = {sj.subject_id}
     # 返回 {point_code, total, lessons}，lessons 同「按条目列课文」（只含直接挂在该知识点上的课）
     # 报错 404 没有这个知识点
     # 调用 kg.取知识点 code=point_code，取不到报错 404 没有这个知识点
     # 查 lesson_point_link 中 point_code 相等的行，连 lesson_text 取课文，同一课只算一次，按 seq 升序、id 升序
-    设 k = 调用 kg.取知识点 code={point_code}
+    设 k = 调用 kg.取知识点 code={point_code} subject={sid}
     如果 {k} 为空
       报错 404 没有这个知识点
     结束
-    设 rows = 查询 app.db lesson_by_point point_code={point_code}
+    设 rows = 查询 app.db lesson_by_point point_code={point_code} subject_id={sid}
     设 n = 列表长度 {rows}
     设 out.point_code = {point_code}
     设 out.total = {n}
@@ -139,20 +188,22 @@
     返回 {out}
   结束
 
-  公开 函数 取课文关联条目 lesson_code
+  公开 函数 取课文关联条目 lesson_code learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sid = {sj.subject_id}
     # 返回 {lesson_code, total, items}，items 是 [{code, name, point_code}]，按挂接顺序
     # 报错 404 没有这课
     # 按 lesson_code 查 lesson_text，查不到报错 404 没有这课
     # 查 lesson_item_link 中 lesson_code 相等的行，按 id 升序
     # 逐行调用 kg.取条目 code=该行 item_code，取到则收 {code, name, point_code}，取不到（条目已被删）跳过
-    设 lt = 查一行 app.db lesson_text_get code={lesson_code}
+    设 lt = 查一行 app.db lesson_text_get code={lesson_code} subject_id={sid}
     如果 {lt} 为空
       报错 404 没有这课
     结束
-    设 links = 查询 app.db lesson_item_link_by_lesson lesson_code={lesson_code}
+    设 links = 查询 app.db lesson_item_link_by_lesson lesson_code={lesson_code} subject_id={sid}
     设 items = 解析JSON []
     遍历 lk 于 {links}
-      设 k = 调用 kg.取条目 code={lk.item_code}
+      设 k = 调用 kg.取条目 code={lk.item_code} subject={sid}
       如果 {k} 不为空
         设 e.code = {k.code}
         设 e.name = {k.name}
@@ -167,23 +218,26 @@
     返回 {out}
   结束
 
-  公开 函数 取知识点等级 point_code
+  公开 函数 取知识点等级 point_code learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sid = {sj.subject_id}
     # 返回 {point_code, level, lesson_count}；level 是与该知识点相关的课文里最基础的等级（N5 最基础、N1 最难），没有相关课文时 level 为空串、lesson_count 为 0
     # 报错 404 没有这个知识点
     # 调用 kg.取知识点 code=point_code，取不到报错 404 没有这个知识点
     # 课文集合 = lesson_point_link 中 point_code 相等的课文编号，并上「调用 kg.按知识点列条目 point_code=point_code」得到的每个条目在 lesson_item_link 中挂的课文编号，去重
     # 连 lesson_text 取每课 level，lesson_count = 集合大小
     # 集合为空返回 {"point_code": point_code, "level": "", "lesson_count": 0}
-    设 k = 调用 kg.取知识点 code={point_code}
+    设 k = 调用 kg.取知识点 code={point_code} subject={sid}
     如果 {k} 为空
       报错 404 没有这个知识点
     结束
-    设 ks = 调用 kg.按知识点列条目 point_code={point_code}
+    设 ks = 调用 kg.按知识点列条目 point_code={point_code} subject={sid}
     设 s = {zz 或}
     遍历 it 于 {ks.items}
       设 s = {s}{it.code},
     结束
     设 q.point_code = {point_code}
+    设 q.subject_id = {sid}
     设 q.items = {s}
     设 row = 查一行表 app.db lesson_level_by_point {q}
     如果 {row.cnt} 等于 0
@@ -198,7 +252,7 @@
     返回 {out}
   结束
 
-  函数 校验行 line
+  函数 校验行 line subject_id
     设 parts = 按正则切分 {line} \|
     设 n = 0
     设 code = {zz 或}
@@ -248,10 +302,11 @@
         报错 400 导入文件有错
       结束
     结束
+    设 pf = 调用 编号前缀检查 subject_id={subject_id} code={code}
     设 ics = 按正则切分 {items} \s*,\s*
     遍历 c 于 {ics}
       如果 {c} 不为空
-        设 k = 调用 kg.取条目 code={c}
+        设 k = 调用 kg.取条目 code={c} subject={subject_id}
         如果 {k} 为空
           报错 400 课文映射对不上
         结束
@@ -260,7 +315,7 @@
     设 pcs = 按正则切分 {points} \s*,\s*
     遍历 c 于 {pcs}
       如果 {c} 不为空
-        设 k = 调用 kg.取知识点 code={c}
+        设 k = 调用 kg.取知识点 code={c} subject={subject_id}
         如果 {k} 为空
           报错 400 课文映射对不上
         结束
@@ -269,7 +324,7 @@
     返回 {"code": "{code}"}
   结束
 
-  函数 写入行 line series_code
+  函数 写入行 line series_code subject_id
     设 parts = 按正则切分 {line} \|
     设 n = 0
     设 q.code = {zz 或}
@@ -283,6 +338,7 @@
     设 q.orig_title = {zz 或}
     设 q.seq = 0
     设 q.series_code = {series_code}
+    设 q.subject_id = {subject_id}
     设 items = {zz 或}
     设 points = {zz 或}
     遍历 f 于 {parts}
@@ -325,7 +381,7 @@
     遍历 c 于 {ics}
       如果 {c} 不为空
         如果 {seeni} 不包含 @{c}@
-          设 w = 写库 app.db lesson_item_link_insert lesson_code={q.code} item_code={c}
+          设 w = 写库 app.db lesson_item_link_insert lesson_code={q.code} item_code={c} subject_id={subject_id}
           设 seeni = {seeni}{c}@
           设 il = 计算 {il} + 1
         结束
@@ -336,7 +392,7 @@
     遍历 c 于 {pcs}
       如果 {c} 不为空
         如果 {seenp} 不包含 @{c}@
-          设 w = 写库 app.db lesson_point_link_insert lesson_code={q.code} point_code={c}
+          设 w = 写库 app.db lesson_point_link_insert lesson_code={q.code} point_code={c} subject_id={subject_id}
           设 seenp = {seenp}{c}@
           设 pl = 计算 {pl} + 1
         结束
@@ -345,7 +401,7 @@
     返回 {"i": {il}, "p": {pl}}
   结束
 
-  公开 函数 导入课文 series_code file_path series_name? intro? source? license? sort_order?
+  公开 函数 导入课文 series_code file_path series_name? intro? source? license? sort_order? learner? current_role? auth_mode? subject?
     如果 {series_code} 为空
       报错 400 series_code 不能为空
     结束
@@ -359,11 +415,12 @@
     如果 {doc.error} 不为空
       报错 400 导入文件有错
     结束
-    设 r = 调用 导入课文数据 series_code={series_code} lessons_text={doc.text} series_name={series_name} intro={intro} source={source} license={license} sort_order={sort_order}
+    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 r = 调用 导入课文数据 series_code={series_code} lessons_text={doc.text} subject_id={sj.subject_id} series_name={series_name} intro={intro} source={source} license={license} sort_order={sort_order}
     返回 {r}
   结束
 
-  函数 导入课文数据 series_code lessons_text series_name? intro? source? license? sort_order?
+  函数 导入课文数据 series_code lessons_text subject_id series_name? intro? source? license? sort_order?
     # 返回 {ok, series_code, total, item_links, point_links}
     # 报错 400 series_code 不能为空
     # 报错 400 导入文件有错
@@ -402,7 +459,7 @@
       如果 {mc.matched} 等于 是
         继续
       结束
-      设 r = 调用 校验行 line={line}
+      设 r = 调用 校验行 line={line} subject_id={subject_id}
       如果 {seen} 包含 @{r.code}@
         报错 400 课号重复
       结束
@@ -421,7 +478,14 @@
     设 pl = 0
     事务 app.db
       设 s = 查一行 app.db lesson_series_get code={series_code}
+      设 s2 = 查一行 app.db lesson_series_get_subject code={series_code} subject_id={subject_id}
+      如果 {s} 不为空
+        如果 {s2} 为空
+          报错 400 系列编号已被其他科目使用
+        结束
+      结束
       设 p.code = {series_code}
+      设 p.subject_id = {subject_id}
       设 p.intro = {intro 或}
       设 p.source = {source 或}
       设 p.license = {license 或}
@@ -442,7 +506,7 @@
       设 w = 写库 app.db lesson_point_link_delete_series series_code={series_code}
       设 w = 写库 app.db lesson_text_delete_series series_code={series_code}
       遍历 vl 于 {valid}
-        设 x = 调用 写入行 line={vl} series_code={series_code}
+        设 x = 调用 写入行 line={vl} series_code={series_code} subject_id={subject_id}
         设 il = 计算 {il} + {x.i}
         设 pl = 计算 {pl} + {x.p}
       结束
@@ -450,10 +514,12 @@
     返回 {"ok": 1, "series_code": "{series_code}", "total": {total}, "item_links": {il}, "point_links": {pl}}
   结束
 
-  公开 函数 写入系列课文并重灌 series_code rows_json series_name? source? license?
+  公开 函数 写入系列课文并重灌 series_code rows_json series_name? source? license? learner? current_role? auth_mode? subject?
     如果 {series_code} 为空
       报错 400 series_code 不能为空
     结束
+    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sid = {sj.subject_id}
     设 mt = 匹配 {rows_json} ^\s*\[
     如果 {mt.matched} 不等于 是
       报错 400 课文数据有错
@@ -502,7 +568,15 @@
       如果 {oc} 大于 0
         报错 400 课号重复
       结束
+      设 pf = 调用 编号前缀检查 subject_id={sid} code={c}
       设 seen = {seen}{c}@
+    结束
+    设 sa = 查一行 app.db lesson_series_get code={series_code}
+    设 sb = 查一行 app.db lesson_series_get_subject code={series_code} subject_id={sid}
+    如果 {sa} 不为空
+      如果 {sb} 为空
+        报错 400 系列编号已被其他科目使用
+      结束
     结束
     写JSONL content/lesson/series/{series_code}.jsonl {rows}
     读JSONL frows = content/lesson/series/{series_code}.jsonl
@@ -522,7 +596,7 @@
       遍历 ci 于 {ics}
         如果 {bad} 为空
           如果 {ci} 不为空
-            设 k = 调用 kg.取条目 code={ci}
+            设 k = 调用 kg.取条目 code={ci} subject={sid}
             如果 {k} 为空
               设 bad = 条目{ci}在库里没有
             结束
@@ -532,7 +606,7 @@
       遍历 cp 于 {pcs}
         如果 {bad} 为空
           如果 {cp} 不为空
-            设 k = 调用 kg.取知识点 code={cp}
+            设 k = 调用 kg.取知识点 code={cp} subject={sid}
             如果 {k} 为空
               设 bad = 知识点{cp}在库里没有
             结束
@@ -552,6 +626,7 @@
     事务 app.db
       设 s = 查一行 app.db lesson_series_get code={series_code}
       设 p.code = {series_code}
+      设 p.subject_id = {sid}
       设 p.name = {series_name 或}
       设 p.intro = {zz 或}
       设 p.source = {source 或}
@@ -584,6 +659,7 @@
         设 q.orig_title = {gw.orig_title 或}
         设 q.seq = {gw.seq 或 0}
         设 q.series_code = {series_code}
+        设 q.subject_id = {sid}
         设 w = 写库表 app.db lesson_text_insert {q}
         设 gi = 解析JSON []
         如果 {gw.item_codes 或} 不为空
@@ -597,7 +673,7 @@
         遍历 ci 于 {gi}
           如果 {ci} 不为空
             如果 {seeni} 不包含 @{ci}@
-              设 w = 写库 app.db lesson_item_link_insert lesson_code={q.code} item_code={ci}
+              设 w = 写库 app.db lesson_item_link_insert lesson_code={q.code} item_code={ci} subject_id={sid}
               设 seeni = {seeni}{ci}@
               设 il = 计算 {il} + 1
             结束
@@ -607,7 +683,7 @@
         遍历 cp 于 {gp}
           如果 {cp} 不为空
             如果 {seenp} 不包含 @{cp}@
-              设 w = 写库 app.db lesson_point_link_insert lesson_code={q.code} point_code={cp}
+              设 w = 写库 app.db lesson_point_link_insert lesson_code={q.code} point_code={cp} subject_id={sid}
               设 seenp = {seenp}{cp}@
               设 pl = 计算 {pl} + 1
             结束
@@ -628,12 +704,14 @@
     返回 {out}
   结束
 
-  公开 函数 撤下系列 series_code
+  公开 函数 撤下系列 series_code learner? current_role? auth_mode? subject?
     # 返回 {ok, series_code, removed_lessons}
     # 报错 404 没有这个系列
     # 按 series_code 查 lesson_series，查不到报错 404 没有这个系列
     # 在一个事务里：数出 series_code 系列的课文数 removed_lessons；删除这些课文在 lesson_item_link、lesson_point_link 中的行；删除 lesson_text 中该系列的行；把 lesson_series 该行 sort_order 改为 -1（系列行保留，lesson_pref 不动）
-    设 s = 查一行 app.db lesson_series_get code={series_code}
+    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sid = {sj.subject_id}
+    设 s = 查一行 app.db lesson_series_get_subject code={series_code} subject_id={sid}
     如果 {s} 为空
       报错 404 没有这个系列
     结束
@@ -652,19 +730,21 @@
     返回 {"ok": 1, "series_code": "{series_code}", "removed_lessons": {cnt}, "moved": {moved}}
   结束
 
-  函数 题数表
+  函数 题数表 subject_id
     设 c = 查一值 app.db lesson_qq_exists
     如果 {c} 等于 0
       设 e = 解析JSON []
       返回 {e}
     结束
-    设 rows = 查询 app.db lesson_qcount
+    设 rows = 查询 app.db lesson_qcount subject_id={subject_id}
     返回 {rows}
   结束
 
-  公开 函数 教材页面 learner series? lesson_level? keyword? current_role?
-    设 sl = 调用 列系列
-    设 qt = 调用 题数表
+  公开 函数 教材页面 learner series? lesson_level? keyword? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sid = {sj.subject_id}
+    设 sl = 调用 列系列 subject={sid}
+    设 qt = 调用 题数表 subject_id={sid}
     设 found = 0
     设 cur_code = {zz 或}
     设 cur_name = {zz 或}
@@ -677,10 +757,10 @@
       结束
     结束
     如果 {found} 等于 1
-      设 sel = 调用 选择系列 learner={learner} series_code={series} current_role={current_role 或}
+      设 sel = 调用 选择系列 learner={learner} series_code={series} subject={sid}
       设 cur_code = {series}
     否则
-      设 cu = 调用 取当前系列 learner={learner} current_role={current_role 或}
+      设 cu = 调用 取当前系列 learner={learner} subject={sid}
       设 cur_code = {cu.series_code}
       设 cur_name = {cu.name}
     结束
@@ -689,7 +769,7 @@
       设 lv = {zz 或}
     结束
     设 kw = {keyword 或}
-    设 ls = 调用 列课文 series_code={cur_code} level={lv} keyword={kw}
+    设 ls = 调用 列课文 series_code={cur_code} level={lv} keyword={kw} subject={sid}
     设 rows = 解析JSON []
     遍历 r 于 {ls.lessons}
       设 qn = 转数字 0
@@ -723,12 +803,14 @@
     返回 {out}
   结束
 
-  公开 函数 课文页面 learner lesson? current_role?
+  公开 函数 课文页面 learner lesson? current_role? auth_mode? subject?
     如果 {lesson} 为空
       报错 400 lesson 不能为空
     结束
-    设 pg = 调用 教材页面 learner={learner} current_role={current_role 或}
-    设 lt = 调用 取课文 code={lesson}
+    设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sid = {sj.subject_id}
+    设 pg = 调用 教材页面 learner={learner} subject={sid}
+    设 lt = 调用 取课文 code={lesson} subject={sid}
     如果 {lt} 为空
       设 o1.reading.code = {lesson}
       设 o1.reading.missing = 没有这一课（{lesson}），回课文表重新选。
@@ -736,7 +818,7 @@
       设 o1.form = {pg.form}
       返回 {o1}
     结束
-    设 qt = 调用 题数表
+    设 qt = 调用 题数表 subject_id={sid}
     设 n = 转数字 0
     遍历 x 于 {qt}
       如果 {x.lesson_code} 等于 {lesson}
@@ -746,7 +828,7 @@
     设 qq.code = {lesson}
     设 qn1 = 查一行表 app.db lesson_seq_no {qq}
     设 nn = {qn1.nn}
-    设 sl = 调用 列系列
+    设 sl = 调用 列系列 subject={sid}
     设 slabel = {lt.series_code}
     遍历 s 于 {sl.series}
       如果 {s.code} 等于 {lt.series_code}
@@ -797,11 +879,11 @@
         结束
       结束
     结束
-    设 gi = 调用 取课文关联条目 lesson_code={lesson}
+    设 gi = 调用 取课文关联条目 lesson_code={lesson} subject={sid}
     设 lis = 解析JSON []
     遍历 it 于 {gi.items}
       设 pl = {it.point_code}
-      设 pk = 调用 kg.取知识点 code={it.point_code}
+      设 pk = 调用 kg.取知识点 code={it.point_code} subject={sid}
       如果 {pk} 不为空
         设 pl = {pk.title}
       结束
@@ -814,7 +896,7 @@
     遍历 pc 于 {pcs}
       如果 {pc} 不为空
         设 pl = {pc}
-        设 pk = 调用 kg.取知识点 code={pc}
+        设 pk = 调用 kg.取知识点 code={pc} subject={sid}
         如果 {pk} 不为空
           设 pl = {pk.title}
         结束
