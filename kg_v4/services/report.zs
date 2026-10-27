@@ -1,12 +1,39 @@
 业务 report
-  依赖 account progress dictation tutor teacher_rules kg lesson
+  依赖 account progress dictation tutor teacher_rules kg lesson subject
   用包 common db text
 
-  函数 取点等级 point_code
+  函数 本科目 learner current_role auth_mode subject need?
+    设 r = 调用 subject.解析科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need={need}
+    返回 {r.subject_id}
+  结束
+
+  函数 学生范围 subject_id
+    设 al = 调用 account.列学生
+    设 ss = 调用 subject.列科目学生 subject_id={subject_id}
+    设 res = 解析JSON []
+    遍历 a0 于 {al.students}
+      设 ok = 0
+      遍历 x0 于 {ss.students}
+        如果 {x0.learner} 等于 {a0.username}
+          设 ok = 1
+        结束
+      结束
+      如果 {ok} 等于 1
+        设 o.username = {a0.username}
+        设 o.display_name = {a0.display_name}
+        设 o.status = {a0.status}
+        设 o.last_at = {a0.last_at 或}
+        设 res = 列表加项 {res} {o}
+      结束
+    结束
+    返回 {res}
+  结束
+
+  函数 取点等级 point_code subject_id
     # 返回 等级文本（N5 到 N1），取不到返回空串
     # 调用 lesson.取知识点等级 point_code=point_code 出错时 e
     # 出错（如 404）或其 level 为空，返回空串；否则返回其 level
-    设 r = 调用 lesson.取知识点等级 point_code={point_code} 出错时 er
+    设 r = 调用 lesson.取知识点等级 point_code={point_code} subject={subject_id} 出错时 er
     设 lv = {r.level 或}
     如果 {er} 不为空
       设 lv = {zz 或}
@@ -14,7 +41,7 @@
     返回 {lv}
   结束
 
-  函数 算学生指标 username
+  函数 算学生指标 username subject_id
     # 返回 {answer_total, recent_accuracy, avg_score, mastered_count, wrong_book_count, weak_all}；weak_all 是该学生全部低分点 [{point_code, title, score}]，得分低的在前
     # 调用 progress.取概览 learner=username，取 answer_total、mastered_count
     # 调用 progress.列最近作答 learner=username limit=20，得 total 和 answers；recent_accuracy = 四舍五入(其中 correct 等于 1 的个数 * 100 / total)，total 为 0 时为 0（近期正确率按最近 20 条作答算）
@@ -22,8 +49,8 @@
     # 调用 progress.列低分点 learner=username limit=1000，得 weak_all（阈值取 progress 默认的 80 分以下）
     # 调用 dictation.统计错词本数 learner=username，取 total 为 wrong_book_count
     # 返回 {"answer_total": …, "recent_accuracy": …, "avg_score": …, "mastered_count": …, "wrong_book_count": …, "weak_all": …}
-    设 ov = 调用 progress.取概览 learner={username}
-    设 ra = 调用 progress.列最近作答 learner={username} limit=20
+    设 ov = 调用 progress.取概览 learner={username} subject={subject_id}
+    设 ra = 调用 progress.列最近作答 learner={username} limit=20 subject={subject_id}
     设 good = 0
     设 n = 列表长度 {ra.answers}
     遍历 a 于 {ra.answers}
@@ -35,7 +62,7 @@
     如果 {n} 大于 0
       设 acc = 计算 四舍五入({good} * 100 / {n})
     结束
-    设 sc = 调用 progress.列得分 learner={username}
+    设 sc = 调用 progress.列得分 learner={username} subject={subject_id}
     设 ssum = 0
     设 cnt = 0
     遍历 x 于 {sc.scores}
@@ -46,8 +73,8 @@
     如果 {cnt} 大于 0
       设 avg = 计算 四舍五入({ssum} / {cnt})
     结束
-    设 wk = 调用 progress.列低分点 learner={username} limit=1000
-    设 wb = 调用 dictation.统计错词本数 learner={username}
+    设 wk = 调用 progress.列低分点 learner={username} limit=1000 subject={subject_id}
+    设 wb = 调用 dictation.统计错词本数 learner={username} subject={subject_id}
     设 out.answer_total = {ov.answer_total}
     设 out.recent_accuracy = {acc}
     设 out.avg_score = {avg}
@@ -57,7 +84,7 @@
     返回 {out}
   结束
 
-  公开 函数 取全班学情 sort_by? student?
+  公开 函数 取全班学情 sort_by? student? learner? current_role? auth_mode? subject?
     # 返回 {total, students, weak_point_count, weak_item_count, weak_points, weak_items}；students 每项 {username, display_name, status, answer_total, recent_accuracy, avg_score, mastered_count, weak_count, weak_points, wrong_book_count, last_at}，weak_points 是该生最低分的前 5 个 [{point_code, title, score}]，weak_count 是该生低分点总数；全班 weak_points 是前 10 个 [{point_code, title, student_count, avg_score, level}]；weak_items 是前 10 个 [{code, name, point_code, student_count}]。只读；student 不为空时只统计该学生
     # 报错 400 排序方式不对
     # sort_by 为空取 last_at；不是 last_at 也不是 avg_score，报错 400 排序方式不对
@@ -75,12 +102,13 @@
     如果 {sb} 不等于 last_at 且 {sb} 不等于 avg_score
       报错 400 排序方式不对
     结束
-    设 ls = 调用 account.列学生
+    设 subject_id = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 ls = 调用 学生范围 subject_id={subject_id}
     设 rows = 解析JSON []
     设 agg = 解析JSON []
-    遍历 s 于 {ls.students}
+    遍历 s 于 {ls}
       如果 {student} 为空 或 {s.username} 等于 {student}
-        设 m = 调用 算学生指标 username={s.username}
+        设 m = 调用 算学生指标 username={s.username} subject_id={subject_id}
         设 wp5 = 解析JSON []
         设 k = 0
         遍历 w 于 {m.weak_all}
@@ -161,7 +189,7 @@
     设 il = 解析JSON []
     遍历 g 于 {agg}
       设 av = 计算 四舍五入({g.total} / {g.student_count})
-      设 lv = 调用 取点等级 point_code={g.point_code}
+      设 lv = 调用 取点等级 point_code={g.point_code} subject_id={subject_id}
       设 wi.point_code = {g.point_code}
       设 wi.title = {g.title}
       设 wi.student_count = {g.student_count}
@@ -190,7 +218,7 @@
         设 nl = 列表加项 {nl} {wi}
       结束
       设 wl = {nl}
-      设 ki = 调用 kg.按知识点列条目 point_code={g.point_code} 出错时 er
+      设 ki = 调用 kg.按知识点列条目 point_code={g.point_code} subject={subject_id} 出错时 er
       如果 {er} 为空
         遍历 it 于 {ki.items}
           设 ii.code = {it.code}
@@ -246,7 +274,7 @@
     返回 {out}
   结束
 
-  公开 函数 取学生学情 student
+  公开 函数 取学生学情 student learner? current_role? auth_mode? subject?
     # 返回 {student, display_name, status, answer_total, recent_accuracy, avg_score, mastered_count, wrong_count, wrong_answers, wrong_book_count, wrong_book, weak_count, weak_points, question_count, dialog_last_at, recent_questions, relay_count, relays, has_summary, summary, summary_author, summary_at}；wrong_answers 是最近答错的题 [{point_code, title, question_no, answer, at, score, mastered}]（题干由 quiz 持有，本模块不依赖 quiz，故只给题号与知识点标题）；wrong_book 是错词本 [{word_id, direction, kanji, kana, meaning, last_answer, last_at}]；weak_points 是前 10 个低分点 [{point_code, title, score, level}]；recent_questions 是最近 5 条学生提问 [{content, intent, at}]；relays 是该生的传达状态 [{relay_id, must_info, rounds, rounds_done, finished, confirmed}]；has_summary 为 1 时 summary、summary_author、summary_at 是最近一份学情总结，否则为空串。只读
     # 报错 400 student 不能为空
     # 报错 404 没有这个学生
@@ -263,6 +291,7 @@
     如果 {student} 为空
       报错 400 student 不能为空
     结束
+    设 subject_id = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 acc = 调用 account.取账号 username={student}
     如果 {acc} 为空
       报错 404 没有这个学生
@@ -270,11 +299,21 @@
     如果 {acc.role} 不等于 student
       报错 404 没有这个学生
     结束
-    设 m = 调用 算学生指标 username={student}
-    设 wr = 调用 progress.列错题 learner={student} limit=10
+    设 scope = 调用 学生范围 subject_id={subject_id}
+    设 inscope = 0
+    遍历 sc0 于 {scope}
+      如果 {sc0.username} 等于 {student}
+        设 inscope = 1
+      结束
+    结束
+    如果 {inscope} 等于 0
+      报错 404 没有这个学生
+    结束
+    设 m = 调用 算学生指标 username={student} subject_id={subject_id}
+    设 wr = 调用 progress.列错题 learner={student} limit=10 subject={subject_id}
     设 wa = 解析JSON []
     遍历 w 于 {wr.wrongs}
-      设 kp = 调用 kg.取知识点 code={w.point_code} 出错时 er
+      设 kp = 调用 kg.取知识点 code={w.point_code} subject={subject_id} 出错时 er
       设 tt = {kp.title 或}
       如果 {er} 不为空
         设 tt = {zz 或}
@@ -288,12 +327,12 @@
       设 x.mastered = {w.mastered}
       设 wa = 列表加项 {wa} {x}
     结束
-    设 wb = 调用 dictation.取错词本 learner={student}
+    设 wb = 调用 dictation.取错词本 learner={student} subject={subject_id}
     设 wp = 解析JSON []
     设 k = 0
     遍历 w 于 {m.weak_all}
       如果 {k} 小于 10
-        设 lv = 调用 取点等级 point_code={w.point_code}
+        设 lv = 调用 取点等级 point_code={w.point_code} subject_id={subject_id}
         设 y.point_code = {w.point_code}
         设 y.title = {w.title}
         设 y.score = {w.score}
@@ -302,9 +341,9 @@
       结束
       设 k = 计算 {k} + 1
     结束
-    设 td = 调用 tutor.取对话摘要 learner={student}
-    设 rl = 调用 teacher_rules.列传达状态 student={student}
-    设 sm = 调用 取最近总结 student={student}
+    设 td = 调用 tutor.取对话摘要 learner={student} subject={subject_id}
+    设 rl = 调用 teacher_rules.列传达状态 student={student} subject={subject_id}
+    设 sm = 调用 取最近总结 student={student} subject={subject_id}
     设 st = 启用
     如果 {acc.disabled} 等于 1
       设 st = 停用
@@ -334,7 +373,7 @@
     返回 {out}
   结束
 
-  公开 函数 写学情总结 student current_user
+  公开 函数 写学情总结 student current_user current_role? auth_mode? subject?
     # 返回 {ok, id, student, summary, author, created_at}
     # 报错 400 student 不能为空
     # 报错 400 current_user 不能为空
@@ -351,7 +390,8 @@
     如果 {current_user} 为空
       报错 400 current_user 不能为空
     结束
-    设 d = 调用 取学生学情 student={student}
+    设 subject_id = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 d = 调用 取学生学情 student={student} subject={subject_id}
     设 pt = 请根据下面的学情数据，为教师写一段简明的学情总结（中文，不超过300字）。学生：{d.display_name}；近期正确率：{d.recent_accuracy}%；平均得分：{d.avg_score}；已掌握知识点数：{d.mastered_count}；最近答错的题：{d.wrong_answers}；错词本：{d.wrong_book}；薄弱点：{d.weak_points}；问老师的提问摘要：{d.recent_questions}；传达状态：{d.relays}
     问 reply = {pt} 用 平衡 出错时 qe
     如果 {qe} 不为空
@@ -365,9 +405,10 @@
     设 p.summary = {reply}
     设 p.author = {current_user}
     设 p.created_at = {now}
+    设 p.subject_id = {subject_id}
     事务 app.db
       设 n = 写库表 app.db report_summary_insert {p}
-      设 nid = 查一值 app.db report_summary_last_id student={student}
+      设 nid = 查一值 app.db report_summary_last_id student={student} subject_id={subject_id}
     结束
     设 out.ok = 1
     设 out.id = {nid}
@@ -378,7 +419,7 @@
     返回 {out}
   结束
 
-  公开 函数 取最近总结 student
+  公开 函数 取最近总结 student learner? current_role? auth_mode? subject?
     # 返回 {student, has_summary, id, summary, author, created_at}；该学生没有总结时 has_summary 为 0，id 为 0，其余为空串（下次打开直接看上一份，不调模型）
     # 报错 400 student 不能为空
     # student 为空，报错 400 student 不能为空
@@ -388,7 +429,8 @@
     如果 {student} 为空
       报错 400 student 不能为空
     结束
-    设 row = 查一行 app.db report_summary_latest student={student}
+    设 subject_id = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 row = 查一行 app.db report_summary_latest student={student} subject_id={subject_id}
     如果 {row} 为空
       返回 {"student": "{student}", "has_summary": 0, "id": 0, "summary": "", "author": "", "created_at": ""}
     结束
@@ -428,14 +470,15 @@
     返回 {res}
   结束
 
-  公开 函数 学情首页页面 report_sort?
+  公开 函数 学情首页页面 report_sort? learner? current_role? auth_mode? subject?
+    设 subject_id = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 sb = last_at
     设 sel = 最近学习
     如果 {report_sort} 等于 平均得分
       设 sb = avg_score
       设 sel = 平均得分
     结束
-    设 cw = 调用 取全班学情 sort_by={sb}
+    设 cw = 调用 取全班学情 sort_by={sb} subject={subject_id}
     设 ordl = 解析JSON []
     设 lastl = 解析JSON []
     遍历 s0 于 {cw.students}
@@ -488,7 +531,7 @@
       设 row.weak_points = {wt}
       设 row.book_n = {s.wrong_book_count}
       设 rows = 列表加项 {rows} {row}
-      设 stt = 调用 progress.取状态 learner={s.username}
+      设 stt = 调用 progress.取状态 learner={s.username} subject={subject_id}
       遍历 p 于 {stt.points}
         如果 {p.total} 大于 0
           设 wr = 计算 {p.total} - {p.right}
@@ -563,7 +606,7 @@
         设 cwp = 列表加项 {cwp} {cp}
       结束
       设 k = 计算 {k} + 1
-      设 ki = 调用 kg.按知识点列条目 point_code={g.code} 出错时 er
+      设 ki = 调用 kg.按知识点列条目 point_code={g.code} subject={subject_id} 出错时 er
       如果 {er} 为空
         遍历 it 于 {ki.items}
           设 ii.label = {it.name}
@@ -617,15 +660,26 @@
     返回 {out}
   结束
 
-  公开 函数 学生页面 student
+  公开 函数 学生页面 student learner? current_role? auth_mode? subject?
     如果 {student} 为空
       报错 400 student 不能为空
     结束
+    设 subject_id = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 acc = 调用 account.取账号 username={student}
     设 bad = 0
     如果 {acc} 为空
       设 bad = 1
     否则如果 {acc.role} 不等于 student
+      设 bad = 1
+    结束
+    设 scope2 = 调用 学生范围 subject_id={subject_id}
+    设 ins2 = 0
+    遍历 sc2 于 {scope2}
+      如果 {sc2.username} 等于 {student}
+        设 ins2 = 1
+      结束
+    结束
+    如果 {ins2} 等于 0
       设 bad = 1
     结束
     设 bk = #%E5%AD%A6%E6%83%85
@@ -637,10 +691,10 @@
       设 mo.student = {so}
       返回 {mo}
     结束
-    设 g = 调用 取学生学情 student={student}
-    设 ser = 调用 lesson.取当前系列 learner={student}
-    设 recent = 调用 progress.列最近作答 learner={student} limit=20
-    设 dict = 调用 dictation.取默写概况 learner={student}
+    设 g = 调用 取学生学情 student={student} subject={subject_id}
+    设 ser = 调用 lesson.取当前系列 learner={student} subject={subject_id}
+    设 recent = 调用 progress.列最近作答 learner={student} limit=20 subject={subject_id}
+    设 dict = 调用 dictation.取默写概况 learner={student} subject={subject_id}
     设 ra1 = {zz 或}
     遍历 a 于 {recent.answers}
       如果 {ra1} 为空
@@ -695,8 +749,8 @@
     设 ssm.student = {student}
     设 ssm.head = {sh}
     设 ssm.text = {g.summary 或}
-    设 stt = 调用 progress.取状态 learner={student}
-    设 scs = 调用 progress.列得分 learner={student}
+    设 stt = 调用 progress.取状态 learner={student} subject={subject_id}
+    设 scs = 调用 progress.列得分 learner={student} subject={subject_id}
     设 pl = 解析JSON []
     遍历 p 于 {stt.points}
       设 hs = 0
@@ -758,7 +812,7 @@
       设 cr.mastered_text = {y.mastered_text}
       设 spts = 列表加项 {spts} {cr}
     结束
-    设 aw = 调用 progress.取区间作答 learner={student} start_id=0
+    设 aw = 调用 progress.取区间作答 learner={student} start_id=0 subject={subject_id}
     设 qs = 解析JSON []
     遍历 a 于 {aw.answers}
       设 nq = 解析JSON []
@@ -843,7 +897,7 @@
         如果 {lab} 为空
           设 lab = {q.qn}
         结束
-        设 kp = 调用 kg.取知识点 code={q.point_code} 出错时 er
+        设 kp = 调用 kg.取知识点 code={q.point_code} subject={subject_id} 出错时 er
         设 pt = {kp.title 或}
         如果 {er} 不为空
           设 pt = {zz 或}
@@ -863,7 +917,7 @@
     结束
     设 srec = 解析JSON []
     遍历 a 于 {recent.answers}
-      设 kp = 调用 kg.取知识点 code={a.point_code} 出错时 er
+      设 kp = 调用 kg.取知识点 code={a.point_code} subject={subject_id} 出错时 er
       设 pt = {kp.title 或}
       如果 {er} 不为空
         设 pt = {zz 或}
@@ -899,14 +953,14 @@
       设 bo.last_wrong = {bw.last_at 或}
       设 sbk = 列表加项 {sbk} {bo}
     结束
-    设 ch = 调用 tutor.列对话 learner={student} limit=40
+    设 ch = 调用 tutor.列对话 learner={student} limit=40 subject={subject_id}
     设 sch = 解析JSON []
     遍历 mg 于 {ch.messages}
       设 who = 学生
       设 nt = {zz 或}
       如果 {mg.role} 等于 teacher
         设 who = 老师
-        设 nr2 = 调用 teacher_rules.取回复用到 reply_id={mg.id}
+        设 nr2 = 调用 teacher_rules.取回复用到 reply_id={mg.id} subject={subject_id}
         设 nt = {nr2.text 或}
       结束
       设 ct = 调用 缩略 text={mg.content} n=120
@@ -916,8 +970,8 @@
       设 co.chat_notes = {nt}
       设 sch = 列表加项 {sch} {co}
     结束
-    设 snotes = 调用 teacher_rules.设定列表 student={student}
-    设 srel = 调用 teacher_rules.传达列表 student={student}
+    设 snotes = 调用 teacher_rules.设定列表 student={student} subject={subject_id}
+    设 srel = 调用 teacher_rules.传达列表 student={student} subject={subject_id}
     设 out.student = {so}
     设 out.student_summary = {ssm}
     设 out.student_points = {spts}
@@ -930,9 +984,10 @@
     返回 {out}
   结束
 
-  公开 函数 写学情总结页面 student current_user
-    设 w = 调用 写学情总结 student={student} current_user={current_user}
-    设 sm = 调用 取最近总结 student={student}
+  公开 函数 写学情总结页面 student current_user current_role? auth_mode? subject?
+    设 subject_id = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 w = 调用 写学情总结 student={student} current_user={current_user} subject={subject_id}
+    设 sm = 调用 取最近总结 student={student} subject={subject_id}
     设 wa = AI
     设 hd = {wa} 学情总结（{sm.created_at}，{sm.author} 请的）
     设 so.student = {student}
