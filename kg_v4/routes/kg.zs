@@ -94,3 +94,23 @@
   设 r = 调用 kg.导入对照 file_path={file_path} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   返回 {r}
 结束
+
+接口 POST /kg/point/create 角色 teacher
+  设 r = 调用 kg.建知识点 code={code} title={title} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  返回 {r}
+结束
+
+接口 POST /kg/point/update 角色 teacher
+  设 r = 调用 kg.改知识点 code={code} title={title} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  返回 {r}
+结束
+
+接口 POST /kg/point/delete 角色 teacher
+  设 r = 调用 kg.删知识点 code={code} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  返回 {r}
+结束
+
+接口 GET /kg/refs 角色 teacher
+  设 r = 调用 kg.查引用 code={code} kind={kind 或} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  返回 {r}
+结束

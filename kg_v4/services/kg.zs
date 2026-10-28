@@ -445,6 +445,274 @@
     返回 {"ok": 1, "total": {total}, "created": {created}, "updated": {updated}}
   结束
 
+  公开 函数 建知识点 code title learner? current_role? auth_mode? subject?
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
+    设 cd = 替换 {code} ^\s+|\s+$
+    设 tt = 替换 {title} ^\s+|\s+$
+    如果 {cd} 为空
+      报错 400 编号不能为空
+    结束
+    如果 {tt} 为空
+      报错 400 名称不能为空
+    结束
+    设 lt = 截取 {tt} 61
+    如果 {lt} 不为空
+      报错 400 名称最长60字
+    结束
+    设 fc = 调用 编号格式检查 subject_id={sb.subject_id} code={cd}
+    设 own = 查一行 app.db kg_point_by_code code={cd} subject_id={sb.subject_id}
+    如果 {own} 不为空
+      报错 409 编号已存在
+    结束
+    设 oc = 查一值 app.db kg_point_other code={cd} subject_id={sb.subject_id}
+    如果 {oc} 大于 0
+      报错 409 编号已被其他科目使用
+    结束
+    设 pa.code = {cd}
+    设 pa.title = {tt}
+    设 pa.subject_id = {sb.subject_id}
+    设 w = 写库表 app.db kg_point_insert {pa}
+    返回 {"ok": 1, "code": "{cd}"}
+  结束
+
+  公开 函数 改知识点 code title learner? current_role? auth_mode? subject?
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
+    设 cd = 替换 {code} ^\s+|\s+$
+    设 tt = 替换 {title} ^\s+|\s+$
+    如果 {cd} 为空
+      报错 400 编号不能为空
+    结束
+    如果 {tt} 为空
+      报错 400 名称不能为空
+    结束
+    设 lt = 截取 {tt} 61
+    如果 {lt} 不为空
+      报错 400 名称最长60字
+    结束
+    设 p = 查一行 app.db kg_point_by_code code={cd} subject_id={sb.subject_id}
+    如果 {p} 为空
+      报错 404 没有这个知识点
+    结束
+    设 pa.code = {cd}
+    设 pa.title = {tt}
+    设 pa.subject_id = {sb.subject_id}
+    设 w = 写库表 app.db kg_point_update {pa}
+    返回 {"ok": 1}
+  结束
+
+  函数 外部引用 kind code subject_id
+    设 refs = 解析JSON []
+    设 tot = 0
+    如果 {kind} 等于 point
+      设 t1 = 查一值 app.db kg_table_exists name=lesson_point_link
+      如果 {t1} 大于 0
+        设 n = 查一值 app.db kg_ref_lesson_point code={code} subject_id={subject_id}
+        如果 {n} 大于 0
+          设 it = {"source": "课文挂接", "n": {n}, "block": 1}
+          设 refs = 列表加项 {refs} {it}
+          设 tot = 计算 {tot} + {n}
+        结束
+      结束
+      设 t2 = 查一值 app.db kg_table_exists name=vocab_word
+      如果 {t2} 大于 0
+        设 n = 查一值 app.db kg_ref_vocab code={code} subject_id={subject_id}
+        如果 {n} 大于 0
+          设 it = {"source": "单词", "n": {n}, "block": 1}
+          设 refs = 列表加项 {refs} {it}
+          设 tot = 计算 {tot} + {n}
+        结束
+      结束
+      设 t3 = 查一值 app.db kg_table_exists name=progress_answer
+      如果 {t3} 大于 0
+        设 n = 查一值 app.db kg_ref_answer code={code} subject_id={subject_id}
+        如果 {n} 大于 0
+          设 it = {"source": "作答记录", "n": {n}, "block": 1}
+          设 refs = 列表加项 {refs} {it}
+          设 tot = 计算 {tot} + {n}
+        结束
+      结束
+      设 t4 = 查一值 app.db kg_table_exists name=progress_mastery
+      如果 {t4} 大于 0
+        设 n = 查一值 app.db kg_ref_mastery code={code} subject_id={subject_id}
+        如果 {n} 大于 0
+          设 it = {"source": "掌握记录", "n": {n}, "block": 1}
+          设 refs = 列表加项 {refs} {it}
+          设 tot = 计算 {tot} + {n}
+        结束
+      结束
+      设 t5 = 查一值 app.db kg_table_exists name=progress_score
+      如果 {t5} 大于 0
+        设 n = 查一值 app.db kg_ref_score code={code} subject_id={subject_id}
+        如果 {n} 大于 0
+          设 it = {"source": "得分记录", "n": {n}, "block": 1}
+          设 refs = 列表加项 {refs} {it}
+          设 tot = 计算 {tot} + {n}
+        结束
+      结束
+      设 t6 = 查一值 app.db kg_table_exists name=dictation_progress
+      如果 {t6} 大于 0
+        设 n = 查一值 app.db kg_ref_dictation code={code} subject_id={subject_id}
+        如果 {n} 大于 0
+          设 it = {"source": "默写进度", "n": {n}, "block": 1}
+          设 refs = 列表加项 {refs} {it}
+          设 tot = 计算 {tot} + {n}
+        结束
+      结束
+      设 t7 = 查一值 app.db kg_table_exists name=teacher_assist_message
+      如果 {t7} 大于 0
+        设 n = 查一值 app.db kg_ref_assist code={code} subject_id={subject_id}
+        如果 {n} 大于 0
+          设 it = {"source": "教师助手对话", "n": {n}, "block": 0}
+          设 refs = 列表加项 {refs} {it}
+          设 tot = 计算 {tot} + {n}
+        结束
+      结束
+    结束
+    如果 {kind} 等于 item
+      设 t8 = 查一值 app.db kg_table_exists name=lesson_item_link
+      如果 {t8} 大于 0
+        设 n = 查一值 app.db kg_ref_lesson_item code={code} subject_id={subject_id}
+        如果 {n} 大于 0
+          设 it = {"source": "课文挂接", "n": {n}, "block": 1}
+          设 refs = 列表加项 {refs} {it}
+          设 tot = 计算 {tot} + {n}
+        结束
+      结束
+      设 t9 = 查一值 app.db kg_table_exists name=quiz_question
+      如果 {t9} 大于 0
+        设 n = 查一值 app.db kg_ref_quiz_item code={code} subject_id={subject_id}
+        如果 {n} 大于 0
+          设 it = {"source": "题目", "n": {n}, "block": 1}
+          设 refs = 列表加项 {refs} {it}
+          设 tot = 计算 {tot} + {n}
+        结束
+      结束
+    结束
+    返回 {"total": {tot}, "refs": {refs}}
+  结束
+
+  公开 函数 查引用 code kind? learner? current_role? auth_mode? subject?
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 cd = 替换 {code} ^\s+|\s+$
+    如果 {cd} 为空
+      报错 400 编号不能为空
+    结束
+    如果 {kind} 不为空 且 {kind} 不等于 point 且 {kind} 不等于 item
+      报错 400 kind 只能是 point 或 item
+    结束
+    设 kd = {kind}
+    如果 {kd} 为空
+      设 pp = 查一行 app.db kg_point_by_code code={cd} subject_id={sb.subject_id}
+      设 ii = 查一行 app.db kg_item_by_code code={cd} subject_id={sb.subject_id}
+      如果 {pp} 不为空
+        设 kd = point
+      否则如果 {ii} 不为空
+        设 kd = item
+      否则
+        报错 404 没有这个编号
+      结束
+    否则如果 {kd} 等于 point
+      设 pp = 查一行 app.db kg_point_by_code code={cd} subject_id={sb.subject_id}
+      如果 {pp} 为空
+        报错 404 没有这个编号
+      结束
+    否则
+      设 ii = 查一行 app.db kg_item_by_code code={cd} subject_id={sb.subject_id}
+      如果 {ii} 为空
+        报错 404 没有这个编号
+      结束
+    结束
+    设 refs = 解析JSON []
+    设 tot = 0
+    如果 {kd} 等于 point
+      设 n1 = 查一值 app.db kg_ref_item_point code={cd} subject_id={sb.subject_id}
+      如果 {n1} 大于 0
+        设 it = {"source": "下挂条目", "n": {n1}, "block": 1}
+        设 refs = 列表加项 {refs} {it}
+        设 tot = 计算 {tot} + {n1}
+      结束
+      设 n2 = 查一值 app.db kg_ref_edge code={cd} subject_id={sb.subject_id}
+      如果 {n2} 大于 0
+        设 it = {"source": "前置边", "n": {n2}, "block": 0}
+        设 refs = 列表加项 {refs} {it}
+        设 tot = 计算 {tot} + {n2}
+      结束
+    否则
+      设 n1 = 查一值 app.db kg_ref_item_prev code={cd} subject_id={sb.subject_id}
+      如果 {n1} 大于 0
+        设 it = {"source": "后一个条目", "n": {n1}, "block": 1}
+        设 refs = 列表加项 {refs} {it}
+        设 tot = 计算 {tot} + {n1}
+      结束
+    结束
+    设 n3 = 查一值 app.db kg_ref_contrast code={cd} subject_id={sb.subject_id}
+    如果 {n3} 大于 0
+      设 it = {"source": "对照", "n": {n3}, "block": 0}
+      设 refs = 列表加项 {refs} {it}
+      设 tot = 计算 {tot} + {n3}
+    结束
+    设 ex = 调用 外部引用 kind={kd} code={cd} subject_id={sb.subject_id}
+    遍历 x 于 {ex.refs}
+      设 refs = 列表加项 {refs} {x}
+    结束
+    设 tot = 计算 {tot} + {ex.total}
+    设 bs = 0
+    遍历 y 于 {refs}
+      如果 {y.block} 等于 1
+        设 bs = 计算 {bs} + {y.n}
+      结束
+    结束
+    设 dl = 0
+    如果 {bs} 等于 0
+      设 dl = 1
+    结束
+    返回 {"code": "{cd}", "kind": "{kd}", "total": {tot}, "deletable": {dl}, "refs": {refs}}
+  结束
+
+  公开 函数 删知识点 code learner? current_role? auth_mode? subject?
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
+    设 cd = 替换 {code} ^\s+|\s+$
+    如果 {cd} 为空
+      报错 400 编号不能为空
+    结束
+    设 p = 查一行 app.db kg_point_by_code code={cd} subject_id={sb.subject_id}
+    如果 {p} 为空
+      报错 404 没有这个知识点
+    结束
+    设 q = 调用 查引用 code={cd} kind=point subject={sb.subject_id}
+    如果 {q.deletable} 等于 0
+      设 detail = {nothing 或}
+      遍历 x 于 {q.refs}
+        如果 {x.block} 等于 1
+          如果 {detail} 为空
+            设 detail = {x.source}{x.n}
+          否则
+            设 detail = {detail}、{x.source}{x.n}
+          结束
+        结束
+      结束
+      报错 409 知识点还被引用，不能删除（{detail}）
+    结束
+    设 er = 0
+    设 cr = 0
+    事务 app.db
+      设 er = 写库 app.db kg_edge_delete code={cd} subject_id={sb.subject_id}
+      设 cr = 写库 app.db kg_contrast_delete code={cd} subject_id={sb.subject_id}
+      设 w = 写库 app.db kg_point_delete code={cd} subject_id={sb.subject_id}
+    结束
+    返回 {"ok": 1, "edges_removed": {er}, "contrasts_removed": {cr}}
+  结束
+
+  函数 编号格式检查 subject_id code
+    设 mt = 匹配 {code} ^[A-Za-z0-9][A-Za-z0-9_.-]*$
+    设 lg = 截取 {code} 61
+    如果 {mt.matched} 不等于 是 或 {lg} 不为空
+      报错 400 编号只能用字母、数字、点、下划线、短横，最长60
+    结束
+    设 pc = 调用 编号前缀检查 subject_id={subject_id} code={code}
+    返回 {"ok": 1}
+  结束
+
   函数 本科目 learner current_role auth_mode subject need?
     # 返回 {subject_id}；本次请求用哪个科目
     设 r = 调用 subject.解析科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need={need 或}
