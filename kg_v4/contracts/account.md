@@ -23,6 +23,21 @@
   old_password 文本 旧密码
   new_password 文本 新密码
   new_password2 文本 再输一次新密码
+页面 subject_member_view 科目成员页面
+  member_head 文本 成员浮层抬头（科目名、编码、状态、我的身份）
+  member_teacher 文本 教师表「用户名」列
+  member_teacher_label 文本 教师表「显示名」列
+  member_role 文本 教师表「角色」列（负责/协作）
+  member_creator 文本 教师表「创建者」列（是/空）
+  member_learner 文本 学生表「用户名」列
+  member_learner_label 文本 学生表「显示名」列
+  member_state 文本 学生表「状态」列（在册/已撤销）
+  member_assigned_by 文本 学生表「分配人」列
+  cand_learner 文本 可分配学生表「用户名」列
+  cand_label 文本 可分配学生表「显示名」列
+  assign_learners 长文本 批量分配的学生用户名（逗号、顿号、空格或换行分隔）
+  add_teacher 文本 要加入的教师（选项来自 teacher_options）
+  add_role 枚举 协作,负责 加入后的角色
 
 ## 函数
 公开 函数 核对身份 username
@@ -147,6 +162,101 @@
   伪代码 更新该行 disabled=disabled
   伪代码 调用 列学生页面，返回刷新后的学生列表（数组）
 
+公开 函数 列可分配学生 subject_id
+  返回 {total, students}；students 是 [{username, display_name}]：可以分配进该科目的学生——account_user 中 role 等于 student 且 disabled 等于 0、并且不在 subject.列科目学生（该科目在册）里的账号，按 id 升序；被撤销过的学生算「可分配」（再分配即恢复），停用的账号不列
+  伪代码 调用 subject.列科目学生 subject_id=subject_id 取在册名单（不校验权限；科目不存在时在册为空，返回全部可用学生）
+  伪代码 查 account_user 中 role 等于 student 且 disabled 等于 0 的行（按 id 升序），去掉 username 在在册名单里的
+  伪代码 返回 {"total": 数量, "students": [{"username", "display_name"}]}
+  伪代码 依赖方向：subject 是叶子、不读 account 的表，所以「哪些学生可分配」只能在 account 里算（K94 任务书写的「subject 的 列可分配学生」因此放在 account）
+
+公开 函数 科目成员页面 learner subj_id current_role? auth_mode?
+  返回 {form, member_head, member_my_role, can_manage, can_assign, member_teachers, member_students, assign_candidates, teacher_options}；「科目成员」浮层的「载入」（动作 subject_members，模板 页面状态 表单=form）
+  报错 400 subject_id 不对
+  报错 404 没有这个科目
+  报错 403 只有教师可以管理科目
+  报错 403 没有权限访问该科目
+  伪代码 调用 subject.科目详情 learner=learner subject_id=subj_id current_role=current_role auth_mode=auth_mode 得 详情（400/404/403 由它报：学生、他人私有科目的教师进不来）
+  伪代码 can_manage：详情 my_role 是 owner 或 single 为 1，否则 0；can_assign：详情 status 不等于 disabled 为 1，否则 0（能读到详情的教师都有分配权：负责、协作、公共科目其他教师）
+  伪代码 显示名：按用户名查 account_user 的 display_name，查不到写「{用户名}（无账号）」
+  伪代码 member_teachers：详情 teachers 每行转 {member_teacher: teacher, member_teacher_label: 显示名, member_role: owner 为「负责」否则「协作」, member_creator: creator 为 1 写「是」否则空串, can_edit: can_manage 为 1 且 creator 为 0 时 1 否则 0}
+  伪代码 member_students：详情 students 每行转 {member_learner: learner, member_learner_label: 显示名, member_state: active 为「在册」否则「已撤销」, member_assigned_by: assigned_by 为空写「迁移登记」否则原值, can_revoke: status 等于 active 且（my_role 不等于 public 或 assigned_by 等于 learner）时 1 否则 0}
+  伪代码 assign_candidates：can_assign 为 1 时调用 列可分配学生 subject_id=subj_id，每行转 {cand_learner: username, cand_label: display_name}；否则空数组
+  伪代码 teacher_options：can_manage 为 1 时查 account_user 中 role 等于 teacher 且 disabled 等于 0、用户名不在详情 teachers 里的账号，转 [{value: username, label: 「显示名（用户名）」}] 按用户名升序；否则空数组
+  伪代码 member_head：「{name}（{code}）·{状态中文：启用/停用/草稿}·我是{身份中文：负责/协作/公共只读/单人}」（不含空格）；member_my_role 为同一个身份中文
+  伪代码 form：{"subj_id": 科目 id, "assign_learners": "", "add_teacher": "", "add_role": "协作"}
+  伪代码 返回上面这些键组成的对象
+
+公开 函数 分配科目学生页面 learner subj_id assign_learners current_role? auth_mode?
+  返回 刷新后的成员浮层状态，形状同 科目成员页面
+  报错 400 请选择要分配的学生
+  报错 400 有的用户名不是可用的学生账号
+  报错 400 subject_id 不对
+  报错 404 没有这个科目
+  报错 403 只有教师可以管理科目
+  报错 403 没有权限访问该科目
+  报错 403 没有权限给该科目分配学生
+  报错 409 科目已停用，不能分配学生
+  伪代码 先调用 subject.科目详情 learner=learner subject_id=subj_id current_role=current_role auth_mode=auth_mode（只为校验：学生、他人私有科目先在这里得 403/404，不会因为名单不对先报 400）
+  伪代码 assign_learners 里的中文逗号、顿号、空白、换行都换成英文逗号，按英文逗号拆开，去空项、去重（保持顺序）；一项都没有，报错 400 请选择要分配的学生
+  伪代码 每一项按 username 查 account_user：查不到、role 不等于 student、或 disabled 等于 1，报错 400 有的用户名不是可用的学生账号（整批不写；消息里不列名字，前端名单来自候选表，手填才会撞上）
+  伪代码 调用 subject.分配学生 learner=learner subject_id=subj_id learners=规整后用英文逗号连起来的名单 current_role=current_role auth_mode=auth_mode（停用科目 409、权限 403 由它报）
+  伪代码 返回 调用 科目成员页面 learner=learner subj_id=subj_id current_role=current_role auth_mode=auth_mode 的结果
+
+公开 函数 撤销科目学生页面 learner subj_id member_learner current_role? auth_mode?
+  返回 刷新后的成员浮层状态，形状同 科目成员页面
+  报错 400 学生用户名不能为空
+  报错 400 subject_id 不对
+  报错 404 没有这个科目
+  报错 403 只有教师可以管理科目
+  报错 403 没有权限给该科目分配学生
+  报错 404 该学生不在本科目
+  报错 403 只能撤销自己分配的学生
+  伪代码 调用 subject.撤销学生 learner=learner subject_id=subj_id student=member_learner current_role=current_role auth_mode=auth_mode
+  伪代码 返回 调用 科目成员页面 learner=learner subj_id=subj_id current_role=current_role auth_mode=auth_mode 的结果
+
+公开 函数 加科目教师页面 learner subj_id add_teacher add_role? current_role? auth_mode?
+  返回 刷新后的成员浮层状态，形状同 科目成员页面
+  报错 400 角色只能是 owner 或 editor
+  报错 400 请选择要加入的教师
+  报错 400 不是可用的教师账号
+  报错 400 subject_id 不对
+  报错 404 没有这个科目
+  报错 403 只有教师可以管理科目
+  报错 403 没有权限访问该科目
+  报错 403 只有科目负责人可以操作
+  报错 409 该教师已在本科目
+  伪代码 先调用 subject.科目详情 learner=learner subject_id=subj_id current_role=current_role auth_mode=auth_mode 得 详情（400/404/403 由它报）；详情 my_role 不是 owner 也不是 single，报错 403 只有科目负责人可以操作（先判权限，非负责人不能借 400 探测某用户名是不是教师账号）
+  伪代码 add_role 页面值转换：「协作」或空为 editor，「负责」为 owner，其他值报错 400 角色只能是 owner 或 editor
+  伪代码 add_teacher 去掉首尾空白后为空，报错 400 请选择要加入的教师
+  伪代码 按 add_teacher 查 account_user：查不到、role 不等于 teacher、或 disabled 等于 1，报错 400 不是可用的教师账号
+  伪代码 调用 subject.加科目教师 learner=learner subject_id=subj_id teacher=add_teacher role=转换后 current_role=current_role auth_mode=auth_mode（403/404/409 由它报）
+  伪代码 返回 调用 科目成员页面 learner=learner subj_id=subj_id current_role=current_role auth_mode=auth_mode 的结果
+
+公开 函数 改科目教师角色页面 learner subj_id member_teacher role current_role? auth_mode?
+  返回 刷新后的成员浮层状态，形状同 科目成员页面（行动作「设为负责」「设为协作」，路由用「传」写死 role）
+  报错 400 角色只能是 owner 或 editor
+  报错 400 subject_id 不对
+  报错 404 没有这个科目
+  报错 403 只有教师可以管理科目
+  报错 403 只有科目负责人可以操作
+  报错 409 科目创建者始终是负责人
+  报错 404 该教师不在本科目
+  报错 409 不能去掉最后一个负责人
+  伪代码 调用 subject.改科目教师角色 learner=learner subject_id=subj_id teacher=member_teacher role=role current_role=current_role auth_mode=auth_mode
+  伪代码 返回 调用 科目成员页面 learner=learner subj_id=subj_id current_role=current_role auth_mode=auth_mode 的结果
+
+公开 函数 移除科目教师页面 learner subj_id member_teacher current_role? auth_mode?
+  返回 刷新后的成员浮层状态，形状同 科目成员页面
+  报错 400 subject_id 不对
+  报错 404 没有这个科目
+  报错 403 只有教师可以管理科目
+  报错 403 只有科目负责人可以操作
+  报错 409 科目创建者不能移除
+  报错 404 该教师不在本科目
+  报错 409 不能移除最后一个负责人
+  伪代码 调用 subject.移除科目教师 learner=learner subject_id=subj_id teacher=member_teacher current_role=current_role auth_mode=auth_mode
+  伪代码 返回 调用 科目成员页面 learner=learner subj_id=subj_id current_role=current_role auth_mode=auth_mode 的结果
+
 ## 接口
 POST /account/login -> 登录 动作 auth_login 模板 提交跳转 消息=已登录 跳转=@来处 公开
 POST /account/logout -> 退出
@@ -158,6 +268,15 @@ POST /account/students/create -> 建学生 动作 student_create 模板 提交�
 POST /account/students/reset -> 重置学生密码 动作 student_reset 模板 提交消息 消息=已重置{reset_user}的密码 参数 reset_user=username 角色 teacher
 POST /account/students/disable -> 设置学生停用 动作 student_disable 模板 提交消息 消息=已停用 键=students 传 disabled=1 角色 teacher
 POST /account/students/enable -> 设置学生停用 动作 student_enable 模板 提交消息 消息=已启用 键=students 传 disabled=0 角色 teacher
+GET /account/subject/candidates -> 列可分配学生 角色 teacher
+POST /account/subject/members -> 科目成员页面 动作 subject_members 模板 页面状态 表单=form 角色 teacher
+POST /account/subject/assign -> 分配科目学生页面 动作 subject_assign 模板 页面状态消息 消息=已分配 角色 teacher
+POST /account/subject/assign-one -> 分配科目学生页面 动作 subject_assign_one 模板 页面状态消息 消息=已分配 参数 cand_learner=assign_learners 角色 teacher
+POST /account/subject/revoke -> 撤销科目学生页面 动作 subject_revoke 模板 页面状态消息 消息=已撤销 角色 teacher
+POST /account/subject/teacher-add -> 加科目教师页面 动作 subject_teacher_add 模板 页面状态消息 消息=已加入本科目 角色 teacher
+POST /account/subject/teacher-owner -> 改科目教师角色页面 动作 subject_teacher_owner 模板 页面状态消息 消息=已设为负责 传 role=owner 角色 teacher
+POST /account/subject/teacher-editor -> 改科目教师角色页面 动作 subject_teacher_editor 模板 页面状态消息 消息=已设为协作 传 role=editor 角色 teacher
+POST /account/subject/teacher-remove -> 移除科目教师页面 动作 subject_teacher_remove 模板 页面状态消息 消息=已移出本科目 角色 teacher
 
 ## 用例
 用例 核对身份_存在
@@ -395,3 +514,188 @@ POST /account/students/enable -> 设置学生停用 动作 student_enable 模板
   先 调用 建学生 username=s1 password=pw123456 display_name=小明
   调用 设置学生停用 username=s1 disabled=2
   报错 400
+
+用例 列可分配学生_排除在册停用和教师
+  先 数据 account_user username=s1 password_hash=x display_name=s1 role=student disabled=0 created_at=2026-01-01
+  先 数据 account_user username=s2 password_hash=x display_name=s2 role=student disabled=0 created_at=2026-01-01
+  先 数据 account_user username=s3 password_hash=x display_name=s3 role=student disabled=1 created_at=2026-01-01
+  先 数据 account_user username=s4 password_hash=x display_name=s4 role=student disabled=0 created_at=2026-01-01
+  先 数据 account_user username=t1 password_hash=x display_name=t1 role=teacher disabled=0 created_at=2026-01-01
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  先 数据 subject_student subject_id=1 learner=s2 assigned_by=t1 status=revoked created_at=2026-01-01
+  调用 列可分配学生 subject_id=1
+  得 total=2
+
+用例 列可分配学生_科目没人登记
+  先 数据 account_user username=s1 password_hash=x display_name=s1 role=student disabled=0 created_at=2026-01-01
+  先 数据 account_user username=s2 password_hash=x display_name=s2 role=student disabled=0 created_at=2026-01-01
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 列可分配学生 subject_id=1
+  得 total=2
+
+用例 科目成员页面_负责人
+  先 数据 account_user username=t1 password_hash=x display_name=t1 role=teacher disabled=0 created_at=2026-01-01
+  先 数据 account_user username=t2 password_hash=x display_name=t2 role=teacher disabled=0 created_at=2026-01-01
+  先 数据 account_user username=s1 password_hash=x display_name=s1 role=student disabled=0 created_at=2026-01-01
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=1 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  调用 科目成员页面 learner=t1 current_role=teacher auth_mode=on subj_id=1
+  得 can_manage=1 can_assign=1
+
+用例 科目成员页面_公共科目其他教师只能分配
+  先 数据 account_user username=t9 password_hash=x display_name=t9 role=teacher disabled=0 created_at=2026-01-01
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 科目成员页面 learner=t9 current_role=teacher auth_mode=on subj_id=1
+  得 can_manage=0 can_assign=1
+
+用例 科目成员页面_停用科目不能分配
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=disabled created_at=2026-01-01 updated_at=2026-01-01
+  调用 科目成员页面 learner=t1 current_role=teacher auth_mode=on subj_id=1
+  得 can_manage=1 can_assign=0
+
+用例 科目成员页面_他人私有403
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 科目成员页面 learner=t9 current_role=teacher auth_mode=on subj_id=1
+  报错 403
+
+用例 科目成员页面_学生403
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  调用 科目成员页面 learner=s1 current_role=student auth_mode=on subj_id=1
+  报错 403
+
+用例 科目成员页面_不存在404
+  调用 科目成员页面 learner=t1 current_role=teacher auth_mode=on subj_id=9
+  报错 404
+
+用例 分配科目学生页面_批量分配
+  先 数据 account_user username=s1 password_hash=x display_name=s1 role=student disabled=0 created_at=2026-01-01
+  先 数据 account_user username=s2 password_hash=x display_name=s2 role=student disabled=0 created_at=2026-01-01
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 分配科目学生页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 assign_learners=s1、s2
+  得 有返回
+  库 subject_student 共 2 行
+  库 subject_student 含 subject_id=1 learner=s2 status=active assigned_by=t1
+
+用例 分配科目学生页面_含教师账号整批不写
+  先 数据 account_user username=s1 password_hash=x display_name=s1 role=student disabled=0 created_at=2026-01-01
+  先 数据 account_user username=t2 password_hash=x display_name=t2 role=teacher disabled=0 created_at=2026-01-01
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 分配科目学生页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 assign_learners=s1,t2
+  报错 400
+  库 subject_student 共 0 行
+
+用例 分配科目学生页面_不存在的用户400
+  先 数据 account_user username=s1 password_hash=x display_name=s1 role=student disabled=0 created_at=2026-01-01
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 分配科目学生页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 assign_learners=s1,ghost
+  报错 400
+  库 subject_student 共 0 行
+
+用例 分配科目学生页面_停用账号400
+  先 数据 account_user username=s1 password_hash=x display_name=s1 role=student disabled=1 created_at=2026-01-01
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 分配科目学生页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 assign_learners=s1
+  报错 400
+  库 subject_student 共 0 行
+
+用例 分配科目学生页面_名单为空400
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 分配科目学生页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 assign_learners=空
+  报错 400
+
+用例 分配科目学生页面_他人私有先报403
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 分配科目学生页面 learner=t9 current_role=teacher auth_mode=on subj_id=1 assign_learners=ghost
+  报错 403
+  库 subject_student 共 0 行
+
+用例 分配科目学生页面_停用科目409
+  先 数据 account_user username=s1 password_hash=x display_name=s1 role=student disabled=0 created_at=2026-01-01
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=disabled created_at=2026-01-01 updated_at=2026-01-01
+  调用 分配科目学生页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 assign_learners=s1
+  报错 409
+  库 subject_student 共 0 行
+
+用例 撤销科目学生页面_负责人撤销
+  先 数据 account_user username=s1 password_hash=x display_name=s1 role=student disabled=0 created_at=2026-01-01
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  调用 撤销科目学生页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 member_learner=s1
+  得 有返回
+  库 subject_student 含 learner=s1 status=revoked
+
+用例 撤销科目学生页面_不在册404
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 撤销科目学生页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 member_learner=s1
+  报错 404
+
+用例 加科目教师页面_加协作
+  先 数据 account_user username=t1 password_hash=x display_name=t1 role=teacher disabled=0 created_at=2026-01-01
+  先 数据 account_user username=t2 password_hash=x display_name=t2 role=teacher disabled=0 created_at=2026-01-01
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 加科目教师页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 add_teacher=t2 add_role=协作
+  得 有返回
+  库 subject_teacher 含 subject_id=1 teacher=t2 role=editor
+
+用例 加科目教师页面_加负责
+  先 数据 account_user username=t2 password_hash=x display_name=t2 role=teacher disabled=0 created_at=2026-01-01
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 加科目教师页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 add_teacher=t2 add_role=负责
+  得 有返回
+  库 subject_teacher 含 teacher=t2 role=owner
+
+用例 加科目教师页面_学生账号400
+  先 数据 account_user username=s1 password_hash=x display_name=s1 role=student disabled=0 created_at=2026-01-01
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 加科目教师页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 add_teacher=s1
+  报错 400
+  库 subject_teacher 共 0 行
+
+用例 加科目教师页面_没有这个账号400
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 加科目教师页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 add_teacher=ghost
+  报错 400
+  库 subject_teacher 共 0 行
+
+用例 加科目教师页面_角色不对400
+  先 数据 account_user username=t2 password_hash=x display_name=t2 role=teacher disabled=0 created_at=2026-01-01
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 加科目教师页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 add_teacher=t2 add_role=abc
+  报错 400
+
+用例 加科目教师页面_协作教师403
+  先 数据 account_user username=t3 password_hash=x display_name=t3 role=teacher disabled=0 created_at=2026-01-01
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=1 teacher=t2 role=editor created_at=2026-01-01
+  调用 加科目教师页面 learner=t2 current_role=teacher auth_mode=on subj_id=1 add_teacher=t3
+  报错 403
+  库 subject_teacher 共 1 行
+
+用例 改科目教师角色页面_设为负责
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=1 teacher=t2 role=editor created_at=2026-01-01
+  调用 改科目教师角色页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 member_teacher=t2 role=owner
+  得 有返回
+  库 subject_teacher 含 teacher=t2 role=owner
+
+用例 改科目教师角色页面_最后一个负责人409
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=空 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=1 teacher=t1 role=owner created_at=2026-01-01
+  调用 改科目教师角色页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 member_teacher=t1 role=editor
+  报错 409
+
+用例 移除科目教师页面_移除协作
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=1 teacher=t2 role=editor created_at=2026-01-01
+  调用 移除科目教师页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 member_teacher=t2
+  得 有返回
+  库 subject_teacher 共 0 行
+
+用例 移除科目教师页面_创建者409
+  先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=1 teacher=t2 role=owner created_at=2026-01-01
+  调用 移除科目教师页面 learner=t2 current_role=teacher auth_mode=on subj_id=1 member_teacher=t1
+  报错 409
