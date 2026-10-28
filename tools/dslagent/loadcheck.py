@@ -17,7 +17,7 @@ from tools.dsl import DSLEngine
 from tools import entity as E
 from tools.dsl_core import (
     CALL_PARAM_RE, DSLError, PACK_SEP_RE, RESERVED, normalize, single_eq_hint, parse_cond_expr,
-    split_head, split_raw_cmp,
+    split_args, split_head, split_raw_cmp,
 )
 from tools.verbs import VerbRegistry
 from tools.dsl_http import scan_routes, split_endpoints
@@ -337,7 +337,7 @@ def check_verb_calls(lines, reg, label, base=0):
             continue
         if head == "报错" and BIZ_CODE_HEAD_RE.match(rest.strip()):
             continue   # 「报错 4xx 文字」是业务错误（引擎先认它），不是 common 的报错动词
-        problem = reg.check_call(head, rest.split())
+        problem = reg.check_call(head, split_args(rest))
         if problem:
             probs.append(f"[接口出错] {label}: 第 {base + i + 1} 行：{problem}")
     return probs

@@ -280,7 +280,7 @@ from .dsl_core import (  # noqa: F401
     LoopControl, MAX_CALL_DEPTH, REPEAT_RE, WHILE_LIMIT_RE, PACK_SEP_RE, RESERVED, RET_STATUS_RE,
     BizError, ScriptReturn, TX_BEGIN, TX_COMMIT, TX_ROLLBACK, VAR_RE, VERB_LIKE_RE,
     as_number, check_name, dig, index_of, eval_cond_expr, eval_parts, is_empty,
-    iter_items, msg_size, normalize, parse_cond_expr, parse_condition, put,
+    iter_items, msg_size, normalize, parse_cond_expr, parse_condition, put, split_args,
     split_alt, split_condition_tail, split_head, split_items, split_ws_once, to_text,
 )
 from .dsl_calc import calculate
@@ -1164,7 +1164,8 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
     def _do_verb(self, name: str, rest: str, lineno: int,
                  assign_to: str | None = None) -> None:
         """执行一个动词。参数转文本，但返回值保留结构。"""
-        pos, kws, late = self.verbs.split_call(name, rest.split()) if rest.strip() else ([], [], [])
+        # 切在展开之前；{名 或}、{名 或 默认} 里的空格不切（split_args）
+        pos, kws, late = self.verbs.split_call(name, split_args(rest)) if rest.strip() else ([], [], [])
         args = [self.expand(a) for a in pos]
         # 键=值 的值整个是变量引用时保留结构（列表 / 对象）
         params = self.verbs.bind(name, args, [(k, self._resolve_items(v)) for k, v in kws],

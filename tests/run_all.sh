@@ -110,6 +110,7 @@ run 经WSL调CLI  $PY tests/dsl/test_cli_via_wsl.py
 run 运行模式    $PY tests/dsl/test_run_mode.py
 run 命名约定    $PY tests/dsl/test_naming.py
 run 字符串动词  $PY tests/dsl/test_text_verbs.py
+run 参数或默认  $PY tests/dsl/test_alt_args.py
 run 条件计算正则 $PY tests/dsl/test_cond_calc_regex.py
 run 循环        $PY tests/dsl/test_loop_while.py
 run 业务层        $PY tests/dsl/test_service_layer.py
