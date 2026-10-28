@@ -10,8 +10,8 @@
 |---|---|
 | `contracts/` | 13 个模块的约定（公开函数、用例）；约定检查、回归都以它为准 |
 | `entities/` `queries/` | 实体（表）和查询 SQL |
-| `services/` `routes/` `scripts/` | 业务函数、79 个接口、教材导入用的脚本 |
-| `ui/` | 13 个 .ui，编译出 14 个界面（学生端 `/` 8 个，教师端 `/teacher` 6 个） |
+| `services/` `routes/` `scripts/` | 业务函数、93 个接口、教材导入用的脚本 |
+| `ui/` | 14 个 .ui，编译出 15 个界面（学生端 `/` 8 个，教师端 `/teacher` 7 个） |
 | `plan/top.zs` | 模块清单和依赖（约定检查、回归会读） |
 | `setup/init_data.py` | 数据初始化 |
 | `req.md` | 需求说明 |
@@ -91,7 +91,7 @@
 ## 检查与测试
 
 ```
-.venv/bin/python tests/kg_v4/test_project.py     # 约定检查 + 全量回归 13/13 + 编译 79 接口 + 初始化脚本（约 1 分钟）
+.venv/bin/python tests/kg_v4/test_project.py     # 约定检查 + 全量回归 13/13 + 编译 93 接口 + 初始化脚本（约 1 分钟）
 ```
 
 `tests/run_all.sh` 里有「kg_v4 项目」一行。

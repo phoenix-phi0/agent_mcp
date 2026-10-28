@@ -5,6 +5,7 @@
 
     cd /workspace/agent_mcp && .venv/bin/python tests/kg_v4/e2e_walk.py
     .venv/bin/python tests/kg_v4/e2e_walk.py --no-subject-mgmt   # 基线（合并前）也该全过
+    .venv/bin/python tests/kg_v4/e2e_walk.py --no-kg-mgmt       # 图谱管理未合并时跑全过
 
 浏览器：playwright + 系统 Chrome（/usr/bin/google-chrome 作 executable_path，
 不 playwright install 下载浏览器）。没装 playwright 就打「跳过」并退出码 2
@@ -18,16 +19,22 @@
 
 断言与数据内容无关：不数具体条数，只查「界面开得开、结构对不对、流程通不通」。
 
-覆盖（--no-subject-mgmt 去掉带 * 的）：
+覆盖（--no-subject-mgmt 去掉带 * 的，--no-kg-mgmt 去掉带 ** 的）：
   1.  学生端根地址 / 落在问老师
   2.  学生端 6 个界面都能打开且无 JS 错误（忽略 unpkg vue-flow 的
       「production is not defined」告警，见 kg_v4/README.md）
-  3.  教师端 6 个界面都能打开（学情、教师助手、学生管理、科目管理*、AI老师设定、教材导入）
+  3.  教师端 6 个界面都能打开（学情、教师助手、学生管理、科目管理*、AI老师设定、教材导入；
+      图谱管理** 合并后是第 7 个）
   4.  导航分组：学生端右侧「看看」、教师端右侧「管理」
   5.* 科目管理流程：t1 建科目（私有草稿）→ 成员浮层加 t2 协作 → 分配 s1 →
       启用 → s1 顶栏可切到新科目 → t2 在该科目行只见「成员」→ t1 停用后
       s1 回落日语 → 停用日语提示 409 原文（先打接口取原文，再点按钮对文字）
-  6.  390px 视口：学生端首页与科目管理页* 不横向溢出
+  6.  390px 视口：学生端首页与科目管理页*、图谱管理页** 不横向溢出
+  7.** 图谱管理流程：t1 建知识点×2 → 建条目 → 加前置边 → 加反向的成环边看到
+      400 提示 → 导入预检（含一行错）确认导入按钮不出现 → 导出文本出现；
+      协作教师 t2 可写；公共科目其他教师 t3 只读（看不到写按钮）。t3 是
+      init_data 之后才建的账号，所以没被登记进 1 号科目（迁移会把先前已有
+      的教师全登记成协作）。断言与数据内容无关：只认本段自建的 walk99.* 编号
 输出「通过 x/共 y」，失败列原因；退出码 0 全过 / 1 有失败 / 2 环境起不来。
 """
 import argparse
@@ -54,6 +61,11 @@ STUDENT_PAGES = ["问老师", "做题", "默写", "教材", "知识图谱", "学
 TEACHER_PAGES = ["学情", "教师助手", "学生管理", "科目管理", "AI老师设定", "教材导入"]
 TEACHER_USER = "t1"
 STUDENT_NAME = "s1"
+# 图谱管理段（K99b）自建的编号/名称：断言只认这些，与种子数据内容无关
+KG_P1, KG_T1T = "walk99.p1", "走查点甲"
+KG_P2, KG_T2T = "walk99.p2", "走查点乙"
+KG_I1, KG_IT1 = "walk99.i1", "走查条目一"
+KG_T2P = "walk99.t2p"
 TEST_PASSWORD = "k97-walk-临时口令"     # 只进本走查自建的临时库
 SUBJ_CODE = "walk97"
 SUBJ_NAME = "走查物理"
@@ -91,7 +103,7 @@ def free_port():
     return p
 
 
-def build_workspace(tmp, src):
+def build_workspace(tmp, src, kg_mgmt=False):
     """拷 kg_v4、裁内容、建账号、灌库。返回项目目录。"""
     proj = tmp / "kg_v4"
     shutil.copytree(src, proj, ignore=shutil.ignore_patterns(
@@ -132,6 +144,14 @@ def build_workspace(tmp, src):
     r = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(f"init_data 失败：{(r.stdout + r.stderr)[-500:]}")
+    if kg_mgmt:
+        # t3 必须赶在 init_data 之后建：迁移会把之前就存在的教师全登记成 1 号
+        # 科目的协作（can_write=1）；图谱管理段要一个「没登记的公共科目其他教师」。
+        r = subprocess.run([str(REPO_PY), "-c", code, str(proj), TEST_PASSWORD,
+                            json.dumps([("t3", "teacher")])],
+                           cwd=REPO, capture_output=True, text=True)
+        if r.returncode != 0:
+            raise RuntimeError(f"建 t3 失败：{(r.stdout + r.stderr)[-500:]}")
     return proj
 
 
@@ -320,15 +340,24 @@ def student_switch(s1, ck, marks):
     ck(not err, "s1 页面整个流程无 JS 错误", err)
 
 
-def walk_teacher(page, base, ck, marks, subject_mgmt):
+def walk_teacher(page, base, ck, marks, subject_mgmt, kg_mgmt=False):
     links = nav_links(page)
     expect = sorted(p for p in TEACHER_PAGES if subject_mgmt or p != "科目管理")
+    kg_ok = kg_mgmt
+    if kg_mgmt:
+        if "图谱管理" in links:
+            expect = sorted(expect + ["图谱管理"])
+        else:
+            # 实现未合并：只报一条清楚的失败，后面的图谱管理段整体跳过（不然会 30 秒超时崩掉）
+            kg_ok = False
+            ck(False, "教师端导航有「图谱管理」页（实现缺失？未合并时请用 --no-kg-mgmt）", links)
     ck(links == expect, f"教师端导航 {len(expect)} 项齐全", links)
     ck(page.locator(".nav-side-h", has_text="管理").count() == 1,
        "教师端导航分组「管理」在")
     for n in expect:
         err = visit(page, n, marks)
         ck(not err, f"教师端「{n}」打开且无 JS 错误", err)
+    return kg_ok
 
 
 def subject_flow(t1, base, ck, marks):
@@ -416,15 +445,188 @@ def subject_flow_after(t2, s1, t1, ck, marks):
        f"页面：「{got}」")
 
 
+def pick_label(page, sel, needle):
+    """下拉里挑一条含 needle 的选项文字；挑不到就退而取最后一项。没选项返回 None。"""
+    # eval_on_selector_all 传给页面函数的是「匹配元素数组」，不是单个元素（K103 实测：
+    # 写成 e => [...e.options] 会 TypeError: e.options is not iterable）
+    labels = page.eval_on_selector_all(
+        sel, "els => els.flatMap(el => [...el.options].map(o => o.textContent.trim()))")
+    if not labels:
+        return None
+    hit = [x for x in labels if needle in x]
+    return hit[0] if hit else labels[-1]
+
+
+def kg_create_point(page, code, title, ck, label):
+    """顶栏「新建知识点」浮层建一个点，断言它出现在知识点表里。"""
+    clear_toast(page)
+    page.locator('button:has-text("新建知识点")').first.click()
+    page.wait_for_selector(".overlay", timeout=8000)
+    page.locator('.overlay label.field:has-text("编号") input').first.fill(code)
+    page.locator('.overlay label.field:has-text("名称") input').first.fill(title)
+    page.locator('.overlay button:has-text("保存")').first.click()
+    page.wait_for_selector(".overlay", state="detached", timeout=10000)
+    clear_toast(page)
+    page.wait_for_selector(f'tr:has-text("{code}")', timeout=10000)
+    ck(page.locator("tr", has_text=code).count() >= 1,
+       f"{label}：知识点 {code} 建成且在表里")
+
+
+def kg_mgmt_flow(t1, t2, t3, ck, marks, tmp):
+    """图谱管理段（K99b，约定 k98_design/kg_manage.ui）。断言与数据内容无关：
+    只认本段自建的 walk99.* 编号和自取的提示条文字，不写死种子数据的任何内容。"""
+    t1._allowed_status = ("400", "409")   # 成环 400 / 引用 409 是故意打的，不算 JS 错误
+    visit(t1, "图谱管理", marks)
+    # 等 kgm_home（进入时）回来：三个写按钮挂在 shared.can_write 上，没回来时只剩「导出」
+    t1.wait_for_selector('button:has-text("新建知识点")', timeout=15000)
+    btns = [b for b in ("新建知识点", "新建条目", "批量导入", "导出")
+            if t1.locator(f'button:has-text("{b}")').count()]
+    ck(btns == ["新建知识点", "新建条目", "批量导入", "导出"],
+       "负责人（t1）顶栏四个按钮齐全", f"实际有：{btns}")
+
+    # 1) 建两个知识点（后面加边、成环要用一对）
+    kg_create_point(t1, KG_P1, KG_T1T, ck, "建知识点1")
+    kg_create_point(t1, KG_P2, KG_T2T, ck, "建知识点2")
+
+    # 2) 建条目：挂到「所属知识点」下拉的第一项上——挂谁都行，与数据内容无关
+    clear_toast(t1)
+    t1.locator('button:has-text("新建条目")').first.click()
+    t1.wait_for_selector(".overlay", timeout=8000)
+    t1.locator('.overlay label.field:has-text("编号") input').first.fill(KG_I1)
+    t1.locator('.overlay label.field:has-text("名称") input').first.fill(KG_IT1)
+    # 不能 select_option(index=0)：下拉第一项是 <option value="" disabled>请选择</option>
+    # 占位项，选它提交 kgi_point 为空 → 404 没有这个知识点（K103 实测）。按值选刚建的点。
+    t1.wait_for_function(
+        "c => { for (const el of document.querySelectorAll('.overlay label.field')) {"
+        " if (el.textContent.indexOf('所属知识点') < 0) continue;"
+        " const sel = el.querySelector('select');"
+        " if (sel && [...sel.options].some(o => o.value === c)) return true; } return false; }",
+        arg=KG_P1, timeout=10000)
+    t1.locator('.overlay label.field:has-text("所属知识点") select').first.select_option(KG_P1)
+    t1.locator('.overlay button:has-text("保存")').first.click()
+    t1.wait_for_selector(".overlay", state="detached", timeout=10000)
+    clear_toast(t1)
+    # 等整页状态（kgm_item_save 返回）把条目表刷出来再数，跟建知识点同款
+    t1.wait_for_selector(f'tr:has-text("{KG_I1}")', timeout=10000)
+    ck(t1.locator("tr", has_text=KG_I1).count() >= 1, "条目 walk99.i1 建成且在表里")
+
+    # 3) 加前置边 p1→p2；再加反向 p2→p1（成环）看到 400 提示、表不多行
+    l1 = pick_label(t1, 'label.field:has-text("先学") select', KG_P1)
+    l2 = pick_label(t1, 'label.field:has-text("后学") select', KG_P2)
+    ck(bool(l1) and bool(l2) and l1 != l2, "前置边两个下拉有可选项", f"{l1!r} {l2!r}")
+    if l1 and l2 and l1 != l2:
+        pre = t1.locator('label.field:has-text("先学") select').first
+        post = t1.locator('label.field:has-text("后学") select').first
+        n0 = t1.locator("tr", has_text=KG_T1T).count()
+        pre.select_option(label=l1)
+        post.select_option(label=l2)
+        t1.locator('button:has-text("加前置边")').first.click()
+        # 等整页状态（kgm_edge_add 返回）把前置边表刷出来再数：刷新是异步的，数早了差一行
+        t1.wait_for_function(
+            "([t, n]) => [...document.querySelectorAll('tr')]"
+            ".filter(r => r.textContent.indexOf(t) >= 0).length === n + 1",
+            arg=[KG_T1T, n0], timeout=10000)
+        n1 = t1.locator("tr", has_text=KG_T1T).count()
+        ck(n1 == n0 + 1, "前置边加上（前置边表多一行）", f"{n0} → {n1}")
+        pre.select_option(label=l2)
+        post.select_option(label=l1)
+        t1.locator('button:has-text("加前置边")').first.click()
+        try:
+            got = toast(t1, kind="no")
+        except Exception:
+            try:
+                got = toast(t1)
+            except Exception:
+                got = ""
+        ck(bool(got.strip()), "成环的边被拒：提示条有 400 原文", f"提示条：「{got}」")
+        n2 = t1.locator("tr", has_text=KG_T1T).count()
+        ck(n2 == n1, "成环的边没进表", f"{n1} → {n2}")
+
+    # 4) 导入预检：一行好一行坏 → 逐行结果出来、确认导入按钮不出现
+    clear_toast(t1)
+    t1.locator('button:has-text("批量导入")').first.click()
+    t1.wait_for_selector(".overlay", timeout=8000)
+    # 上传文件不能在预检后立刻删：图谱管理页每个动作的 FormData 都带着 imp_upload，
+    # 文件没了后面的请求（如导出）会在发出前失败（K105）。建在走查 tmp 里，随 rmtree 删
+    f = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8", dir=tmp)
+    f.write(KG_P1 + "imp|预检好的行\n坏 编号|预检坏行\n")
+    f.close()
+    t1.locator('.overlay input[type="file"]').first.set_input_files(f.name)
+    # 不能 index=0：下拉第一项是「请选择」占位（imp_kind 空 → 400 导入类型不对）
+    t1.locator('.overlay label.field:has-text("类型") select').first.select_option(label="知识点")
+    t1.locator('.overlay button:has-text("预检")').first.click()
+    t1.wait_for_selector(".overlay tr", timeout=10000)
+    ck(t1.locator(".overlay tr").count() >= 1, "预检出了逐行结果")
+    ck(t1.locator('.overlay button:has-text("确认导入")').count() == 0,
+       "有一行错：确认导入按钮不出现")
+    t1.locator('.overlay button:has-text("返回")').first.click()
+    t1.wait_for_selector(".overlay", state="detached", timeout=8000)
+    clear_toast(t1)
+
+    # 5) 导出：生成后有文本（约定：不做文件下载；.ui 里导出文本走「显示」读 shared，
+    #    不是多行框——多行框绑 form，而 kgm_export 回的是页面状态，不会回填）
+    t1.locator('button:has-text("导出")').first.click()
+    t1.wait_for_selector(".overlay", timeout=8000)
+    t1.locator('.overlay label.field:has-text("类型") select').first.select_option(label="全部")
+    t1.locator('.overlay button:has-text("生成")').first.click()
+    try:
+        t1.wait_for_function(
+            "() => [...document.querySelectorAll('.overlay .dyn-v')]"
+            ".some(e => e.textContent.trim().length > 50)", timeout=15000)
+        ck(True, "导出生成了文本")
+    except Exception as e:
+        ck(False, "导出生成了文本", type(e).__name__)
+    t1.locator('.overlay button:has-text("返回")').first.click()
+    t1.wait_for_selector(".overlay", state="detached", timeout=8000)
+    clear_toast(t1)
+
+    # 6) 协作教师（t2）可写：有写按钮、真能建一个点
+    visit(t2, "图谱管理", marks)
+    t2.wait_for_selector('button:has-text("新建知识点")', timeout=15000)  # 等 kgm_home 回来
+    ck(t2.locator('button:has-text("新建知识点")').count() == 1, "协作教师（t2）有写按钮")
+    kg_create_point(t2, KG_T2P, "走查协作点", ck, "协作教师写")
+
+    # 7) 公共科目其他教师（t3，init 后才建、没登记）只读：没有写按钮、能导出
+    visit(t3, "图谱管理", marks)
+    t3.wait_for_selector('button:has-text("导出")', timeout=15000)  # 等 kgm_home 回来
+    extra = [b for b in ("新建知识点", "新建条目", "批量导入")
+             if t3.locator(f'button:has-text("{b}")').count()]
+    ck(not extra, "公共科目其他教师（t3）看不到写按钮", f"多了：{extra}")
+    ck(t3.locator('button:has-text("导出")').count() == 1, "t3 仍能导出")
+    # 文案挂在 shared.can_write===0 上（kgm_home 回来才出现），直接等它
+    try:
+        t3.wait_for_selector("text=公共只读", timeout=15000)
+        ck(True, "t3 页面有「公共只读」说明")
+    except Exception:
+        ck(False, "t3 页面有「公共只读」说明", "15 秒没出现（can_write 没到 0？）")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="kg_v4 浏览器走查（真浏览器，自己起服务）")
     ap.add_argument("--no-subject-mgmt", dest="no_subject", action="store_true",
                     help="跳过科目管理相关断言（给合并前的基线跑，证明脚本本身没错）")
+    ap.add_argument("--no-kg-mgmt", dest="no_kg", action="store_true",
+                    help="跳过图谱管理段（默认开；实现未合并时用它跑基线）")
     ap.add_argument("--src", default=str(REPO / "kg_v4"),
                     help="被走查的 kg_v4 目录（默认仓库里的；基线 worktree 传它的）")
     ap.add_argument("--keep", action="store_true", help="留着临时目录（排查用）")
+    ap.add_argument("--timeout", type=int, default=600,
+                    help="整个走查的秒数上限（默认 600）；到点打出卡在哪一行，"
+                         "按失败收尾并停服务；0 = 不限")
     a = ap.parse_args(argv)
+    if a.timeout > 0:
+        import signal
+        import traceback
+
+        def _on_alarm(sig, frame):
+            print(f"\n!! 走查超过 {a.timeout} 秒，卡在：")
+            traceback.print_stack(frame, limit=6, file=sys.stdout)
+            sys.stdout.flush()
+            raise TimeoutError(f"整个走查超过 {a.timeout} 秒")
+        signal.signal(signal.SIGALRM, _on_alarm)
+        signal.alarm(a.timeout)
     subject_mgmt = not a.no_subject
+    kg_mgmt = not a.no_kg
 
     try:
         from playwright.sync_api import sync_playwright
@@ -442,7 +644,7 @@ def main(argv=None):
     proc = None
     print(f"临时目录 {tmp}，端口 {port}")
     try:
-        proj = build_workspace(tmp, Path(a.src))
+        proj = build_workspace(tmp, Path(a.src), kg_mgmt=kg_mgmt)
         with open(tmp / "server.log", "w") as log:
             proc = start_server(proj, port, log)
             base = f"http://127.0.0.1:{port}"
@@ -468,7 +670,7 @@ def main(argv=None):
                 t1 = new_page(browser.new_context(), "t1")
                 login(t1, base, TEACHER_USER, end="/teacher")
                 snapshot(marks)      # 登录前 401 跳登录页是预期行为，不计 JS 错误
-                walk_teacher(t1, base, ck, marks, subject_mgmt)
+                kg_mgmt = walk_teacher(t1, base, ck, marks, subject_mgmt, kg_mgmt)
                 if subject_mgmt:
                     subject_flow(t1, base, ck, marks)
                     student_switch(s1, ck, marks)
@@ -480,6 +682,19 @@ def main(argv=None):
                     subject_flow_after(t2, s1, t1, ck, marks)
                     err = drain_errors(marks_t2)
                     ck(not err, "t2 页面无 JS 错误", err)
+
+                # ---- 图谱管理（K99b）----
+                if kg_mgmt:
+                    t2k = t2 if subject_mgmt else new_page(browser.new_context(), "t2")
+                    if not subject_mgmt:
+                        login(t2k, base, "t2", end="/teacher")
+                        snapshot(marks)   # t2 登录前的 401 不计
+                    t3 = new_page(browser.new_context(), "t3")
+                    login(t3, base, "t3", end="/teacher")
+                    snapshot(marks)
+                    kg_mgmt_flow(t1, t2k, t3, ck, marks, tmp)
+                    err = drain_errors(marks)
+                    ck(not err, "图谱管理流程无 JS 错误", err)
 
                 # ---- 390px 视口 ----
                 m = new_page(browser.new_context(viewport={"width": 390, "height": 844}),
@@ -495,6 +710,14 @@ def main(argv=None):
                     mt.evaluate("location.hash = encodeURIComponent('科目管理')")
                     mt.wait_for_timeout(1200)
                     no_overflow(mt, "科目管理页", ck)
+                if kg_mgmt:
+                    mk = new_page(
+                        browser.new_context(viewport={"width": 390, "height": 844}),
+                        "390-t1kg")
+                    login(mk, base, TEACHER_USER, end="/teacher")
+                    mk.evaluate("location.hash = encodeURIComponent('图谱管理')")
+                    mk.wait_for_timeout(1200)
+                    no_overflow(mk, "图谱管理页", ck)
                 browser.close()
     except Exception as e:
         ck(False, "走查中途异常", f"{type(e).__name__}: {e}")

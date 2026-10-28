@@ -1,0 +1,204 @@
+# 图谱管理（教师端；K98 草稿，没编译过，实现时再放进 kg_v4/ui/）：科目的负责/协作教师
+# 管理本科目的知识图谱——知识点、前置边、条目、对照的增改删，批量导入（先预检、逐行报错、
+# 再确认），导出。公共科目的其他教师只读（能看、能导出）。单人模式全开。
+#
+# 接口（kg 模块，routes/kg_manage.zs，全部「角色 teacher」；约定见 contracts/kg.md）：
+#     kgm_home             图谱管理页面        进入时，整页状态（graph、kgm_points、kgm_items、
+#                                              kgm_edges、kgm_contrasts、point_options、kgm_head、kgm_role、can_write）
+#     kgm_point_open       载入知识点页面      「编辑知识点」浮层的载入（回填 kgp_*；节点图带 code、表格行带 kgp_orig）
+#     kgm_point_save       保存知识点页面      新建（kgp_orig 空）或改名；返回整页状态
+#     kgm_point_delete     删知识点页面        行上「删除」，带 kgp_orig；被引用 409，提示条显示原文和明细
+#     kgm_edge_add         加前置边页面        两个下拉 edge_pre / edge_point + 按钮；成环 400
+#     kgm_edge_delete      删前置边页面        行上「删除」，带 edge_key（「前置>后续」拼成一个键）
+#     kgm_item_open        载入条目页面        「编辑条目」浮层的载入（回填 kgi_*）
+#     kgm_item_save        保存条目页面        新建（kgi_orig 空）或编辑
+#     kgm_item_delete      删条目页面          行上「删除」，带 kgi_orig；被引用 409
+#     kgm_contrast_add     加对照页面          ct_a / ct_b 两个输入框
+#     kgm_contrast_delete  删对照页面          行上「删除」，带 ct_key（「a~b」）
+#     kgm_import_preview   导入预检页面        上传 imp_upload + imp_kind；返回 imp_rows / imp_head / imp_ok，
+#                                              表单回填 imp_file（模板 页面状态 表单=form）
+#     kgm_import_confirm   确认导入页面        提交 imp_kind + imp_file；返回整页状态
+#     kgm_export           导出页面            exp_kind 下拉；返回 export_text / export_head
+#
+# 「端 教师」「侧 管理」「序 15」：紧跟科目管理（序 14）。
+#
+# 身份：can_write（负责、协作、单人为 1；公共只读为 0）决定所有新建/编辑/删除/导入按钮显不显示；
+# 后端各写函数仍各自做 need=write 校验（按钮藏起来只是界面友好，不是安全边界）。
+# 学生进不来（路由「角色 teacher」，函数里再拦 403 只有教师可以管理图谱）。
+# 当前科目跟顶栏的科目下拉走（地址参数 subject → 偏好），页面不另放科目选择。
+#
+# 写法禁忌：「当」的条件里不能有空格；「提示」里不能有双引号和空格；动作标签别和关键字重名
+# （K95：「关闭」会被当成关键字，按钮文案落成动作名——底栏用「收起/取消/返回」）。
+#
+# ===== 实现前要核对的引擎点（每条带退路） =====
+# 1. 行动作「带」只支持单键（K95 实测：onRowRemote 的 carry 是单键）。本页所有行动作都只带一个键：
+#    知识点 kgp_orig、条目 kgi_orig、前置边 edge_key（「前置>后续」）、对照 ct_key（「a~b」），
+#    后端拆开。编号字符集已禁止 > 和 ~（kg.编号格式检查），拆分不会歧义。不需要退路。
+# 2. 浮层从行上打开时「载入」不发请求（K95：onRow 先把整行拷进表单，runLoader 看到「表单里
+#    已是这条」就跳过）。对策两层：
+#    a) 表格行本身带齐浮层要的全部字段（kgp_code/kgp_title、kgi_* 全套），所以就算不发载入，
+#       表单也是对的——只缺「被引用」说明 kgp_refs；
+#    b) 界面级「触发 kgm_point_open」：浮层开着、地址带 kgp_orig 或 code 时跑一次，把 kgp_refs 拉回来。
+#    要核对：一个界面能不能写两个「触发」（知识点、条目各一个）。草稿只写了 kgm_point_open；
+#    条目浮层不需要 refs，按 a) 不依赖载入。退路：kgp_refs 拉不回来就删掉这一行显示，
+#    删除时 409 的提示条照样给出引用明细（报错文案自带）。
+# 3. 「节点图 … 点开 编辑知识点 带 code」：学生端 node.ui 点开的是只读浮层；这里点开可编辑浮层，
+#    要核对节点图点开时是否也把节点拷进表单（节点里只有 code/label，没有 kgp_*）。如果拷了、
+#    载入又被跳过，浮层会是空表单——由第 2 条的「触发」兜底；触发也不行的退路：节点图「点开」
+#    去掉，只用作浏览，编辑从知识点表行上进。
+# 4. 浮层里放「上传」字段（imp_upload 在「批量导入」浮层里）：现有上传字段（textbook_import.ui
+#    的 document）都在页面主体上。要核对浮层里的远程动作能否带文件。退路：把「批量导入」区
+#    挪到页面主体最下面的「分组 … 当 shared.can_write==1」里。
+# 5. 「页面状态 表单=form」回填 imp_file 后，确认按钮提交时 imp_file 要能随表单发出：imp_file
+#    在浮层里是「只读」字段（显示存盘文件名）。要核对只读字段是否随表单提交。退路：改成普通
+#    单行字段加「提示 不用改」。
+# 6. 「序 15」和「侧 管理」同时写时组内排序：K95 已核对「符合预期」（科目管理 序 14 侧 管理）。
+# 7. 导出不做文件下载（没有下载模板）：文本放进多行框，教师全选复制、自己存 .txt。
+#    另留 GET /kg/export/text、GET /kg/export（JSON）给脚本用。要文件下载另开引擎任务。
+
+界面 自定义 图谱管理 端 教师 序 15 侧 管理 触发 kgm_point_open
+  动作 kgm_home 远程 进入时 隐藏 刷新
+
+  分组 抬头 横排 间距 12px 对齐 center
+    显示 kgm_head
+    显示 kgm_role 我的身份
+  结束
+  文案 当 shared.can_write===0 你在这个科目是「公共只读」：可以浏览和导出，不能修改。要改请找负责人把你加为协作教师。
+  文案 当 shared.can_write===1 编号建后不能改（课文、题目、单词和学习记录都按编号挂着）。被条目、题目、课文或学习记录用到的知识点和条目不能删，可以改名；删知识点会连同它的前置边和对照一起删。非日语科目的编号要以「科目编码.」开头。
+  分组 顶栏 横排 顶栏 间距 12px 对齐 center
+    动作 new_point 打开 编辑知识点 重置 当 shared.can_write===1 新建知识点
+    动作 new_item 打开 编辑条目 重置 当 shared.can_write===1 新建条目
+    动作 open_import 打开 批量导入 重置 当 shared.can_write===1 批量导入
+    动作 open_export 打开 导出 重置 导出
+  结束
+
+  # 复用学生端的节点图控件；图数据 graph 的形状同 progress.图谱页面（孤点 state=locked 灰显）
+  节点图 kg 绑 graph 选中 sel 点开 编辑知识点 带 code 图例 方向 纵向
+
+  布局 横排
+    区域 知识点
+      文案 当 lists.kgm_points&&!lists.kgm_points.length 这个科目还没有知识点：点「新建知识点」，或用「批量导入」。
+      列表 知识点表 绑 kgm_points 当 lists.kgm_points&&lists.kgm_points.length
+        列 kgp_code 编号
+        列 kgp_title 名称
+        列 kgp_pre_n 前置数
+        列 kgp_next_n 后续数
+        列 kgp_item_n 条目数
+        动作 edit_point 打开 编辑知识点 带 kgp_orig 当 shared.can_write===1 编辑
+        动作 kgm_point_delete 远程 危险 带 kgp_orig 当 shared.can_write===1 删除
+      结束
+    结束
+    区域 前置边
+      分组 加边 横排 间距 8px 对齐 flex-end 当 shared.can_write===1
+        字段 edge_pre 控件 下拉 选项来自 point_options 宽 180px 先学
+        字段 edge_point 控件 下拉 选项来自 point_options 宽 180px 后学
+        动作 kgm_edge_add 远程 加前置边
+      结束
+      文案 当 lists.kgm_edges&&!lists.kgm_edges.length 还没有前置边。
+      列表 前置边表 绑 kgm_edges 当 lists.kgm_edges&&lists.kgm_edges.length
+        列 edge_pre_title 先学
+        列 edge_point_title 后学
+        动作 kgm_edge_delete 远程 危险 带 edge_key 当 shared.can_write===1 删除
+      结束
+    结束
+  结束
+
+  布局 横排
+    区域 条目
+      文案 当 lists.kgm_items&&!lists.kgm_items.length 还没有条目（条目是知识点下面的具体说法，题目和课文挂在条目上）。
+      列表 条目表 绑 kgm_items 当 lists.kgm_items&&lists.kgm_items.length
+        列 kgi_code 编号
+        列 kgi_name 名称
+        列 kgi_point_title 所属知识点
+        列 kgi_after 接在
+        列 kgi_prev 前一个
+        动作 edit_item 打开 编辑条目 带 kgi_orig 当 shared.can_write===1 编辑
+        动作 kgm_item_delete 远程 危险 带 kgi_orig 当 shared.can_write===1 删除
+      结束
+    结束
+    区域 对照
+      分组 加对照 横排 间距 8px 对齐 flex-end 当 shared.can_write===1
+        字段 ct_a 宽 160px 提示 知识点或条目编号 一端
+        字段 ct_b 宽 160px 提示 知识点或条目编号 另一端
+        动作 kgm_contrast_add 远程 加对照
+      结束
+      文案 当 lists.kgm_contrasts&&!lists.kgm_contrasts.length 还没有对照（容易混的两个点，做题时会出对比题）。
+      列表 对照表 绑 kgm_contrasts 当 lists.kgm_contrasts&&lists.kgm_contrasts.length
+        列 ct_a_label 一端
+        列 ct_b_label 另一端
+        动作 kgm_contrast_delete 远程 危险 带 ct_key 当 shared.can_write===1 删除
+      结束
+    结束
+  结束
+
+  浮层 编辑知识点 宽 520px 载入 kgm_point_open
+    分组 主体 竖排 间距 12px
+      # K103s：params 在行上/节点图开浮层时恒空 → 改看 form.kgp_orig（载入回填；新建/重置为空）
+      字段 kgp_code 当 !form.kgp_orig 提示 如math.linear_fn 编号（建后不能改）
+      # 「显示」读 shared、不读 form，载入回填的是 form → 显示出来是空；改成文案（编号在表格行里看）
+      文案 当 form.kgp_orig 编号建后不能改（见表格里的编号列）。
+      字段 kgp_title 提示 最长60字 名称
+      # K103：行上/节点图开浮层时地址不带参数，「当 params…」恒假、说明永远不出；
+      # 而载入（kgm_point_open）真会发请求并按 form 回填 → 改绑 form，说明就出来了
+      字段 kgp_refs 提示 保存或载入后显示 被引用
+    结束
+    分组 底栏 横排 底栏
+      动作 kgm_point_save 提交 远程 关闭 当 shared.can_write===1 保存
+      动作 cancel_point 次要 关闭 收起
+    结束
+  结束
+
+  浮层 编辑条目 宽 560px 载入 kgm_item_open
+    分组 主体 竖排 间距 12px
+      字段 kgi_code 当 !form.kgi_orig 提示 如math.slope_formula 编号（建后不能改）
+      文案 当 form.kgi_orig 编号建后不能改（见表格里的编号列）。
+      字段 kgi_name 提示 最长60字 名称
+      字段 kgi_point 控件 下拉 选项来自 point_options 所属知识点
+      字段 kgi_after 提示 可空 接在哪个形式后
+      字段 kgi_prev 提示 可空，填前一个条目的编号 前一个条目
+    结束
+    分组 底栏 横排 底栏
+      动作 kgm_item_save 提交 远程 关闭 保存
+      动作 cancel_item 次要 关闭 取消
+    结束
+  结束
+
+  浮层 批量导入 宽 820px
+    文案 先选类型、选文件，点「预检」看每一行会怎样；全部没问题才能「确认导入」，有一行报错就一行都不写。
+    文案 格式：.txt/.md 每行用竖线分隔——知识点「编号|名称」，条目「编号|名称|知识点编号|接在|前一个条目」，前置边「先学编号|后学编号」，对照「编号A|编号B」；.csv 首行表头（code,title / code,name,point_code,after_form,prev_code / pre_code,point_code / a_code,b_code）；.json 是同样键的对象列表。一次最多2000行。
+    分组 选文件 横排 间距 12px 对齐 flex-end
+      字段 imp_kind 控件 下拉 宽 120px 类型
+      字段 imp_upload 接受 .md,.txt,.csv,.json 最大 20MB 文件
+      动作 kgm_import_preview 远程 预检
+    结束
+    显示 imp_head
+    列表 预检表 绑 imp_rows 当 shared.imp_rows&&shared.imp_rows.length
+      列 imp_line 行号
+      列 imp_code 编号
+      列 imp_label 内容
+      列 imp_action 结果
+      列 imp_reason 说明
+    结束
+    # K103：「只读」不在引擎修饰表里（tools/ui.py FLAG_MODIFIERS），写在行上只会
+    # 整段进标签 → 按文件头退路改普通字段加提示；当放标签前，随 imp_ok 显隐
+    字段 imp_file 当 shared.imp_ok===1 提示 预检时存下的文件，不用改 待导入文件
+    分组 底栏 横排 底栏
+      动作 kgm_import_confirm 远程 关闭 当 shared.imp_ok===1 确认导入
+      动作 cancel_import 次要 关闭 返回
+    结束
+  结束
+
+  浮层 导出 宽 720px
+    分组 选类型 横排 间距 12px 对齐 flex-end
+      字段 exp_kind 控件 下拉 宽 120px 类型
+      动作 kgm_export 远程 生成
+    结束
+    显示 export_head
+    # K103 退路：字段 多行 绑 form，而 kgm_export 按约定走「页面状态」（响应 state），
+    # state 不回填 form，多行框永远是空的 → 改「显示」（读 shared），文本照样出现可复制
+    显示 export_text 导出内容（全选复制，按类型存成.txt可以直接再导入）
+    分组 底栏 横排 底栏
+      动作 cancel_export 次要 关闭 返回
+    结束
+  结束
+结束
