@@ -50,7 +50,7 @@
   ct_b_label 文本 对照表「另一端」列（编号加名称）
   imp_kind 枚举 知识点,条目,前置边,对照 导入类型
   imp_upload 文件 导入文件（.md/.txt 用 | 分隔，.csv 首行表头，.json 对象列表）
-  imp_file 文本 预检时存下的文件路径（确认导入时原样回传）
+  imp_file 文本 预检时存下的文件路径（确认导入时原样回传；只能是 uploads/ 下的一个文件，即上传时「存文件」给的 uploads/<哈希>.<扩展名>，改成别的路径确认时报 400 导入文件路径不对；引擎没有只读修饰，页面上做成随 imp_ok 显隐的普通字段，提示「预检时存下的文件，不用改」）
   imp_line 整数 预检表「行号」列
   imp_code 文本 预检表「编号」列
   imp_label 文本 预检表「内容」列
@@ -532,9 +532,32 @@
   伪代码 在一个事务里：每行按 (subject_id, pre_code, point_code) 查 kg_edge，没有则插入并 created+1，有则 updated+1；同一文件里重复的边只插一次，后出现的按已有计 updated
   伪代码 返回 {"ok": 1, "total": 有效行数, "created": created, "updated": updated}
 
+函数 拼原因 rs add
+  返回 {r}；导入预检逐行攒原因用（私有）：rs 为空时 r 就是 add，否则 r 是「rs；add」（多条原因用「；」连起来）
+  伪代码 rs 为空，返回 {"r": add}；否则返回 {"r": "rs；add"}
+
+函数 边可达 edges start target
+  返回 {r}；导入预检查环用（私有）：edges 是 [{pre_code, point_code}]，从 start 顺着 pre_code→point_code 走能到 target 时 r 为 1，否则为 0
+  伪代码 已到集合先放 start；反复扫一遍 edges，pre_code 已到而 point_code 未到的把 point_code 加进已到集合，直到一轮没有新加入（最多 500 轮）
+  伪代码 target 在已到集合里返回 {"r": 1}，否则返回 {"r": 0}
+
+函数 读导入行 kind file_path
+  返回 {rows}；导入预检的读文件段（私有）：rows 是 [{line, a, b, c, d, e, extra}]，a..e 按 kind 依次是 point（编号、名称）、item（编号、名称、知识点编号、接在哪个形式后、前一个条目编号）、edge（前置编号、后续编号）、contrast（一端、另一端），没有的项为空串；extra 为 1 表示 md、txt 该行项数超过该类型的项数（见下），csv、json 恒为 0
+  报错 400 文件类型只能是 md、txt、csv、json
+  报错 400 导入文件读不了
+  报错 400 导入文件没有数据行
+  报错 400 一次最多导入2000行
+  伪代码 file_path 扩展名（不分大小写）是 md、txt：用 doc 包「读文档」取文本，error 不为空报错 400 导入文件读不了；按行拆，每行去首尾空白，空行和以 # 开头的行忽略；其余每行按 | 切成若干项，前 5 项依次放 a..e（不足的补空串）；项数（| 的个数加 1，行尾多余的 | 也算一项）超过该类型的项数——point、edge、contrast 2 项，item 5 项——时 extra 为 1；line 是原文件行号（含被忽略的行）
+  伪代码 扩展名是 csv：用 data 包「读CSV」（首行是表头）；是 json：用「读JSON」语句，顶层要是对象列表，解析失败或顶层不是列表报错 400 导入文件读不了；line 是 csv 从 2 起、json 从 1 起
+  伪代码 csv、json 的必需列：point 是 code、title；item 是 code、name、point_code（after_form、prev_code 可缺）；edge 是 pre_code、point_code；contrast 是 a_code、b_code。缺列＝csv 表头里没有这个列名（表头各列名去掉 UTF-8 BOM 和首尾空白后比较，同 读CSV 的 utf-8-sig 读法）、json 里没有一个对象带这个键；按上面的顺序找第一个缺的列，报错 400 导入文件读不了（缺<列名>）（整份不认，如「导入文件读不了（缺code）」）。列在、某行的值为空（json 某个对象缺这个键也算这一行为空）不在这里报，照常放进 rows 成空串，由 导入预检 按「缺编号」等记成该行报错。多出的列、键忽略
+  伪代码 其他扩展名报错 400 文件类型只能是 md、txt、csv、json
+  伪代码 rows 为空报错 400 导入文件没有数据行；超过 2000 行报错 400 一次最多导入2000行
+  伪代码 返回 {"rows": rows}
+
 公开 函数 导入预检 kind file_path learner? current_role? auth_mode? subject?
   返回 {kind, total, ok_count, error_count, created, updated, rows}；批量导入的预览，不写库；rows 是 [{line, code, label, action, reason}]，action 是 新增/更新/报错，reason 是逐行说明（报错原因或提示，可空）
   报错 400 导入类型不对
+  报错 400 导入文件路径不对
   报错 400 文件类型只能是 md、txt、csv、json
   报错 400 导入文件读不了
   报错 400 导入文件没有数据行
@@ -546,13 +569,14 @@
   报错 403 没有权限修改该科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 kind 不是 point、item、edge、contrast 之一，报错 400 导入类型不对（预检按写操作校验：没有写权限的人连预览都不给）
-  伪代码 按 file_path 的扩展名读：md、txt 用 doc 包「读文档」取文本按行拆，空行和以 # 开头的行忽略，每行按 | 切（格式同 导入知识点 / 导入条目 / 导入对照 / 导入前置边）；csv 用 data 包「读CSV」（首行是表头）；json 用「读JSON」语句，顶层要是对象列表；其他扩展名报错 400 文件类型只能是 md、txt、csv、json；读文档 返回的 error 不为空、JSON 解析失败或顶层不是列表，报错 400 导入文件读不了
-  伪代码 csv 表头和 json 的键：point 是 code,title；item 是 code,name,point_code,after_form,prev_code（后两项可缺）；edge 是 pre_code,point_code；contrast 是 a_code,b_code；缺必需的列整份不认，报错 400 导入文件读不了（文案后接缺的列名）
+  伪代码 文件位置：file_path 必须是 uploads/ 下的一个文件——以 uploads/ 开头，其后只有一段文件名（不再含 /），整个路径不含 ..、不含 \（以 / 开头的绝对路径、Windows 盘符路径自然不以 uploads/ 开头）；不符报错 400 导入文件路径不对（与 确认导入 同一条规则；路由传进来的都是「存文件」给的 uploads/<哈希>.<扩展名>，这条挡的是别的调用方直接传路径读工作目录里别的文件）。在读文件之前判；扩展名不对仍按下一条报 文件类型只能是 md、txt、csv、json
+  伪代码 调用本模块 读导入行 kind=kind file_path=file_path 得 rows（读法见 读导入行）：md、txt 用 doc 包「读文档」取文本按行拆，空行和以 # 开头的行忽略，每行按 | 切（格式同 导入知识点 / 导入条目 / 导入对照 / 导入前置边，项数上限也同它们：point、edge、contrast 2 项，item 5 项）；csv 用 data 包「读CSV」（首行是表头）；json 用「读JSON」语句，顶层要是对象列表；其他扩展名报错 400 文件类型只能是 md、txt、csv、json；读文档 返回的 error 不为空、JSON 解析失败或顶层不是列表，报错 400 导入文件读不了
+  伪代码 csv 表头和 json 的键：point 是 code,title；item 是 code,name,point_code,after_form,prev_code（后两项可缺）；edge 是 pre_code,point_code；contrast 是 a_code,b_code。两种情况分开：①缺列（csv 表头里没有这个列名；json 里没有一个对象带这个键）整份不认，报错 400 导入文件读不了（缺<列名>），按上面列的顺序报第一个缺的，原文如「导入文件读不了（缺code）」；②列在、但某行的值为空（json 某个对象缺这个键也算该行为空）：不整份拒，该行报错，原因与 md、txt 相同（「缺编号」「缺名称」「缺知识点编号」「缺前置编号」等），确认导入时因此报 400 导入文件有错（第N行：缺编号）。全部行都空也按②逐行报，不再当缺列
   伪代码 有效行为 0 报错 400 导入文件没有数据行；超过 2000 行报错 400 一次最多导入2000行
   伪代码 line 是文件里的行号：md、txt 是原文件行号（含被忽略的行），csv 从 2 起，json 从 1 起；code 是该行编号（edge、contrast 是「A>B」「A~B」），label 是名称或对端
-  伪代码 逐行校验，一行有多条原因用「；」连起来，有原因的行 action 为「报错」：必填项为空（「缺编号」「缺名称」「缺知识点编号」「缺前置编号」等）；point、item 的编号调用本模块 编号格式检查 subject_id=subject_id code=编号，报错原文作原因；point、item 的名称超过 60 个字；编号已在别的科目（point 只查 kg_point、item 只查 kg_item，K81 口径），原因「编号已被其他科目使用」；item 的所属知识点不在本科目 kg_point「没有这个知识点」；item 的前一个条目不为空且既不在本科目 kg_item、也不是本文件里的条目「没有这个前一个条目」；edge 两端相同「不能以自己为前置」、任一端不在本科目 kg_point「没有这个知识点」；contrast 两端相同「对照两端不能相同」，两端都调用本模块 编号前缀检查 subject_id=subject_id code=编号（只查前缀，不核对存在，同 导入对照 旧口径）
+  伪代码 逐行校验，一行有多条原因用「；」连起来（调用本模块 拼原因），有原因的行 action 为「报错」：md、txt 该行 extra 为 1（项数超过该类型的项数，含行尾多余的 |），原因放在第一条：point「项数多了：知识点每行最多2项（编号|名称），行尾多余的|也算一项」、item「项数多了：条目每行最多5项（编号|名称|知识点编号|接在哪个形式后|前一个条目编号），行尾多余的|也算一项」、edge「项数多了：前置边每行最多2项（前置编号|后续编号），行尾多余的|也算一项」、contrast「项数多了：对照每行最多2项（编号A|编号B），行尾多余的|也算一项」（预检与确认同一规则：确认导入先重跑本函数，这类行在预检就是报错行，确认时报 400 导入文件有错（第N行：项数多了…），不会走到旧导入函数的无行号报错；item 比旧 导入条目 严——旧函数忽略第 5 项之后的内容，但经 确认导入 一律先过本函数，所以导入口径以本条为准，直接调旧函数的行为不变）；必填项为空（「缺编号」「缺名称」「缺知识点编号」「缺前置编号」等）；point、item 的编号调用本模块 编号格式检查 subject_id=subject_id code=编号，报错原文作原因；point、item 的名称超过 60 个字；编号已在别的科目（point 只查 kg_point、item 只查 kg_item，K81 口径），原因「编号已被其他科目使用」；item 的所属知识点不在本科目 kg_point「没有这个知识点」；item 的前一个条目不为空且既不在本科目 kg_item、也不是本文件里的条目「没有这个前一个条目」；edge 两端相同「不能以自己为前置」、任一端不在本科目 kg_point「没有这个知识点」；contrast 两端相同「对照两端不能相同」，两端都调用本模块 编号前缀检查 subject_id=subject_id code=编号（只查前缀，不核对存在，同 导入对照 旧口径）
   伪代码 edge 的环检查：各行单行校验都过了以后，把本科目已有的边和本批的边合起来查环，有环时把环上属于本批的行都标为报错，原因「会形成环：A>B>…>A」
-  伪代码 没报错的行（计数口径与旧导入函数一致，保证预检的 created/updated 就是确认后的 created/updated）：本科目已有、或本文件前面的行已经出现过（point、item 按编号，edge、contrast 按两端）为「更新」，计入 updated；各列都相同时 reason 写「内容相同」（edge、contrast 写「已存在」）；没有为「新增」，计入 created；同一文件里重复的编号（edge、contrast 按两端）后一行为准，前一行 reason 写「被第N行覆盖」、action 照算（与旧导入函数「后一行覆盖前一行」一致）
+  伪代码 没报错的行（计数口径与旧导入函数一致，保证预检的 created/updated 就是确认后的 created/updated）：本科目已有、或本文件前面的行已经出现过（point、item 按编号，edge、contrast 按两端）为「更新」，计入 updated；各列都相同时 reason 写「内容相同」（edge、contrast 写「已存在」）；没有为「新增」，计入 created；同一文件里重复的编号（edge、contrast 按两端；只在没报错的行之间算，报错行不参与）后一行为准、action 照算（与旧导入函数「后一行覆盖前一行」一致）：前面的各行 reason 写「被第N行覆盖」（N 是该编号最后出现的行，即最终生效的那行），最后出现的那行 reason 写「本文件重复，以本行为准」（说明它为什么是「更新」）；该行原来已有「内容相同」「已存在」时用「；」接在后面（如「内容相同；被第5行覆盖」）。理由：保留约定原意（前一行要告诉老师它会被覆盖、不会生效），同时补上后一行的说明——不写的话，库里没有的编号显示成「更新」会让人看不懂；实现上在逐行走完后再回填前面行的 reason
   伪代码 只读：不写库、不删文件
   伪代码 返回 {"kind": kind, "total": 有效行数, "ok_count": 非报错行数, "error_count": 报错行数, "created": 新增行数, "updated": 更新行数, "rows": 按 line 升序}
 
@@ -571,7 +595,7 @@
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
-  伪代码 file_path 以 / 开头、含 .. 或 \、或扩展名不是 md、txt、csv、json 之一，报错 400 导入文件路径不对（页面回传的是预检时存下的路径，防路径穿越）
+  伪代码 file_path 不符合 导入预检 的文件位置规则（必须以 uploads/ 开头、其后只有一段文件名不再含 /、整个路径不含 .. 和 \；以 / 开头的绝对路径、Windows 盘符路径都不以 uploads/ 开头），或扩展名不是 md、txt、csv、json 之一（不分大小写），报错 400 导入文件路径不对（页面回传的是预检时存下的路径 uploads/<哈希>.<扩展名>；限定在 uploads/ 内，防路径穿越、防拿工作目录里别的同扩展名文件来导入或借报错行号探测内容）
   伪代码 调用本模块 导入预检 kind=kind file_path=file_path subject=subject_id 得 error_count 和 rows（预检的报错原样抛出）；error_count 大于 0，报错 400 导入文件有错（文案后接第一条报错行「第N行：原因」）
   伪代码 扩展名是 md、txt：复用旧导入函数——kind 等于 point 调用本模块 导入知识点 file_path=file_path subject=subject_id；item 调用本模块 导入条目 file_path=file_path subject=subject_id；contrast 调用本模块 导入对照 file_path=file_path subject=subject_id；edge 调用本模块 导入前置边 file_path=file_path subject=subject_id；得 total、created、updated
   伪代码 扩展名是 csv、json：调用本模块 写入导入行 kind=kind rows=预检的全部行 subject_id=subject_id 得 total、created、updated
@@ -800,6 +824,7 @@
   返回 {imp_rows, imp_head, imp_ok, form}（动作 kgm_import_preview，「批量导入」浮层上传后的预览）；imp_rows 是 [{imp_line, imp_code, imp_label, imp_action, imp_reason}]；imp_ok 为 1 表示没有报错行、可以确认；form 是 {imp_kind, imp_file}，把存盘路径填回表单给「确认导入」用
   报错 403 只有教师可以管理图谱
   报错 400 导入类型不对
+  报错 400 导入文件路径不对
   报错 400 文件类型只能是 md、txt、csv、json
   报错 400 导入文件读不了
   报错 400 导入文件没有数据行
@@ -1886,8 +1911,8 @@ POST /kg/manage/export -> 导出页面 动作 kgm_export 模板 页面状态 角
 
 用例 导入预检_新增和更新不写库
   先 数据 kg_point code=P1 title=旧名
-  先 文件 kg_in/p.txt 内容=P1|新名\nP2|乙
-  调用 导入预检 kind=point file_path=kg_in/p.txt
+  先 文件 uploads/p.txt 内容=P1|新名\nP2|乙
+  调用 导入预检 kind=point file_path=uploads/p.txt
   得 kind=point total=2 ok_count=2 error_count=0 created=1 updated=1
   库 kg_point 共 1 行
   库 kg_point 含 code=P1 title=旧名
@@ -1895,15 +1920,15 @@ POST /kg/manage/export -> 导出页面 动作 kgm_export 模板 页面状态 角
 用例 导入预检_逐行报错
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
-  先 文件 kg_in/p.txt 内容=math.a|代数\nbad|乙\nmath.b|
-  调用 导入预检 kind=point file_path=kg_in/p.txt subject=2
+  先 文件 uploads/p.txt 内容=math.a|代数\nbad|乙\nmath.b|
+  调用 导入预检 kind=point file_path=uploads/p.txt subject=2
   得 total=3 ok_count=1 error_count=2 created=1
   库 kg_point 共 0 行
 
 用例 导入预检_条目可引用本文件里的前一个
   先 数据 kg_point code=P1 title=甲
-  先 文件 kg_in/i.txt 内容=I1|条目一|P1\nI2|条目二|P1||I1
-  调用 导入预检 kind=item file_path=kg_in/i.txt
+  先 文件 uploads/i.txt 内容=I1|条目一|P1\nI2|条目二|P1||I1
+  调用 导入预检 kind=item file_path=uploads/i.txt
   得 total=2 error_count=0 created=2
   库 kg_item 共 0 行
 
@@ -1911,67 +1936,105 @@ POST /kg/manage/export -> 导出页面 动作 kgm_export 模板 页面状态 角
   先 数据 kg_point code=A title=甲
   先 数据 kg_point code=B title=乙
   先 数据 kg_edge pre_code=A point_code=B
-  先 文件 kg_in/e.txt 内容=B|A
-  调用 导入预检 kind=edge file_path=kg_in/e.txt
+  先 文件 uploads/e.txt 内容=B|A
+  调用 导入预检 kind=edge file_path=uploads/e.txt
   得 total=1 error_count=1
   库 kg_edge 共 1 行
 
 用例 导入预检_csv
-  先 文件 kg_in/p.csv 内容=code,title\nP1,甲\nP2,乙
-  调用 导入预检 kind=point file_path=kg_in/p.csv
+  先 文件 uploads/p.csv 内容=code,title\nP1,甲\nP2,乙
+  调用 导入预检 kind=point file_path=uploads/p.csv
   得 total=2 error_count=0 created=2
 
 用例 导入预检_json
-  先 文件 kg_in/p.json 内容=[{"code":"P1","title":"甲"}]
-  调用 导入预检 kind=point file_path=kg_in/p.json
+  先 文件 uploads/p.json 内容=[{"code":"P1","title":"甲"}]
+  调用 导入预检 kind=point file_path=uploads/p.json
   得 total=1 error_count=0 created=1
 
 用例 导入预检_csv缺列400
-  先 文件 kg_in/p.csv 内容=code,name\nP1,甲
-  调用 导入预检 kind=point file_path=kg_in/p.csv
+  先 文件 uploads/p.csv 内容=code,name\nP1,甲
+  调用 导入预检 kind=point file_path=uploads/p.csv
   报错 400
 
 用例 导入预检_类型不对400
-  先 文件 kg_in/p.txt 内容=P1|甲
-  调用 导入预检 kind=abc file_path=kg_in/p.txt
+  先 文件 uploads/p.txt 内容=P1|甲
+  调用 导入预检 kind=abc file_path=uploads/p.txt
   报错 400
 
 用例 导入预检_文件类型不对400
-  先 文件 kg_in/p.xml 内容=P1|甲
-  调用 导入预检 kind=point file_path=kg_in/p.xml
+  先 文件 uploads/p.xml 内容=P1|甲
+  调用 导入预检 kind=point file_path=uploads/p.xml
   报错 400
 
 用例 导入预检_公共科目非负责教师403
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
-  先 文件 kg_in/p2.txt 内容=math.a|代数
-  调用 导入预检 kind=point file_path=kg_in/p2.txt learner=t2 current_role=teacher auth_mode=on subject=2
+  先 文件 uploads/p2.txt 内容=math.a|代数
+  调用 导入预检 kind=point file_path=uploads/p2.txt learner=t2 current_role=teacher auth_mode=on subject=2
   报错 403
 
+用例 导入预检_不在uploads下400
+  先 文件 kg_in/p.txt 内容=P1|甲
+  调用 导入预检 kind=point file_path=kg_in/p.txt
+  报错 400
+
+用例 导入预检_行尾多余竖线按错行报
+  先 文件 uploads/p.txt 内容=P1|甲|\nP2|乙
+  调用 导入预检 kind=point file_path=uploads/p.txt
+  得 total=2 ok_count=1 error_count=1 created=1
+  库 kg_point 共 0 行
+
+用例 导入预检_条目项数多了按错行报
+  先 数据 kg_point code=P1 title=甲
+  先 文件 uploads/i.txt 内容=I1|条目一|P1|||
+  调用 导入预检 kind=item file_path=uploads/i.txt
+  得 total=1 error_count=1
+
+用例 导入预检_csv某行空值按错行报
+  先 文件 uploads/p.csv 内容=code,title\nP1,甲\n,乙
+  调用 导入预检 kind=point file_path=uploads/p.csv
+  得 total=2 ok_count=1 error_count=1 created=1
+
+用例 导入预检_csv整列值为空按错行报
+  先 文件 uploads/p.csv 内容=code,title\n,甲\n,乙
+  调用 导入预检 kind=point file_path=uploads/p.csv
+  得 total=2 ok_count=0 error_count=2
+
+用例 导入预检_json缺键整份不认400
+  先 文件 uploads/p.json 内容=[{"title":"甲"}]
+  调用 导入预检 kind=point file_path=uploads/p.json
+  报错 400
+
+用例 导入预检_同文件重复编号
+  先 文件 uploads/p.txt 内容=P1|甲\nP1|乙
+  调用 导入预检 kind=point file_path=uploads/p.txt
+  得 total=2 error_count=0 created=1 updated=1
+  库 kg_point 共 0 行
+
 用例 确认导入_txt复用旧导入
-  先 文件 kg_in/p.txt 内容=P1|甲\nP2|乙
-  调用 确认导入 kind=point file_path=kg_in/p.txt
+  先 文件 uploads/p.txt 内容=P1|甲\nP2|乙
+  调用 确认导入 kind=point file_path=uploads/p.txt
   得 ok=1 kind=point total=2 created=2 updated=0
   库 kg_point 共 2 行
 
 用例 确认导入_csv条目
   先 数据 kg_point code=P1 title=甲
-  先 文件 kg_in/i.csv 内容=code,name,point_code\nI1,条目一,P1
-  调用 确认导入 kind=item file_path=kg_in/i.csv
+  先 文件 uploads/i.csv 内容=code,name,point_code\nI1,条目一,P1
+  调用 确认导入 kind=item file_path=uploads/i.csv
   得 ok=1 total=1 created=1
   库 kg_item 含 code=I1 name=条目一 point_code=P1 subject_id=1
 
 用例 确认导入_前置边
   先 数据 kg_point code=A title=甲
   先 数据 kg_point code=B title=乙
-  先 文件 kg_in/e.txt 内容=A|B
-  调用 确认导入 kind=edge file_path=kg_in/e.txt
+  先 文件 uploads/e.txt 内容=A|B
+  调用 确认导入 kind=edge file_path=uploads/e.txt
   得 ok=1 created=1
   库 kg_edge 含 pre_code=A point_code=B
 
 用例 确认导入_有一行报错整批不写
-  先 文件 kg_in/p.txt 内容=P1|甲\n只有一项
-  调用 确认导入 kind=point file_path=kg_in/p.txt
+  先 文件 uploads/p.txt 内容=P1|甲\n只有一项
+  调用 确认导入 kind=point file_path=uploads/p.txt
   报错 400
   库 kg_point 共 0 行
 
@@ -1982,9 +2045,37 @@ POST /kg/manage/export -> 导出页面 动作 kgm_export 模板 页面状态 角
 用例 确认导入_公共科目非负责教师403
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
-  先 文件 kg_in/p3.txt 内容=math.a|代数
-  调用 确认导入 kind=point file_path=kg_in/p3.txt learner=t2 current_role=teacher auth_mode=on subject=2
+  先 文件 uploads/p3.txt 内容=math.a|代数
+  调用 确认导入 kind=point file_path=uploads/p3.txt learner=t2 current_role=teacher auth_mode=on subject=2
   报错 403
+  库 kg_point 共 0 行
+
+用例 确认导入_不在uploads下400
+  先 文件 kg_in/p.txt 内容=P1|甲
+  调用 确认导入 kind=point file_path=kg_in/p.txt
+  报错 400
+  库 kg_point 共 0 行
+
+用例 确认导入_uploads子目录400
+  先 文件 uploads/sub/p.txt 内容=P1|甲
+  调用 确认导入 kind=point file_path=uploads/sub/p.txt
+  报错 400
+  库 kg_point 共 0 行
+
+用例 确认导入_绝对路径400
+  调用 确认导入 kind=point file_path=/tmp/p.txt
+  报错 400
+
+用例 确认导入_行尾多余竖线400
+  先 文件 uploads/p.txt 内容=P1|甲|\nP2|乙
+  调用 确认导入 kind=point file_path=uploads/p.txt
+  报错 400
+  库 kg_point 共 0 行
+
+用例 确认导入_csv某行空值400
+  先 文件 uploads/p.csv 内容=code,title\nP1,甲\n,乙
+  调用 确认导入 kind=point file_path=uploads/p.csv
+  报错 400
   库 kg_point 共 0 行
 
 用例 导出文本_全部
@@ -2207,34 +2298,40 @@ POST /kg/manage/export -> 导出页面 动作 kgm_export 模板 页面状态 角
   报错 400
 
 用例 导入预检页面_预览
-  先 文件 kg_in/p.txt 内容=P1|甲
-  调用 导入预检页面 learner=me imp_kind=知识点 imp_upload_path=kg_in/p.txt
+  先 文件 uploads/p.txt 内容=P1|甲
+  调用 导入预检页面 learner=me imp_kind=知识点 imp_upload_path=uploads/p.txt
   得 imp_ok=1 imp_head=共1行：新增1、更新0、报错0
   库 kg_point 共 0 行
 
 用例 导入预检页面_有报错不能确认
-  先 文件 kg_in/p.txt 内容=P1|甲\n只有一项
-  调用 导入预检页面 learner=me imp_kind=知识点 imp_upload_path=kg_in/p.txt
+  先 文件 uploads/p.txt 内容=P1|甲\n只有一项
+  调用 导入预检页面 learner=me imp_kind=知识点 imp_upload_path=uploads/p.txt
   得 imp_ok=0
   库 kg_point 共 0 行
 
 用例 导入预检页面_类型不对400
-  先 文件 kg_in/p.txt 内容=P1|甲
-  调用 导入预检页面 learner=me imp_kind=别的 imp_upload_path=kg_in/p.txt
+  先 文件 uploads/p.txt 内容=P1|甲
+  调用 导入预检页面 learner=me imp_kind=别的 imp_upload_path=uploads/p.txt
   报错 400
 
 用例 确认导入页面_导入
-  先 文件 kg_in/p.txt 内容=P1|甲
-  调用 确认导入页面 learner=me imp_kind=知识点 imp_file=kg_in/p.txt
+  先 文件 uploads/p.txt 内容=P1|甲
+  调用 确认导入页面 learner=me imp_kind=知识点 imp_file=uploads/p.txt
   得 imp_ok=0 imp_head=已导入：新增1、更新0
   库 kg_point 含 code=P1 title=甲
 
 用例 确认导入页面_公共科目非负责教师403
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
-  先 文件 kg_in/p4.txt 内容=math.a|代数
-  调用 确认导入页面 learner=t2 current_role=teacher auth_mode=on subject=2 imp_kind=知识点 imp_file=kg_in/p4.txt
+  先 文件 uploads/p4.txt 内容=math.a|代数
+  调用 确认导入页面 learner=t2 current_role=teacher auth_mode=on subject=2 imp_kind=知识点 imp_file=uploads/p4.txt
   报错 403
+  库 kg_point 共 0 行
+
+用例 确认导入页面_不在uploads下400
+  先 文件 kg_in/p.txt 内容=P1|甲
+  调用 确认导入页面 learner=me imp_kind=知识点 imp_file=kg_in/p.txt
+  报错 400
   库 kg_point 共 0 行
 
 用例 导出页面_全部

@@ -109,7 +109,7 @@
   伪代码 student_detail：调用 匹配学生 name=student subject=subject_id。none 或 student 为空：status=ask，hint「没有找到叫「student」的学生。现有学生：roster」（student 为空写「你想看哪位学生？现有学生：roster」）；many：status=ask，hint「找到多位：显示名（用户名）、…，你指哪一位？」；one：调用 学生范围 subject_id=subject_id 取该生 last_at，context_text = 学生上下文 username=该生 username display_name=该生 display_name last_at=该生 last_at subject_id=subject_id，student、student_name 填上
   伪代码 point_status：调用 匹配知识点 keyword=point subject=subject_id。none 或 point 为空：status=ask，hint「没有找到「point」这个知识点或条目，换个说法试试（知识点名、条目名或编号都行）」（point 为空写「你想看哪个知识点？」）；many：status=ask，hint「找到多个：标题（编号）、…（共 total 个，最多列 5 个），你指哪一个？」；one：context_text = 知识点上下文 code=该编号 title=该标题 subject_id=subject_id，point、point_title 填上
   伪代码 teaching_advice：context_text = 建议上下文 current_user=learner subject_id=subject_id；student 不为空时再调用 匹配学生 name=student subject=subject_id，one 的话把学生上下文附在后面并填 student（none 或 many 不拦，只是不附，不改 status）；point 不为空时同理用 匹配知识点 keyword=point subject=subject_id，one 的话把知识点上下文附在后面并填 point；整段 context_text 总长度上限 4500 个字，超出从最后附加的段落末尾砍起
-  伪代码 chitchat：context_text = 系统功能说明（固定文字：教师端有学情、学生管理、教师助手、AI 老师设定、教材导入五页各管什么；学生端有问老师、做题、默写、教材、学习进度、知识图谱；助手本身只读，不能改设定、不能出题、不能给学生发话）；status 为 ok
+  伪代码 chitchat：context_text = 系统功能说明（固定文字：教师端有学情、教师助手、学生管理、科目管理、图谱管理、AI 老师设定、教材导入七页各管什么（页数以 ui/ 下「端 教师」的界面为准，改密码不进导航不算）；学生端有问老师、做题、默写、教材、学习进度、知识图谱；助手本身只读，不能改设定、不能出题、不能给学生发话）；status 为 ok
   伪代码 返回 {"ok": 1, "intent": intent, "status": status, "student": …, "student_name": …, "point": …, "point_title": …, "hint": …, "context_text": …}
 
 函数 判意图 message recent focus_text
