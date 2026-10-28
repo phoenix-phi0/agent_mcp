@@ -447,8 +447,10 @@ def subject_flow_after(t2, s1, t1, ck, marks):
 
 def pick_label(page, sel, needle):
     """下拉里挑一条含 needle 的选项文字；挑不到就退而取最后一项。没选项返回 None。"""
+    # eval_on_selector_all 传给页面函数的是「匹配元素数组」，不是单个元素（K103 实测：
+    # 写成 e => [...e.options] 会 TypeError: e.options is not iterable）
     labels = page.eval_on_selector_all(
-        sel, "e => [...e.options].map(o => o.textContent.trim())")
+        sel, "els => els.flatMap(el => [...el.options].map(o => o.textContent.trim()))")
     if not labels:
         return None
     hit = [x for x in labels if needle in x]
@@ -475,6 +477,8 @@ def kg_mgmt_flow(t1, t2, t3, ck, marks):
     只认本段自建的 walk99.* 编号和自取的提示条文字，不写死种子数据的任何内容。"""
     t1._allowed_status = ("400", "409")   # 成环 400 / 引用 409 是故意打的，不算 JS 错误
     visit(t1, "图谱管理", marks)
+    # 等 kgm_home（进入时）回来：三个写按钮挂在 shared.can_write 上，没回来时只剩「导出」
+    t1.wait_for_selector('button:has-text("新建知识点")', timeout=15000)
     btns = [b for b in ("新建知识点", "新建条目", "批量导入", "导出")
             if t1.locator(f'button:has-text("{b}")').count()]
     ck(btns == ["新建知识点", "新建条目", "批量导入", "导出"],
@@ -490,10 +494,20 @@ def kg_mgmt_flow(t1, t2, t3, ck, marks):
     t1.wait_for_selector(".overlay", timeout=8000)
     t1.locator('.overlay label.field:has-text("编号") input').first.fill(KG_I1)
     t1.locator('.overlay label.field:has-text("名称") input').first.fill(KG_IT1)
-    t1.locator('.overlay label.field:has-text("所属知识点") select').first.select_option(index=0)
+    # 不能 select_option(index=0)：下拉第一项是 <option value="" disabled>请选择</option>
+    # 占位项，选它提交 kgi_point 为空 → 404 没有这个知识点（K103 实测）。按值选刚建的点。
+    t1.wait_for_function(
+        "c => { for (const el of document.querySelectorAll('.overlay label.field')) {"
+        " if (el.textContent.indexOf('所属知识点') < 0) continue;"
+        " const sel = el.querySelector('select');"
+        " if (sel && [...sel.options].some(o => o.value === c)) return true; } return false; }",
+        arg=KG_P1, timeout=10000)
+    t1.locator('.overlay label.field:has-text("所属知识点") select').first.select_option(KG_P1)
     t1.locator('.overlay button:has-text("保存")').first.click()
     t1.wait_for_selector(".overlay", state="detached", timeout=10000)
     clear_toast(t1)
+    # 等整页状态（kgm_item_save 返回）把条目表刷出来再数，跟建知识点同款
+    t1.wait_for_selector(f'tr:has-text("{KG_I1}")', timeout=10000)
     ck(t1.locator("tr", has_text=KG_I1).count() >= 1, "条目 walk99.i1 建成且在表里")
 
     # 3) 加前置边 p1→p2；再加反向 p2→p1（成环）看到 400 提示、表不多行
@@ -507,7 +521,11 @@ def kg_mgmt_flow(t1, t2, t3, ck, marks):
         pre.select_option(label=l1)
         post.select_option(label=l2)
         t1.locator('button:has-text("加前置边")').first.click()
-        clear_toast(t1)
+        # 等整页状态（kgm_edge_add 返回）把前置边表刷出来再数：刷新是异步的，数早了差一行
+        t1.wait_for_function(
+            "([t, n]) => [...document.querySelectorAll('tr')]"
+            ".filter(r => r.textContent.indexOf(t) >= 0).length === n + 1",
+            arg=[KG_T1T, n0], timeout=10000)
         n1 = t1.locator("tr", has_text=KG_T1T).count()
         ck(n1 == n0 + 1, "前置边加上（前置边表多一行）", f"{n0} → {n1}")
         pre.select_option(label=l2)
@@ -533,7 +551,8 @@ def kg_mgmt_flow(t1, t2, t3, ck, marks):
     f.close()
     try:
         t1.locator('.overlay input[type="file"]').first.set_input_files(f.name)
-        t1.locator('.overlay label.field:has-text("类型") select').first.select_option(index=0)
+        # 不能 index=0：下拉第一项是「请选择」占位（imp_kind 空 → 400 导入类型不对）
+        t1.locator('.overlay label.field:has-text("类型") select').first.select_option(label="知识点")
         t1.locator('.overlay button:has-text("预检")').first.click()
         t1.wait_for_selector(".overlay tr", timeout=10000)
         ck(t1.locator(".overlay tr").count() >= 1, "预检出了逐行结果")
@@ -545,15 +564,16 @@ def kg_mgmt_flow(t1, t2, t3, ck, marks):
     t1.wait_for_selector(".overlay", state="detached", timeout=8000)
     clear_toast(t1)
 
-    # 5) 导出：生成后文本框有内容（约定：不做文件下载，文本进多行框）
+    # 5) 导出：生成后有文本（约定：不做文件下载；.ui 里导出文本走「显示」读 shared，
+    #    不是多行框——多行框绑 form，而 kgm_export 回的是页面状态，不会回填）
     t1.locator('button:has-text("导出")').first.click()
     t1.wait_for_selector(".overlay", timeout=8000)
-    t1.locator('.overlay label.field:has-text("类型") select').first.select_option(index=0)
+    t1.locator('.overlay label.field:has-text("类型") select').first.select_option(label="全部")
     t1.locator('.overlay button:has-text("生成")').first.click()
     try:
         t1.wait_for_function(
-            "() => { const t = document.querySelector('.overlay textarea');"
-            " return !!t && t.value.length > 0; }", timeout=10000)
+            "() => [...document.querySelectorAll('.overlay .dyn-v')]"
+            ".some(e => e.textContent.trim().length > 50)", timeout=15000)
         ck(True, "导出生成了文本")
     except Exception as e:
         ck(False, "导出生成了文本", type(e).__name__)
@@ -563,16 +583,23 @@ def kg_mgmt_flow(t1, t2, t3, ck, marks):
 
     # 6) 协作教师（t2）可写：有写按钮、真能建一个点
     visit(t2, "图谱管理", marks)
+    t2.wait_for_selector('button:has-text("新建知识点")', timeout=15000)  # 等 kgm_home 回来
     ck(t2.locator('button:has-text("新建知识点")').count() == 1, "协作教师（t2）有写按钮")
     kg_create_point(t2, KG_T2P, "走查协作点", ck, "协作教师写")
 
     # 7) 公共科目其他教师（t3，init 后才建、没登记）只读：没有写按钮、能导出
     visit(t3, "图谱管理", marks)
+    t3.wait_for_selector('button:has-text("导出")', timeout=15000)  # 等 kgm_home 回来
     extra = [b for b in ("新建知识点", "新建条目", "批量导入")
              if t3.locator(f'button:has-text("{b}")').count()]
     ck(not extra, "公共科目其他教师（t3）看不到写按钮", f"多了：{extra}")
     ck(t3.locator('button:has-text("导出")').count() == 1, "t3 仍能导出")
-    ck(t3.locator("text=公共只读").count() >= 1, "t3 页面有「公共只读」说明")
+    # 文案挂在 shared.can_write===0 上（kgm_home 回来才出现），直接等它
+    try:
+        t3.wait_for_selector("text=公共只读", timeout=15000)
+        ck(True, "t3 页面有「公共只读」说明")
+    except Exception:
+        ck(False, "t3 页面有「公共只读」说明", "15 秒没出现（can_write 没到 0？）")
 
 
 def main(argv=None):
@@ -584,7 +611,21 @@ def main(argv=None):
     ap.add_argument("--src", default=str(REPO / "kg_v4"),
                     help="被走查的 kg_v4 目录（默认仓库里的；基线 worktree 传它的）")
     ap.add_argument("--keep", action="store_true", help="留着临时目录（排查用）")
+    ap.add_argument("--timeout", type=int, default=600,
+                    help="整个走查的秒数上限（默认 600）；到点打出卡在哪一行，"
+                         "按失败收尾并停服务；0 = 不限")
     a = ap.parse_args(argv)
+    if a.timeout > 0:
+        import signal
+        import traceback
+
+        def _on_alarm(sig, frame):
+            print(f"\n!! 走查超过 {a.timeout} 秒，卡在：")
+            traceback.print_stack(frame, limit=6, file=sys.stdout)
+            sys.stdout.flush()
+            raise TimeoutError(f"整个走查超过 {a.timeout} 秒")
+        signal.signal(signal.SIGALRM, _on_alarm)
+        signal.alarm(a.timeout)
     subject_mgmt = not a.no_subject
     kg_mgmt = not a.no_kg
 

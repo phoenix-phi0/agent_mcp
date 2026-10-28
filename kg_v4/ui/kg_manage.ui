@@ -136,7 +136,9 @@
       字段 kgp_code 当 !params.kgp_orig&&!params.code 提示 如math.linear_fn 编号（建后不能改）
       显示 kgp_code 当 params.kgp_orig||params.code 编号
       字段 kgp_title 提示 最长60字 名称
-      显示 kgp_refs 当 params.kgp_orig||params.code 被引用
+      # K103：行上/节点图开浮层时地址不带参数，「当 params…」恒假、说明永远不出；
+      # 而载入（kgm_point_open）真会发请求并按 form 回填 → 改绑 form，说明就出来了
+      字段 kgp_refs 提示 保存或载入后显示 被引用
     结束
     分组 底栏 横排 底栏
       动作 kgm_point_save 提交 远程 关闭 当 shared.can_write===1 保存
@@ -175,7 +177,9 @@
       列 imp_action 结果
       列 imp_reason 说明
     结束
-    字段 imp_file 只读 当 shared.imp_ok===1 待导入文件
+    # K103：「只读」不在引擎修饰表里（tools/ui.py FLAG_MODIFIERS），写在行上只会
+    # 整段进标签 → 按文件头退路改普通字段加提示；当放标签前，随 imp_ok 显隐
+    字段 imp_file 当 shared.imp_ok===1 提示 预检时存下的文件，不用改 待导入文件
     分组 底栏 横排 底栏
       动作 kgm_import_confirm 远程 关闭 当 shared.imp_ok===1 确认导入
       动作 cancel_import 次要 关闭 返回
@@ -188,7 +192,9 @@
       动作 kgm_export 远程 生成
     结束
     显示 export_head
-    字段 export_text 控件 多行 只读 导出内容（全选复制，按类型存成.txt可以直接再导入）
+    # K103 退路：字段 多行 绑 form，而 kgm_export 按约定走「页面状态」（响应 state），
+    # state 不回填 form，多行框永远是空的 → 改「显示」（读 shared），文本照样出现可复制
+    显示 export_text 导出内容（全选复制，按类型存成.txt可以直接再导入）
     分组 底栏 横排 底栏
       动作 cancel_export 次要 关闭 返回
     结束

@@ -133,11 +133,12 @@ try:
     eng = K.make_engine(ws)
     tag = [0]
 
-    def call_fn(name, **args):
+    def call_fn(fn_name, **args):
         # 调 kg 公开函数 → ("ok", r) / ("err", err) / ("missing", 说明) / ("fail", 说明)
+        # 形参不能叫 name：建条目的入参里也有 name，关键字撞车
         tag[0] += 1
         try:
-            r, err = K.call(eng, "kg", name, args, "t%d" % tag[0])
+            r, err = K.call(eng, "kg", fn_name, args, "t%d" % tag[0])
             K.settle()
         except Exception as e:  # noqa: BLE001
             m = str(e)
@@ -204,19 +205,27 @@ try:
         else:
             check(False, "删 %s 应成功" % PA, repr(got))
         cn = sqlite3.connect(db)
-        left = [t for t, w in (("kg_point", PA), ("kg_edge", PA), ("kg_contrast", PA))
-                if cn.execute("select count(*) from " + t +
-                              " where code=? or pre_code=? or point_code=? or a_code=? or b_code=?",
-                              (w, w, w, w, w)).fetchone()[0]]
+        # 各表各自的列（kg_point 只有 code；三张表不能共用一组列名，会 no such column）
+        left = []
+        for t, cols in (("kg_point", ("code",)),
+                        ("kg_edge", ("pre_code", "point_code")),
+                        ("kg_contrast", ("a_code", "b_code"))):
+            sql = "select count(*) from " + t + " where " + " or ".join(c + "=?" for c in cols)
+            n = cn.execute(sql, (PA,) * len(cols)).fetchone()[0]
+            if n:
+                left.append((t, n))
         keep = cn.execute("select count(*) from kg_point where code=?", (PB,)).fetchone()[0]
         cn.close()
         check(not left and keep == 1, "%s 删干净（前置边、对照随删），%s 还在" % (PA, PB), left)
         kind, got = call_fn("删知识点", code=PB)
         check(kind == "ok", "删 %s（已无边和对照）应成功" % PB,
               repr(got) if kind != "ok" else None)
-        k5 = step("建条目", "建条目 %s 挂 %s" % (PI, PB), code=PI, name="引用保护条目",
-                  point_code=PB)[0]
-        k6 = step("加对照", "加对照 %s~%s" % (PI, PB), a_code=PI, b_code=PB)[0]
+        # 条目要挂在一个活着的点上：PB 刚删掉，另建一个 PC 挂它（挂 PB 会 404，后面全空转）
+        PC = "kgrefs.pc"
+        k4b = step("建知识点", "建知识点 %s（挂条目用）" % PC, code=PC, title="引用保护丙")[0]
+        k5 = step("建条目", "建条目 %s 挂 %s" % (PI, PC), code=PI, name="引用保护条目",
+                  point_code=PC)[0]
+        k6 = step("加对照", "加对照 %s~%s" % (PI, PC), a_code=PI, b_code=PC)[0]
         if "missing" not in (k5, k6) and failed == 0:
             kind, got = call_fn("删条目", code=PI)
             if kind == "ok":
@@ -224,9 +233,10 @@ try:
             else:
                 check(False, "删条目 %s 应成功" % PI, repr(got))
             cn = sqlite3.connect(db)
-            gone = all(cn.execute("select count(*) from " + t + " where code=? or a_code=? or b_code=?",
-                                  (PI, PI, PI)).fetchone()[0] == 0
-                       for t in ("kg_item", "kg_contrast"))
+            gone = all(cn.execute(
+                "select count(*) from " + t + " where " +
+                " or ".join(c + "=?" for c in cols), (PI,) * len(cols)).fetchone()[0] == 0
+                for t, cols in (("kg_item", ("code",)), ("kg_contrast", ("a_code", "b_code"))))
             cn.close()
             check(gone, "%s 删干净（对照随删）" % PI)
 
