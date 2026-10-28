@@ -110,6 +110,36 @@
   返回 {r}
 结束
 
+接口 POST /kg/edge/delete 角色 teacher
+  设 r = 调用 kg.删前置边 pre_code={pre_code} point_code={point_code} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  返回 {r}
+结束
+
+接口 POST /kg/item/create 角色 teacher
+  设 r = 调用 kg.建条目 code={code} name={name} point_code={point_code} after_form={after_form 或} prev_code={prev_code 或} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  返回 {r}
+结束
+
+接口 POST /kg/item/update 角色 teacher
+  设 r = 调用 kg.改条目 code={code} name={name} point_code={point_code} after_form={after_form 或} prev_code={prev_code 或} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  返回 {r}
+结束
+
+接口 POST /kg/item/delete 角色 teacher
+  设 r = 调用 kg.删条目 code={code} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  返回 {r}
+结束
+
+接口 POST /kg/contrast/add 角色 teacher
+  设 r = 调用 kg.加对照 a_code={a_code} b_code={b_code} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  返回 {r}
+结束
+
+接口 POST /kg/contrast/delete 角色 teacher
+  设 r = 调用 kg.删对照 a_code={a_code} b_code={b_code} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  返回 {r}
+结束
+
 接口 GET /kg/refs 角色 teacher
   设 r = 调用 kg.查引用 code={code} kind={kind 或} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   返回 {r}

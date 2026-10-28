@@ -703,6 +703,194 @@
     返回 {"ok": 1, "edges_removed": {er}, "contrasts_removed": {cr}}
   结束
 
+  公开 函数 删前置边 pre_code point_code learner? current_role? auth_mode? subject?
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
+    如果 {pre_code} 为空 或 {point_code} 为空
+      报错 400 编号不能为空
+    结束
+    设 ex = 查一值 app.db kg_edge_exists pre_code={pre_code} point_code={point_code} subject_id={sb.subject_id}
+    如果 {ex} 等于 0
+      报错 404 没有这条前置边
+    结束
+    设 n = 写库 app.db kg_edge_delete_pair pre_code={pre_code} point_code={point_code} subject_id={sb.subject_id}
+    返回 {"ok": 1, "removed": {n}}
+  结束
+
+  公开 函数 建条目 code name point_code after_form? prev_code? learner? current_role? auth_mode? subject?
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
+    设 cd = 替换 {code} ^\s+|\s+$
+    设 nm = 替换 {name} ^\s+|\s+$
+    设 pc = 替换 {point_code} ^\s+|\s+$
+    设 af = 替换 {after_form 或} ^\s+|\s+$
+    设 pv = 替换 {prev_code 或} ^\s+|\s+$
+    如果 {cd} 为空
+      报错 400 编号不能为空
+    结束
+    如果 {nm} 为空
+      报错 400 名称不能为空
+    结束
+    设 lt = 截取 {nm} 61
+    如果 {lt} 不为空
+      报错 400 名称最长60字
+    结束
+    如果 {pc} 为空
+      报错 404 没有这个知识点
+    结束
+    设 fc = 调用 编号格式检查 subject_id={sb.subject_id} code={cd}
+    设 own = 查一行 app.db kg_item_by_code code={cd} subject_id={sb.subject_id}
+    如果 {own} 不为空
+      报错 409 编号已存在
+    结束
+    设 oc = 查一值 app.db kg_item_other code={cd} subject_id={sb.subject_id}
+    如果 {oc} 大于 0
+      报错 409 编号已被其他科目使用
+    结束
+    设 pp = 查一行 app.db kg_point_by_code code={pc} subject_id={sb.subject_id}
+    如果 {pp} 为空
+      报错 404 没有这个知识点
+    结束
+    如果 {pv} 不为空
+      设 pi = 查一行 app.db kg_item_by_code code={pv} subject_id={sb.subject_id}
+      如果 {pi} 为空
+        报错 404 没有这个前一个条目
+      结束
+    结束
+    设 ia.code = {cd}
+    设 ia.name = {nm}
+    设 ia.point_code = {pc}
+    设 ia.after_form = {af}
+    设 ia.prev_code = {pv}
+    设 ia.subject_id = {sb.subject_id}
+    设 w = 写库表 app.db kg_item_insert {ia}
+    返回 {"ok": 1, "code": "{cd}"}
+  结束
+
+  公开 函数 改条目 code name point_code after_form? prev_code? learner? current_role? auth_mode? subject?
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
+    设 cd = 替换 {code} ^\s+|\s+$
+    设 nm = 替换 {name} ^\s+|\s+$
+    设 pc = 替换 {point_code} ^\s+|\s+$
+    设 af = 替换 {after_form 或} ^\s+|\s+$
+    设 pv = 替换 {prev_code 或} ^\s+|\s+$
+    如果 {cd} 为空
+      报错 400 编号不能为空
+    结束
+    如果 {nm} 为空
+      报错 400 名称不能为空
+    结束
+    设 lt = 截取 {nm} 61
+    如果 {lt} 不为空
+      报错 400 名称最长60字
+    结束
+    设 it = 查一行 app.db kg_item_by_code code={cd} subject_id={sb.subject_id}
+    如果 {it} 为空
+      报错 404 没有这个条目
+    结束
+    设 pp = 查一行 app.db kg_point_by_code code={pc} subject_id={sb.subject_id}
+    如果 {pp} 为空
+      报错 404 没有这个知识点
+    结束
+    如果 {pv} 不为空
+      如果 {pv} 等于 {cd}
+        报错 400 不能以自己为前一个条目
+      结束
+      设 pi = 查一行 app.db kg_item_by_code code={pv} subject_id={sb.subject_id}
+      如果 {pi} 为空
+        报错 404 没有这个前一个条目
+      结束
+      设 cur = {pv}
+      当 {cur} 不为空 最多 1000 次
+        如果 {cur} 等于 {cd}
+          报错 400 前一个条目会形成环
+        结束
+        设 row = 查一行 app.db kg_item_by_code code={cur} subject_id={sb.subject_id}
+        设 cur = {row.prev_code 或}
+      结束
+    结束
+    设 ia.code = {cd}
+    设 ia.name = {nm}
+    设 ia.point_code = {pc}
+    设 ia.after_form = {af}
+    设 ia.prev_code = {pv}
+    设 ia.subject_id = {sb.subject_id}
+    设 w = 写库表 app.db kg_item_update {ia}
+    返回 {"ok": 1}
+  结束
+
+  公开 函数 删条目 code learner? current_role? auth_mode? subject?
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
+    设 cd = 替换 {code} ^\s+|\s+$
+    如果 {cd} 为空
+      报错 400 编号不能为空
+    结束
+    设 it = 查一行 app.db kg_item_by_code code={cd} subject_id={sb.subject_id}
+    如果 {it} 为空
+      报错 404 没有这个条目
+    结束
+    设 q = 调用 查引用 code={cd} kind=item subject={sb.subject_id}
+    如果 {q.deletable} 等于 0
+      设 detail = {nothing 或}
+      遍历 x 于 {q.refs}
+        如果 {x.block} 等于 1
+          如果 {detail} 为空
+            设 detail = {x.source}{x.n}
+          否则
+            设 detail = {detail}、{x.source}{x.n}
+          结束
+        结束
+      结束
+      报错 409 条目还被引用，不能删除（{detail}）
+    结束
+    设 cr = 0
+    事务 app.db
+      设 cr = 写库 app.db kg_contrast_delete code={cd} subject_id={sb.subject_id}
+      设 w = 写库 app.db kg_item_delete code={cd} subject_id={sb.subject_id}
+    结束
+    返回 {"ok": 1, "contrasts_removed": {cr}}
+  结束
+
+  公开 函数 加对照 a_code b_code learner? current_role? auth_mode? subject?
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
+    设 ca = 替换 {a_code} ^\s+|\s+$
+    设 cb = 替换 {b_code} ^\s+|\s+$
+    如果 {ca} 为空 或 {cb} 为空
+      报错 400 编号不能为空
+    结束
+    如果 {ca} 等于 {cb}
+      报错 400 对照两端不能相同
+    结束
+    设 na = 查一值 app.db kg_code_exists code={ca} subject_id={sb.subject_id}
+    设 nb = 查一值 app.db kg_code_exists code={cb} subject_id={sb.subject_id}
+    如果 {na} 等于 0 或 {nb} 等于 0
+      报错 404 没有这个编号
+    结束
+    设 lo = 查一值 app.db kg_str_min a={ca} b={cb}
+    设 hi = 查一值 app.db kg_str_max a={ca} b={cb}
+    设 ex = 查一值 app.db kg_contrast_count a_code={lo} b_code={hi} subject_id={sb.subject_id}
+    如果 {ex} 大于 0
+      返回 {"ok": 1, "created": 0}
+    结束
+    设 w = 写库 app.db kg_contrast_insert a_code={lo} b_code={hi} subject_id={sb.subject_id}
+    返回 {"ok": 1, "created": 1}
+  结束
+
+  公开 函数 删对照 a_code b_code learner? current_role? auth_mode? subject?
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
+    设 ca = 替换 {a_code} ^\s+|\s+$
+    设 cb = 替换 {b_code} ^\s+|\s+$
+    如果 {ca} 为空 或 {cb} 为空
+      报错 400 编号不能为空
+    结束
+    设 lo = 查一值 app.db kg_str_min a={ca} b={cb}
+    设 hi = 查一值 app.db kg_str_max a={ca} b={cb}
+    设 ex = 查一值 app.db kg_contrast_count a_code={lo} b_code={hi} subject_id={sb.subject_id}
+    如果 {ex} 等于 0
+      报错 404 没有这条对照
+    结束
+    设 w = 写库 app.db kg_contrast_delete_pair a_code={lo} b_code={hi} subject_id={sb.subject_id}
+    返回 {"ok": 1}
+  结束
+
   函数 编号格式检查 subject_id code
     设 mt = 匹配 {code} ^[A-Za-z0-9][A-Za-z0-9_.-]*$
     设 lg = 截取 {code} 61
