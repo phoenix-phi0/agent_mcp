@@ -22,3 +22,21 @@
   字段 new_password 文本 新密码
   字段 new_password2 文本 再输一次新密码
 结束
+
+# 页面 实体：只撑科目成员浮层上的列和表单（表里不存东西）。
+页面 实体 subject_member_view 科目成员页面
+  字段 member_head 文本 成员浮层抬头（科目名、编码、状态、我的身份）
+  字段 member_teacher 文本 教师表用户名列
+  字段 member_teacher_label 文本 教师表显示名列
+  字段 member_role 文本 教师表角色列（负责/协作）
+  字段 member_creator 文本 教师表创建者列（是/空）
+  字段 member_learner 文本 学生表用户名列
+  字段 member_learner_label 文本 学生表显示名列
+  字段 member_state 文本 学生表状态列（在册/已撤销）
+  字段 member_assigned_by 文本 学生表分配人列
+  字段 cand_learner 文本 可分配学生表用户名列
+  字段 cand_label 文本 可分配学生表显示名列
+  字段 assign_learners 长文本 批量分配的学生用户名（逗号、顿号、空格或换行分隔）
+  字段 add_teacher 文本 要加入的教师（选项来自 teacher_options）
+  字段 add_role 枚举 协作,负责 加入后的角色
+结束

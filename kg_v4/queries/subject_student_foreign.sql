@@ -1,0 +1,1 @@
+SELECT COUNT(*) FROM subject_student s JOIN subject_info i ON i.id = s.subject_id WHERE s.subject_id = CAST(:subject_id AS INTEGER) AND s.status = 'active' AND s.assigned_by <> '' AND s.assigned_by <> i.owner AND s.assigned_by NOT IN (SELECT teacher FROM subject_teacher WHERE subject_id = i.id)

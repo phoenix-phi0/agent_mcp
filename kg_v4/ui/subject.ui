@@ -1,0 +1,132 @@
+# 科目管理（教师端 /teacher；K94 草稿，K95 起放进 kg_v4/ui/）：教师开新科目、改名称说明、
+# 设公共/私有、启用/停用，以及在「科目成员」浮层里加/改/移除教师、分配/撤销学生。
+#
+# 接口：
+#   subject 模块（routes/subject_manage.zs，全部「角色 teacher」）：
+#     subject_manage_home  科目管理页面        进入时，整页状态（subjects、manage_head、can_create）
+#     subject_open         载入科目页面        「编辑科目」浮层的载入（回填 subj_* 表单）
+#     subject_save         保存科目页面        新建（subj_id 空）或编辑；返回整页状态
+#     subject_publish / subject_private   设科目可见性页面（传 visibility=public/private）
+#     subject_enable / subject_disable    设科目状态页面（传 status=active/disabled）
+#   account 模块（routes/account_subject.zs，全部「角色 teacher」；要校验账号，subject 是叶子所以放这里）：
+#     subject_members      科目成员页面        「科目成员」浮层的载入（页面状态 表单=form）
+#     subject_assign       分配科目学生页面    批量（assign_learners 逗号/顿号/换行分隔）
+#     subject_assign_one   分配科目学生页面    候选表行上「分配」，参数 cand_learner=assign_learners
+#     subject_revoke       撤销科目学生页面    学生表行上「撤销」，带 member_learner
+#     subject_teacher_add  加科目教师页面      下拉 add_teacher + add_role（协作/负责）
+#     subject_teacher_owner / subject_teacher_editor  改科目教师角色页面（传 role=owner/editor）
+#     subject_teacher_remove 移除科目教师页面  教师表行上「移出」，带 member_teacher
+#
+# 「端 教师」：只在教师端；「侧 管理」：和 AI老师设定、教材导入同在右侧「管理」组；
+# 「序 14」：接在学生管理（序 13）之后（K90c：教师端序 11+）。
+#
+# 身份：表格行的 can_manage（负责人或单人模式为 1）决定「编辑」「设公共/私有」「启用/停用」
+# 「成员」里的教师操作显不显示；公共科目的其他教师（我的身份=公共只读）只能看和分配学生。
+# 日语科目（jp_grammar）不能停用、不能改私有：按钮照常画，后端回 409，提示条显示原文。
+#
+# 「当」的条件里不能有空格；「提示」里不能有双引号和空格。
+# 待实现时核对：浮层「载入」用「页面状态 表单=form」模板时 state 里的列表能否在浮层里喂表格
+# （teacher_note 的浮层只用过「回填」）。已核对（K95）：喂表格没问题，但从行上打开时
+# 「载入」不发请求（见下面 K95 实测补记），靠界面级「触发 subject_members」补上。
+# 另需核对：行动作「带 a,b」带两个键、「分组 … 当 …」条件显隐是否被编译器支持（草稿按需要写，
+# 实测：编译器收「带 a,b」，但运行时 onRowRemote 的 carry 是单键，两键取不到——
+# 已按退路改：成员浮层里的行动作只带 member_*/cand_*，subj_id 由浮层地址参数并进请求（K95）。
+# 还要核对：同时写「序 14」和「侧 管理」时「管理」组内的排序（现有两页只写「侧」没写「序」）；
+# 不合预期就去掉「序 14」，组内按文件名排。
+#
+# K95 实测补记：成员浮层的「载入」从行上打开时不发请求——onRow 先把整行（含
+# subj_id）拷进表单，teacher.js 的 runLoader 看到「表单里已是这条」就跳过载入，
+# 浮层里的教师/学生/候选表和 can_manage/can_assign 全空。退路没用「独立界面」
+# （会在导航多出一页），改成界面级「触发 subject_members」：浮层开着、地址带
+# subj_id 时跑一次，把成员数据拉回来；直接刷新/分享浮层地址时表单里没这条，
+# 「载入」本身不跳过，两条路都落到同一个接口。
+
+界面 自定义 科目管理 端 教师 序 14 侧 管理 触发 subject_members
+  动作 subject_manage_home 远程 进入时 隐藏 刷新
+
+  显示 manage_head
+  文案 科目由老师开、由老师分配给学生；学生只看得到分配给自己且已启用的科目。新建的科目是「私有、草稿」：只有你（和你加的协作教师）看得到，分配好学生、导入内容后点「启用」，学生才看得到；设为「公共」后其他教师也能看、能把它分配给学生，但只有负责/协作教师能改内容。
+  文案 负责：改名称说明、公共/私有、启用/停用、加减教师、分配学生。协作：改内容、分配学生。公共只读：看和分配学生。日语语法是 1 号公共科目，不能停用、不能改成私有。
+  分组 顶栏 横排 顶栏 间距 12px 对齐 center
+    动作 new_subject 打开 编辑科目 重置 当 shared.can_create==1 新建科目
+  结束
+
+  列表 科目表 绑 subjects
+    列 subj_id 编号
+    列 subj_name 名称
+    列 subj_code 编码
+    列 subj_kind 类型
+    列 subj_visibility 可见性
+    列 subj_status 状态
+    列 subj_owner 创建者
+    列 subj_my_role 我的身份
+    列 subj_student_n 在册学生
+    列 subj_teacher_n 教师数
+    动作 open_members 打开 科目成员 带 subj_id 成员
+    动作 edit_subject 打开 编辑科目 带 subj_id 当 row.can_manage==1 编辑
+    动作 subject_enable 远程 带 subj_id 当 row.can_manage==1&&row.subj_status!=='启用' 启用
+    动作 subject_disable 远程 危险 带 subj_id 当 row.can_manage==1&&row.subj_status==='启用' 停用
+    动作 subject_publish 远程 危险 带 subj_id 当 row.can_manage==1&&row.subj_visibility==='私有' 设为公共
+    动作 subject_private 远程 带 subj_id 当 row.can_manage==1&&row.subj_visibility==='公共' 设为私有
+  结束
+
+  浮层 编辑科目 宽 560px 载入 subject_open
+    分组 主体 竖排 间距 12px
+      字段 subj_code 提示 小写字母开头，只用小写字母、数字、_，最长20，比如phys_hs 编码（建后不能改，兼作知识点编号前缀）
+      字段 subj_name 提示 比如：高中物理 名称
+      字段 subj_kind 控件 单选 类型（语言类默认开单词、默写、课文；通用类只开图谱、做题、进度、问老师；建后不能改）
+      字段 subj_intro 控件 多行 说明（可空，会进AI老师的人设）
+    结束
+    分组 底栏 横排 底栏
+      动作 subject_save 提交 远程 关闭 保存
+      动作 cancel_subject 次要 关闭 取消
+    结束
+  结束
+
+  浮层 科目成员 宽 720px 载入 subject_members
+    显示 member_head
+    文案 当 shared.can_manage===0 你不是这个科目的负责人：教师名单只读；学生可以分配，公共科目只能撤销你自己分配的。
+    文案 当 shared.can_assign===0 科目已停用：不能分配学生（可以撤销）；重新启用后原来的分配全部恢复。
+
+    # 「分组」不能套「分组」，所以教师区、学生区不包外层分组，用文案作小标题。
+    文案 教师
+    列表 教师表 绑 member_teachers
+      列 member_teacher 用户名
+      列 member_teacher_label 显示名
+      列 member_role 角色
+      列 member_creator 创建者
+      动作 subject_teacher_owner 远程 带 member_teacher 当 row.can_edit==1&&row.member_role==='协作' 设为负责
+      动作 subject_teacher_editor 远程 带 member_teacher 当 row.can_edit==1&&row.member_role==='负责' 设为协作
+      动作 subject_teacher_remove 远程 危险 带 member_teacher 当 row.can_edit==1 移出
+    结束
+    分组 加教师 横排 间距 12px 对齐 flex-end 当 shared.can_manage===1
+      字段 add_teacher 控件 下拉 选项来自 teacher_options 宽 220px 教师
+      字段 add_role 控件 下拉 宽 120px 角色
+      动作 subject_teacher_add 远程 加入
+    结束
+
+    文案 学生
+    文案 当 lists.member_students&&!lists.member_students.length 这个科目还没有分配学生。
+    列表 学生表 绑 member_students 当 lists.member_students&&lists.member_students.length
+      列 member_learner 用户名
+      列 member_learner_label 显示名
+      列 member_state 状态
+      列 member_assigned_by 分配人
+      动作 subject_revoke 远程 危险 带 member_learner 当 row.can_revoke==1 撤销
+    结束
+    文案 当 shared.can_assign===1&&lists.assign_candidates&&!lists.assign_candidates.length 所有可用的学生都已经在这个科目里了。
+    列表 可分配学生 绑 assign_candidates 当 shared.can_assign===1&&lists.assign_candidates&&lists.assign_candidates.length
+      列 cand_learner 用户名
+      列 cand_label 显示名
+      动作 subject_assign_one 远程 带 cand_learner 分配
+    结束
+    分组 批量分配 横排 间距 12px 对齐 flex-end 当 shared.can_assign===1
+      字段 assign_learners 控件 多行 提示 用户名用逗号、顿号或换行隔开 批量分配
+      动作 subject_assign 远程 清空 分配
+    结束
+
+    分组 底栏 横排 底栏
+      动作 close_members 次要 关闭 返回
+    结束
+  结束
+结束

@@ -64,3 +64,63 @@
   表格 students {r}
   消息 系统 {_msg} ok
 结束
+
+接口 GET /account/subject/candidates 角色 teacher
+  设 r = 调用 account.列可分配学生 subject_id={subject_id}
+  返回 {r}
+结束
+
+接口 POST /account/subject/members 动作 subject_members 角色 teacher
+  设 r = 调用 account.科目成员页面 learner={learner} subj_id={subj_id} current_role={current_role 或} auth_mode={auth_mode 或}
+  响应 state {r}
+  响应 form {r.form}
+结束
+
+接口 POST /account/subject/assign 动作 subject_assign 角色 teacher
+  设 r = 调用 account.分配科目学生页面 learner={learner} subj_id={subj_id} assign_learners={assign_learners} current_role={current_role 或} auth_mode={auth_mode 或}
+  设 _msg = 已分配
+  消息 系统 {_msg} ok
+  响应 state {r}
+结束
+
+接口 POST /account/subject/assign-one 动作 subject_assign_one 角色 teacher
+  设 r = 调用 account.分配科目学生页面 learner={learner} subj_id={subj_id} assign_learners={cand_learner} current_role={current_role 或} auth_mode={auth_mode 或}
+  设 _msg = 已分配
+  消息 系统 {_msg} ok
+  响应 state {r}
+结束
+
+接口 POST /account/subject/revoke 动作 subject_revoke 角色 teacher
+  设 r = 调用 account.撤销科目学生页面 learner={learner} subj_id={subj_id} member_learner={member_learner} current_role={current_role 或} auth_mode={auth_mode 或}
+  设 _msg = 已撤销
+  消息 系统 {_msg} ok
+  响应 state {r}
+结束
+
+接口 POST /account/subject/teacher-add 动作 subject_teacher_add 角色 teacher
+  设 r = 调用 account.加科目教师页面 learner={learner} subj_id={subj_id} add_teacher={add_teacher} add_role={add_role 或} current_role={current_role 或} auth_mode={auth_mode 或}
+  设 _msg = 已加入本科目
+  消息 系统 {_msg} ok
+  响应 state {r}
+结束
+
+接口 POST /account/subject/teacher-owner 动作 subject_teacher_owner 角色 teacher
+  设 r = 调用 account.改科目教师角色页面 learner={learner} subj_id={subj_id} member_teacher={member_teacher} role=owner current_role={current_role 或} auth_mode={auth_mode 或}
+  设 _msg = 已设为负责
+  消息 系统 {_msg} ok
+  响应 state {r}
+结束
+
+接口 POST /account/subject/teacher-editor 动作 subject_teacher_editor 角色 teacher
+  设 r = 调用 account.改科目教师角色页面 learner={learner} subj_id={subj_id} member_teacher={member_teacher} role=editor current_role={current_role 或} auth_mode={auth_mode 或}
+  设 _msg = 已设为协作
+  消息 系统 {_msg} ok
+  响应 state {r}
+结束
+
+接口 POST /account/subject/teacher-remove 动作 subject_teacher_remove 角色 teacher
+  设 r = 调用 account.移除科目教师页面 learner={learner} subj_id={subj_id} member_teacher={member_teacher} current_role={current_role 或} auth_mode={auth_mode 或}
+  设 _msg = 已移出本科目
+  消息 系统 {_msg} ok
+  响应 state {r}
+结束

@@ -46,3 +46,18 @@
   字段 updated_by 文本 最后修改的教师，可空
   字段 updated_at 文本 最后修改时间，可空
 结束
+
+页面 实体 subject_view 科目管理页面
+  字段 subj_id 整数 科目表编号列，也是编辑/成员浮层地址里带的科目编号
+  字段 subj_code 文本 科目编码（新建时填，建后不可改）
+  字段 subj_name 文本 科目名称
+  字段 subj_intro 长文本 科目说明
+  字段 subj_kind 枚举 通用,语言 类型（页面值域中文；通用存 general、语言存 language）
+  字段 subj_visibility 文本 科目表可见性列（公共/私有）
+  字段 subj_status 文本 科目表状态列（启用/停用/草稿）
+  字段 subj_owner 文本 科目表创建者列
+  字段 subj_my_role 文本 科目表我的身份列（负责/协作/公共只读/单人）
+  字段 subj_student_n 整数 科目表在册学生列
+  字段 subj_teacher_n 整数 科目表教师数列
+  字段 manage_head 文本 页面抬头
+结束

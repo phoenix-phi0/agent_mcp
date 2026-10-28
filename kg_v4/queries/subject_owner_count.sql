@@ -1,0 +1,1 @@
+SELECT (CASE WHEN i.owner <> '' AND i.owner <> :ex THEN 1 ELSE 0 END) + (SELECT COUNT(*) FROM subject_teacher t WHERE t.subject_id = i.id AND t.role = 'owner' AND t.teacher <> i.owner AND t.teacher <> :ex) FROM subject_info i WHERE i.id = CAST(:subject_id AS INTEGER)

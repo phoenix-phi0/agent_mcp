@@ -331,4 +331,223 @@
     返回 {out}
   结束
 
+  公开 函数 列可分配学生 subject_id
+    设 sl = 调用 subject.列科目学生 subject_id={subject_id}
+    设 rows = 查询 app.db account_students_enabled
+    设 list = 解析JSON []
+    遍历 s 于 {rows}
+      设 found = 0
+      遍历 l 于 {sl.students}
+        如果 {l.learner} 等于 {s.username}
+          设 found = 1
+        结束
+      结束
+      如果 {found} 等于 0
+        设 it.username = {s.username}
+        设 it.display_name = {s.display_name}
+        设 list = 列表加项 {list} {it}
+      结束
+    结束
+    设 total = 列表长度 {list}
+    返回 {"total": {total}, "students": {list}}
+  结束
+
+  公开 函数 科目成员页面 learner subj_id current_role? auth_mode?
+    设 d = 调用 subject.科目详情 learner={learner} subject_id={subj_id} current_role={current_role} auth_mode={auth_mode}
+    设 cm = 0
+    如果 {d.my_role} 等于 owner 或 {d.my_role} 等于 single
+      设 cm = 1
+    结束
+    设 ca = 0
+    如果 {d.status} 不等于 disabled
+      设 ca = 1
+    结束
+    设 rl = 单人
+    如果 {d.my_role} 等于 owner
+      设 rl = 负责
+    结束
+    如果 {d.my_role} 等于 editor
+      设 rl = 协作
+    结束
+    如果 {d.my_role} 等于 public
+      设 rl = 公共只读
+    结束
+    设 stz = 草稿
+    如果 {d.status} 等于 active
+      设 stz = 启用
+    结束
+    如果 {d.status} 等于 disabled
+      设 stz = 停用
+    结束
+    设 head = {d.name}（{d.code}）·{stz}·我是{rl}
+    设 tl = 解析JSON []
+    遍历 t 于 {d.teachers}
+      设 tu = 查一行 app.db account_user_by_name username={t.teacher}
+      设 tn = {tu.display_name 或}
+      如果 {tu.username 或} 为空
+        设 tn = {t.teacher}（无账号）
+      结束
+      设 mr = 协作
+      如果 {t.role} 等于 owner
+        设 mr = 负责
+      结束
+      设 mc = 
+      如果 {t.creator} 等于 1
+        设 mc = 是
+      结束
+      设 ce = 0
+      如果 {cm} 等于 1 且 {t.creator} 等于 0
+        设 ce = 1
+      结束
+      设 tr.member_teacher = {t.teacher}
+      设 tr.member_teacher_label = {tn}
+      设 tr.member_role = {mr}
+      设 tr.member_creator = {mc}
+      设 tr.can_edit = {ce}
+      设 tl = 列表加项 {tl} {tr}
+    结束
+    设 sl2 = 解析JSON []
+    遍历 s 于 {d.students}
+      设 su = 查一行 app.db account_user_by_name username={s.learner}
+      设 sn = {su.display_name 或}
+      如果 {su.username 或} 为空
+        设 sn = {s.learner}（无账号）
+      结束
+      设 ms = 已撤销
+      如果 {s.status} 等于 active
+        设 ms = 在册
+      结束
+      设 ab = {s.assigned_by 或迁移登记}
+      设 cr = 0
+      如果 {s.status} 等于 active 且 ({d.my_role} 不等于 public 或 {s.assigned_by} 等于 {learner})
+        设 cr = 1
+      结束
+      设 sr.member_learner = {s.learner}
+      设 sr.member_learner_label = {sn}
+      设 sr.member_state = {ms}
+      设 sr.member_assigned_by = {ab}
+      设 sr.can_revoke = {cr}
+      设 sl2 = 列表加项 {sl2} {sr}
+    结束
+    设 cl = 解析JSON []
+    如果 {ca} 等于 1
+      设 cd = 调用 列可分配学生 subject_id={subj_id}
+      遍历 c 于 {cd.students}
+        设 cx.cand_learner = {c.username}
+        设 cx.cand_label = {c.display_name}
+        设 cl = 列表加项 {cl} {cx}
+      结束
+    结束
+    设 ol = 解析JSON []
+    如果 {cm} 等于 1
+      设 trows = 查询 app.db account_teachers_enabled
+      遍历 o 于 {trows}
+        设 inn = 0
+        遍历 t2 于 {d.teachers}
+          如果 {t2.teacher} 等于 {o.username}
+            设 inn = 1
+          结束
+        结束
+        如果 {inn} 等于 0
+          设 lb = {o.display_name}（{o.username}）
+          设 ox.value = {o.username}
+          设 ox.label = {lb}
+          设 ol = 列表加项 {ol} {ox}
+        结束
+      结束
+    结束
+    设 form.subj_id = {d.id}
+    设 form.assign_learners = 
+    设 form.add_teacher = 
+    设 form.add_role = 协作
+    返回 {"form": {form}, "member_head": "{head}", "member_my_role": "{rl}", "can_manage": {cm}, "can_assign": {ca}, "member_teachers": {tl}, "member_students": {sl2}, "assign_candidates": {cl}, "teacher_options": {ol}}
+  结束
+
+  公开 函数 分配科目学生页面 learner subj_id assign_learners current_role? auth_mode?
+    设 d = 调用 subject.科目详情 learner={learner} subject_id={subj_id} current_role={current_role} auth_mode={auth_mode}
+    设 s1 = 替换 {assign_learners} [，、\s,]+ ,
+    设 parts = 按正则切分 {s1} ,
+    设 joined = 
+    设 seen = ,
+    设 cnt = 0
+    遍历 x 于 {parts}
+      如果 {x} 为空
+        继续
+      结束
+      设 key = ,{x},
+      如果 {seen} 包含 {key}
+        继续
+      结束
+      设 seen = {seen}{x},
+      如果 {cnt} 等于 0
+        设 joined = {x}
+      否则
+        设 joined = {joined},{x}
+      结束
+      设 cnt = 计算 {cnt} + 1
+    结束
+    如果 {cnt} 等于 0
+      报错 400 请选择要分配的学生
+    结束
+    遍历 y 于 {parts}
+      如果 {y} 不为空
+        设 u = 查一行 app.db account_user_by_name username={y}
+        如果 {u.username 或} 为空
+          报错 400 有的用户名不是可用的学生账号
+        结束
+        如果 {u.role} 不等于 student 或 {u.disabled} 等于 1
+          报错 400 有的用户名不是可用的学生账号
+        结束
+      结束
+    结束
+    设 ar = 调用 subject.分配学生 learner={learner} subject_id={subj_id} learners={joined} current_role={current_role} auth_mode={auth_mode}
+    设 out = 调用 科目成员页面 learner={learner} subj_id={subj_id} current_role={current_role} auth_mode={auth_mode}
+    返回 {out}
+  结束
+
+  公开 函数 撤销科目学生页面 learner subj_id member_learner current_role? auth_mode?
+    设 rv = 调用 subject.撤销学生 learner={learner} subject_id={subj_id} student={member_learner} current_role={current_role} auth_mode={auth_mode}
+    设 out = 调用 科目成员页面 learner={learner} subj_id={subj_id} current_role={current_role} auth_mode={auth_mode}
+    返回 {out}
+  结束
+
+  公开 函数 加科目教师页面 learner subj_id add_teacher add_role? current_role? auth_mode?
+    设 d = 调用 subject.科目详情 learner={learner} subject_id={subj_id} current_role={current_role} auth_mode={auth_mode}
+    如果 {d.my_role} 不等于 owner 且 {d.my_role} 不等于 single
+      报错 403 只有科目负责人可以操作
+    结束
+    设 rr = editor
+    如果 {add_role} 等于 负责
+      设 rr = owner
+    否则如果 {add_role} 不为空 且 {add_role} 不等于 协作
+      报错 400 角色只能是 owner 或 editor
+    结束
+    设 at = 替换 {add_teacher} ^\s+|\s+$
+    如果 {at} 为空
+      报错 400 请选择要加入的教师
+    结束
+    设 u = 查一行 app.db account_user_by_name username={at}
+    如果 {u.username 或} 为空
+      报错 400 不是可用的教师账号
+    结束
+    如果 {u.role} 不等于 teacher 或 {u.disabled} 等于 1
+      报错 400 不是可用的教师账号
+    结束
+    设 ad = 调用 subject.加科目教师 learner={learner} subject_id={subj_id} teacher={at} role={rr} current_role={current_role} auth_mode={auth_mode}
+    设 out = 调用 科目成员页面 learner={learner} subj_id={subj_id} current_role={current_role} auth_mode={auth_mode}
+    返回 {out}
+  结束
+
+  公开 函数 改科目教师角色页面 learner subj_id member_teacher role current_role? auth_mode?
+    设 rv = 调用 subject.改科目教师角色 learner={learner} subject_id={subj_id} teacher={member_teacher} role={role} current_role={current_role} auth_mode={auth_mode}
+    设 out = 调用 科目成员页面 learner={learner} subj_id={subj_id} current_role={current_role} auth_mode={auth_mode}
+    返回 {out}
+  结束
+
+  公开 函数 移除科目教师页面 learner subj_id member_teacher current_role? auth_mode?
+    设 rv = 调用 subject.移除科目教师 learner={learner} subject_id={subj_id} teacher={member_teacher} current_role={current_role} auth_mode={auth_mode}
+    设 out = 调用 科目成员页面 learner={learner} subj_id={subj_id} current_role={current_role} auth_mode={auth_mode}
+    返回 {out}
+  结束
+
 结束

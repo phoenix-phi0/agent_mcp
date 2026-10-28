@@ -207,4 +207,365 @@
     结束
     返回 {"ok": 1, "subject": {subject}}
   结束
+
+  函数 管理校验 learner subject_id need current_role? auth_mode?
+    如果 {subject_id} 为空
+      报错 400 subject_id 不对
+    结束
+    设 mm = 匹配 {subject_id} ^[0-9]+$
+    如果 {mm.matched} 不等于 是
+      报错 400 subject_id 不对
+    结束
+    设 si = 查一行 app.db subject_info_full id={subject_id}
+    如果 {si} 为空
+      报错 404 没有这个科目
+    结束
+    如果 {auth_mode} 不等于 on
+      返回 {"subject_id": {si.id}, "code": "{si.code}", "status": "{si.status}", "visibility": "{si.visibility}", "owner": "{si.owner}", "via": "single"}
+    结束
+    如果 {current_role} 不等于 teacher
+      报错 403 只有教师可以管理科目
+    结束
+    设 a = 调用 科目访问 learner={learner} current_role={current_role} subject_id={subject_id} need={need} auth_mode=on
+    如果 {a.ok} 等于 0
+      如果 {need} 等于 settings
+        报错 403 只有科目负责人可以操作
+      结束
+      如果 {need} 等于 assign
+        报错 403 没有权限给该科目分配学生
+      结束
+      报错 403 没有权限访问该科目
+    结束
+    返回 {"subject_id": {si.id}, "code": "{si.code}", "status": "{si.status}", "visibility": "{si.visibility}", "owner": "{si.owner}", "via": "{a.via}"}
+  结束
+
+  函数 负责人数 subject_id except?
+    设 q = {"subject_id": "{subject_id}", "ex": "{except}"}
+    设 n = 查一值表 app.db subject_owner_count {q}
+    返回 {"n": {n}}
+  结束
+
+  公开 函数 建科目 learner code name intro? kind? current_role? auth_mode?
+    如果 {learner} 为空
+      报错 400 learner 不能为空
+    结束
+    如果 {auth_mode} 等于 on 且 {current_role} 不等于 teacher
+      报错 403 只有教师可以管理科目
+    结束
+    设 cd = {code 或}
+    如果 {cd} 不为空
+      设 cd = 替换 {cd} ^\s+|\s+$
+    结束
+    设 cm = 匹配 {cd} ^[a-z][a-z0-9_]*$
+    设 ctail = 截取 {cd} 21
+    如果 {cm.matched} 不等于 是 或 {ctail} 不为空
+      报错 400 科目编码只能是小写字母开头的小写字母、数字、下划线，最长20
+    结束
+    如果 {cd} 等于 jp_grammar
+      报错 400 jp_grammar 是日语科目的保留编码
+    结束
+    设 ex = 查一值 app.db subject_info_by_code code={cd}
+    如果 {ex} 不为空
+      报错 409 科目编码已存在
+    结束
+    设 nm = {name 或}
+    如果 {nm} 不为空
+      设 nm = 替换 {nm} ^\s+|\s+$
+    结束
+    如果 {nm} 为空
+      报错 400 科目名称不能为空
+    结束
+    设 ntail = 截取 {nm} 41
+    如果 {ntail} 不为空
+      报错 400 科目名称最长40字
+    结束
+    设 kd = {kind 或 general}
+    如果 {kd} 不等于 language 且 {kd} 不等于 general
+      报错 400 类型只能是 language 或 general
+    结束
+    设 now = 当前时间
+    设 row = {"code": "{cd}", "name": "{nm}", "intro": "{intro 或}", "kind": "{kd}", "owner": "{learner}", "now": "{now}"}
+    事务 app.db
+      如果 {kd} 等于 language
+        设 n1 = 写库表 app.db subject_info_insert_language {row}
+      否则
+        设 n1 = 写库表 app.db subject_info_insert_general {row}
+      结束
+      设 sid = 查一值 app.db subject_info_by_code code={cd}
+      设 n2 = 写库 app.db subject_teacher_insert subject_id={sid} teacher={learner} role=owner now={now}
+    结束
+    返回 {"id": {sid}, "code": "{cd}"}
+  结束
+
+  公开 函数 改科目 learner subject_id name? intro? current_role? auth_mode?
+    设 v = 调用 管理校验 learner={learner} subject_id={subject_id} need=settings current_role={current_role} auth_mode={auth_mode}
+    设 si = 查一行 app.db subject_info_full id={subject_id}
+    设 nm = {name 或}
+    如果 {nm} 不为空
+      设 nm = 替换 {nm} ^\s+|\s+$
+    结束
+    设 newname = {si.name}
+    如果 {nm} 不为空
+      设 ntail = 截取 {nm} 41
+      如果 {ntail} 不为空
+        报错 400 科目名称最长40字
+      结束
+      设 newname = {nm}
+    结束
+    设 now = 当前时间
+    设 row = {"id": "{subject_id}", "name": "{newname}", "intro": "{intro 或}", "now": "{now}"}
+    设 n = 写库表 app.db subject_info_update {row}
+    返回 {"ok": 1}
+  结束
+
+  公开 函数 设科目可见性 learner subject_id visibility current_role? auth_mode?
+    如果 {visibility} 不等于 public 且 {visibility} 不等于 private
+      报错 400 可见性只能是 public 或 private
+    结束
+    设 v = 调用 管理校验 learner={learner} subject_id={subject_id} need=settings current_role={current_role} auth_mode={auth_mode}
+    如果 {v.code} 等于 jp_grammar 且 {visibility} 等于 private
+      报错 409 日语科目必须是公共科目
+    结束
+    如果 {visibility} 等于 private 且 {v.visibility} 等于 public
+      设 fc = 查一值 app.db subject_student_foreign subject_id={subject_id}
+      如果 {fc} 大于 0
+        报错 409 还有其他教师分配的在册学生，不能改成私有
+      结束
+    结束
+    设 now = 当前时间
+    设 n = 写库 app.db subject_info_set_visibility visibility={visibility} now={now} id={subject_id}
+    返回 {"ok": 1, "visibility": "{visibility}"}
+  结束
+
+  公开 函数 设科目状态 learner subject_id status current_role? auth_mode?
+    如果 {status} 不等于 active 且 {status} 不等于 disabled
+      报错 400 状态只能是 active 或 disabled
+    结束
+    设 v = 调用 管理校验 learner={learner} subject_id={subject_id} need=settings current_role={current_role} auth_mode={auth_mode}
+    如果 {v.code} 等于 jp_grammar 且 {status} 等于 disabled
+      报错 409 日语科目不能停用
+    结束
+    设 now = 当前时间
+    设 n = 写库 app.db subject_info_set_status status={status} now={now} id={subject_id}
+    返回 {"ok": 1, "status": "{status}"}
+  结束
+
+  公开 函数 列可管理科目 learner current_role? auth_mode?
+    如果 {auth_mode} 等于 on 且 {current_role} 不等于 teacher
+      报错 403 只有教师可以管理科目
+    结束
+    如果 {auth_mode} 等于 on
+      设 rows = 查询 app.db subject_manage_list learner={learner}
+    否则
+      设 rows = 查询 app.db subject_manage_list_all
+    结束
+    设 n = 列表长度 {rows}
+    返回 {"total": {n}, "subjects": {rows}}
+  结束
+
+  公开 函数 列科目教师 subject_id
+    设 si = 查一行 app.db subject_info_full id={subject_id}
+    如果 {si} 为空
+      返回 {"total": 0, "teachers": []}
+    结束
+    设 rows = 查询 app.db subject_teacher_list subject_id={subject_id}
+    设 n = 列表长度 {rows}
+    返回 {"total": {n}, "teachers": {rows}}
+  结束
+
+  公开 函数 科目详情 learner subject_id current_role? auth_mode?
+    设 v = 调用 管理校验 learner={learner} subject_id={subject_id} need=read current_role={current_role} auth_mode={auth_mode}
+    设 si = 查一行 app.db subject_info_full id={subject_id}
+    设 tl = 调用 列科目教师 subject_id={subject_id}
+    设 st = 查询 app.db subject_student_all subject_id={subject_id}
+    返回 {"id": {si.id}, "code": "{si.code}", "name": "{si.name}", "intro": "{si.intro 或}", "kind": "{si.kind}", "visibility": "{si.visibility}", "status": "{si.status}", "owner": "{si.owner}", "my_role": "{v.via}", "teachers": {tl.teachers}, "students": {st}}
+  结束
+
+  公开 函数 加科目教师 learner subject_id teacher role? current_role? auth_mode?
+    设 tc = {teacher 或}
+    如果 {tc} 不为空
+      设 tc = 替换 {tc} ^\s+|\s+$
+    结束
+    如果 {tc} 为空
+      报错 400 教师用户名不能为空
+    结束
+    设 rl = {role 或 editor}
+    如果 {rl} 不等于 owner 且 {rl} 不等于 editor
+      报错 400 角色只能是 owner 或 editor
+    结束
+    设 v = 调用 管理校验 learner={learner} subject_id={subject_id} need=settings current_role={current_role} auth_mode={auth_mode}
+    设 tr = 查一值 app.db subject_teacher_role subject_id={subject_id} learner={tc}
+    如果 {v.owner} 等于 {tc} 或 {tr} 不为空
+      报错 409 该教师已在本科目
+    结束
+    设 now = 当前时间
+    设 n = 写库 app.db subject_teacher_insert subject_id={subject_id} teacher={tc} role={rl} now={now}
+    返回 {"ok": 1}
+  结束
+
+  公开 函数 改科目教师角色 learner subject_id teacher role current_role? auth_mode?
+    如果 {role} 不等于 owner 且 {role} 不等于 editor
+      报错 400 角色只能是 owner 或 editor
+    结束
+    设 v = 调用 管理校验 learner={learner} subject_id={subject_id} need=settings current_role={current_role} auth_mode={auth_mode}
+    如果 {teacher} 不为空 且 {v.owner} 等于 {teacher}
+      报错 409 科目创建者始终是负责人
+    结束
+    设 tr = 查一值 app.db subject_teacher_role subject_id={subject_id} learner={teacher}
+    如果 {tr} 为空
+      报错 404 该教师不在本科目
+    结束
+    如果 {role} 等于 editor 且 {tr} 等于 owner
+      设 c = 调用 负责人数 subject_id={subject_id} except={teacher}
+      如果 {c.n} 等于 0
+        报错 409 不能去掉最后一个负责人
+      结束
+    结束
+    设 n = 写库 app.db subject_teacher_update_role subject_id={subject_id} teacher={teacher} role={role}
+    返回 {"ok": 1}
+  结束
+
+  公开 函数 移除科目教师 learner subject_id teacher current_role? auth_mode?
+    设 v = 调用 管理校验 learner={learner} subject_id={subject_id} need=settings current_role={current_role} auth_mode={auth_mode}
+    如果 {teacher} 不为空 且 {v.owner} 等于 {teacher}
+      报错 409 科目创建者不能移除
+    结束
+    设 tr = 查一值 app.db subject_teacher_role subject_id={subject_id} learner={teacher}
+    如果 {tr} 为空
+      报错 404 该教师不在本科目
+    结束
+    如果 {tr} 等于 owner
+      设 c = 调用 负责人数 subject_id={subject_id} except={teacher}
+      如果 {c.n} 等于 0
+        报错 409 不能移除最后一个负责人
+      结束
+    结束
+    设 n = 写库 app.db subject_teacher_delete subject_id={subject_id} teacher={teacher}
+    返回 {"ok": 1}
+  结束
+
+  公开 函数 分配学生 learner subject_id learners current_role? auth_mode?
+    设 ls = {learners 或}
+    如果 {ls} 为空
+      报错 400 请选择要分配的学生
+    结束
+    设 hm = 匹配 {ls} [^,\s]
+    如果 {hm.matched} 不等于 是
+      报错 400 请选择要分配的学生
+    结束
+    设 v = 调用 管理校验 learner={learner} subject_id={subject_id} need=assign current_role={current_role} auth_mode={auth_mode}
+    如果 {v.status} 等于 disabled
+      报错 409 科目已停用，不能分配学生
+    结束
+    设 parts = 按正则切分 {ls} ,
+    设 now = 当前时间
+    设 assigned = 0
+    设 reactivated = 0
+    设 skipped = 0
+    设 seen = ,
+    事务 app.db
+      遍历 x 于 {parts}
+        如果 {x} 为空
+          继续
+        结束
+        设 s = 替换 {x} ^\s+|\s+$
+        如果 {s} 为空
+          继续
+        结束
+        设 key = ,{s},
+        如果 {seen} 包含 {key}
+          继续
+        结束
+        设 seen = {seen}{s},
+        设 sr = 查一行 app.db subject_student_row subject_id={subject_id} learner={s}
+        如果 {sr} 为空
+          设 n = 写库 app.db subject_student_assign_insert subject_id={subject_id} learner={s} by={learner} now={now}
+          设 assigned = 计算 {assigned} + 1
+        否则如果 {sr.status} 等于 revoked
+          设 n = 写库 app.db subject_student_reactivate subject_id={subject_id} learner={s} by={learner}
+          设 reactivated = 计算 {reactivated} + 1
+        否则
+          设 skipped = 计算 {skipped} + 1
+        结束
+      结束
+    结束
+    返回 {"assigned": {assigned}, "reactivated": {reactivated}, "skipped": {skipped}}
+  结束
+
+  公开 函数 撤销学生 learner subject_id student current_role? auth_mode?
+    设 sd = {student 或}
+    如果 {sd} 不为空
+      设 sd = 替换 {sd} ^\s+|\s+$
+    结束
+    如果 {sd} 为空
+      报错 400 学生用户名不能为空
+    结束
+    设 v = 调用 管理校验 learner={learner} subject_id={subject_id} need=assign current_role={current_role} auth_mode={auth_mode}
+    设 sr = 查一行 app.db subject_student_row subject_id={subject_id} learner={sd}
+    如果 {sr} 为空
+      报错 404 该学生不在本科目
+    结束
+    如果 {sr.status} 不等于 active
+      报错 404 该学生不在本科目
+    结束
+    如果 {v.via} 等于 public 且 {sr.assigned_by} 不等于 {learner}
+      报错 403 只能撤销自己分配的学生
+    结束
+    设 n = 写库 app.db subject_student_revoke subject_id={subject_id} learner={sd}
+    返回 {"ok": 1}
+  结束
+
+  公开 函数 科目管理页面 learner current_role? auth_mode?
+    设 lm = 调用 列可管理科目 learner={learner} current_role={current_role} auth_mode={auth_mode}
+    如果 {auth_mode} 等于 on
+      设 rows = 查询 app.db subject_page_rows learner={learner}
+    否则
+      设 rows = 查询 app.db subject_page_rows_all
+    结束
+    返回 {"subjects": {rows}, "manage_head": "我能管理的科目共{lm.total}个", "can_create": 1}
+  结束
+
+  公开 函数 载入科目页面 learner subj_id? current_role? auth_mode?
+    如果 {subj_id} 为空
+      返回 {"subj_id": "", "subj_code": "", "subj_name": "", "subj_intro": "", "subj_kind": "通用"}
+    结束
+    设 v = 调用 管理校验 learner={learner} subject_id={subj_id} need=settings current_role={current_role} auth_mode={auth_mode}
+    设 si = 查一行 app.db subject_info_full id={subj_id}
+    设 kd = 通用
+    如果 {si.kind} 等于 language
+      设 kd = 语言
+    结束
+    返回 {"subj_id": {si.id}, "subj_code": "{si.code}", "subj_name": "{si.name}", "subj_intro": "{si.intro 或}", "subj_kind": "{kd}"}
+  结束
+
+  公开 函数 保存科目页面 learner subj_name subj_id? subj_code? subj_intro? subj_kind? current_role? auth_mode?
+    如果 {learner} 为空
+      报错 400 learner 不能为空
+    结束
+    设 kd = {subj_kind 或}
+    如果 {kd} 为空 或 {kd} 等于 通用
+      设 kd = general
+    否则如果 {kd} 等于 语言
+      设 kd = language
+    结束
+    如果 {subj_id} 为空
+      设 cr = 调用 建科目 learner={learner} code={subj_code} name={subj_name} intro={subj_intro} kind={kd} current_role={current_role} auth_mode={auth_mode}
+    否则
+      设 ed = 调用 改科目 learner={learner} subject_id={subj_id} name={subj_name} intro={subj_intro} current_role={current_role} auth_mode={auth_mode}
+    结束
+    设 pg = 调用 科目管理页面 learner={learner} current_role={current_role} auth_mode={auth_mode}
+    返回 {pg}
+  结束
+
+  公开 函数 设科目可见性页面 learner subj_id visibility current_role? auth_mode?
+    设 r = 调用 设科目可见性 learner={learner} subject_id={subj_id} visibility={visibility} current_role={current_role} auth_mode={auth_mode}
+    设 pg = 调用 科目管理页面 learner={learner} current_role={current_role} auth_mode={auth_mode}
+    返回 {pg}
+  结束
+
+  公开 函数 设科目状态页面 learner subj_id status current_role? auth_mode?
+    设 r = 调用 设科目状态 learner={learner} subject_id={subj_id} status={status} current_role={current_role} auth_mode={auth_mode}
+    设 pg = 调用 科目管理页面 learner={learner} current_role={current_role} auth_mode={auth_mode}
+    返回 {pg}
+  结束
 结束
