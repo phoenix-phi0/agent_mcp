@@ -36,6 +36,11 @@ run() {
     printf '%s\n' "$out" | tail -6 | sed 's/^/    /'
     return
   fi
+  # 浏览器走查在没装 playwright 的机器上退出码 2 = 跳过（环境缺依赖），不计失败
+  if [ "$code" -eq 2 ] && [ "$name" = "kg_v4走查" ]; then
+    printf '%-12s 跳过（没装 playwright，不计失败）\n' "$name"
+    return
+  fi
   last=$(printf '%s\n' "$out" | grep -E '通过 *[0-9]+|passed|OK|完成' | tail -1)
   [ -z "$last" ] && last=$(printf '%s\n' "$out" | grep -v '^\s*$' | tail -1)
   printf '%-12s 退出码 %s  %s\n' "$name" "$code" "$last"
@@ -58,6 +63,9 @@ run 块识别当重复 $PY tests/http/test_block_openers.py
 LIMIT=150 run kg_v4项目  $PY tests/kg_v4/test_project.py
 run 设定行科目列  $PY tests/kg_v4/test_tr_rows.py
 run 学生页设定表  $PY tests/kg_v4/test_report_notes.py
+# 浏览器走查（K97）：起服务 + playwright + 系统 Chrome，比别的组慢，时限给 300 秒。
+# 没 playwright 的机器上打「跳过」退出码 2——run() 里单独按「跳过」处理，详见脚本头部。
+LIMIT=300 run kg_v4走查  $PY tests/kg_v4/e2e_walk.py
 run 模板命名    $PY tests/gen/test_templates.py
 run 按端拆页面  $PY tests/gen/test_ends.py
 run 界面序      $PY tests/gen/test_order.py
