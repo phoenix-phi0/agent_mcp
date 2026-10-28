@@ -1033,7 +1033,18 @@
         如果 {line} 不为空 且 {cm.matched} 不等于 是
           设 padded = {line}||||
           设 mm = 匹配 {padded} {re}
-          设 it = {"line": {ln}, "a": "{mm.named.a}", "b": "{mm.named.b}", "c": "{mm.named.c}", "d": "{mm.named.d}", "e": "{mm.named.e}"}
+          设 pcs = 找全部 {line} [|]
+          设 pn = 列表长度 {pcs}
+          设 np = 计算 {pn} + 1
+          设 lim = 2
+          如果 {kind} 等于 item
+            设 lim = 5
+          结束
+          设 exf = 0
+          如果 {np} 大于 {lim}
+            设 exf = 1
+          结束
+          设 it = {"line": {ln}, "a": "{mm.named.a}", "b": "{mm.named.b}", "c": "{mm.named.c}", "d": "{mm.named.d}", "e": "{mm.named.e}", "extra": {exf}}
           设 rows = 列表加项 {rows} {it}
         结束
       结束
@@ -1060,9 +1071,6 @@
         设 c1 = a_code
         设 c2 = b_code
       结束
-      设 da = 0
-      设 db2 = 0
-      设 dc = 0
       遍历 x 于 {src}
         设 ln = 计算 {ln} + 1
         设 ra = {nothing 或}
@@ -1086,27 +1094,70 @@
           设 ra = {x.a_code 或}
           设 rb = {x.b_code 或}
         结束
-        如果 {ra} 不为空
-          设 da = 计算 {da} + 1
-        结束
-        如果 {rb} 不为空
-          设 db2 = 计算 {db2} + 1
-        结束
-        如果 {rc} 不为空
-          设 dc = 计算 {dc} + 1
-        结束
-        设 it = {"line": {ln}, "a": "{ra}", "b": "{rb}", "c": "{rc}", "d": "{rd}", "e": "{rf}"}
+        设 it = {"line": {ln}, "a": "{ra}", "b": "{rb}", "c": "{rc}", "d": "{rd}", "e": "{rf}", "extra": 0}
         设 rows = 列表加项 {rows} {it}
       结束
       设 n0 = 列表长度 {rows}
       如果 {n0} 大于 0
-        如果 {da} 等于 0
+        设 hl = 读文本行 {file_path}
+        设 hs = @
+        设 jt = @
+        如果 {m2.matched} 等于 是
+          遍历 hh 于 {hl}
+            设 h1 = 替换 {hh} ^\ufeff
+            设 hparts = 按正则切分 {h1} ,
+            遍历 pp 于 {hparts}
+              设 p2 = 替换 {pp} ^\s+|\s+$
+              设 hs = {hs}{p2}@
+            结束
+            跳出
+          结束
+        否则
+          遍历 jj 于 {hl}
+            设 jt = {jt}{jj}
+          结束
+        结束
+        设 ok1 = 0
+        设 ok2 = 0
+        设 ok3 = 1
+        如果 {m2.matched} 等于 是
+          设 k1 = @{c1}@
+          设 k2 = @{c2}@
+          如果 {hs} 包含 {k1}
+            设 ok1 = 1
+          结束
+          如果 {hs} 包含 {k2}
+            设 ok2 = 1
+          结束
+          如果 {c3} 不为空
+            设 k3 = @{c3}@
+            如果 {hs} 不包含 {k3}
+              设 ok3 = 0
+            结束
+          结束
+        否则
+          设 q1 = 匹配 {jt} "{c1}"\s*:
+          设 q2 = 匹配 {jt} "{c2}"\s*:
+          如果 {q1.matched} 等于 是
+            设 ok1 = 1
+          结束
+          如果 {q2.matched} 等于 是
+            设 ok2 = 1
+          结束
+          如果 {c3} 不为空
+            设 q3 = 匹配 {jt} "{c3}"\s*:
+            如果 {q3.matched} 不等于 是
+              设 ok3 = 0
+            结束
+          结束
+        结束
+        如果 {ok1} 等于 0
           报错 400 导入文件读不了（缺{c1}）
         结束
-        如果 {db2} 等于 0
+        如果 {ok2} 等于 0
           报错 400 导入文件读不了（缺{c2}）
         结束
-        如果 {c3} 不为空 且 {dc} 等于 0
+        如果 {ok3} 等于 0
           报错 400 导入文件读不了（缺{c3}）
         结束
       结束
@@ -1128,6 +1179,11 @@
     如果 {kind} 不等于 point 且 {kind} 不等于 item 且 {kind} 不等于 edge 且 {kind} 不等于 contrast
       报错 400 导入类型不对
     结束
+    设 pm = 匹配 {file_path} ^uploads/[^/\\]+$
+    设 pd = 匹配 {file_path} [.][.]
+    如果 {pm.matched} 不等于 是 或 {pd.matched} 等于 是
+      报错 400 导入文件路径不对
+    结束
     设 sid = {sb.subject_id}
     设 acts = {"e": "报错", "u": "更新", "n": "新增"}
     设 rd = 调用 读导入行 kind={kind} file_path={file_path}
@@ -1146,6 +1202,18 @@
       设 xe = {x.e}
       设 rs = {nothing 或}
       设 cdv = {xa}
+      如果 {x.extra} 等于 1
+        设 em = 项数多了：对照每行最多2项（编号A|编号B），行尾多余的|也算一项
+        如果 {kind} 等于 point
+          设 em = 项数多了：知识点每行最多2项（编号|名称），行尾多余的|也算一项
+        否则如果 {kind} 等于 item
+          设 em = 项数多了：条目每行最多5项（编号|名称|知识点编号|接在哪个形式后|前一个条目编号），行尾多余的|也算一项
+        否则如果 {kind} 等于 edge
+          设 em = 项数多了：前置边每行最多2项（前置编号|后续编号），行尾多余的|也算一项
+        结束
+        设 t = 调用 拼原因 rs={rs} add={em}
+        设 rs = {t.r}
+      结束
       如果 {kind} 等于 point
         如果 {xa} 为空
           设 t = 调用 拼原因 rs={rs} add=缺编号
@@ -1300,11 +1368,13 @@
     结束
     设 out = 解析JSON []
     设 seen = @
+    设 dupkeys = @
     设 created = 0
     设 updated = 0
     设 errn = 0
     遍历 x 于 {mid2}
       设 rs = {x.reason}
+      设 k = {nothing 或}
       设 act = {acts.e}
       如果 {rs} 不为空
         设 errn = 计算 {errn} + 1
@@ -1353,6 +1423,11 @@
           结束
         结束
         设 sk = @{k}@
+        设 isdup = 0
+        如果 {seen} 包含 {sk}
+          设 isdup = 1
+          设 dupkeys = {dupkeys}{k}@
+        结束
         如果 {ex} 等于 1
           设 act = {acts.u}
           设 updated = 计算 {updated} + 1
@@ -1366,19 +1441,42 @@
         否则如果 {seen} 包含 {sk}
           设 act = {acts.u}
           设 updated = 计算 {updated} + 1
-          设 rs = 本文件重复，以后一行为准
+          设 rs = {nothing 或}
         否则
           设 act = {acts.n}
           设 created = 计算 {created} + 1
         结束
         设 seen = {seen}{sk}
       结束
-      设 orow = {"line": {x.line}, "code": "{x.code}", "label": "{x.label}", "action": "{act}", "reason": "{rs}", "a": "{x.a}", "b": "{x.b}", "c": "{x.c}", "d": "{x.d}", "e": "{x.e}"}
+      设 orow = {"line": {x.line}, "code": "{x.code}", "label": "{x.label}", "action": "{act}", "k": "{k}", "reason": "{rs}", "a": "{x.a}", "b": "{x.b}", "c": "{x.c}", "d": "{x.d}", "e": "{x.e}"}
       设 out = 列表加项 {out} {orow}
     结束
-    设 total = 列表长度 {out}
+    设 out2 = 解析JSON []
+    遍历 y 于 {out}
+      设 yr = {y.reason}
+      设 yk = {y.k}
+      设 ysk = @{yk}@
+      如果 {yk} 不为空 且 {dupkeys} 包含 {ysk}
+        设 lastl = {y.line}
+        遍历 z 于 {out}
+          如果 {z.k} 等于 {yk}
+            设 lastl = {z.line}
+          结束
+        结束
+        如果 {lastl} 不等于 {y.line}
+          设 t = 调用 拼原因 rs={yr} add=被第{lastl}行覆盖
+          设 yr = {t.r}
+        否则
+          设 t = 调用 拼原因 rs={yr} add=本文件重复，以本行为准
+          设 yr = {t.r}
+        结束
+      结束
+      设 orow2 = {"line": {y.line}, "code": "{y.code}", "label": "{y.label}", "action": "{y.action}", "reason": "{yr}", "a": "{y.a}", "b": "{y.b}", "c": "{y.c}", "d": "{y.d}", "e": "{y.e}"}
+      设 out2 = 列表加项 {out2} {orow2}
+    结束
+    设 total = 列表长度 {out2}
     设 okn = 计算 {created} + {updated}
-    返回 {"kind": "{kind}", "total": {total}, "ok_count": {okn}, "error_count": {errn}, "created": {created}, "updated": {updated}, "rows": {out}}
+    返回 {"kind": "{kind}", "total": {total}, "ok_count": {okn}, "error_count": {errn}, "created": {created}, "updated": {updated}, "rows": {out2}}
   结束
 
   函数 写入导入行 kind rows subject_id
@@ -1452,9 +1550,10 @@
   公开 函数 确认导入 kind file_path learner? current_role? auth_mode? subject?
     设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
     设 sid = {sb.subject_id}
-    设 bp = 匹配 {file_path} (^/)|([.][.])|([\\])
+    设 pm = 匹配 {file_path} ^uploads/[^/\\]+$
+    设 pd = 匹配 {file_path} [.][.]
     设 xm = 匹配 {file_path} (?i)[.](md|txt|csv|json)$
-    如果 {bp.matched} 等于 是 或 {xm.matched} 不等于 是
+    如果 {pm.matched} 不等于 是 或 {pd.matched} 等于 是 或 {xm.matched} 不等于 是
       报错 400 导入文件路径不对
     结束
     设 pv = 调用 导入预检 kind={kind} file_path={file_path} subject={sid}
