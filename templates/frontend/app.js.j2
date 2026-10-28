@@ -902,6 +902,8 @@ const _app = createApp({
     // 从列表点「编辑」进来时表单已经是那一行了，参数对得上，不发请求。
     // 要发的话先清空表单：请求回来之前不该还显示着上一条记录——那一刻点
     // 保存，就把上一条的内容写到这一条上了。
+    //
+    // 返回发出去的那个动作名（没发就是 undefined），runTrigger 据此不再重复发。
     let enterSeq = 0;
     async function runLoader(name) {
       const all = params.value || {};
@@ -919,6 +921,7 @@ const _app = createApp({
       const seq = ++enterSeq;
       const resp = await postTo(ep, { action: loader, form: p });
       if (seq === enterSeq && route.value === name) applyResponse(resp);
+      return loader;
     }
 
     // 「触发」：带着地址参数进来（#问老师?lesson=hb-n5-046）时，把参数交给
@@ -931,14 +934,25 @@ const _app = createApp({
     //               每句话都带着这一课
     // 跟提交一样锁住这个界面、在消息流里摆「…」；请求回来时人已经切走了就
     // 不往别的界面上放（下次进来「进入时」会从库里拉回）。
-    async function runTrigger(name) {
+    //
+    // 地址里有「浮层」时参数不去掉：这时参数是浮层的（#科目管理?浮层=科目成员&subj_id=3），
+    // 界面级「触发」拿来给浮层补数据（从行上打开时「载入」看表单已是这条会跳过）。
+    // 去掉的话浮层的地址就没了，刷新浮层关掉、链接分享不了（K99c 实测）。这时
+    // 刷新再跑一次是对的——跟「载入」一样是把记录拉回来。
+    //
+    // loaded：runLoader 刚为同样的参数发过的动作。跟触发是同一个就不再发——
+    // 节点图「带 code」点开、带参刷新时，载入和触发都是它，原先一次发两遍。
+    async function runTrigger(name, loaded) {
       const act = triggers[name];
-      const p = Object.fromEntries(Object.entries(params.value || {}).filter(([k]) => k !== "浮层"));
-      if (!act || !Object.keys(p).length) return;
+      const all = params.value || {};
+      const p = Object.fromEntries(Object.entries(all).filter(([k]) => k !== "浮层"));
+      if (!act || !Object.keys(p).length || act === loaded) return;
       const ep = typeof endpoints !== "undefined" ? endpoints[act] : null;
       if (!ep || inflight.value[name]) return;
-      history.replaceState(null, "", "#" + encodeURIComponent(name));
-      params.value = {};
+      if (!all["浮层"]) {
+        history.replaceState(null, "", "#" + encodeURIComponent(name));
+        params.value = {};
+      }
       inflight.value = { ...inflight.value, [name]: act };
       const stream = screenStream[name] || "";
       let placeholder = null;
@@ -983,7 +997,7 @@ const _app = createApp({
       //
       // 预览里没有后端，lists 是编译时塞的示例数据，清掉就什么都看不到了
       if (acts.some(remote)) lists.value = {};
-      await runLoader(name);
+      const loaded = await runLoader(name);
       const seq = ++enterSeq;
       for (const a of acts) {
         const ep = remote(a);
@@ -994,7 +1008,7 @@ const _app = createApp({
       // 「触发」排在「进入时」后面：先把页面原有的数据（问老师的历史对话）
       // 拉回来，再在后面接上这次的请求和回复——反过来的话，「进入时」回来
       // 整条替换消息流，刚放上去的回复就被盖掉了
-      if (seq === enterSeq && route.value === name) await runTrigger(name);
+      if (seq === enterSeq && route.value === name) await runTrigger(name, loaded);
     }
 
     // 换了界面才跑「进入时」；同一个界面、只是地址参数变了（开关浮层、换
@@ -1006,7 +1020,7 @@ const _app = createApp({
         entered = route.value;
         runEnter(route.value);
       } else {
-        runLoader(route.value).then(() => runTrigger(route.value));
+        runLoader(route.value).then(loaded => runTrigger(route.value, loaded));
       }
     }
     window.addEventListener("hashchange", onRoute);

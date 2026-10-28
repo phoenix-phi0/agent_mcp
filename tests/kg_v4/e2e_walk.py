@@ -289,6 +289,22 @@ def clear_toast(page):
         page.wait_for_selector(".toast", state="detached", timeout=4000)
 
 
+def track_posts(page, path):
+    """从现在起记下发往 path 的 POST；返回 (记录列表, 停止函数)。"""
+    hits = []
+
+    def on_req(r):
+        if r.method == "POST" and r.url.split("?")[0].endswith(path):
+            hits.append(r.url)
+    page.on("request", on_req)
+    return hits, lambda: page.remove_listener("request", on_req)
+
+
+def hash_of(page):
+    """解码后的地址 #… 部分（参数是 URLSearchParams 编的，+ 还原成空格）。"""
+    return page.evaluate("decodeURIComponent(location.hash.replace(/\\+/g, ' '))")
+
+
 def selected_label(page, sel):
     return page.evaluate(
         "s => { const e = document.querySelector(s);"
@@ -380,8 +396,29 @@ def subject_flow(t1, base, ck, marks):
        "新科目在表里：私有、草稿，t1 是负责", row.inner_text()[:200])
 
     # 2) 成员浮层：加 t2 协作、批量分配 s1
+    # K112：科目管理有界面级「触发 subject_members」，原先 runTrigger 把浮层参数从
+    # 地址里抹掉（刷新浮层就关了）；带参刷新时载入和触发各发一次 members。
+    hits, stop = track_posts(t1, "/account/subject/members")
     row.locator('button:has-text("成员")').first.click()
     t1.wait_for_selector(".overlay", timeout=8000)
+    t1.wait_for_timeout(1500)
+    stop()
+    h = hash_of(t1)
+    ck("浮层=科目成员" in h and "subj_id=" in h,
+       "从行上开成员浮层：地址里的浮层参数还在", h)
+    ck(len(hits) == 1, "从行上开成员浮层：members 只发一次", f"{len(hits)} 次")
+    hits, stop = track_posts(t1, "/account/subject/members")
+    t1.reload(wait_until="domcontentloaded")
+    try:
+        t1.wait_for_selector('.overlay tr:has-text("t1")', timeout=15000)
+        ok = True
+    except Exception:
+        ok = False
+    t1.wait_for_timeout(1500)
+    stop()
+    ck(ok and "浮层=科目成员" in hash_of(t1),
+       "成员浮层开着刷新：浮层还开着、成员表拉回来了", hash_of(t1))
+    ck(len(hits) == 1, "成员浮层带参刷新：members 只发一次", f"{len(hits)} 次")
     t1.locator('.overlay label.field:has-text("教师") select').first.select_option("t2")
     t1.locator('.overlay label.field:has-text("角色") select').first.select_option("协作")
     t1.locator('.overlay button:has-text("加入")').first.click()
@@ -487,6 +524,30 @@ def kg_mgmt_flow(t1, t2, t3, ck, marks, tmp):
     # 1) 建两个知识点（后面加边、成环要用一对）
     kg_create_point(t1, KG_P1, KG_T1T, ck, "建知识点1")
     kg_create_point(t1, KG_P2, KG_T2T, ck, "建知识点2")
+
+    # 1b) K112：节点图点一个节点（「点开 编辑知识点 带 code」），载入和界面级触发都是
+    #     kgm_point_open，原先一次点击发两遍、地址里的浮层参数被抹掉
+    node = t1.locator(".vue-flow__node", has_text=KG_T1T).first
+    try:
+        node.wait_for(timeout=10000)
+        hits, stop = track_posts(t1, "/kg/manage/point/open")
+        # 不用 click()：节点在 Vue Flow 变换过的画布里，取景后常在可视区外，
+        # Playwright 判为不可点、等满 30 秒。直接派 click，Vue Flow 照样发 node-click
+        node.dispatch_event("click")
+        t1.wait_for_selector(".overlay", timeout=8000)
+        t1.wait_for_function(
+            "t => [...document.querySelectorAll('.overlay label.field input')]"
+            ".some(e => e.value === t)", arg=KG_T1T, timeout=10000)
+        t1.wait_for_timeout(1500)
+        stop()
+        h = hash_of(t1)
+        ck("浮层=编辑知识点" in h and f"code={KG_P1}" in h,
+           "节点图点开：地址里的浮层参数还在", h)
+        ck(len(hits) == 1, "节点图点一次：kgm_point_open 只发一次", f"{len(hits)} 次")
+        t1.keyboard.press("Escape")
+        t1.wait_for_selector(".overlay", state="detached", timeout=8000)
+    except Exception as e:
+        ck(False, "节点图点开编辑知识点浮层", f"{type(e).__name__}: {str(e)[:200]}")
 
     # 2) 建条目：挂到「所属知识点」下拉的第一项上——挂谁都行，与数据内容无关
     clear_toast(t1)
