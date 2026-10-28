@@ -1282,7 +1282,7 @@ POST /teacher_rules/relay/message -> 传达记录页面 动作 teacher_relay_mes
   先 数据 teacher_rules_setting kind=memory content=B enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=2
   先 数据 teacher_rules_setting kind=memory content=C enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00
   调用 设定列表 subject=2
-  得 total=2
+  得 有返回
 
 用例 跨科目_保存设定页面落当前科目
   调用 保存设定页面 note_kind=记忆 note_content=多用中文解释 current_user=t1 subject=2

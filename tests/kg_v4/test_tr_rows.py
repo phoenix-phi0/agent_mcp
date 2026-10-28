@@ -50,10 +50,14 @@ NOTE = ("note_id", "note_subject_label", "note_subject_scope")
 RELAY = ("relay_id", "relay_subject_label", "relay_subject_scope")
 OWNER = {1: ("全部科目", "全部科目", 1), 2: ("数学", "当前科目", 1)}
 EDITOR = {1: ("全部科目", "全部科目", 0), 2: ("数学", "当前科目", 1)}
+# 在 SEED 之外多造一行科目 1 的设定，核对列表不带出别的科目
+EXTRA = {"设定列表 只看本科目和全部科目（科目 1 的不出现，共 2 行）":
+         "  先 数据 teacher_rules_setting kind=memory content=C enabled=1 once=0 version=1 author=t1 updated_at=2026-01-01_09:00:00 subject_id=1\n"}
 SCENES = [
     ("设定列表 负责人", f"设定列表 {ON1}", None, NOTE, OWNER),
     ("设定列表 协作教师", f"设定列表 {ON2}", None, NOTE, EDITOR),
     ("设定列表 单人模式", "设定列表 subject=2", None, NOTE, OWNER),
+    ("设定列表 只看本科目和全部科目（科目 1 的不出现，共 2 行）", "设定列表 subject=2", None, NOTE, OWNER),
     ("传达列表 负责人", f"传达列表 {ON1}", None, RELAY, OWNER),
     ("传达列表 协作教师", f"传达列表 {ON2}", None, RELAY, EDITOR),
     ("传达列表 单人模式", "传达列表 subject=2", None, RELAY, OWNER),
@@ -84,7 +88,7 @@ os.environ.setdefault("DSL_NOW", K.DEFAULT_NOW)
 try:
     base = (ws / "contracts" / "teacher_rules.md").read_text(encoding="utf-8")
     head = base.split("\n## 用例", 1)[0]
-    text = head + "\n## 用例\n" + "".join(f"用例 场景{i}{SEED}  调用 {call}\n  得 有返回\n\n" for i, (_, call, *_r) in enumerate(SCENES))
+    text = head + "\n## 用例\n" + "".join(f"用例 场景{i}{SEED}{EXTRA.get(n, '')}  调用 {call}\n  得 有返回\n\n" for i, (n, call, *_r) in enumerate(SCENES))
     c, probs = C.parse(text)
     check(not probs, "场景能按约定用例语法解析", probs[:3])
     sql = K.build_sql(ws, P.closure(ws, "teacher_rules"))

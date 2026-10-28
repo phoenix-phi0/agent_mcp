@@ -410,10 +410,7 @@
       结束
       设 items = 列表加项 {items} {row}
     结束
-    设 n = 查一值 app.db teacher_rules_note_count student={student} subj={sid}
-    设 out.items = {items}
-    设 out.total = {n}
-    返回 {out}
+    返回 {items}
   结束
 
   公开 函数 传达列表 student? learner? current_role? auth_mode? subject?
@@ -492,7 +489,7 @@
     设 sr = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 sid = {sr.subject_id}
     设 notes_r = 调用 设定列表 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
-    设 notes = {notes_r.items}
+    设 notes = {notes_r}
     设 relays = 调用 传达列表 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
     设 states = 调用 传达状态列表 subject={sid}
     设 st = 调用 account.列学生
@@ -602,7 +599,7 @@
     结束
     设 saved = 调用 保存设定 kind={kind_v} content={note_content} current_user={current_user} setting_id={note_id} student={student} keywords={note_keywords} once={once_v} scope={scope_v} current_role={current_role} auth_mode={auth_mode} subject={sid}
     设 notes_r = 调用 设定列表 student={student} learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={sid}
-    设 notes = {notes_r.items}
+    设 notes = {notes_r}
     如果 {student} 为空
       设 out.class_notes = {notes}
     否则
@@ -620,7 +617,7 @@
     结束
     设 u = 调用 设置设定启用 setting_id={note_id} enabled={enabled} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
     设 notes_r = 调用 设定列表 student={student} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
-    设 notes = {notes_r.items}
+    设 notes = {notes_r}
     如果 {student} 为空
       设 out.class_notes = {notes}
     否则
@@ -638,7 +635,7 @@
     结束
     设 u = 调用 删除设定 setting_id={note_id} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
     设 notes_r = 调用 设定列表 student={student} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
-    设 notes = {notes_r.items}
+    设 notes = {notes_r}
     如果 {student} 为空
       设 out.class_notes = {notes}
     否则
