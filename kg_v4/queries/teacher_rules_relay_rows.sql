@@ -16,9 +16,12 @@ SELECT r.id AS relay_id,
   COALESCE(r.keywords, '') AS relay_keywords,
   r.rounds AS relay_rounds,
   COALESCE(r.student, '') AS student,
-  COALESCE(st.id, 0) AS message_id
+  COALESCE(st.id, 0) AS message_id,
+  CASE WHEN r.subject_id = 0 THEN '全部科目' ELSE :sname END AS relay_subject_label,
+  CASE WHEN r.subject_id = 0 THEN '全部科目' ELSE '当前科目' END AS relay_subject_scope,
+  CASE WHEN r.subject_id = 0 THEN CAST(:own AS INTEGER) ELSE CAST(:wr AS INTEGER) END AS can_edit
 FROM teacher_rules_relay r
 LEFT JOIN (SELECT relay_id, count(*) AS n FROM teacher_rules_relay_state WHERE confirmed = 1 AND instr(',' || :studs || ',', ',' || student || ',') > 0 GROUP BY relay_id) d ON d.relay_id = r.id
 LEFT JOIN teacher_rules_relay_state st ON st.relay_id = r.id AND st.student = :student
-WHERE (:student = '' AND COALESCE(r.student, '') = '') OR (:student <> '' AND (COALESCE(r.student, '') = '' OR r.student = :student))
+WHERE (r.subject_id = CAST(:subj AS INTEGER) OR r.subject_id = 0) AND ((:student = '' AND COALESCE(r.student, '') = '') OR (:student <> '' AND (COALESCE(r.student, '') = '' OR r.student = :student)))
 ORDER BY CASE WHEN COALESCE(r.student, '') = '' THEN 0 ELSE 1 END, r.id

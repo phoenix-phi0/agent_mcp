@@ -106,7 +106,7 @@
     # point_code 不为空时，调用 kg.取知识点 code=point_code，取不到报错 404 没有这个知识点
     # 按 kanji + kana 查 vocab_word，已有则报错 400 单词已存在
     # 往 vocab_word 插入一行 (kanji, kana, meaning, point_code)
-    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
     如果 {kana} 为空
       报错 400 假名不能为空
     结束
@@ -138,7 +138,7 @@
     # point_code 不为空时，调用 kg.取知识点 code=point_code，取不到报错 404 没有这个知识点
     # 按 kanji + kana 查 vocab_word，若存在且 id 不等于 word_id，报错 400 单词已存在
     # 更新该行的 kanji、kana、meaning、point_code
-    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
     设 w = 查一行 app.db vocab_by_id word_id={word_id} subject_id={sb.subject_id}
     如果 {w} 为空
       报错 404 没有这个单词
@@ -157,7 +157,7 @@
       结束
     结束
     事务 app.db
-      设 n = 写库 app.db vocab_update_full word_id={word_id} kanji={kanji} kana={kana} meaning={meaning} point_code={point_code}
+      设 n = 写库 app.db vocab_update_full word_id={word_id} kanji={kanji} kana={kana} meaning={meaning} point_code={point_code} subject_id={sb.subject_id}
     结束
     返回 {"ok": 1, "id": {word_id}}
   结束
@@ -167,13 +167,13 @@
     # 报错 404 没有这个单词
     # 按 id=word_id 查 vocab_word，查不到报错 404 没有这个单词
     # 删除该行
-    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
     设 w = 查一行 app.db vocab_by_id word_id={word_id} subject_id={sb.subject_id}
     如果 {w} 为空
       报错 404 没有这个单词
     结束
     事务 app.db
-      设 n = 写库 app.db vocab_delete word_id={word_id}
+      设 n = 写库 app.db vocab_delete word_id={word_id} subject_id={sb.subject_id}
     结束
     返回 {"ok": 1}
   结束
@@ -187,7 +187,7 @@
     # 对每个非空的知识点编号，调用 kg.取知识点 code=编号，取不到报错 400 知识点对不上（整批不写）
     # 在一个事务里：逐行按 汉字+假名 查 vocab_word，没有则插入 (kanji, kana, meaning, point_code) 并 created+1，有则更新 meaning、point_code 并 updated+1
     # 同一文件里重复的 汉字+假名，后一行覆盖前一行（按已存在算更新）
-    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
     设 d = 读文档 {file_path}
     如果 {d.error} 不为空
       报错 400 导入文件有错
@@ -231,7 +231,7 @@
           设 n = 写库 app.db vocab_insert kanji={m.named.kanji} kana={m.named.kana} meaning={m.named.meaning} point_code={m.named.code} subject_id={sb.subject_id}
           设 created = 计算 {created} + 1
         否则
-          设 n = 写库 app.db vocab_update_meaning word_id={ex} meaning={m.named.meaning} point_code={m.named.code}
+          设 n = 写库 app.db vocab_update_meaning word_id={ex} meaning={m.named.meaning} point_code={m.named.code} subject_id={sb.subject_id}
           设 updated = 计算 {updated} + 1
         结束
         设 total = 计算 {total} + 1
@@ -240,8 +240,8 @@
     返回 {"ok": 1, "total": {total}, "created": {created}, "updated": {updated}}
   结束
 
-  函数 本科目 learner current_role auth_mode subject
-    设 r = 调用 subject.解析科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+  函数 本科目 learner current_role auth_mode subject need?
+    设 r = 调用 subject.解析科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need={need 或}
     返回 {"subject_id": {r.subject_id}}
   结束
 

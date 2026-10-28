@@ -1,1 +1,1 @@
-SELECT COALESCE(group_concat(content, char(10)), '') FROM (SELECT content FROM (SELECT id, content FROM tutor_message WHERE learner = :learner AND role = 'user' ORDER BY id DESC LIMIT 3) ORDER BY id ASC)
+SELECT COALESCE(group_concat(content, char(10)), '') FROM (SELECT content FROM (SELECT id, content FROM tutor_message WHERE learner = :learner AND subject_id = CAST(:subj AS INTEGER) AND role = 'user' ORDER BY id DESC LIMIT 3) ORDER BY id ASC)

@@ -18,7 +18,9 @@
 
 不进版本库（见仓库 `.gitignore`）：`app.db`、`web/`（每次 build 重写）、`uploads/`、`sessions/`、`.auth_secret`。
 
-教师端页面（`/teacher`，按 `ui/*.ui` 文件名排序）：学情（`report.ui`，首页）→ 学生管理（`student.ui`）→ 教师助手（`teacher_assist.ui`）→ AI老师设定（`teacher_note.ui`）→ 教材导入（`textbook_import.ui`）。
+导航顺序和入口不再按文件名排序，由界面行上的修饰词「序 n」（小的在前，没写序的排在后面）和「侧 <组>」（归到导航右侧一组）决定；`gen run/build --入口` 仍优先。注意「序」是全项目统一排序、不分端，打开 `/` 的是排在最前的界面所在的那一端，所以学生端的序用 1–4、教师端用 11–13，教师端的序不能小于学生端的入口，否则 `/` 会变成教师端。
+- 学生端（`/`，入口是问老师）：问老师（`teacher.ui`，序 1）→ 做题（`quiz.ui`，序 2）→ 默写（`quiz_dictation.ui`，序 3）→ 教材（`textbook.ui`，序 4）｜右侧「看看」组：知识图谱（`node.ui`）、学习进度（`progress.ui`）。
+- 教师端（`/teacher`，入口是学情）：学情（`report.ui`，序 11）→ 教师助手（`teacher_assist.ui`，序 12）→ 学生管理（`student.ui`，序 13）｜右侧「管理」组：AI老师设定（`teacher_note.ui`）、教材导入（`textbook_import.ui`）。
 教师助手（`teacher_assist` 模块）只读：问全班概况、某个学生、某个知识点全班掌握、教学建议，也能闲聊/问系统用法；每位教师各自一份对话（`teacher_assist_message`）；数字和名单由后端拼进数据段，模型只读；找不到学生/知识点或有多个时用模板话追问，不调回答模型。
 
 ## 多科目底座（M1）

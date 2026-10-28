@@ -1,1 +1,1 @@
-SELECT count(*) FROM teacher_rules_setting WHERE (:kind = '' OR kind = :kind) AND (:student = '' OR COALESCE(student, '') = '' OR student = :student)
+SELECT count(*) FROM teacher_rules_setting WHERE (subject_id = CAST(:subj AS INTEGER) OR subject_id = 0) AND (:kind = '' OR kind = :kind) AND (:student = '' OR COALESCE(student, '') = '' OR student = :student)

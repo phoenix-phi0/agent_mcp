@@ -25,7 +25,7 @@
 #
 # 「当」的条件里不能有空格；「提示」里不能有双引号。
 
-界面 自定义 学情 端 教师 载入 report_one
+界面 自定义 学情 端 教师 序 11 载入 report_one
   动作 report_home 远程 进入时 隐藏 刷新
 
   # ---- 全班 ----
@@ -133,16 +133,17 @@
       列表 学生设定表 绑 student_notes 当 lists.student_notes&&lists.student_notes.length
         列 note_id 编号
         列 note_scope 范围
+        列 note_subject_label 科目
         列 note_kind 种类
         列 note_keywords 关键词
         列 note_brief 内容
         列 note_state 状态
         列 note_updated 更新时间
         列 note_by 写的人
-        动作 edit_student_note 打开 编辑学生设定 带 note_id 当 row.mine==1 编辑
-        动作 teacher_note_disable 远程 带 note_id 当 row.mine==1&&row.note_state!=='停用' 停用
-        动作 teacher_note_enable 远程 带 note_id 当 row.mine==1&&row.note_state==='停用' 启用
-        动作 teacher_note_delete 远程 危险 带 note_id 当 row.mine==1 删除
+        动作 edit_student_note 打开 编辑学生设定 带 note_id 当 row.mine==1&&row.can_edit==1 编辑
+        动作 teacher_note_disable 远程 带 note_id 当 row.mine==1&&row.can_edit==1&&row.note_state!=='停用' 停用
+        动作 teacher_note_enable 远程 带 note_id 当 row.mine==1&&row.can_edit==1&&row.note_state==='停用' 启用
+        动作 teacher_note_delete 远程 危险 带 note_id 当 row.mine==1&&row.can_edit==1 删除
       结束
     结束
     区域 传达
@@ -152,6 +153,7 @@
       列表 学生传达表 绑 student_relays 当 lists.student_relays&&lists.student_relays.length
         列 relay_id 编号
         列 relay_scope 范围
+        列 relay_subject_label 科目
         列 relay_urgency 紧急程度
         列 relay_brief 要点
         列 relay_facts 必须准确的信息
@@ -159,10 +161,10 @@
         列 relay_state_text 状态
         列 relay_excerpt AI原话
         动作 open_student_relay_message 打开 学生传达记录 带 message_id 当 row.message_id 看那条回复
-        动作 edit_student_relay 打开 编辑学生传达 带 relay_id 当 row.mine==1 编辑
-        动作 teacher_relay_disable 远程 带 relay_id 当 row.mine==1&&row.relay_enabled_text==='启用' 停用
-        动作 teacher_relay_enable 远程 带 relay_id 当 row.mine==1&&row.relay_enabled_text==='停用' 启用
-        动作 teacher_relay_delete 远程 危险 带 relay_id 当 row.mine==1 删除
+        动作 edit_student_relay 打开 编辑学生传达 带 relay_id 当 row.mine==1&&row.can_edit==1 编辑
+        动作 teacher_relay_disable 远程 带 relay_id 当 row.mine==1&&row.can_edit==1&&row.relay_enabled_text==='启用' 停用
+        动作 teacher_relay_enable 远程 带 relay_id 当 row.mine==1&&row.can_edit==1&&row.relay_enabled_text==='停用' 启用
+        动作 teacher_relay_delete 远程 危险 带 relay_id 当 row.mine==1&&row.can_edit==1 删除
       结束
     结束
   结束

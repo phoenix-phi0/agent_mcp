@@ -106,30 +106,78 @@
     返回 {"subject_id": 1}
   结束
 
-  公开 函数 解析科目 learner current_role auth_mode subject?
+  公开 函数 解析科目 learner current_role auth_mode subject? need?
+    如果 {need} 不为空 且 {need} 不等于 read 且 {need} 不等于 write 且 {need} 不等于 own
+      报错 400 need 不对
+    结束
     如果 {subject} 为空
       设 c = 调用 subject.当前科目 learner={learner} current_role={current_role}
-      返回 {"subject_id": {c.subject_id}}
-    结束
-    设 mm = 匹配 {subject} ^[0-9]+$
-    如果 {mm.matched} 不等于 是
-      报错 400 subject 不对
-    结束
-    如果 {auth_mode} 不等于 on
-      返回 {"subject_id": {subject}}
-    结束
-    设 a = 调用 subject.科目访问 learner={learner} current_role={current_role} subject_id={subject} need=read auth_mode=on
-    如果 {a.ok} 等于 0
-      设 si = 查一行 app.db subject_info_by_id id={subject}
-      如果 {si} 为空
-        报错 404 没有这个科目
+      设 sid = {c.subject_id}
+    否则
+      设 mm = 匹配 {subject} ^[0-9]+$
+      如果 {mm.matched} 不等于 是
+        报错 400 subject 不对
       结束
-      如果 {current_role} 等于 student
-        报错 403 该科目未分配给你
+      设 sid = {subject}
+      如果 {auth_mode} 等于 on
+        设 a = 调用 subject.科目访问 learner={learner} current_role={current_role} subject_id={sid} need=read auth_mode=on
+        如果 {a.ok} 等于 0
+          设 si = 查一行 app.db subject_info_by_id id={sid}
+          如果 {si} 为空
+            报错 404 没有这个科目
+          结束
+          如果 {current_role} 等于 student
+            报错 403 该科目未分配给你
+          结束
+          报错 403 没有权限访问该科目
+        结束
       结束
-      报错 403 没有权限访问该科目
     结束
-    返回 {"subject_id": {subject}}
+    如果 {auth_mode} 等于 on 且 {need} 等于 write
+      设 w = 调用 subject.科目访问 learner={learner} current_role={current_role} subject_id={sid} need=write auth_mode=on
+      如果 {w.ok} 等于 0
+        设 si = 查一行 app.db subject_info_by_id id={sid}
+        如果 {si} 为空
+          报错 404 没有这个科目
+        结束
+        报错 403 没有权限修改该科目
+      结束
+    结束
+    如果 {auth_mode} 等于 on 且 {need} 等于 own
+      设 w = 调用 subject.科目访问 learner={learner} current_role={current_role} subject_id={sid} need=settings auth_mode=on
+      如果 {w.ok} 等于 0
+        设 si = 查一行 app.db subject_info_by_id id={sid}
+        如果 {si} 为空
+          报错 404 没有这个科目
+        结束
+        报错 403 只有科目负责人可以操作
+      结束
+    结束
+    返回 {"subject_id": {sid}}
+  结束
+
+  公开 函数 列科目学生 subject_id
+    设 rows = 查询 app.db subject_student_list subject_id={subject_id}
+    设 n = 列表长度 {rows}
+    返回 {"total": {n}, "students": {rows}}
+  结束
+
+  公开 函数 登记学生 learner code?
+    如果 {learner} 为空
+      返回 {"registered": 0, "subject_id": 0}
+    结束
+    设 cd = {code 或 jp_grammar}
+    设 si = 查一行 app.db subject_info_by_code code={cd}
+    如果 {si} 为空
+      返回 {"registered": 0, "subject_id": 0}
+    结束
+    设 stv = 查一值 app.db subject_student_status subject_id={si.id} learner={learner}
+    如果 {stv} 不为空
+      返回 {"registered": 0, "subject_id": {si.id}}
+    结束
+    设 now = 当前时间
+    设 n = 写库 app.db subject_student_insert subject_id={si.id} learner={learner} created_at={now}
+    返回 {"registered": 1, "subject_id": {si.id}}
   结束
 
   公开 函数 切换科目 learner current_role subject

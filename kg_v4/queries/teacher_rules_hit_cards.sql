@@ -11,5 +11,5 @@ SELECT s.id AS note_id,
   CASE WHEN length(s.content) > 60 THEN substr(s.content, 1, 60) || '…' ELSE s.content END AS note_brief,
   '放进去了' AS hit_placed
 FROM teacher_rules_setting s
-WHERE s.enabled = 1 AND s.kind = 'card' AND (COALESCE(s.student, '') = '' OR s.student = :student) AND EXISTS (SELECT 1 FROM hit h WHERE h.sid = s.id)
+WHERE s.enabled = 1 AND s.kind = 'card' AND (COALESCE(s.student, '') = '' OR s.student = :student) AND (s.subject_id = CAST(:subj AS INTEGER) OR s.subject_id = 0) AND EXISTS (SELECT 1 FROM hit h WHERE h.sid = s.id)
 ORDER BY CASE WHEN COALESCE(s.student, '') = '' THEN 0 ELSE 1 END, s.id

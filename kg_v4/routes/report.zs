@@ -1,36 +1,36 @@
 接口 GET /report/class 角色 teacher
-  设 r = 调用 report.取全班学情 sort_by={sort_by 或} student={student 或}
+  设 r = 调用 report.取全班学情 sort_by={sort_by 或} student={student 或} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   返回 {r}
 结束
 
 接口 GET /report/student 角色 teacher
-  设 r = 调用 report.取学生学情 student={student}
+  设 r = 调用 report.取学生学情 student={student} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   返回 {r}
 结束
 
 接口 POST /report/summary/write 角色 teacher
-  设 r = 调用 report.写学情总结 student={student} current_user={current_user}
+  设 r = 调用 report.写学情总结 student={student} current_user={current_user} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   返回 {r}
 结束
 
 接口 GET /report/summary 角色 teacher
-  设 r = 调用 report.取最近总结 student={student}
+  设 r = 调用 report.取最近总结 student={student} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   返回 {r}
 结束
 
 接口 POST /report/home 动作 report_home 角色 teacher
-  设 r = 调用 report.学情首页页面 report_sort={report_sort 或}
+  设 r = 调用 report.学情首页页面 report_sort={report_sort 或} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   响应 state {r}
   响应 form {r.form}
 结束
 
 接口 POST /report/one 动作 report_one 角色 teacher
-  设 r = 调用 report.学生页面 student={student}
+  设 r = 调用 report.学生页面 student={student} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   响应 state {r}
 结束
 
 接口 POST /report/summary 动作 report_summary 角色 teacher
-  设 r = 调用 report.写学情总结页面 student={student} current_user={current_user}
+  设 r = 调用 report.写学情总结页面 student={student} current_user={current_user} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   设 _msg = 学情总结写好了
   消息 系统 {_msg} ok
   响应 state {r}

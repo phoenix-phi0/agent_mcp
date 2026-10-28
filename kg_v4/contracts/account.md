@@ -121,6 +121,7 @@
   伪代码 display_name 为空则取 username
   伪代码 用 auth 包的哈希密码 算 password 的哈希
   伪代码 往 account_user 插入 (username, password_hash, display_name, role=student, disabled=0, created_at=当前时间)
+  伪代码 调用 subject.登记学生 learner=username code=jp_grammar，把新学生自动登记进日语科目（subject_student，status=active；account 不直接写 subject 的表；按 code 找科目，不写死 id=1；库里没有该科目时 subject 返回 registered=0，建学生照常成功）。这样 report / teacher_assist 统一用 subject.列科目学生 取学生范围，不再有「1 号=全部学生」的特例
   伪代码 调用 列学生页面，返回刷新后的学生列表（数组）
 
 公开 函数 重置学生密码 username new_password
@@ -308,6 +309,33 @@ POST /account/students/enable -> 设置学生停用 动作 student_enable 模板
   得 有返回
   库 account_user 共 1 行
   库 account_user 含 username=s1 role=student disabled=0 created_at=2026-01-01_09:00:00
+
+用例 建学生_自动登记进日语科目
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 建学生 username=s1 password=pw123456 display_name=小明
+  得 有返回
+  库 subject_student 含 subject_id=1 learner=s1 status=active
+
+用例 建学生_登记按code不按id
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 建学生 username=s1 password=pw123456 display_name=小明
+  得 有返回
+  库 subject_student 含 subject_id=2 learner=s1 status=active
+  库 subject_student 共 1 行
+
+用例 建学生_没有日语科目照常成功
+  调用 建学生 username=s1 password=pw123456 display_name=小明
+  得 有返回
+  库 account_user 含 username=s1
+  库 subject_student 共 0 行
+
+用例 建学生_失败不登记
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 调用 建学生 username=s1 password=pw123456 display_name=小明
+  调用 建学生 username=s1 password=other display_name=小红
+  报错 409
+  库 subject_student 共 1 行
 
 用例 建学生_用户名带非法字符
   调用 建学生 username=s1! password=pw123456 display_name=小明

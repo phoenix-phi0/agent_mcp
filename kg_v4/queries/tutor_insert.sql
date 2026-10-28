@@ -1,1 +1,1 @@
-INSERT INTO tutor_message (learner, role, content, intent, lesson_code, link, links, summary_round, at) VALUES (:learner, :role, :content, :intent, :lesson_code, :link, :links, :summary_round, :at)
+INSERT INTO tutor_message (learner, role, content, intent, lesson_code, link, links, summary_round, at, subject_id) VALUES (:learner, :role, :content, :intent, :lesson_code, :link, :links, :summary_round, :at, CAST(:subject_id AS INTEGER))

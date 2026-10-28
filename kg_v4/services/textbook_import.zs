@@ -1,8 +1,10 @@
 业务 textbook_import
-  依赖 kg lesson
+  依赖 kg lesson subject
   用包 common db text doc
 
-  公开 函数 新建导入 series_code series_name code_prefix file_path source? license? file_name? file_size? file_ext? lesson_level? rewrite? overwrite?
+  公开 函数 新建导入 series_code series_name code_prefix file_path source? license? file_name? file_size? file_ext? lesson_level? rewrite? overwrite? learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 subject_id = {sj.subject_id}
     # 返回 {ok, task_id, duplicate, chunk_count}；duplicate 为 1 表示库里已有内容完全相同的任务（不分系列），直接返回那一个，不再新存
     # 报错 400 series_code 不能为空
     # 报错 400 series_name 不能为空
@@ -36,10 +38,14 @@
     如果 {series_code} 等于 hanabira
       报错 400 hanabira 是主教材，不能用导入覆盖它
     结束
-    设 pm = 匹配 {code_prefix} ^[a-z][a-z0-9]*$
-    设 pover = 截取 {code_prefix} 21
-    如果 {pm.matched} 不等于 是 或 {pover} 不为空
-      报错 400 课号前缀只能用小写字母开头，后面是小写字母、数字，不超过 20 个字
+    如果 {subject_id} 等于 1
+      设 pm = 匹配 {code_prefix} ^[a-z][a-z0-9]*$
+      设 pover = 截取 {code_prefix} 21
+      如果 {pm.matched} 不等于 是 或 {pover} 不为空
+        报错 400 课号前缀只能用小写字母开头，后面是小写字母、数字，不超过 20 个字
+      结束
+    否则
+      设 pk = 调用 编号前缀检查 subject_id={subject_id} code={code_prefix}1
     结束
     设 px = 查一值 app.db textbook_import_prefix_taken series_code={series_code} code_prefix={code_prefix}
     如果 {px} 大于 0
@@ -76,6 +82,7 @@
       报错 400 文件没有可读文本
     结束
     设 q.raw_text = {body}
+    设 q.subject_id = {subject_id}
     设 ex = 查一行表 app.db textbook_import_task_by_raw {q}
     如果 {ex} 不为空
       设 ecnt = 查一值 app.db textbook_import_chunk_count_by_task task_id={ex.id}
@@ -94,6 +101,7 @@
       设 dt = {series_name}-{file_name}
     结束
     设 tp.series_code = {series_code}
+    设 tp.subject_id = {subject_id}
     设 tp.series_name = {series_name}
     设 tp.source = {source 或}
     设 tp.license = {license 或}
@@ -138,7 +146,7 @@
     返回 {"ok": 1, "task_id": {tid}, "duplicate": 0, "chunk_count": {cc}}
   结束
 
-  公开 函数 处理任务 task_id
+  公开 函数 处理任务 task_id learner? current_role? auth_mode? subject?
     # 返回 {ok, task_id, chunk_total, failed}；failed 是本次处理后失败的块数
     # 报错 404 没有这个任务
     # 按 task_id 查 textbook_import_task，查不到报错 404 没有这个任务
@@ -152,7 +160,7 @@
     结束
     设 rows = 查询 app.db textbook_import_chunks_pending task_id={task_id}
     遍历 c 于 {rows}
-      设 r = 调用 处理块 chunk_id={c.id} 出错时 e0
+      设 r = 调用 处理块 chunk_id={c.id} subject={t.subject_id} 出错时 e0
     结束
     设 n1 = 写库 app.db textbook_import_task_set_status id={task_id} status=待审阅
     设 total = 查一值 app.db textbook_import_chunk_count_by_task task_id={task_id}
@@ -160,7 +168,7 @@
     返回 {"ok": 1, "task_id": {task_id}, "chunk_total": {total}, "failed": {failed}}
   结束
 
-  公开 函数 处理块 chunk_id
+  公开 函数 处理块 chunk_id learner? current_role? auth_mode? subject?
     # 返回 {ok, chunk_id, status, draft_count}；status 是处理后块的状态（完成 或 失败）
     # 报错 404 没有这个块
     # 按 chunk_id 查 textbook_import_chunk，查不到报错 404 没有这个块；再取所属任务（取课号前缀 code_prefix）
@@ -176,7 +184,7 @@
     结束
     设 t = 查一行 app.db textbook_import_task_by_id id={ch.task_id}
     设 n0 = 写库 app.db textbook_import_chunk_set_processing id={chunk_id}
-    设 bp = 调用 块提示词 chunk_id={chunk_id}
+    设 bp = 调用 块提示词 chunk_id={chunk_id} subject={t.subject_id}
     设 res = 调用 抽课 prompt={bp.prompt} 出错时 e
     如果 {e} 不为空
       设 reason = {e.error 或 模型调用出错}
@@ -199,7 +207,7 @@
         设 dpl = @,
         如果 {les.item_codes 或} 不为空
           遍历 c 于 {les.item_codes}
-            设 it = 调用 kg.取条目 code={c}
+            设 it = 调用 kg.取条目 code={c} subject={t.subject_id}
             如果 {it} 不为空
               如果 {ics} 为空
                 设 ics = {c}
@@ -221,7 +229,7 @@
         结束
         如果 {les.point_codes 或} 不为空
           遍历 c2 于 {les.point_codes}
-            设 pt = 调用 kg.取知识点 code={c2}
+            设 pt = 调用 kg.取知识点 code={c2} subject={t.subject_id}
             如果 {pt} 不为空
               如果 {pcs} 为空
                 设 pcs = {c2}
@@ -300,7 +308,7 @@
     返回 {"ok": 1, "chunk_id": {chunk_id}, "status": "完成", "draft_count": {draft_count}}
   结束
 
-  公开 函数 标记任务失败 task_id error
+  公开 函数 标记任务失败 task_id error learner? current_role? auth_mode? subject?
     # 返回 {ok}
     # 报错 404 没有这个任务
     # 按 task_id 查 textbook_import_task，查不到报错 404 没有这个任务
@@ -316,7 +324,13 @@
     返回 {"ok": 1}
   结束
 
-  公开 函数 重试块 chunk_id
+  公开 函数 重试块 chunk_id learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 subject_id = {sj.subject_id}
+    设 c0x = 查一行 app.db textbook_import_chunk_by_id id={chunk_id}
+    如果 {c0x} 为空 或 {c0x.subject_id} 不等于 {subject_id}
+      报错 404 没有这个块
+    结束
     # 返回 {ok, chunk_id, task_id, status}；status 是提交后块的状态（待处理，后台处理，前端通过 取任务 轮询进度）
     # 报错 404 没有这个块
     # 报错 400 只有失败的块可以重试
@@ -340,17 +354,25 @@
     返回 {"ok": 1, "chunk_id": {chunk_id}, "task_id": {ch.task_id}, "status": "待处理"}
   结束
 
-  公开 函数 列任务
+  公开 函数 列任务 learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
     # 返回 {total, tasks}，tasks 是 [{task_id, series_code, series_name, display_title, status, chunk_total, pending_count, draft_total, created_at}]，按 id 倒序
     # 查 textbook_import_task 全部行，按 id 倒序
     # 每行统计其块数 chunk_total、status 为 待处理 或 处理中 的块数 pending_count、草稿课数 draft_total
     # 返回 {"total": 行数, "tasks": 列表}
-    设 rows = 查询 app.db textbook_import_tasks_list
+    设 rows = 查询 app.db textbook_import_tasks_list subject_id={subject_id}
     设 n = 列表长度 {rows}
     返回 {"total": {n}, "tasks": {rows}}
   结束
 
-  公开 函数 取任务 task_id
+  公开 函数 取任务 task_id learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
+    设 t0x = 查一行 app.db textbook_import_task_by_id id={task_id}
+    如果 {t0x} 为空 或 {t0x.subject_id} 不等于 {subject_id}
+      报错 404 没有这个任务
+    结束
     # 返回 {task_id, series_code, series_name, source, license, code_prefix, file_name, display_title, status, fail_reason, report, created_at, chunk_total, chunk_pending, chunk_done, chunk_failed, chunks, drafts}；chunks 是 [{id, seq, title, status, fail_reason, retry_count}] 按 seq 升序；drafts 是 [{id, code, display_title, title, level, seq, status, item_count, point_count}] 按 seq 升序、id 升序
     # 报错 404 没有这个任务
     # 按 task_id 查 textbook_import_task，查不到报错 404 没有这个任务
@@ -387,7 +409,13 @@
     返回 {out}
   结束
 
-  公开 函数 取草稿课 draft_id
+  公开 函数 取草稿课 draft_id learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
+    设 d0x = 查一行 app.db textbook_import_draft_by_id id={draft_id}
+    如果 {d0x} 为空 或 {d0x.subject_id} 不等于 {subject_id}
+      报错 404 没有这个草稿课
+    结束
     # 返回 {id, task_id, chunk_id, code, display_title, level, title, summary, explain, connection, examples, examples_edited, orig_title, seq, item_codes, point_codes, status}
     # 报错 404 没有这个草稿课
     # 按 draft_id 查 textbook_import_draft，查不到报错 404 没有这个草稿课
@@ -419,7 +447,13 @@
     返回 {out}
   结束
 
-  公开 函数 修改草稿课 draft_id title level summary explain connection examples seq
+  公开 函数 修改草稿课 draft_id title level summary explain connection examples seq learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 subject_id = {sj.subject_id}
+    设 d0x = 查一行 app.db textbook_import_draft_by_id id={draft_id}
+    如果 {d0x} 为空 或 {d0x.subject_id} 不等于 {subject_id}
+      报错 404 没有这个草稿课
+    结束
     # 返回 {ok, draft_id}
     # 报错 404 没有这个草稿课
     # 报错 400 已导入的课不能再改
@@ -472,7 +506,13 @@
     返回 {"ok": 1, "draft_id": {draft_id}}
   结束
 
-  公开 函数 改映射 draft_id kind action code
+  公开 函数 改映射 draft_id kind action code learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 subject_id = {sj.subject_id}
+    设 d0x = 查一行 app.db textbook_import_draft_by_id id={draft_id}
+    如果 {d0x} 为空 或 {d0x.subject_id} 不等于 {subject_id}
+      报错 404 没有这个草稿课
+    结束
     # 返回 {ok, item_codes, point_codes}
     # 报错 404 没有这个草稿课
     # 报错 400 已导入的课不能再改
@@ -511,12 +551,12 @@
     设 nw = {cur 或}
     如果 {action} 等于 add
       如果 {kind} 等于 item
-        设 it = 调用 kg.取条目 code={code}
+        设 it = 调用 kg.取条目 code={code} subject={subject_id}
         如果 {it} 为空
           报错 404 没有这个条目
         结束
       否则
-        设 pt = 调用 kg.取知识点 code={code}
+        设 pt = 调用 kg.取知识点 code={code} subject={subject_id}
         如果 {pt} 为空
           报错 404 没有这个知识点
         结束
@@ -552,7 +592,13 @@
     返回 {"ok": 1, "item_codes": "{ics}", "point_codes": "{pcs}"}
   结束
 
-  公开 函数 审核草稿课 draft_id decision
+  公开 函数 审核草稿课 draft_id decision learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 subject_id = {sj.subject_id}
+    设 d0x = 查一行 app.db textbook_import_draft_by_id id={draft_id}
+    如果 {d0x} 为空 或 {d0x.subject_id} 不等于 {subject_id}
+      报错 404 没有这个草稿课
+    结束
     # 返回 {ok, draft_id, status}
     # 报错 404 没有这个草稿课
     # 报错 400 已导入的课不能再改
@@ -593,7 +639,13 @@
     返回 {"ok": 1, "draft_id": {draft_id}, "status": "{st}"}
   结束
 
-  公开 函数 一键通过 task_id
+  公开 函数 一键通过 task_id learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 subject_id = {sj.subject_id}
+    设 t0x = 查一行 app.db textbook_import_task_by_id id={task_id}
+    如果 {t0x} 为空 或 {t0x.subject_id} 不等于 {subject_id}
+      报错 404 没有这个任务
+    结束
     # 返回 {ok, approved, skipped}；approved 是本次改为通过的课数，skipped 是仍待审但没通过的课数
     # 报错 404 没有这个任务
     # 报错 400 已导入的课不能再改
@@ -613,7 +665,13 @@
     返回 {"ok": 1, "approved": {approved}, "skipped": {skipped}}
   结束
 
-  公开 函数 确认导入 task_id
+  公开 函数 确认导入 task_id learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 subject_id = {sj.subject_id}
+    设 t0x = 查一行 app.db textbook_import_task_by_id id={task_id}
+    如果 {t0x} 为空 或 {t0x.subject_id} 不等于 {subject_id}
+      报错 404 没有这个任务
+    结束
     # 返回 {ok, series_code, total, imported, rejected_count, rejected, item_links, point_links, file_rows}；total、imported、item_links、point_links、file_rows、rejected 取自 lesson.写入系列课文并重灌 的返回，rejected 是 [{code, reason}]，rejected_count 是 rejected 的个数
     # 报错 404 没有这个任务
     # 报错 400 已导入的课不能再改
@@ -672,7 +730,7 @@
       设 rw2.point_codes = {pa}
       设 rows = 列表加项 {rows} {rw2}
     结束
-    设 r = 调用 lesson.写入系列课文并重灌 series_code={t.series_code} rows_json={rows} series_name={t.series_name} source={t.source} license={t.license}
+    设 r = 调用 lesson.写入系列课文并重灌 series_code={t.series_code} rows_json={rows} series_name={t.series_name} source={t.source} license={t.license} subject={subject_id}
     设 rc = 列表长度 {r.rejected}
     设 rep = {"ok": {r.ok}, "series_code": "{r.series_code}", "total": {r.total}, "imported": {r.imported}, "item_links": {r.item_links}, "point_links": {r.point_links}, "file_rows": {r.file_rows}, "rejected": {r.rejected}}
     设 ip.id = {task_id}
@@ -681,7 +739,13 @@
     返回 {"ok": 1, "series_code": "{t.series_code}", "total": {r.total}, "imported": {r.imported}, "rejected_count": {rc}, "rejected": {r.rejected}, "item_links": {r.item_links}, "point_links": {r.point_links}, "file_rows": {r.file_rows}}
   结束
 
-  公开 函数 删除任务 task_id
+  公开 函数 删除任务 task_id learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 subject_id = {sj.subject_id}
+    设 t0x = 查一行 app.db textbook_import_task_by_id id={task_id}
+    如果 {t0x} 为空 或 {t0x.subject_id} 不等于 {subject_id}
+      报错 404 没有这个任务
+    结束
     # 返回 {ok, task_id}
     # 报错 404 没有这个任务
     # 按 task_id 查 textbook_import_task，查不到报错 404 没有这个任务
@@ -699,16 +763,18 @@
     返回 {"ok": 1, "task_id": {task_id}}
   结束
 
-  公开 函数 列已导入系列 series_code?
+  公开 函数 列已导入系列 series_code? learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
     # 返回 {total, series, lesson_total, lessons}；series 是 [{code, name, sort_order, lesson_count}]；series_code 不为空时 lessons 是该系列的课文 [{code, level, title, summary, series_code, seq}]，lesson_total 是其个数；为空时 lessons 为空列表、lesson_total 为 0
     # 调用 lesson.列系列 得系列列表（只含未撤下的系列）
     # 每个系列调用 lesson.列课文 series_code=该系列编号，lesson_count 取返回的 total
     # series_code 不为空时，调用 lesson.列课文 series_code=series_code，取其 lessons 和 total
     # 返回 {"total": 系列数, "series": 列表, "lesson_total": 课数, "lessons": 课文列表}
-    设 sl = 调用 lesson.列系列
+    设 sl = 调用 lesson.列系列 subject={subject_id}
     设 series = 解析JSON []
     遍历 s 于 {sl.series}
-      设 lc = 调用 lesson.列课文 series_code={s.code}
+      设 lc = 调用 lesson.列课文 series_code={s.code} subject={subject_id}
       设 s.lesson_count = {lc.total}
       设 series = 列表加项 {series} {s}
     结束
@@ -716,14 +782,16 @@
     设 lessons = 解析JSON []
     设 lt = 0
     如果 {series_code} 不为空
-      设 ll = 调用 lesson.列课文 series_code={series_code}
+      设 ll = 调用 lesson.列课文 series_code={series_code} subject={subject_id}
       设 lessons = {ll.lessons}
       设 lt = {ll.total}
     结束
     返回 {"total": {n}, "series": {series}, "lesson_total": {lt}, "lessons": {lessons}}
   结束
 
-  公开 函数 撤下已导入系列 series_code
+  公开 函数 撤下已导入系列 series_code learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 subject_id = {sj.subject_id}
     # 返回 {ok, series_code, removed_lessons, moved}，removed_lessons、moved 取自 lesson.撤下系列 的返回
     # 报错 404 没有这个系列
     # 调用 lesson.撤下系列 series_code=series_code 得 r（挪走内容文件、清课文及挂接、排序改 -1 都由 lesson 完成；没有这个系列时 lesson 报 404 原样向上抛）
@@ -732,12 +800,18 @@
     如果 {series_code} 等于 hanabira
       报错 400 hanabira 是主教材，不能撤下
     结束
-    设 r = 调用 lesson.撤下系列 series_code={series_code}
-    设 n1 = 写库 app.db textbook_import_task_withdraw series_code={series_code}
+    设 r = 调用 lesson.撤下系列 series_code={series_code} subject={subject_id}
+    设 n1 = 写库 app.db textbook_import_task_withdraw series_code={series_code} subject_id={subject_id}
     返回 {"ok": 1, "series_code": "{series_code}", "removed_lessons": {r.removed_lessons}, "moved": {r.moved}}
   结束
 
-  公开 函数 块提示词 chunk_id
+  公开 函数 块提示词 chunk_id learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
+    设 c0x = 查一行 app.db textbook_import_chunk_by_id id={chunk_id}
+    如果 {c0x} 为空 或 {c0x.subject_id} 不等于 {subject_id}
+      报错 404 没有这个块
+    结束
     设 ch = 查一行 app.db textbook_import_chunk_by_id id={chunk_id}
     如果 {ch} 为空
       报错 404 没有这个块
@@ -748,18 +822,18 @@
       设 rw = 0
     结束
     设 lv = {t.lesson_level 或 全部}
-    设 il = 调用 kg.列条目
-    设 pl = 调用 kg.列知识点
+    设 il = 调用 kg.列条目 subject={subject_id}
+    设 pl = 调用 kg.列知识点 subject={subject_id}
     设 cand = {il.items}
     如果 {lv} 等于 N5 或 {lv} 等于 N4 或 {lv} 等于 N3 或 {lv} 等于 N2 或 {lv} 等于 N1
       设 cand = 解析JSON []
       设 lk1 = @,
-      设 rows1 = 查询 app.db textbook_import_item_linked
+      设 rows1 = 查询 app.db textbook_import_item_linked subject_id={subject_id}
       遍历 r1 于 {rows1}
         设 lk1 = {lk1}{r1.item_code},
       结束
       设 lk2 = @,
-      设 rows2 = 查询 app.db textbook_import_item_linked_level level={lv}
+      设 rows2 = 查询 app.db textbook_import_item_linked_level level={lv} subject_id={subject_id}
       遍历 r2 于 {rows2}
         设 lk2 = {lk2}{r2.item_code},
       结束
@@ -788,7 +862,7 @@
     返回 {out}
   结束
 
-  公开 函数 创建导入任务 series_code series_name document_path code_prefix? source? license? lesson_level? rewrite? overwrite? file_name? file_size? file_ext?
+  公开 函数 创建导入任务 series_code series_name document_path code_prefix? source? license? lesson_level? rewrite? overwrite? file_name? file_size? file_ext? learner? current_role? auth_mode? subject?
     设 cp = {code_prefix 或}
     如果 {cp} 为空 且 {series_code} 不为空
       设 cp1 = 替换 {series_code} [-_]
@@ -811,16 +885,18 @@
         设 ow = 1
       结束
     结束
-    设 r = 调用 新建导入 series_code={series_code} series_name={series_name} code_prefix={cp} file_path={document_path} source={source 或} license={license 或} file_name={file_name 或} file_size={file_size 或} file_ext={file_ext 或} lesson_level={ll} rewrite={rw} overwrite={ow}
+    设 r = 调用 新建导入 series_code={series_code} series_name={series_name} code_prefix={cp} file_path={document_path} source={source 或} license={license 或} file_name={file_name 或} file_size={file_size 或} file_ext={file_ext 或} lesson_level={ll} rewrite={rw} overwrite={ow} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     返回 {r}
   结束
 
-  公开 函数 导入首页
-    设 tl = 调用 列任务
+  公开 函数 导入首页 learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
+    设 tl = 调用 列任务 subject={subject_id}
     设 jobs = 解析JSON []
     遍历 tk 于 {tl.tasks}
       设 tr0 = 查一行 app.db textbook_import_task_by_id id={tk.task_id}
-      设 js = 调用 任务进度文本 task_id={tk.task_id}
+      设 js = 调用 任务进度文本 task_id={tk.task_id} subject_id={subject_id}
       设 row = 解析JSON 空对象
       设 row.job = {tk.task_id}
       设 row.series = {tk.series_code}
@@ -831,7 +907,7 @@
       设 row.href = #%E6%95%99%E6%9D%90%E5%AF%BC%E5%85%A5?job={tk.task_id}
       设 jobs = 列表加项 {jobs} {row}
     结束
-    设 sl = 调用 列已导入系列
+    设 sl = 调用 列已导入系列 subject={subject_id}
     设 ser = 解析JSON []
     遍历 sv 于 {sl.series}
       如果 {sv.code} 不等于 hanabira
@@ -869,12 +945,14 @@
     返回 {r}
   结束
 
-  公开 函数 任务视图 task_id
+  公开 函数 任务视图 task_id learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
     设 tr = 查一行 app.db textbook_import_task_by_id id={task_id}
-    如果 {tr} 为空
+    如果 {tr} 为空 或 {tr.subject_id} 不等于 {subject_id}
       返回 {"job": {"id": {task_id}, "missing": "没有这个导入任务（{task_id}），可能已经删了。", "running": 0, "back": "#%E6%95%99%E6%9D%90%E5%AF%BC%E5%85%A5"}}
     结束
-    设 t = 调用 取任务 task_id={task_id}
+    设 t = 调用 取任务 task_id={task_id} subject={subject_id}
     设 running = 转数字 0
     如果 {t.status} 等于 处理中
       设 running = 转数字 1
@@ -969,8 +1047,8 @@
     设 drows = 解析JSON []
     遍历 dd2 于 {t.drafts}
       设 df = 查一行 app.db textbook_import_draft_by_id id={dd2.id}
-      设 dx = 调用 取草稿课 draft_id={dd2.id}
-      设 mp = 调用 映射文本 item_codes={df.item_codes} point_codes={df.point_codes}
+      设 dx = 调用 取草稿课 draft_id={dd2.id} subject={subject_id}
+      设 mp = 调用 映射文本 item_codes={df.item_codes} point_codes={df.point_codes} subject_id={subject_id}
       设 iss = 调用 问题文本 draft={df} task_drafts={tds}
       设 dl = {df.level 或}
       如果 {dl} 为空
@@ -995,13 +1073,15 @@
     返回 {"job": {job}, "job_note": "", "import_chunks": {crows}, "import_drafts": {drows}, "import_rejected": {rej}}
   结束
 
-  公开 函数 草稿视图 draft_id with_form?
+  公开 函数 草稿视图 draft_id with_form? learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
     设 ef = 解析JSON 空对象
     设 dr = 查一行 app.db textbook_import_draft_by_id id={draft_id}
-    如果 {dr} 为空
+    如果 {dr} 为空 或 {dr.subject_id} 不等于 {subject_id}
       返回 {"draft": {"draft": {draft_id}, "missing": "没有这一课草稿（{draft_id}），可能任务已经删了。", "back": "#%E6%95%99%E6%9D%90%E5%AF%BC%E5%85%A5"}, "form": {ef}}
     结束
-    设 d = 调用 取草稿课 draft_id={draft_id}
+    设 d = 调用 取草稿课 draft_id={draft_id} subject={subject_id}
     设 t = 查一行 app.db textbook_import_task_by_id id={d.task_id}
     设 ch = 查一行 app.db textbook_import_chunk_by_id id={d.chunk_id}
     设 fc = 第?块「?」
@@ -1046,11 +1126,11 @@
     结束
     遍历 ic 于 {ia}
       如果 {ic} 不为空
-        设 it = 调用 kg.取条目 code={ic}
+        设 it = 调用 kg.取条目 code={ic} subject={subject_id}
         如果 {it} 不为空
           设 lab = {it.name}
           如果 {it.point_code} 不为空
-            设 pt0 = 调用 kg.取知识点 code={it.point_code}
+            设 pt0 = 调用 kg.取知识点 code={it.point_code} subject={subject_id}
             如果 {pt0} 不为空
               设 lab = {it.name}（属于 {pt0.title}）
             结束
@@ -1069,7 +1149,7 @@
     结束
     遍历 pcd 于 {pa}
       如果 {pcd} 不为空
-        设 pt1 = 调用 kg.取知识点 code={pcd}
+        设 pt1 = 调用 kg.取知识点 code={pcd} subject={subject_id}
         如果 {pt1} 不为空
           设 mrow2 = 解析JSON 空对象
           设 mrow2.map_kind = 知识点
@@ -1079,7 +1159,7 @@
         结束
       结束
     结束
-    设 oitems = 调用 kg.列条目
+    设 oitems = 调用 kg.列条目 subject={subject_id}
     设 opts = 解析JSON []
     遍历 oi 于 {oitems.items}
       设 orow = 解析JSON 空对象
@@ -1087,7 +1167,7 @@
       设 orow.label = {oi.name}（条目，{oi.code}）
       设 opts = 列表加项 {opts} {orow}
     结束
-    设 opoints = 调用 kg.列知识点
+    设 opoints = 调用 kg.列知识点 subject={subject_id}
     遍历 op 于 {opoints.points}
       设 prow = 解析JSON 空对象
       设 prow.value = {op.code}
@@ -1111,8 +1191,8 @@
     返回 {"draft": {draft}, "draft_note": "", "draft_maps": {maps}, "map_options": {opts}, "form": {form}}
   结束
 
-  函数 系列视图 series_code
-    设 sl = 调用 列已导入系列 series_code={series_code}
+  函数 系列视图 series_code subject_id
+    设 sl = 调用 列已导入系列 series_code={series_code} subject={subject_id}
     设 found = 0
     设 fname = {zz 或}
     设 flc = 0
@@ -1135,51 +1215,61 @@
     返回 {"series_view": {"code": "{series_code}", "head": "{head}", "note": "", "can_withdraw": {can}, "back": "#%E6%95%99%E6%9D%90%E5%AF%BC%E5%85%A5"}}
   结束
 
-  公开 函数 导入视图 task_id? draft_id? series_code?
+  公开 函数 导入视图 task_id? draft_id? series_code? learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
     设 ef = 解析JSON 空对象
     如果 {task_id} 不为空
-      设 v = 调用 任务视图 task_id={task_id}
+      设 v = 调用 任务视图 task_id={task_id} subject={subject_id}
       设 v.form = {ef}
       返回 {v}
     否则如果 {draft_id} 不为空
-      设 v = 调用 草稿视图 draft_id={draft_id} with_form=是
+      设 v = 调用 草稿视图 draft_id={draft_id} with_form=是 subject={subject_id}
       返回 {v}
     否则如果 {series_code} 不为空
-      设 v = 调用 系列视图 series_code={series_code}
+      设 v = 调用 系列视图 series_code={series_code} subject_id={subject_id}
       设 v.form = {ef}
       返回 {v}
     结束
     返回 {"form": {ef}}
   结束
 
-  公开 函数 一键通过页面 task_id
-    设 r = 调用 一键通过 task_id={task_id}
-    设 v = 调用 任务视图 task_id={task_id}
+  公开 函数 一键通过页面 task_id learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 subject_id = {sj.subject_id}
+    设 r = 调用 一键通过 task_id={task_id} subject={subject_id}
+    设 v = 调用 任务视图 task_id={task_id} subject={subject_id}
     设 v.job_note = 通过了：{r.approved}课（有映射、还待审的）。
     返回 {v}
   结束
 
-  公开 函数 确认导入页面 task_id
-    设 r = 调用 确认导入 task_id={task_id}
-    设 v = 调用 任务视图 task_id={task_id}
+  公开 函数 确认导入页面 task_id learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 subject_id = {sj.subject_id}
+    设 r = 调用 确认导入 task_id={task_id} subject={subject_id}
+    设 v = 调用 任务视图 task_id={task_id} subject={subject_id}
     返回 {v}
   结束
 
-  公开 函数 审核草稿页面 draft_id decision job?
-    设 r = 调用 审核草稿课 draft_id={draft_id} decision={decision}
+  公开 函数 审核草稿页面 draft_id decision job? learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 subject_id = {sj.subject_id}
+    设 r = 调用 审核草稿课 draft_id={draft_id} decision={decision} subject={subject_id}
     如果 {job} 不为空
-      设 v = 调用 任务视图 task_id={job}
+      设 v = 调用 任务视图 task_id={job} subject={subject_id}
       设 ef = 解析JSON 空对象
       设 v.form = {ef}
     否则
-      设 v = 调用 草稿视图 draft_id={draft_id} with_form=否
+      设 v = 调用 草稿视图 draft_id={draft_id} with_form=否 subject={subject_id}
     结束
     返回 {v}
   结束
 
-  公开 函数 保存草稿页面 draft_id title draft_level seq summary? formation? explanation? examples?
+  公开 函数 保存草稿页面 draft_id title draft_level seq summary? formation? explanation? examples? learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 subject_id = {sj.subject_id}
     设 d0 = 查一行 app.db textbook_import_draft_by_id id={draft_id}
-    如果 {d0} 为空
+    如果 {d0} 为空 或 {d0.subject_id} 不等于 {subject_id}
       报错 404 没有这个草稿课
     结束
     如果 {examples} 不为空
@@ -1192,13 +1282,15 @@
         结束
       结束
     结束
-    设 r = 调用 修改草稿课 draft_id={draft_id} title={title} level={draft_level} summary={summary 或} explain={explanation 或} connection={formation 或} examples={examples 或} seq={seq}
-    设 v = 调用 草稿视图 draft_id={draft_id} with_form=是
+    设 r = 调用 修改草稿课 draft_id={draft_id} title={title} level={draft_level} summary={summary 或} explain={explanation 或} connection={formation 或} examples={examples 或} seq={seq} subject={subject_id}
+    设 v = 调用 草稿视图 draft_id={draft_id} with_form=是 subject={subject_id}
     设 v.draft_note = 保存了。
     返回 {v}
   结束
 
-  公开 函数 加映射页面 draft_id map_typed? map_add?
+  公开 函数 加映射页面 draft_id map_typed? map_add? learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 subject_id = {sj.subject_id}
     设 code = {map_typed 或}
     如果 {code} 为空
       设 code = {map_add 或}
@@ -1207,47 +1299,53 @@
       报错 400 从下拉里选一个条目或知识点，或者输入编号
     结束
     设 kind = item
-    设 it = 调用 kg.取条目 code={code}
+    设 it = 调用 kg.取条目 code={code} subject={subject_id}
     如果 {it} 为空
-      设 pt = 调用 kg.取知识点 code={code}
+      设 pt = 调用 kg.取知识点 code={code} subject={subject_id}
       如果 {pt} 为空
         报错 400 库里没有编号「{code}」，只能挑已有的条目、知识点（不新建）
       结束
       设 kind = point
     结束
-    设 r = 调用 改映射 draft_id={draft_id} kind={kind} action=add code={code}
-    设 v = 调用 草稿视图 draft_id={draft_id} with_form=否
+    设 r = 调用 改映射 draft_id={draft_id} kind={kind} action=add code={code} subject={subject_id}
+    设 v = 调用 草稿视图 draft_id={draft_id} with_form=否 subject={subject_id}
     返回 {v}
   结束
 
-  公开 函数 去掉映射页面 draft_id map_code
-    设 d = 调用 取草稿课 draft_id={draft_id}
+  公开 函数 去掉映射页面 draft_id map_code learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 subject_id = {sj.subject_id}
+    设 d = 调用 取草稿课 draft_id={draft_id} subject={subject_id}
     设 kind = point
     设 wrapped = ,{d.item_codes},
     如果 {wrapped} 包含 ,{map_code},
       设 kind = item
     结束
-    设 r = 调用 改映射 draft_id={draft_id} kind={kind} action=remove code={map_code}
-    设 v = 调用 草稿视图 draft_id={draft_id} with_form=否
+    设 r = 调用 改映射 draft_id={draft_id} kind={kind} action=remove code={map_code} subject={subject_id}
+    设 v = 调用 草稿视图 draft_id={draft_id} with_form=否 subject={subject_id}
     返回 {v}
   结束
 
-  公开 函数 重试块页面 chunk_id
-    设 r = 调用 重试块 chunk_id={chunk_id}
-    设 v = 调用 任务视图 task_id={r.task_id}
+  公开 函数 重试块页面 chunk_id learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 subject_id = {sj.subject_id}
+    设 r = 调用 重试块 chunk_id={chunk_id} subject={subject_id}
+    设 v = 调用 任务视图 task_id={r.task_id} subject={subject_id}
     返回 {v}
   结束
 
-  公开 函数 撤下系列页面 series_code
-    设 sl = 调用 列已导入系列
+  公开 函数 撤下系列页面 series_code learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 subject_id = {sj.subject_id}
+    设 sl = 调用 列已导入系列 subject={subject_id}
     设 nm = {series_code}
     遍历 x 于 {sl.series}
       如果 {x.code} 等于 {series_code}
         设 nm = {x.name}
       结束
     结束
-    设 r = 调用 撤下已导入系列 series_code={series_code}
-    设 h = 调用 导入首页
+    设 r = 调用 撤下已导入系列 series_code={series_code} subject={subject_id}
+    设 h = 调用 导入首页 subject={subject_id}
     设 note = 撤下了：库里删掉{r.removed_lessons}课（连同映射），教材页的下拉里不再有它。
     如果 {r.moved} 不等于 0
       设 note = {note}课文文件留在 content/lesson/series/{series_code}.withdrawn.jsonl。
@@ -1256,8 +1354,8 @@
     返回 {"series_view": {"code": "{series_code}", "head": "{head}", "note": "{note}", "can_withdraw": 0, "back": "#%E6%95%99%E6%9D%90%E5%AF%BC%E5%85%A5"}, "import_jobs": {h.import_jobs}, "import_series": {h.import_series}}
   结束
 
-  函数 任务进度文本 task_id
-    设 t = 调用 取任务 task_id={task_id}
+  函数 任务进度文本 task_id subject_id
+    设 t = 调用 取任务 task_id={task_id} subject={subject_id}
     设 cf = {t.chunk_failed}
     设 cdn = 查一值 app.db textbook_import_chunk_count_status task_id={task_id} status=完成
     设 fin = 计算 {cdn} + {cf}
@@ -1291,7 +1389,7 @@
     返回 {o}
   结束
 
-  函数 映射文本 item_codes point_codes
+  函数 映射文本 item_codes point_codes subject_id
     设 names = {zz 或}
     设 pts = {zz 或}
     设 ia = 解析JSON []
@@ -1300,7 +1398,7 @@
     结束
     遍历 c 于 {ia}
       如果 {c} 不为空
-        设 it = 调用 kg.取条目 code={c}
+        设 it = 调用 kg.取条目 code={c} subject={subject_id}
         如果 {it} 不为空
           如果 {names} 为空
             设 names = {it.name}
@@ -1316,7 +1414,7 @@
     结束
     遍历 c2 于 {pa}
       如果 {c2} 不为空
-        设 pt = 调用 kg.取知识点 code={c2}
+        设 pt = 调用 kg.取知识点 code={c2} subject={subject_id}
         如果 {pt} 不为空
           如果 {pts} 为空
             设 pts = 〔{pt.title}〕
@@ -1399,6 +1497,28 @@
     结束
     设 o.text = {out}
     返回 {o}
+  结束
+
+  函数 本科目 learner current_role auth_mode subject need?
+    设 r = 调用 subject.解析科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need={need}
+    返回 {"subject_id": {r.subject_id}}
+  结束
+
+  函数 编号前缀检查 subject_id code
+    如果 {subject_id} 等于 1
+      返回 {"ok": 1}
+    结束
+    设 sc = 查一值 app.db textbook_import_subject_code subject_id={subject_id}
+    设 cm = 匹配 {code} ^[a-z][a-z0-9_]*\.[A-Za-z0-9_-]+$
+    设 pre = {sc}.
+    设 okp = 0
+    如果 {code} 开头是 {pre}
+      设 okp = 1
+    结束
+    如果 {sc} 为空 或 {cm.matched} 不等于 是 或 {okp} 等于 0
+      报错 400 编号要以「{sc}.」开头
+    结束
+    返回 {"ok": 1}
   结束
 
 结束

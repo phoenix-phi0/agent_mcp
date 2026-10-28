@@ -3,7 +3,7 @@
 
 ## 表
 表 quiz_question
-  question_no 文本 题号，唯一
+  question_no 文本 题号，全局唯一（跨科目也不能重号）；不得含英文逗号或空白（asked_nos 按逗号拼接、拆分）
   course 文本 课程，可空
   level 文本 等级 N5/N4/N3/N2/N1
   category 文本 考点类别（如接续题）
@@ -37,6 +37,17 @@
   given 文本 接续题的作答内容
 
 ## 函数
+函数 本科目 learner current_role auth_mode subject need?
+  返回 {subject_id}；本次请求用哪个科目
+  伪代码 调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=need，原样返回它的 subject_id（四个入参都是空串时得 1；显式 subject 无权时 解析科目 报 403/404、不是数字报 400、need 不对报 400，原样抛出）
+
+函数 编号前缀检查 subject_id code
+  返回 {ok}
+  报错 400 编号要以「<编码>.」开头
+  伪代码 subject_id 等于 1（日语）：直接返回 {"ok": 1}，旧编号不动
+  伪代码 否则按 subject_id 查 subject_info 的 code（科目编码，查询 quiz_subject_code）；编码为空、或 code 不匹配 ^[a-z][a-z0-9_]*\.[A-Za-z0-9_-]+$、或 code 不以「<编码>.」开头，报错 400 编号要以「<编码>.」开头（文案里的 <编码> 换成真实编码）
+  伪代码 返回 {"ok": 1}
+
 函数 取轮大小 mode
   返回 整数，这一轮的题数
   伪代码 mode 等于 lesson 返回 5，否则返回 10
@@ -47,144 +58,186 @@
   伪代码 i 从 n-1 递减到 1：state = (state * 1103515245 + 12345) 对 2147483648 取余；j = state 对 (i+1) 取余；交换 arr[i] 与 arr[j]
   伪代码 返回 arr 用英文逗号连接（例如 n=2、seq=1 得 "1,0"）
 
-函数 组题面 question_no seq
+函数 组题面 question_no seq subject_id
   返回 {question_no, course, level, category, stem, is_choice, options}；options 是 [{letter, text}]（已按 seq 打乱，letter 为显示字母 A B C…），非选择题为空列表；不含答案；题号查不到返回空
-  伪代码 按 question_no 查 quiz_question 一行，查不到返回空
+  伪代码 按 question_no 和 subject_id 查 quiz_question 一行，查不到（包括属于别的科目）返回空
   伪代码 options 字段为空：is_choice=0，options 为空列表
   伪代码 否则按 ^ 拆成 n 个文字，is_choice=1；order = 洗牌顺序 n=n seq=seq；显示位置 k 的选项 = {letter: 第 k 个字母(A=0), text: 原第 order[k] 个文字}
   伪代码 返回题面对象（绝不带 answer、accepted、explain）
 
-函数 选题 learner mode level category lesson_code asked_nos asked_count new_seq
+函数 选题 learner mode level category lesson_code asked_nos asked_count new_seq subject_id
   返回 {question_no}；没有可出的题返回空
+  伪代码 科目：只在本科目（subject_id）的题里挑：下面所有对 quiz_question 的查询都带 subject_id 等于入参，调用 kg./lesson./progress. 的函数一律带 subject=subject_id
   伪代码 asked 为 asked_nos 按英文逗号拆开的题号集合；used_items 为 asked 中每个题号在 quiz_question 里的 item_code 集合（一轮里每个条目只出一题）
   伪代码 「可出」指：题号不在 asked，且 item_code 不在 used_items
   伪代码 mode 为空（自由练）：取 quiz_question 中 level 相等的行（category 不为空时再要求 category 相等），按 id 升序，留下可出的，数量为 0 返回空；否则取第 ((new_seq - 1) 对数量取余) 个（从 0 起），返回其题号
-  伪代码 mode 等于 lesson：调用 按课候选条目 lesson_code=lesson_code asked_count=asked_count，得到有序条目编号列表；依次取每个条目在 quiz_question 中 item_code 相等的行（按 id 升序），找到第一个可出的题就返回其题号；都没有返回空
+  伪代码 mode 等于 lesson：调用 按课候选条目 lesson_code=lesson_code asked_count=asked_count subject_id=subject_id，得到有序条目编号列表；依次取每个条目在 quiz_question 中 item_code 相等的行（按 id 升序），找到第一个可出的题就返回其题号；都没有返回空
   伪代码 mode 等于 review：依次构造候选题号列表（按顺序，去重）：
-  伪代码 (1) 调用 progress.列低分点 learner=learner，对返回的每个 point_code 调用 kg.按知识点列条目 point_code=该编号，取这些条目在 quiz_question 中的题（按条目顺序、id 升序）
-  伪代码 (2) 调用 progress.列错题 learner=learner，按返回顺序取每条 question_no（只保留在 quiz_question 中存在的）
-  伪代码 (3) 调用 progress.列久未做已掌握点 learner=learner，对返回的每个 point_code 同 (1) 取题
+  伪代码 (1) 调用 progress.列低分点 learner=learner subject=subject_id，对返回的每个 point_code 调用 kg.按知识点列条目 point_code=该编号 subject=subject_id，取这些条目在 quiz_question 中的题（按条目顺序、id 升序）
+  伪代码 (2) 调用 progress.列错题 learner=learner subject=subject_id，按返回顺序取每条 question_no（只保留在 quiz_question 中存在的）
+  伪代码 (3) 调用 progress.列久未做已掌握点 learner=learner subject=subject_id，对返回的每个 point_code 同 (1) 取题
   伪代码 按候选顺序取第一个可出的题返回其题号，没有返回空
 
-函数 按课候选条目 lesson_code asked_count
+函数 按课候选条目 lesson_code asked_count subject_id
   返回 条目编号有序列表
-  伪代码 调用 lesson.取课文 code=lesson_code，查不到返回空列表
-  伪代码 调用 lesson.取课文关联条目 lesson_code=lesson_code，得本课条目 own（取不到则为空）
+  伪代码 科目：subject_id 是调用方已解析的科目编号，调用 kg./lesson. 的函数一律带 subject=subject_id（别的科目的课、条目取不到）
+  伪代码 调用 lesson.取课文 code=lesson_code subject=subject_id，查不到（包括属于别的科目）返回空列表
+  伪代码 调用 lesson.取课文关联条目 lesson_code=lesson_code subject=subject_id，得本课条目 own（取不到则为空）
   伪代码 asked_count 等于 0（本轮第一题）：返回 own 的条目编号（本课 1 道）
-  伪代码 否则：先收易混对比条目——对 own 每个条目调用 kg.列对照 code=该条目编号，取每行不等于该条目的另一端，调用 kg.取条目 能取到的才算条目，且不在 own 里，去重
-  伪代码 再收同级条目——调用 lesson.列课文 series_code=本课 series_code level=本课 level，对每一课（跳过本课）调用 lesson.取课文关联条目，取其条目编号，不在 own 里，去重，追加在易混对比条目之后
+  伪代码 否则：先收易混对比条目——对 own 每个条目调用 kg.列对照 code=该条目编号 subject=subject_id，取每行不等于该条目的另一端，调用 kg.取条目 code=该另一端编号 subject=subject_id 能取到的才算条目，且不在 own 里，去重
+  伪代码 再收同级条目——调用 lesson.列课文 series_code=本课 series_code level=本课 level subject=subject_id，对每一课（跳过本课）调用 lesson.取课文关联条目 lesson_code=该课编号 subject=subject_id，取其条目编号，不在 own 里，去重，追加在易混对比条目之后
   伪代码 返回合并后的有序列表（易混对比在前，同级条目在后）
 
-函数 出下一题 learner current_role?
+函数 出下一题 learner subject_id
   返回 {finished, question, asked_count, round_size, right_count}；finished 为 1 表示本轮已出满或再无可出的题，此时 question 为空串；否则 question 是 组题面 的对象
   报错 404 没有可出的题
-  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
-  伪代码 读 quiz_progress 该 learner 在当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）下的行 r（调用方保证存在），round_size = 取轮大小 mode=r.mode
+  伪代码 科目：subject_id 是调用方已解析的科目编号（整数），本函数不再解析科目；下面所有查询和写入都只限这个 subject_id，调用 选题、组题面 时带 subject_id=subject_id，调用 kg./lesson./progress. 的函数时带 subject=subject_id
+  伪代码 读 quiz_progress 该 learner 在科目 subject_id（入参）下的行 r（调用方保证存在），round_size = 取轮大小 mode=r.mode
   伪代码 r.asked_count 不小于 round_size，返回 {"finished": 1, "question": "", "asked_count": r.asked_count, "round_size": round_size, "right_count": r.right_count}
-  伪代码 new_seq = r.seq + 1；调用 选题 learner mode=r.mode level=r.level category=r.category lesson_code=r.lesson_code asked_nos=r.asked_nos asked_count=r.asked_count new_seq=new_seq
+  伪代码 new_seq = r.seq + 1；调用 选题 learner=learner mode=r.mode level=r.level category=r.category lesson_code=r.lesson_code asked_nos=r.asked_nos asked_count=r.asked_count new_seq=new_seq subject_id=subject_id
   伪代码 选题 返回空：r.asked_count 等于 0 报错 404 没有可出的题；否则返回 finished=1 的对象（不改库）
   伪代码 在一个事务里更新 quiz_progress 该行：current_no=选中的题号，answered=0，last_correct=0，asked_nos=（原为空则只写题号，否则原值+","+题号），asked_count+1，seq=new_seq
-  伪代码 返回 {"finished": 0, "question": 组题面(question_no=选中题号, seq=new_seq), "asked_count": 新 asked_count, "round_size": round_size, "right_count": r.right_count}
+  伪代码 返回 {"finished": 0, "question": 组题面(question_no=选中题号, seq=new_seq, subject_id=subject_id), "asked_count": 新 asked_count, "round_size": round_size, "right_count": r.right_count}
 
-函数 开新轮 learner mode level category lesson_code current_role?
+函数 开新轮 learner mode level category lesson_code subject_id
   返回 同 出下一题；调用方已校验参数，mode 为空表示自由练
   报错 404 没有可出的题
-  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
-  伪代码 调用 progress.取区间作答 learner=learner start_id=0，取 max_id 作为 round_start_id
+  伪代码 科目：subject_id 是调用方已解析的科目编号（整数），本函数不再解析科目；下面所有查询和写入都只限这个 subject_id，调用 选题、组题面 时带 subject_id=subject_id，调用 kg./lesson./progress. 的函数时带 subject=subject_id
+  伪代码 调用 progress.取区间作答 learner=learner start_id=0 subject=subject_id，取 max_id 作为 round_start_id
   伪代码 在一个事务里：
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 quiz_progress：没有则插入 (learner, subject_id, level, category, current_no 空, answered=0, right_count=0, asked_nos 空, asked_count=0, mode, lesson_code, round_start_id, seq=0, last_correct=0)
+  伪代码 按 learner 和科目 subject_id（入参）查 quiz_progress：没有则插入 (learner, subject_id, level, category, current_no 空, answered=0, right_count=0, asked_nos 空, asked_count=0, mode, lesson_code, round_start_id, seq=0, last_correct=0)
   伪代码 有则更新：current_no 置空、answered=0、right_count=0、asked_nos 置空、asked_count=0、mode、lesson_code、round_start_id（seq 不动）；mode 为空（自由练）时同时更新 level、category 为入参，其它模式 level、category 保持原值
-  伪代码 调用 出下一题 learner=learner，出错（如 404）整个事务回滚、本函数原样报错
+  伪代码 调用 出下一题 learner=learner subject_id=subject_id，出错（如 404）整个事务回滚、本函数原样报错
   伪代码 返回 出下一题 的结果
 
-公开 函数 导入题库 file_path
+公开 函数 导入题库 file_path learner? current_role? auth_mode? subject?
   返回 {ok, total, imported, skipped, skipped_nos}；total 是有效行数，imported 是写入题数，skipped 是条目对不上而没进库的题数，skipped_nos 是这些题号用英文逗号连接（报告里说明）
   报错 400 导入文件有错
   报错 400 题库有坏题
+  报错 400 编号要以「<编码>.」开头
+  报错 400 题号不能含逗号或空白
+  报错 400 题号已被其他科目使用
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 403 没有权限修改该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject），四个都不传得 1，行为同旧（init_data 固定导入 1 号科目）；写操作传 need=write，auth_mode 等于 on 时只有该科目的负责/协作教师可导入，公共科目的其他教师、学生报 403 没有权限修改该科目；下面所有查询和写入都只限这个 subject_id；调用 kg. 的函数时带 subject=subject_id（已解析，不再校验）
   伪代码 用 doc 包「读文档」读 file_path 取文本，按行拆开；空行和以 # 开头的行忽略；没有有效行报错 400 导入文件有错
   伪代码 每行格式「题号|课程|等级|考点类别|题干|选项|标准答案|可接受写法|解析|条目编号」，用 | 分隔；选项和可接受写法内部用 ^ 隔开；前 7 项必须出现，后 3 项可省略或为空
   伪代码 题干里的换行转义：文件按行拆，所以题干里要换行时写字面的两个字符 \n（反斜杠加小写 n）；入库前把题干从左到右还原：连着的两个反斜杠 \\ 还原成一个字面反斜杠，\n 还原成一个真换行（char(10)），其它字符（包括后面不是 n 也不是反斜杠的单个反斜杠）原样保留；存库的 stem 是还原后的文本。要在题干里表示字面的 \n 两个字符，写 \\n。只处理题干，选项、答案、可接受写法、解析不做还原。可在插入时用 SQL 的 replace 与 char(10) 完成（先把 \\ 换成一个题干里不会出现的占位字符，再把 \n 换成 char(10)，最后把占位字符换回一个反斜杠）
   伪代码 做题页面的题卡 stem 原样带真换行（组题面 返回的 stem、card.stem 都不再做任何处理）。实现注意：题干可能含换行、双引号、反斜杠，不能写在 JSON 字面量的引号里（如 "stem": "{q.stem}"，含换行或引号时整个字面量解析失败、退化成文本，题卡会显示成未替换的占位）；组题面、拼题卡 要先把不含 stem 的字面量存进变量，用 设 对象 = 解析JSON {变量} 得到真正的字典（字面量变量本身只是文本，直接对它 设 对象.stem 会丢掉其余字段），再 设 对象.stem = {…} 单独写入题干
   伪代码 坏题：字段数少于 7、题号为空、标准答案为空、同一文件内题号重复；出现任一，报错 400 题库有坏题（整批不写，库保持原样）
-  伪代码 条目编号为空，或调用 kg.取条目 code=条目编号 取不到：这一题不进库，计入 skipped 与 skipped_nos
-  伪代码 在一个事务里：删除 quiz_question 全部行（整表重灌），再逐题插入其余题 (question_no, course, level, category, stem, options, answer, accepted, explain, item_code)；quiz_progress 不动
+  伪代码 题号字符：每行题号含英文逗号或任一空白字符（空格、制表符等），报错 400 题号不能含逗号或空白，整批不写（asked_nos 按英文逗号拼接和拆分，题号含逗号会让已出题集合错乱）；先于前缀检查
+  伪代码 题号前缀：每行题号调用本模块 编号前缀检查 subject_id=subject_id code=题号（日语 subject_id=1 豁免，其它科目要以「<科目编码>.」开头），不符报错 400 编号要以「<编码>.」开头，整批不写
+  伪代码 跨科目重号：题号全局唯一；任一题号已存在于别的科目（quiz_question 中 subject_id 不等于本科目）的行里，报错 400 题号已被其他科目使用，整批不写（本科目自己的旧题会被整表重灌覆盖，不算重号）
+  伪代码 条目编号为空，或调用 kg.取条目 code=条目编号 subject=subject_id 取不到（包括属于别的科目）：这一题不进库，计入 skipped 与 skipped_nos
+  伪代码 在一个事务里：只删除 quiz_question 中 subject_id 等于本科目的行（按科目重灌，别的科目的题不动），再逐题插入其余题 (question_no, course, level, category, stem, options, answer, accepted, explain, item_code, subject_id)；然后清理本科目失效进度（同一事务内）：把 quiz_progress 中 subject_id 等于本科目、current_no 不为空、且 current_no 已不在 quiz_question 本科目的行重置为 current_no 空、answered=0、last_correct=0（level、category、mode、lesson_code、right_count、asked_nos、asked_count、round_start_id、seq 保持不动，学习者回到「未出当前题」状态，点下一题/再来一轮即可继续，不会卡在 404/400）；别的科目的 quiz_progress 行一律不动，current_no 仍指向存在的题的行也不动
   伪代码 返回 {"ok": 1, "total": 有效行数, "imported": 写入数, "skipped": 跳过数, "skipped_nos": 逗号连接}
 
-公开 函数 取做题状态 learner current_role?
+公开 函数 取做题状态 learner current_role? auth_mode? subject?
   返回 {learner, started, mode, level, category, lesson_code, current_no, answered, right_count, asked_count, round_size, last_correct, round_key, question}；mode 为 free/lesson/review；question 是当前题的 组题面 对象（含已打乱选项，不含答案），没有当前题时为空串；没有进度行时 started=0、数字项为 0、字符串项为空串、mode=free、round_size=10
-  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 quiz_progress，没有则返回上述默认对象（started=0）
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
+  伪代码 按 learner 和当前科目 subject_id（本科目 得到的 subject_id）查 quiz_progress，没有则返回上述默认对象（started=0）
   伪代码 有则 started=1，mode 库里空值转为 free，round_size = 取轮大小，round_key = round_start_id
-  伪代码 current_no 不为空时 question = 组题面 question_no=current_no seq=该行 seq（题已不在库则为空串），否则空串
+  伪代码 current_no 不为空时 question = 组题面 question_no=current_no seq=该行 seq subject_id=subject_id（题已不在库则为空串），否则空串
   伪代码 返回上述对象
 
-公开 函数 开始 learner mode? level? category? lesson_code? current_role?
+公开 函数 开始 learner mode? level? category? lesson_code? current_role? auth_mode? subject?
   返回 同 出下一题：{finished, question, asked_count, round_size, right_count}
   报错 400 mode 不合法
   报错 400 等级不能为空
   报错 400 lesson_code 不能为空
   报错 404 没有这课
   报错 404 没有可出的题
-  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
   伪代码 mode 不为空、不等于 free、lesson、review 之一，报错 400 mode 不合法；mode 为空或 free 视为自由练（库里存空）
   伪代码 自由练：level 为空报错 400 等级不能为空；category 为空表示该等级不限考点
-  伪代码 按课练：lesson_code 为空报错 400 lesson_code 不能为空；调用 lesson.取课文 code=lesson_code，取不到报错 404 没有这课
+  伪代码 按课练：lesson_code 为空报错 400 lesson_code 不能为空；调用 lesson.取课文 code=lesson_code subject=subject_id，取不到（包括属于别的科目）报错 404 没有这课
   伪代码 复习薄弱点：不需要 level、category、lesson_code
-  伪代码 调用 开新轮 learner=learner mode=（自由练传空，否则 lesson/review） level=level category=category lesson_code=（按课练传 lesson_code，否则空）
+  伪代码 调用 开新轮 learner=learner mode=（自由练传空，否则 lesson/review） level=level category=category lesson_code=（按课练传 lesson_code，否则空） subject_id=subject_id
   伪代码 返回其结果（第一题已出）
 
-公开 函数 下一题 learner current_role?
+公开 函数 下一题 learner current_role? auth_mode? subject?
   返回 同 出下一题；finished 为 1 表示本轮结束，没有新题
   报错 400 还没有开始
   报错 400 先答完当前题
-  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 quiz_progress，没有报错 400 还没有开始
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
+  伪代码 按 learner 和当前科目 subject_id（本科目 得到的 subject_id）查 quiz_progress，没有报错 400 还没有开始
   伪代码 current_no 不为空且 answered 不等于 1，报错 400 先答完当前题
-  伪代码 调用 出下一题 learner=learner，返回其结果
+  伪代码 调用 出下一题 learner=learner subject_id=subject_id，返回其结果
 
-公开 函数 提交答案 learner answer pass_line? fall_line? current_role?
-  返回 {ok, repeated, question_no, correct, correct_answer, explain, round_done, right_count, asked_count, round_size, score, mastered}；correct_answer 选择题是正确选项在本次显示中的字母，非选择题是标准答案；round_done 为 1 表示这是本轮最后一题；repeated 为 1 表示这道题已交过、本次不再计分（此时不写任何表，score、mastered 为空串）
+公开 函数 提交答案 learner answer pass_line? fall_line? current_role? auth_mode? subject?
+  返回 {ok, repeated, question_no, correct, correct_answer, explain, round_done, right_count, asked_count, round_size, score, mastered, changed, point_code}；changed 取自 progress.记作答 的 changed（1 表示本次新记了一行得分），point_code 是该题知识点编号；correct_answer 选择题是正确选项在本次显示中的字母，非选择题是标准答案；round_done 为 1 表示这是本轮最后一题；repeated 为 1 表示这道题已交过、本次不再计分（此时不写任何表，score、mastered、point_code 为空串，changed 为 0）
   报错 400 答案不能为空
   报错 400 还没有出题
   报错 404 题目不存在
   报错 404 题目对不上条目
   报错 400 分数线不合法
-  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
   伪代码 answer 去掉首尾空白后为空，报错 400 答案不能为空
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 quiz_progress，没有或 current_no 为空，报错 400 还没有出题；判的永远是库里的 current_no，不接收前端题号
-  伪代码 按 current_no 查 quiz_question，查不到报错 404 题目不存在
+  伪代码 按 learner 和当前科目 subject_id（本科目 得到的 subject_id）查 quiz_progress，没有或 current_no 为空，报错 400 还没有出题；判的永远是库里的 current_no，不接收前端题号
+  伪代码 按 current_no 和 subject_id 查 quiz_question，查不到（包括属于别的科目）报错 404 题目不存在
   伪代码 选择题（options 不为空，n=选项个数，order = 洗牌顺序 n=n seq=该行 seq，出题和判题算出同一个顺序）：取 answer 去空白转大写后出现的第一个 A–Z 字母，位置 pos=字母序号；没有字母或 pos 不小于 n 则 correct=0、stored_answer=去空白后的原答案；否则原字母 = 第 order[pos] 个选项的字母，correct = 原字母等于标准答案（去空白转大写），stored_answer = 原字母（库里存题库原字母）
   伪代码 选择题的 correct_answer：标准答案的序号 s，找 order 中值为 s 的位置 k，取第 k 个字母；序号越界则取标准答案原文
   伪代码 非选择题（接续题等）：answer 去首尾空白后整段比对，等于标准答案，或等于 accepted 按 ^ 拆开后某一项（各项也去首尾空白）则 correct=1，否则 0（只认标准答案和可接受写法）；stored_answer=去空白后的答案；correct_answer=标准答案
-  伪代码 该行 answered 等于 1（同一道题交两次只算一次）：不写库，返回 {"ok": 1, "repeated": 1, "question_no": current_no, "correct": last_correct, "correct_answer": ..., "explain": 解析, "round_done": ..., "right_count": ..., "asked_count": ..., "round_size": ..., "score": "", "mastered": ""}
-  伪代码 调用 kg.取条目 code=题目的 item_code，取不到报错 404 题目对不上条目；取其 point_code
+  伪代码 该行 answered 等于 1（同一道题交两次只算一次）：不写库，返回 {"ok": 1, "repeated": 1, "question_no": current_no, "correct": last_correct, "correct_answer": ..., "explain": 解析, "round_done": ..., "right_count": ..., "asked_count": ..., "round_size": ..., "score": "", "mastered": "", "changed": 0, "point_code": ""}
+  伪代码 调用 kg.取条目 code=题目的 item_code subject=subject_id，取不到（包括属于别的科目）报错 404 题目对不上条目；取其 point_code
   伪代码 在一个事务里（记作答流水、更新掌握汇总、重算得分、更新掌握标记与本模块进度一起成功或一起失败）：
-  伪代码 调用 progress.记作答 learner=learner point_code=该 point_code question_no=current_no correct=correct answer=stored_answer pass_line=pass_line fall_line=fall_line，得到 score、mastered（其报错如 400 分数线不合法原样向上抛，整个事务不写）
+  伪代码 调用 progress.记作答 learner=learner point_code=该 point_code question_no=current_no correct=correct answer=stored_answer pass_line=pass_line fall_line=fall_line subject=subject_id（流水、掌握汇总、得分都记在当前科目），得到 score、mastered、changed（其报错如 400 分数线不合法原样向上抛，整个事务不写）
   伪代码 更新 quiz_progress 该行：answered=1、right_count=right_count+correct、last_correct=correct
   伪代码 round_size = 取轮大小 mode=该行 mode，round_done = asked_count 不小于 round_size 则 1 否则 0
-  伪代码 返回 {"ok": 1, "repeated": 0, "question_no": current_no, "correct": correct, "correct_answer": ..., "explain": 解析, "round_done": round_done, "right_count": 新值, "asked_count": asked_count, "round_size": round_size, "score": score, "mastered": mastered}
+  伪代码 返回 {"ok": 1, "repeated": 0, "question_no": current_no, "correct": correct, "correct_answer": ..., "explain": 解析, "round_done": round_done, "right_count": 新值, "asked_count": asked_count, "round_size": round_size, "score": score, "mastered": mastered, "changed": changed, "point_code": 该 point_code}
 
-公开 函数 再来一轮 learner current_role?
+公开 函数 再来一轮 learner current_role? auth_mode? subject?
   返回 同 出下一题
   报错 400 还没有开始
   报错 404 没有可出的题
-  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 quiz_progress，没有报错 400 还没有开始
-  伪代码 调用 开新轮 learner=learner mode=该行 mode level=该行 level category=该行 category lesson_code=该行 lesson_code（沿用上一轮的模式、等级、考点、课）
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
+  伪代码 按 learner 和当前科目 subject_id（本科目 得到的 subject_id）查 quiz_progress，没有报错 400 还没有开始
+  伪代码 调用 开新轮 learner=learner mode=该行 mode level=该行 level category=该行 category lesson_code=该行 lesson_code subject_id=subject_id（沿用上一轮的模式、等级、考点、课）
   伪代码 返回其结果
 
-公开 函数 取本轮作答 learner current_role?
+公开 函数 取本轮作答 learner current_role? auth_mode? subject?
   返回 {learner, round_key, start_id, mode, lesson_code, total, answers}；round_key 是轮次标识（这一轮起点 id）；answers 同 progress.取区间作答 的 answers；没有进度行时 round_key=0、start_id=0、mode=free、lesson_code 为空串、total=0、answers 为空列表
-  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 quiz_progress，没有则返回上述默认对象
-  伪代码 调用 progress.取区间作答 learner=learner start_id=该行 round_start_id，得 total 和 answers
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
+  伪代码 按 learner 和当前科目 subject_id（本科目 得到的 subject_id）查 quiz_progress，没有则返回上述默认对象
+  伪代码 调用 progress.取区间作答 learner=learner start_id=该行 round_start_id subject=subject_id，得 total 和 answers
   伪代码 mode 库里空值转为 free
   伪代码 返回 {"learner": learner, "round_key": round_start_id, "start_id": round_start_id, "mode": mode, "lesson_code": lesson_code, "total": total, "answers": answers}
 
-公开 函数 取当前轮次信息 learner current_role?
+公开 函数 取当前轮次信息 learner current_role? auth_mode? subject?
   返回 {learner, has_round, mode, lesson_code, level, category, round_key, asked_count, round_size, right_count, answered}；mode 为 free/lesson/review；没有进度行时 has_round=0、mode=free、round_size=10、其余数字为 0、字符串为空串
-  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
-  伪代码 按 learner 和当前科目 subject_id（调用 subject.当前科目 learner=learner current_role=current_role 得到）查 quiz_progress，没有则返回默认对象
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
+  伪代码 按 learner 和当前科目 subject_id（本科目 得到的 subject_id）查 quiz_progress，没有则返回默认对象
   伪代码 有则 has_round=1，mode 空值转 free，round_size=取轮大小，round_key=round_start_id，其余取该行字段
   伪代码 返回上述对象
 
@@ -194,75 +247,104 @@
   伪代码 is_choice 等于 1：qtype=选择，options 逐项由 {letter, text} 转成 {key: letter, text: text}；否则 qtype=接续，options 为空列表
   伪代码 返回 {"card": card, "qtype": qtype}
 
-函数 按课轮尾 lesson_code stat
+函数 按课轮尾 lesson_code stat subject_id
   返回 {text, more, back, explain}；按课练一轮做完时卡上那句说明和三个链接地址（地址空前端不画；界面名用编码写法，与原页一致）：换一课回教材页、回教材看这一课、请老师讲这课
-  伪代码 调用 lesson.取课文 code=lesson_code，得 title
+  伪代码 科目：subject_id 是调用方已解析的科目编号，调用 lesson. 的函数带 subject=subject_id
+  伪代码 调用 lesson.取课文 code=lesson_code subject=subject_id，得 title
   伪代码 text=「这一轮做完了（{stat}）。再来一轮会换一道本课的题，对比题也换；也可以换一课，或者回教材再看看这一课。」
   伪代码 more=#%E6%95%99%E6%9D%90，back=#%E6%95%99%E6%9D%90?lesson={lesson_code}，explain=#%E9%97%AE%E8%80%81%E5%B8%88?lesson={lesson_code}
   伪代码 返回上述对象
 
-函数 复习薄弱点文案 learner
+函数 复习薄弱点文案 learner subject_id
   返回 顶栏范围说明文本：有低分点为「复习薄弱点：标题1、标题2、标题3」，没有为「复习薄弱点」
-  伪代码 调用 progress.列低分点 learner=learner limit=3，逐个调用 kg.取知识点 code=编号 取 title（取不到用编号）
+  伪代码 科目：subject_id 是调用方已解析的科目编号，调用 progress./kg. 的函数一律带 subject=subject_id
+  伪代码 调用 progress.列低分点 learner=learner limit=3 subject=subject_id，逐个调用 kg.取知识点 code=编号 subject=subject_id 取 title（取不到用编号）
   伪代码 有标题则用「、」连接拼「复习薄弱点：…」，否则返回「复习薄弱点」
 
-公开 函数 做题页面 learner current_role?
+公开 函数 做题页面 learner current_role? auth_mode? subject?
   返回 {stat, form}；做题页「进入时」的整页状态（进页面不推题卡、不动 phase/card/round/summary，只回顶栏成绩和顶栏下拉回填）：stat 是「这一轮 答对/已出」文本，没做过题为空串；form 是 {pick_level, pick_kind}，取库里上次选的等级考点，没选过填「全部」
-  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
-  伪代码 调用 取做题状态 learner=learner，得 started、right_count、asked_count、level、category
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
+  伪代码 调用 取做题状态 learner=learner subject=subject_id，得 started、right_count、asked_count、level、category
   伪代码 started 等于 1 则 stat=「这一轮 {right_count}/{asked_count}」否则空串；form 的 pick_level 取 level、pick_kind 取 category，为空填「全部」
   伪代码 返回 {"stat": stat, "form": {"pick_level": pick_level, "pick_kind": pick_kind}}
 
-公开 函数 开始页面 learner pick_level? pick_kind? current_role?
+公开 函数 开始页面 learner pick_level? pick_kind? current_role? auth_mode? subject?
   返回 做题页「开始」的整页状态：出题为 {phase, qtype, card, scope, stat, cheer, score_change, round, summary, form}，phase=ask、card 新题卡、round 四键空串、cheer/score_change 空串、summary 空串（收起上一轮总结卡）、scope 空串（自由练顶栏不显示范围）；form 回填本次所选（「全部」或具体等级考点）
   报错 404 没有可出的题
   报错 404 没有这课
-  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
   伪代码 pick_level 为空取「全部」、pick_kind 为空取「全部」（页面下拉默认就是全部）
-  伪代码 等级确定：pick_level 不是「全部」直接用它；是「全部」则按 N5,N4,N3,N2,N1 顺序逐级找（pick_kind 为「全部」查 app.db quiz_q_free_all，否则查 quiz_q_free_cat），取第一个有题的等级；全都没有题，报错 404 没有可出的题
-  伪代码 调用 开始 learner=learner level=等级 category=（pick_kind 为「全部」传空，否则原值），得 finished、question、asked_count、right_count（400/404 原样向上抛）
+  伪代码 等级确定：pick_level 不是「全部」直接用它；是「全部」则按 N5,N4,N3,N2,N1 顺序逐级找（pick_kind 为「全部」查 app.db quiz_q_free_all，否则查 quiz_q_free_cat；都只数本科目 subject_id 的题），取第一个有题的等级；全都没有题，报错 404 没有可出的题
+  伪代码 调用 开始 learner=learner level=等级 category=（pick_kind 为「全部」传空，否则原值） subject=subject_id，得 finished、question、asked_count、right_count（400/404 原样向上抛）
   伪代码 调用 拼题卡 question 得 card、qtype；返回 {"phase": "ask", "qtype": qtype, "card": card, "scope": "", "stat": "这一轮 {right_count}/{asked_count}", "cheer": "", "score_change": "", "round": {"text": "", "more": "", "back": "", "explain": ""}, "summary": "", "form": {"pick_level": pick_level, "pick_kind": pick_kind}}
 
-公开 函数 判答案页面 learner choice? given? current_role?
+公开 函数 判答案页面 learner choice? given? current_role? auth_mode? subject?
   返回 做题页「作答」判完的整页状态：{phase, card, stat, cheer, score_change}；phase=done，card 是判完的题卡（options 每项补 state：答案那项 right、选错的 wrong、其余 dim；mine 是本次作答；verdict 一行结论；explain 解析末尾拼「考的是」），cheer 达标喜报、score_change 得分变化文本，都没有为空串
   报错 400 答案不能为空
-  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
-  伪代码 调用 取做题状态 learner=learner，得 started、question；作答取值同旧页：默认取 given，question 不为空且 is_choice 等于 1 则取 choice（两个键都可能留着旧值，按题型取才不会拿错）
-  伪代码 调用 提交答案 learner=learner answer=作答，得 repeated、question_no、correct、correct_answer、explain、right_count、asked_count（400/404 原样向上抛）
-  伪代码 card 用 拼题卡 按 question 重建（和作答前同一张，code 不变不翻页）；选择题 options 逐项补 state：letter 等于 correct_answer 记 right、等于本次所交字母记 wrong、其余 dim；card 的 mine=本次作答；verdict=correct 等于 1 则「○ 答对了」否则「✗ 正确答案是 {correct_answer}」；explain 末尾拼「\n\n考的是：条目名」（查 app.db quiz_q_by_no 得 item_code，调 kg.取条目 code=item_code 取 name），有课文再拼「　课文《标题》summary」（调 lesson.按条目列课文 item_code=item_code 取第一课，取不到课就不拼那半句）
-  伪代码 repeated 等于 1（同题交两次）cheer、score_change 都为空串；否则调 progress.列得分 learner=learner，按该题知识点的行拼：score_change=「{title} 得分 {prev_score} → {score}」（delta 等于 0 为空串）；prev_score 小于 80 且 score 不小于 80 则 cheer=「「{title}」达标了，图上它后面的知识点可能解锁了。」
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
+  伪代码 调用 取做题状态 learner=learner subject=subject_id，得 started、question；作答取值同旧页：默认取 given，question 不为空且 is_choice 等于 1 则取 choice（两个键都可能留着旧值，按题型取才不会拿错）
+  伪代码 取做题状态 得到的 question 为空（started 为 1 但题已不在库）时，跳过下面取旧分这一步（prev_score 不取），直接往下调 提交答案，由 提交答案 报 404（本页不自己报）
+  伪代码 先取作答前旧分：由 question_no（取做题状态 得到的 question.question_no）查 app.db quiz_q_by_no 得 item_code（限本科目 subject_id），调 kg.取条目 code=item_code subject=subject_id 取 point_code；调用 progress.列得分 learner=learner subject=subject_id，取该 point_code 那一行的 score 作 prev_score，没有这一行（该知识点作答前从未记过分）prev_score 视为 0；这一步必须在 提交答案 之前（提交答案 内部的 记作答 会写新得分行）
+  伪代码 调用 提交答案 learner=learner answer=作答 subject=subject_id，得 repeated、question_no、correct、correct_answer、explain、right_count、asked_count、score、changed、point_code（400/404 原样向上抛）
+  伪代码 card 用 拼题卡 按 question 重建（和作答前同一张，code 不变不翻页）；选择题 options 逐项补 state：letter 等于 correct_answer 记 right、等于本次所交字母记 wrong、其余 dim；card 的 mine=本次作答；verdict=correct 等于 1 则「○ 答对了」否则「✗ 正确答案是 {correct_answer}」；explain 末尾拼「\n\n考的是：条目名」（查 app.db quiz_q_by_no 得 item_code，查询限本科目 subject_id；调 kg.取条目 code=item_code subject=subject_id 取 name），有课文再拼「　课文《标题》summary」（调 lesson.按条目列课文 item_code=item_code subject=subject_id 取第一课，取不到课就不拼那半句）
+  伪代码 cheer、score_change 以本次 提交答案 的返回为准，不再用 列得分 作答后的 prev_score/delta（作答后再取最新两行，得分没变时会把更早一次的 delta 重显，首次记分时 delta 为 0 又漏掉）：repeated 等于 1（同题交两次），或 changed 等于 0（本次没新记得分行，得分没变），cheer、score_change 都为空串；否则新分 = 提交答案 返回的 score，旧分 = 上面作答前取的 prev_score，title 调 kg.取知识点 code=point_code subject=subject_id 取（取不到用编号）：score_change=「{title} 得分 {prev_score} → {score}」；prev_score 小于 80 且 score 不小于 80 则 cheer=「「{title}」达标了，图上它后面的知识点可能解锁了。」（首次记分作答前没有得分行，prev_score 视为 0，所以首次直接达标也会触发 cheer）
   伪代码 stat=「这一轮 {right_count}/{asked_count}」；返回 {"phase": "done", "card": card, "stat": stat, "cheer": cheer, "score_change": score_change}
 
-公开 函数 下一题页面 learner current_role?
+公开 函数 下一题页面 learner current_role? auth_mode? subject?
   返回 做题页「下一题」的整页状态，形状同 开始页面：出题 phase=ask（card 新题卡、round 四键空串、cheer/score_change/summary 空串）；一轮做完 phase=end、round.text 按模式给说明、按课练附三个地址
   报错 400 还没有开始
   报错 400 先答完当前题
-  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
-  伪代码 调用 取当前轮次信息 learner=learner，得 mode、lesson_code
-  伪代码 scope：lesson 模式=「本课《{title}》（含对比题）」（调 lesson.取课文 code=lesson_code 取标题）；review 模式=调用 复习薄弱点文案；自由练=空串
-  伪代码 调用 下一题 learner=learner，得 finished、question、asked_count、right_count（400 原样向上抛）
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
+  伪代码 调用 取当前轮次信息 learner=learner subject=subject_id，得 mode、lesson_code
+  伪代码 scope：lesson 模式=「本课《{title}》（含对比题）」（调 lesson.取课文 code=lesson_code subject=subject_id 取标题）；review 模式=调用 复习薄弱点文案 learner=learner subject_id=subject_id；自由练=空串
+  伪代码 调用 下一题 learner=learner subject=subject_id，得 finished、question、asked_count、right_count（400 原样向上抛）
   伪代码 finished 等于 0：拼题卡，返回 {phase:ask, qtype, card, scope, stat, cheer 空, score_change 空, round 四键空, summary 空}
-  伪代码 finished 等于 1：phase=end；round 按模式：lesson=调用 按课轮尾 lesson_code stat；review 的 text=「这一轮复习做完了（{stat}）。可以请老师总结这一轮，或者再来一轮。」；自由练的 text=「这一轮做完了（{stat}），{asked_count}道题各考一个不同的知识点。可以请老师总结这一轮，或者再来一轮。」，其余三键空串；返回 {phase:end, scope, stat, round, cheer 空, score_change 空}
+  伪代码 finished 等于 1：phase=end；round 按模式：lesson=调用 按课轮尾 lesson_code=lesson_code stat=stat subject_id=subject_id；review 的 text=「这一轮复习做完了（{stat}）。可以请老师总结这一轮，或者再来一轮。」；自由练的 text=「这一轮做完了（{stat}），{asked_count}道题各考一个不同的知识点。可以请老师总结这一轮，或者再来一轮。」，其余三键空串；返回 {phase:end, scope, stat, round, cheer 空, score_change 空}
 
-公开 函数 再来一轮页面 learner current_role?
+公开 函数 再来一轮页面 learner current_role? auth_mode? subject?
   返回 做题页「再来一轮」的整页状态，形状与分支同 下一题页面（新一轮第一题；一轮立即做完的 end 形态也按 下一题页面 处理）
   报错 400 还没有开始
   报错 404 没有可出的题
-  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
-  伪代码 调用 取当前轮次信息 learner=learner，得 mode、lesson_code；scope 同 下一题页面
-  伪代码 调用 再来一轮 learner=learner，得 finished、question、asked_count、right_count（400/404 原样向上抛）
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
+  伪代码 调用 取当前轮次信息 learner=learner subject=subject_id，得 mode、lesson_code；scope 同 下一题页面
+  伪代码 调用 再来一轮 learner=learner subject=subject_id，得 finished、question、asked_count、right_count（400/404 原样向上抛）
   伪代码 finished 等于 0 按出题分支拼整页返回，finished 等于 1 按 end 分支拼整页返回（同 下一题页面）
 
-公开 函数 课文页面 learner lesson? mode? level? kind? current_role?
+公开 函数 课文页面 learner lesson? mode? level? kind? current_role? auth_mode? subject?
   返回 做题页「载入」的整页状态（地址 #做题?lesson=… / #做题?mode=review / #做题?level=…&kind=… 进来时前端把地址参数并进提交调用）：形状同 开始页面（form 回填）；复习但一道都没答过为 phase=noreview 的轻状态 {phase, card, scope, cheer, score_change, round, summary, form}（除 phase/form 外全空）
   报错 400 没有课文、等级或复习模式
   报错 404 没有这课
   报错 404 没有可出的题
-  伪代码 current_role 可选（路由注入的登录角色），原样传给 subject.当前科目 以及本函数调用的本模块函数；不传时行为同旧
-  伪代码 lesson 不为空：调用 开始 learner=learner mode=lesson lesson_code=lesson，按出题分支拼整页，scope=「本课《{title}》（含对比题）」；form 回填库里等级考点（调 取做题状态 取 level/category，空填「全部」）；lesson 本身不回填（旧口径：课文只认地址，防止离开这课后台表还带着它）
-  伪代码 mode 等于 review：先调 progress.列得分 learner=learner，scores 为空（一道都没答过）则不出题不报错，返回 phase=noreview、card/scope/cheer/score_change/round/summary 全空、form 的 pick_level=N5、pick_kind=「全部」（旧口径：界面让先按等级做几道）
-  伪代码 否则（有作答记录）：调用 取当前轮次信息 learner=learner，has_round=1 且 mode=review 且 asked_count 小于 round_size（这轮没出够，刷新/来回切接着这轮）则调用 出下一题 learner=learner，否则调用 开始 learner=learner mode=review；按出题分支拼整页，scope=调用 复习薄弱点文案；end 分支同 下一题页面（text 用复习那句）
-  伪代码 lesson 为空且 mode 不等于 review：level、kind 都为空报错 400 没有课文、等级或复习模式；等级确定同 开始页面（「全部」逐级找第一个有题的等级，全没有报错 404 没有可出的题），调用 开始 learner=learner level=等级 category=（kind 为「全部」传空否则原值），按出题分支拼整页，scope 空串，form 回填所选等级考点
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 注意：参数名 lesson 是地址参数（课文编号字符串），与模块名 lesson.（lesson.取课文 等跨模块调用）只是同形：实现里别把参数 lesson 当成模块名用，跨模块调用永远写「模块名加点加函数名」的完整形式，传课编号一律写 lesson_code=lesson；参数名不改（路由、前端 #做题?lesson=… 都依赖它）
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
+  伪代码 lesson 不为空：调用 开始 learner=learner mode=lesson lesson_code=lesson subject=subject_id，按出题分支拼整页，scope=「本课《{title}》（含对比题）」（title 调 lesson.取课文 code=lesson subject=subject_id 取）；form 回填库里等级考点（调 取做题状态 learner=learner subject=subject_id 取 level/category，空填「全部」）；lesson 本身不回填（旧口径：课文只认地址，防止离开这课后台表还带着它）
+  伪代码 mode 等于 review：先调 progress.列得分 learner=learner subject=subject_id，scores 为空（一道都没答过）则不出题不报错，返回 phase=noreview、card/scope/cheer/score_change/round/summary 全空、form 的 pick_level=N5、pick_kind=「全部」（旧口径：界面让先按等级做几道）
+  伪代码 否则（有作答记录）：调用 取当前轮次信息 learner=learner subject=subject_id，has_round=1 且 mode=review 且 asked_count 小于 round_size（这轮没出够，刷新/来回切接着这轮）则调用 出下一题 learner=learner subject_id=subject_id，否则调用 开始 learner=learner mode=review subject=subject_id；按出题分支拼整页，scope=调用 复习薄弱点文案 learner=learner subject_id=subject_id；end 分支同 下一题页面（text 用复习那句）
+  伪代码 lesson 为空且 mode 不等于 review：level、kind 都为空报错 400 没有课文、等级或复习模式；等级确定同 开始页面（「全部」逐级找第一个有题的等级，全没有报错 404 没有可出的题），调用 开始 learner=learner level=等级 category=（kind 为「全部」传空否则原值） subject=subject_id，按出题分支拼整页，scope 空串，form 回填所选等级考点
 
 ## 接口
 GET /quiz/state -> 取做题状态 角色 student
@@ -636,3 +718,332 @@ POST /quiz/import -> 导入题库 上传 file 类型 md,txt 上限 20MB 角色 t
 用例 课文页面_什么都没带
   调用 课文页面 learner=me
   报错 400
+
+用例 跨科目_开始只出本科目的题
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  先 数据 quiz_question question_no=Q1 level=N5 category=接续 stem=日语题 answer=です item_code=I1
+  先 数据 quiz_question question_no=math.q1 level=N5 category=接续 stem=数学题 answer=2 item_code=math.i1 subject_id=2
+  调用 开始 learner=me level=N5 category=接续 subject=2
+  得 finished=0 asked_count=1 round_size=10
+  库 quiz_progress 共 1 行
+  库 quiz_progress 含 learner=me current_no=math.q1 subject_id=2
+
+用例 跨科目_开始日语的题对2号科目不可见
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 quiz_question question_no=Q1 level=N5 category=接续 stem=日语题 answer=です item_code=I1
+  调用 开始 learner=me level=N5 category=接续 subject=2
+  报错 404
+  库 quiz_progress 共 0 行
+
+用例 跨科目_取做题状态只看本科目
+  先 数据 quiz_progress learner=me level=N5 category=接续 current_no=Q1 answered=0 right_count=0 asked_nos=Q1 asked_count=1 round_start_id=0 seq=1 last_correct=0
+  调用 取做题状态 learner=me subject=2
+  得 started=0 asked_count=0 mode=free
+
+用例 跨科目_取做题状态本科目的进度
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  先 数据 quiz_question question_no=math.q1 level=N5 category=接续 stem=数学题 answer=2 item_code=math.i1 subject_id=2
+  先 数据 quiz_progress learner=me level=N5 category=接续 current_no=math.q1 answered=0 right_count=0 asked_nos=math.q1 asked_count=1 round_start_id=0 seq=1 last_correct=0 subject_id=2
+  调用 取做题状态 learner=me subject=2
+  得 started=1 current_no=math.q1 asked_count=1
+
+用例 跨科目_提交答案记在当前科目的进度
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  先 数据 quiz_question question_no=math.q1 level=N5 category=接续 stem=数学题 answer=2 item_code=math.i1 subject_id=2
+  先 调用 开始 learner=me level=N5 category=接续 subject=2
+  调用 提交答案 learner=me answer=2 subject=2
+  得 ok=1 repeated=0 question_no=math.q1 correct=1 right_count=1 score=100
+  库 progress_answer 含 learner=me point_code=math.a question_no=math.q1 correct=1 subject_id=2
+  库 progress_score 含 learner=me point_code=math.a score=100 subject_id=2
+  库 quiz_progress 含 learner=me answered=1 right_count=1 subject_id=2
+
+用例 跨科目_提交答案别的科目的当前题当不存在
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 quiz_question question_no=Q1 level=N5 category=接续 stem=日语题 answer=です item_code=I1
+  先 数据 quiz_progress learner=me level=N5 category=接续 current_no=Q1 answered=0 right_count=0 asked_nos=Q1 asked_count=1 round_start_id=0 seq=1 last_correct=0 subject_id=2
+  调用 提交答案 learner=me answer=です subject=2
+  报错 404
+  库 progress_answer 共 0 行
+
+用例 跨科目_取本轮作答只看本科目
+  先 数据 quiz_progress learner=me level=N5 category=接续 current_no=Q1 answered=0 right_count=0 asked_nos=Q1 asked_count=1 round_start_id=5 seq=1 last_correct=0
+  调用 取本轮作答 learner=me subject=2
+  得 round_key=0 total=0 mode=free
+
+用例 跨科目_再来一轮另一个科目没开始
+  先 数据 quiz_progress learner=me level=N5 category=接续 current_no=Q1 answered=1 right_count=1 asked_nos=Q1 asked_count=1 round_start_id=0 seq=1 last_correct=1
+  调用 再来一轮 learner=me subject=2
+  报错 400
+
+用例 跨科目_取当前轮次信息只看本科目
+  先 数据 quiz_progress learner=me level=N5 category=接续 current_no=Q1 answered=0 right_count=0 asked_nos=Q1 asked_count=1 round_start_id=0 seq=1 last_correct=0
+  调用 取当前轮次信息 learner=me subject=2
+  得 has_round=0 mode=free round_size=10
+
+用例 跨科目_复习薄弱点用本科目的得分
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  先 数据 quiz_question question_no=math.q1 level=N5 category=接续 stem=数学题 answer=2 item_code=math.i1 subject_id=2
+  先 数据 progress_score learner=me point_code=math.a score=40 at=2026-01-01 subject_id=2
+  调用 开始 learner=me mode=review subject=2
+  得 finished=0 asked_count=1
+  库 quiz_progress 含 learner=me mode=review current_no=math.q1 subject_id=2
+
+用例 跨科目_复习薄弱点日语看不到2号科目的得分
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  先 数据 quiz_question question_no=math.q1 level=N5 category=接续 stem=数学题 answer=2 item_code=math.i1 subject_id=2
+  先 数据 progress_score learner=me point_code=math.a score=40 at=2026-01-01 subject_id=2
+  调用 开始 learner=me mode=review
+  报错 404
+  库 quiz_progress 共 0 行
+
+用例 跨科目_按课练别的科目的课404
+  先 数据 lesson_text code=L1 level=N5 title=第一课 examples_edited=0 series_code=hanabira seq=1
+  调用 开始 learner=me mode=lesson lesson_code=L1 subject=2
+  报错 404
+  库 quiz_progress 共 0 行
+
+用例 跨科目_做题页面只回本科目的上次选择
+  先 数据 quiz_progress learner=me level=N3 category=挖空 current_no=Q1 answered=0 right_count=0 asked_nos=Q1 asked_count=1 round_start_id=0 seq=1 last_correct=0 subject_id=1
+  调用 做题页面 learner=me subject=2
+  得 stat=空
+
+用例 跨科目_导入题库落当前科目
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  先 数据 quiz_question question_no=OLD level=N5 category=接续 stem=旧题 answer=x item_code=I9
+  先 文件 quiz/m1.md 内容=math.q1|C1|N5|接续|题干一|甲^乙|A||解析一|math.i1
+  调用 导入题库 file_path=quiz/m1.md subject=2
+  得 ok=1 total=1 imported=1 skipped=0
+  库 quiz_question 共 2 行
+  库 quiz_question 含 question_no=math.q1 item_code=math.i1 subject_id=2
+  库 quiz_question 含 question_no=OLD subject_id=1
+
+用例 跨科目_导入题库只清本科目
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  先 数据 quiz_question question_no=OLD level=N5 category=接续 stem=旧题 answer=x item_code=I9
+  先 数据 quiz_question question_no=math.old level=N5 category=接续 stem=旧数学题 answer=x item_code=math.i1 subject_id=2
+  先 文件 quiz/m2.md 内容=math.q1|C1|N5|接续|题干一|甲^乙|A||解析一|math.i1
+  调用 导入题库 file_path=quiz/m2.md subject=2
+  得 ok=1 imported=1
+  库 quiz_question 共 2 行
+  库 quiz_question 含 question_no=OLD subject_id=1
+  库 quiz_question 含 question_no=math.q1 subject_id=2
+
+用例 跨科目_导入题库前缀不符
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  先 文件 quiz/m3.md 内容=Q1|C1|N5|接续|题干一|甲^乙|A||解析一|math.i1
+  调用 导入题库 file_path=quiz/m3.md subject=2
+  报错 400
+  库 quiz_question 共 0 行
+
+用例 跨科目_导入题库题号被别的科目占用
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  先 数据 quiz_question question_no=math.q1 level=N5 category=接续 stem=旧题 answer=x item_code=I9
+  先 文件 quiz/m4.md 内容=math.q1|C1|N5|接续|题干一|甲^乙|A||解析一|math.i1
+  调用 导入题库 file_path=quiz/m4.md subject=2
+  报错 400
+  库 quiz_question 共 1 行
+  库 quiz_question 含 question_no=math.q1 subject_id=1
+
+用例 跨科目_导入题库条目在别的科目对不上
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 文件 quiz/m5.md 内容=math.q1|C1|N5|接续|题干一|甲^乙|A||解析一|I1
+  调用 导入题库 file_path=quiz/m5.md subject=2
+  得 ok=1 total=1 imported=0 skipped=1 skipped_nos=math.q1
+  库 quiz_question 共 0 行
+
+用例 跨科目_need导入题库公开科目非负责教师403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  先 文件 quiz/m6.md 内容=math.q1|C1|N5|接续|题干一|甲^乙|A||解析一|math.i1
+  调用 导入题库 file_path=quiz/m6.md learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 quiz_question 共 0 行
+
+用例 跨科目_need导入题库学生403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_student subject_id=2 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  先 文件 quiz/m7.md 内容=math.q1|C1|N5|接续|题干一|甲^乙|A||解析一|math.i1
+  调用 导入题库 file_path=quiz/m7.md learner=s1 current_role=student auth_mode=on subject=2
+  报错 403
+  库 quiz_question 共 0 行
+
+用例 跨科目_need导入题库协作教师可写
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  先 文件 quiz/m8.md 内容=math.q1|C1|N5|接续|题干一|甲^乙|A||解析一|math.i1
+  调用 导入题库 file_path=quiz/m8.md learner=t2 current_role=teacher auth_mode=on subject=2
+  得 ok=1 total=1 imported=1
+  库 quiz_question 含 question_no=math.q1 subject_id=2
+
+用例 导入题库_题号含逗号整批不写
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 quiz_question question_no=OLD level=N5 category=接续 stem=旧题 answer=x item_code=I1
+  先 文件 quiz/c1.md 内容=Q2,Q3|C1|N5|接续|题干二|甲^乙|A||解析|I1
+  调用 导入题库 file_path=quiz/c1.md
+  报错 400
+  库 quiz_question 共 1 行
+  库 quiz_question 含 question_no=OLD
+
+用例 导入题库_清理本科目失效进度且不动别的科目
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 quiz_question question_no=OLD level=N5 category=接续 stem=旧题 answer=x item_code=I1
+  先 数据 quiz_progress learner=me level=N5 category=接续 current_no=OLD answered=1 right_count=1 asked_nos=OLD asked_count=1 round_start_id=0 seq=1 last_correct=1
+  先 数据 quiz_progress learner=you level=N5 category=接续 current_no=Q1 answered=1 right_count=1 asked_nos=Q1 asked_count=1 round_start_id=0 seq=1 last_correct=1
+  先 数据 quiz_progress learner=me level=N5 category=接续 current_no=OLD answered=1 right_count=1 asked_nos=OLD asked_count=1 round_start_id=0 seq=1 last_correct=1 subject_id=2
+  先 文件 quiz/p1.md 内容=Q1|C1|N5|接续|题干一|甲^乙|A||解析|I1
+  调用 导入题库 file_path=quiz/p1.md
+  得 ok=1 total=1 imported=1
+  库 quiz_progress 共 3 行
+  库 quiz_progress 含 learner=me subject_id=1 current_no=空 answered=0 last_correct=0 right_count=1 asked_count=1
+  库 quiz_progress 含 learner=you subject_id=1 current_no=Q1 answered=1 last_correct=1
+  库 quiz_progress 含 learner=me subject_id=2 current_no=OLD answered=1 last_correct=1
+
+用例 导入题库_清理失效进度之后可以继续出题
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 quiz_question question_no=OLD level=N5 category=接续 stem=旧题 answer=x item_code=I1
+  先 数据 quiz_progress learner=me level=N5 category=接续 current_no=OLD answered=1 right_count=1 asked_nos=OLD asked_count=1 round_start_id=0 seq=1 last_correct=1
+  先 文件 quiz/p2.md 内容=Q1|C1|N5|接续|题干一|甲^乙|A||解析|I1
+  先 调用 导入题库 file_path=quiz/p2.md
+  调用 取做题状态 learner=me
+  得 started=1 current_no=空 question=空
+
+用例 导入题库_负责教师可导入
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  先 文件 quiz/o1.md 内容=math.q1|C1|N5|接续|题干一|甲^乙|A||解析一|math.i1
+  调用 导入题库 file_path=quiz/o1.md learner=t1 current_role=teacher auth_mode=on subject=2
+  得 ok=1 total=1 imported=1 skipped=0
+  库 quiz_question 含 question_no=math.q1 subject_id=2
+
+用例 导入题库_科目不存在404
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 文件 quiz/n9.md 内容=math.q1|C1|N5|接续|题干一|甲^乙|A||解析一|math.i1
+  调用 导入题库 file_path=quiz/n9.md learner=t1 current_role=teacher auth_mode=on subject=9
+  报错 404
+  库 quiz_question 共 0 行
+
+用例 导入题库_科目不是数字400
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 文件 quiz/na.md 内容=math.q1|C1|N5|接续|题干一|甲^乙|A||解析一|math.i1
+  调用 导入题库 file_path=quiz/na.md subject=abc
+  报错 400
+  库 quiz_question 共 0 行
+
+用例 提交答案_返回changed和知识点
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 quiz_question question_no=Q1 level=N5 category=接续 stem=题干 answer=です item_code=I1
+  先 调用 开始 learner=me level=N5 category=接续
+  调用 提交答案 learner=me answer=です
+  得 ok=1 changed=1 point_code=P1 score=100
+
+用例 跨科目_按课练2号科目只出2号的题
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  先 数据 quiz_question question_no=Q1 level=N5 category=接续 stem=日语题 answer=です item_code=I1
+  先 数据 quiz_question question_no=math.q1 level=N5 category=接续 stem=数学题 answer=2 item_code=math.i1 subject_id=2
+  先 数据 lesson_text code=L1 level=N5 title=第一课 examples_edited=0 series_code=hanabira seq=1
+  先 数据 lesson_item_link lesson_code=L1 item_code=I1
+  先 数据 lesson_text code=math.L1 level=N5 title=代数课 examples_edited=0 series_code=mathbook seq=1 subject_id=2
+  先 数据 lesson_item_link lesson_code=math.L1 item_code=math.i1 subject_id=2
+  调用 开始 learner=me mode=lesson lesson_code=math.L1 subject=2
+  得 finished=0 asked_count=1 round_size=5
+  库 quiz_progress 共 1 行
+  库 quiz_progress 含 learner=me mode=lesson lesson_code=math.L1 current_no=math.q1 subject_id=2
+
+用例 跨科目_按课练1号看不到2号的课
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  先 数据 quiz_question question_no=math.q1 level=N5 category=接续 stem=数学题 answer=2 item_code=math.i1 subject_id=2
+  先 数据 lesson_text code=math.L1 level=N5 title=代数课 examples_edited=0 series_code=mathbook seq=1 subject_id=2
+  先 数据 lesson_item_link lesson_code=math.L1 item_code=math.i1 subject_id=2
+  调用 开始 learner=me mode=lesson lesson_code=math.L1
+  报错 404
+  库 quiz_progress 共 0 行
+
+用例 跨科目_下一题2号科目只出2号的题
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  先 数据 quiz_question question_no=Q1 level=N5 category=接续 stem=日语题 answer=です item_code=I1
+  先 数据 kg_item code=I2 name=条目二 point_code=P1
+  先 数据 quiz_question question_no=Q2 level=N5 category=接续 stem=日语题二 answer=です item_code=I2
+  先 数据 quiz_question question_no=math.q1 level=N5 category=接续 stem=数学题 answer=2 item_code=math.i1 subject_id=2
+  先 数据 quiz_question question_no=math.q2 level=N5 category=接续 stem=数学题二 answer=2 item_code=math.i1 subject_id=2
+  先 调用 开始 learner=me level=N5 category=接续 subject=2
+  先 调用 提交答案 learner=me answer=2 subject=2
+  调用 下一题 learner=me subject=2
+  得 finished=1 asked_count=1
+  库 quiz_progress 共 1 行
+  库 quiz_progress 含 learner=me current_no=math.q1 asked_count=1 asked_nos=math.q1 subject_id=2
+
+用例 跨科目_下一题1号不受2号进度影响
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 quiz_question question_no=Q1 level=N5 category=接续 stem=日语题 answer=です item_code=I1
+  先 数据 quiz_progress learner=me level=N5 category=接续 current_no=math.q1 answered=1 right_count=1 asked_nos=math.q1 asked_count=1 round_start_id=0 seq=1 last_correct=1 subject_id=2
+  调用 下一题 learner=me
+  报错 400
+  库 quiz_progress 含 learner=me current_no=math.q1 subject_id=2
+
+用例 跨科目_组题面别的科目的当前题题面为空
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 quiz_question question_no=Q1 level=N5 category=接续 stem=日语题 answer=です item_code=I1
+  先 数据 quiz_progress learner=me level=N5 category=接续 current_no=Q1 answered=0 right_count=0 asked_nos=Q1 asked_count=1 round_start_id=0 seq=1 last_correct=0 subject_id=2
+  调用 取做题状态 learner=me subject=2
+  得 started=1 current_no=Q1 question=空
+
+用例 跨科目_组题面本科目的当前题有题面
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  先 数据 quiz_question question_no=math.q1 level=N5 category=接续 stem=数学题 answer=2 item_code=math.i1 subject_id=2
+  先 数据 quiz_progress learner=me level=N5 category=接续 current_no=math.q1 answered=0 right_count=0 asked_nos=math.q1 asked_count=1 round_start_id=0 seq=1 last_correct=0 subject_id=2
+  调用 取做题状态 learner=me subject=2
+  得 started=1 current_no=math.q1

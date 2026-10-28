@@ -1,1 +1,1 @@
-INSERT INTO teacher_assist_message (teacher, role, content, intent, student, point, status, at) VALUES (:teacher, :role, :content, :intent, :student, :point, :status, :at)
+INSERT INTO teacher_assist_message (teacher, role, content, intent, student, point, status, at, subject_id) VALUES (:teacher, :role, :content, :intent, :student, :point, :status, :at, CAST(:subject_id AS INTEGER))
