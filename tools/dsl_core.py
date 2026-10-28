@@ -571,6 +571,38 @@ def raw_words(text: str) -> list:
     return words
 
 
+def split_args(text: str) -> list:
+    """动词参数按空白切（同 str.split），只有带「或」的 {名 或}、{名 或 默认}
+    整块不切——不然「替换 {x 或} 正则 替换为」被切成「{x」「或}」，后面的
+    参数全错位（K102）。
+
+    别的花括号照旧按空白切：{{字面}}、JSON 字面量、没有「或」的 {…}，
+    行为跟修复前一样。{{ 开头的两个字符原样跳过，{{x 或}} 里的 {x 或}
+    不会被当成变量整块收走。「或」的认法同 split_alt / 展开。
+    """
+    words, cur, i = [], [], 0
+    while i < len(text):
+        if text.startswith("{{", i):
+            cur.append("{{")
+            i += 2
+            continue
+        m = VAR_RE.match(text, i)
+        if m and split_alt(m.group(1))[1] is not None:
+            cur.append(m.group(0))
+            i = m.end()
+            continue
+        if text[i].isspace():
+            if cur:
+                words.append("".join(cur))
+                cur = []
+        else:
+            cur.append(text[i])
+        i += 1
+    if cur:
+        words.append("".join(cur))
+    return words
+
+
 def cond_tokens(cond: str) -> list:
     """原文分词，返回 [(类别, 文本)]。类别是 word / and / or / not / ( / )。
 
