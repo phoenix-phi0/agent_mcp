@@ -235,6 +235,33 @@ def main():
     cbatch.wait(j["job_id"], timeout=30, every=0.2)
     check("--append-system-prompt" not in calls()[0]["argv"], "preamble=False 时一个字都不追加")
 
+    print("gsb_tools：放行了不受限的 Bash 就默认带上，其它情况不加")
+
+    def run_tools(**kw):
+        LOG.unlink()
+        j = cbatch.submit(["丙"], name="默认工具", cwd=str(TMP), **kw)
+        d = cbatch.wait(j["job_id"], timeout=30, every=0.2)
+        c = calls()[0]
+        a = c["argv"]
+        pre = a[a.index("--append-system-prompt") + 1] if "--append-system-prompt" in a else ""
+        return tools_of(c), pre, d
+    ts, pre3, d3 = run_tools(allowed_tools=["Bash", "Read"])
+    check(ts == ["Bash", "Read", "mcp__gsb_tools"] and pre3.endswith(cbatch.PREAMBLE_TOOLS),
+          "不受限 Bash：自动追加 mcp__gsb_tools，系统提示带工具用法", (ts, pre3[-40:]))
+    check(d3["options"]["allowed_tools"] == ["Bash", "Read", "mcp__gsb_tools"],
+          "job.json 里记的是最终放行的清单")
+    ts, _, _ = run_tools(allowed_tools=["Bash", "mcp__gsb_tools__read_files"])
+    check(ts == ["Bash", "mcp__gsb_tools__read_files"], "调用方已经写了 gsb 工具：不重复追加", ts)
+    ts, pre4, _ = run_tools(allowed_tools=["Bash(ls:*)", "Read", "Edit"])
+    check("mcp__gsb_tools" not in ts and "工具用法" not in pre4,
+          "只放行受限命令 Bash(ls:*)：不追加（加了等于升级权限）", ts)
+    ts, pre5, _ = run_tools(permission_mode="acceptEdits")
+    check(ts == [] and "工具用法" not in pre5, "只给 acceptEdits：不追加", ts)
+    ts, pre6, _ = run_tools()
+    check(ts == [] and "工具用法" not in pre6, "什么都没给（默认只读）：不追加", ts)
+    ts, pre7, _ = run_tools(allowed_tools=["Bash"], gsb_tools=False)
+    check(ts == ["Bash"] and "工具用法" not in pre7, "gsb_tools=False：关掉，只有调用方写的", ts)
+
     print("share：后一条接前一条的会话，失败后断开")
     LOG.unlink()
     j = cbatch.submit(["甲", "乙 FAIL", "丙", "丁 DENY"], mode="share", cwd=str(TMP),
@@ -339,7 +366,8 @@ def main():
 
     print("列表和概况")
     js = cbatch.jobs(limit=50)
-    check(len(js) == 10 and js[0]["id"] == j["job_id"], "jobs 新的在前", [x["id"] for x in js])
+    n_jobs = len(list(Path(os.environ["CBATCH_HOME"]).iterdir()))     # 本测试建过的任务目录数，不写死
+    check(len(js) == n_jobs and js[0]["id"] == j["job_id"], "jobs 新的在前", [x["id"] for x in js])
     check("最近 5 个任务" in cbatch.describe(), "describe 能用")
 
     print("engine：参数检查")

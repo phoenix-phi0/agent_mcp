@@ -21,7 +21,8 @@ submit 起一个脱离当前进程的执行器（python -m tools.cbatch _run <jo
 **默认不放开权限。** claude -p 没人点「允许」，需要批准的工具调用会被
 直接拒掉，于是默认只能读、不能写、不能随便跑命令。要写文件就显式传
 permission_mode="acceptEdits" 或 allowed_tools=[...]——放不放开该是调用方
-看着任务内容决定的，不该是默认值。
+看着任务内容决定的，不该是默认值。唯一的例外是 gsb_tools：调用方已经放行了不受限的
+Bash 时自动再放行它（它不增加任何权限），见 _with_gsb；submit(gsb_tools=False) 关掉。
 
 ## 每条都是新进程
 
@@ -260,6 +261,20 @@ def _system_prompt(o: dict) -> str:
         return PREAMBLE
     return PREAMBLE + "\n" + PREAMBLE_TOOLS
 
+
+def _with_gsb(allowed_tools, on: bool = True) -> list:
+    """调用方放行了不受限的 Bash 时，默认再放行 gsb_tools。
+
+    只在这种情况追加：不受限的 Bash 已经能跑任意命令、改任意文件，gsb_tools（run_wait 就是 shell，
+    multi_edit 就是改文件）不增加任何权限。默认只读的调用、只给 acceptEdits 的调用、只放行
+    Bash(ls:*) 这类受限命令的调用都不追加——给它们加等于悄悄升级权限，跟「默认不放开权限」冲突。
+    调用方已经写了 gsb_tools 就不重复加；on=False（submit 的 gsb_tools=False）整个关掉。
+    """
+    tools = list(allowed_tools or [])
+    if on and "Bash" in tools and not any(str(t).startswith(GSB_TOOLS_PREFIX) for t in tools):
+        tools.append(GSB_TOOLS_PREFIX)
+    return tools
+
 # 要从子进程环境里去掉的变量，见模块文档「环境变量要洗掉一层」
 _ENV_DROP_PREFIX = ("CLAUDE_CODE_",)
 _ENV_DROP = {"CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT"}
@@ -396,7 +411,7 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
            preamble: bool = True, engine: str = "claude", project: str = None,
            test_cmd: str = None, fallback: bool = True,
            dsl_options: dict = None, concurrency: int = 1,
-           dsl_concurrency: int = DSL_CONCURRENCY) -> dict:
+           dsl_concurrency: int = DSL_CONCURRENCY, gsb_tools: bool = True) -> dict:
     """提交一批任务，立刻返回，不等跑完。
 
     tasks：提示词列表，或 {prompt, outfile} 字典列表。outfile 给了的话，
@@ -412,6 +427,9 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
         理由记在每条任务的 model、effort、model_reason 里。
     permission_mode / allowed_tools：原样传给 claude，见模块文档「默认不
         放开权限」。
+    gsb_tools：默认 True。allowed_tools 里有不受限的 Bash 时自动再放行 mcp__gsb_tools
+        （并在系统提示里追加工具用法，见 PREAMBLE_TOOLS）；其它情况不追加，见 _with_gsb。
+        传 False 关掉，任务只会拿到调用方写的那些工具。
     timeout：单条任务的秒数上限。dsl 任务的 dsl 部分和兜底的 claude 各算一次。
     engine：claude（默认）/ dsl / auto，见模块文档「执行方式 engine」。
         project、test_cmd、fallback、dsl_options 是这批的默认值，tasks 里的字典可以逐条覆盖
@@ -477,7 +495,7 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
         "status": "queued", "created": _now(), "started": None,
         "finished": None, "pid": None,
         "options": {"model": model, "permission_mode": permission_mode,
-                    "allowed_tools": list(allowed_tools or []),
+                    "allowed_tools": _with_gsb(allowed_tools, gsb_tools),
                     "timeout": int(timeout), "preamble": bool(preamble),
                     "engine": engine, "concurrency": concurrency,
                     "dsl_concurrency": dsl_concurrency,
