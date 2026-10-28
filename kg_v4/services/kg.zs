@@ -1557,4 +1557,360 @@
     返回 {"kind": "{kd}", "count": {cnt}, "text": "{txt}"}
   结束
 
+  函数 页面身份 learner current_role auth_mode subject_id
+    如果 {auth_mode} 不等于 on
+      返回 {"can_write": 1, "kgm_role": "单人"}
+    结束
+    设 w = 调用 subject.科目访问 learner={learner} current_role={current_role} subject_id={subject_id} need=write auth_mode={auth_mode}
+    如果 {w.ok} 等于 1
+      如果 {w.via} 等于 editor
+        返回 {"can_write": 1, "kgm_role": "协作"}
+      结束
+      返回 {"can_write": 1, "kgm_role": "负责"}
+    结束
+    设 rd = 调用 subject.科目访问 learner={learner} current_role={current_role} subject_id={subject_id} need=read auth_mode={auth_mode}
+    如果 {rd.via} 等于 public
+      返回 {"can_write": 0, "kgm_role": "公共只读"}
+    结束
+    返回 {"can_write": 0, "kgm_role": "无权"}
+  结束
+
+  公开 函数 图谱管理页面 learner current_role? auth_mode? subject?
+    如果 {auth_mode} 等于 on 且 {current_role} 不等于 teacher
+      报错 403 只有教师可以管理图谱
+    结束
+    设 sb = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 sid = {sb.subject_id}
+    设 idn = 调用 页面身份 learner={learner} current_role={current_role} auth_mode={auth_mode} subject_id={sid}
+    设 g = 调用 导出图 subject={sid}
+    设 il = 调用 列条目 subject={sid}
+    设 nodes = 解析JSON []
+    设 kp = 解析JSON []
+    设 opts = 解析JSON []
+    遍历 p 于 {g.points}
+      设 ni = 0
+      遍历 i 于 {il.items}
+        如果 {i.point_code} 等于 {p.code}
+          设 ni = 计算 {ni} + 1
+        结束
+      结束
+      设 pn = 0
+      设 nn = 0
+      设 desc = {nothing 或}
+      遍历 e 于 {g.edges}
+        如果 {e.point_code} 等于 {p.code}
+          设 pn = 计算 {pn} + 1
+          设 pt = {e.pre_code}
+          遍历 q 于 {g.points}
+            如果 {q.code} 等于 {e.pre_code}
+              设 pt = {q.title}
+            结束
+          结束
+          如果 {desc} 为空
+            设 desc = {pt}
+          否则
+            设 desc = {desc}、{pt}
+          结束
+        结束
+        如果 {e.pre_code} 等于 {p.code}
+          设 nn = 计算 {nn} + 1
+        结束
+      结束
+      如果 {desc} 为空
+        设 desc = （起点）
+      结束
+      设 st = locked
+      设 tn = 计算 {pn} + {nn}
+      如果 {tn} 大于 0
+        设 st = open
+      结束
+      设 nd = {"id": "{p.code}", "code": "{p.code}", "label": "{p.title}", "state": "{st}", "badge": {ni}, "desc": "{desc}"}
+      设 nodes = 列表加项 {nodes} {nd}
+      设 kr = {"kgp_orig": "{p.code}", "kgp_code": "{p.code}", "kgp_title": "{p.title}", "kgp_item_n": {ni}, "kgp_pre_n": {pn}, "kgp_next_n": {nn}}
+      设 kp = 列表加项 {kp} {kr}
+      设 op = {"value": "{p.code}", "label": "{p.code}（{p.title}）"}
+      设 opts = 列表加项 {opts} {op}
+    结束
+    设 ki = 解析JSON []
+    遍历 i 于 {il.items}
+      设 ptl = {nothing 或}
+      遍历 q 于 {g.points}
+        如果 {q.code} 等于 {i.point_code}
+          设 ptl = {q.title}
+        结束
+      结束
+      设 ir = {"kgi_orig": "{i.code}", "kgi_code": "{i.code}", "kgi_name": "{i.name}", "kgi_point": "{i.point_code}", "kgi_point_title": "{ptl}", "kgi_after": "{i.after_form 或}", "kgi_prev": "{i.prev_code 或}"}
+      设 ki = 列表加项 {ki} {ir}
+    结束
+    设 gedges = 解析JSON []
+    设 ke = 解析JSON []
+    遍历 e 于 {g.edges}
+      设 ge = {"from": "{e.pre_code}", "to": "{e.point_code}", "kind": ""}
+      设 gedges = 列表加项 {gedges} {ge}
+      设 t1 = {e.pre_code}
+      设 t2 = {e.point_code}
+      遍历 q 于 {g.points}
+        如果 {q.code} 等于 {e.pre_code}
+          设 t1 = {q.title}
+        结束
+        如果 {q.code} 等于 {e.point_code}
+          设 t2 = {q.title}
+        结束
+      结束
+      设 er = {"edge_key": "{e.pre_code}>{e.point_code}", "edge_pre": "{e.pre_code}", "edge_point": "{e.point_code}", "edge_pre_title": "{t1}", "edge_point_title": "{t2}"}
+      设 ke = 列表加项 {ke} {er}
+    结束
+    设 kc = 解析JSON []
+    遍历 c 于 {g.contrasts}
+      设 na = 0
+      设 nb = 0
+      设 la = {c.a_code}
+      设 lb = {c.b_code}
+      遍历 q 于 {g.points}
+        如果 {q.code} 等于 {c.a_code}
+          设 na = 1
+          设 la = {q.code}（{q.title}）
+        结束
+        如果 {q.code} 等于 {c.b_code}
+          设 nb = 1
+          设 lb = {q.code}（{q.title}）
+        结束
+      结束
+      遍历 q 于 {il.items}
+        如果 {q.code} 等于 {c.a_code} 且 {na} 等于 0
+          设 la = {q.code}（{q.name}）
+        结束
+        如果 {q.code} 等于 {c.b_code} 且 {nb} 等于 0
+          设 lb = {q.code}（{q.name}）
+        结束
+      结束
+      如果 {na} 等于 1 且 {nb} 等于 1
+        设 ge = {"from": "{c.a_code}", "to": "{c.b_code}", "kind": "对照"}
+        设 gedges = 列表加项 {gedges} {ge}
+      结束
+      设 cr = {"ct_key": "{c.a_code}~{c.b_code}", "ct_a": "{c.a_code}", "ct_b": "{c.b_code}", "ct_a_label": "{la}", "ct_b_label": "{lb}"}
+      设 kc = 列表加项 {kc} {cr}
+    结束
+    设 head = 共{g.point_count}个知识点、{g.edge_count}条前置边、{il.total}个条目、{g.contrast_count}条对照
+    返回 {"graph": {"nodes": {nodes}, "edges": {gedges}}, "kgm_points": {kp}, "kgm_items": {ki}, "kgm_edges": {ke}, "kgm_contrasts": {kc}, "point_options": {opts}, "kgm_head": "{head}", "kgm_role": "{idn.kgm_role}", "can_write": {idn.can_write}}
+  结束
+
+  公开 函数 载入知识点页面 learner kgp_orig? code? current_role? auth_mode? subject?
+    如果 {auth_mode} 等于 on 且 {current_role} 不等于 teacher
+      报错 403 只有教师可以管理图谱
+    结束
+    设 cd = {kgp_orig}
+    如果 {cd} 为空
+      设 cd = {code}
+    结束
+    如果 {cd} 为空
+      返回 {"kgp_orig": "", "kgp_code": "", "kgp_title": "", "kgp_refs": ""}
+    结束
+    设 sb = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 p = 调用 取知识点 code={cd} subject={sb.subject_id}
+    如果 {p} 为空
+      报错 404 没有这个知识点
+    结束
+    设 q = 调用 查引用 code={cd} kind=point subject={sb.subject_id}
+    设 nrf = 列表长度 {q.refs}
+    设 txt = 没有被引用，可以删除
+    如果 {nrf} 大于 0
+      设 det = {nothing 或}
+      遍历 x 于 {q.refs}
+        如果 {det} 为空
+          设 det = {x.source}{x.n}
+        否则
+          设 det = {det}、{x.source}{x.n}
+        结束
+      结束
+      设 txt = 被引用：{det}
+      如果 {q.deletable} 等于 0
+        设 txt = {txt}。删除会被拒绝，可以改名
+      结束
+    结束
+    返回 {"kgp_orig": "{cd}", "kgp_code": "{cd}", "kgp_title": "{p.title}", "kgp_refs": "{txt}"}
+  结束
+
+  公开 函数 保存知识点页面 learner kgp_title kgp_orig? kgp_code? current_role? auth_mode? subject?
+    如果 {auth_mode} 等于 on 且 {current_role} 不等于 teacher
+      报错 403 只有教师可以管理图谱
+    结束
+    如果 {kgp_orig} 为空
+      设 w = 调用 建知识点 code={kgp_code} title={kgp_title} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    否则
+      设 w = 调用 改知识点 code={kgp_orig} title={kgp_title} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    结束
+    设 r = 调用 图谱管理页面 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    返回 {r}
+  结束
+
+  公开 函数 删知识点页面 learner kgp_orig current_role? auth_mode? subject?
+    如果 {auth_mode} 等于 on 且 {current_role} 不等于 teacher
+      报错 403 只有教师可以管理图谱
+    结束
+    设 w = 调用 删知识点 code={kgp_orig} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 r = 调用 图谱管理页面 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    返回 {r}
+  结束
+
+  公开 函数 加前置边页面 learner edge_pre edge_point current_role? auth_mode? subject?
+    如果 {auth_mode} 等于 on 且 {current_role} 不等于 teacher
+      报错 403 只有教师可以管理图谱
+    结束
+    设 w = 调用 加前置边 pre_code={edge_pre} point_code={edge_point} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 r = 调用 图谱管理页面 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    返回 {r}
+  结束
+
+  公开 函数 删前置边页面 learner edge_key current_role? auth_mode? subject?
+    如果 {auth_mode} 等于 on 且 {current_role} 不等于 teacher
+      报错 403 只有教师可以管理图谱
+    结束
+    设 re = ^(?P<ea>[^>]+)>(?P<eb>.+)$
+    设 mm = 匹配 {edge_key} {re}
+    如果 {mm.matched} 不等于 是
+      报错 400 前置边参数不对
+    结束
+    设 w = 调用 删前置边 pre_code={mm.named.ea} point_code={mm.named.eb} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 r = 调用 图谱管理页面 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    返回 {r}
+  结束
+
+  公开 函数 载入条目页面 learner kgi_orig? current_role? auth_mode? subject?
+    如果 {auth_mode} 等于 on 且 {current_role} 不等于 teacher
+      报错 403 只有教师可以管理图谱
+    结束
+    如果 {kgi_orig} 为空
+      返回 {"kgi_orig": "", "kgi_code": "", "kgi_name": "", "kgi_point": "", "kgi_after": "", "kgi_prev": ""}
+    结束
+    设 sb = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 p = 调用 取条目 code={kgi_orig} subject={sb.subject_id}
+    如果 {p} 为空
+      报错 404 没有这个条目
+    结束
+    返回 {"kgi_orig": "{p.code}", "kgi_code": "{p.code}", "kgi_name": "{p.name}", "kgi_point": "{p.point_code}", "kgi_after": "{p.after_form 或}", "kgi_prev": "{p.prev_code 或}"}
+  结束
+
+  公开 函数 保存条目页面 learner kgi_name kgi_point kgi_orig? kgi_code? kgi_after? kgi_prev? current_role? auth_mode? subject?
+    如果 {auth_mode} 等于 on 且 {current_role} 不等于 teacher
+      报错 403 只有教师可以管理图谱
+    结束
+    如果 {kgi_orig} 为空
+      设 w = 调用 建条目 code={kgi_code} name={kgi_name} point_code={kgi_point} after_form={kgi_after} prev_code={kgi_prev} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    否则
+      设 w = 调用 改条目 code={kgi_orig} name={kgi_name} point_code={kgi_point} after_form={kgi_after} prev_code={kgi_prev} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    结束
+    设 r = 调用 图谱管理页面 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    返回 {r}
+  结束
+
+  公开 函数 删条目页面 learner kgi_orig current_role? auth_mode? subject?
+    如果 {auth_mode} 等于 on 且 {current_role} 不等于 teacher
+      报错 403 只有教师可以管理图谱
+    结束
+    设 w = 调用 删条目 code={kgi_orig} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 r = 调用 图谱管理页面 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    返回 {r}
+  结束
+
+  公开 函数 加对照页面 learner ct_a ct_b current_role? auth_mode? subject?
+    如果 {auth_mode} 等于 on 且 {current_role} 不等于 teacher
+      报错 403 只有教师可以管理图谱
+    结束
+    设 w = 调用 加对照 a_code={ct_a} b_code={ct_b} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 r = 调用 图谱管理页面 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    返回 {r}
+  结束
+
+  公开 函数 删对照页面 learner ct_key current_role? auth_mode? subject?
+    如果 {auth_mode} 等于 on 且 {current_role} 不等于 teacher
+      报错 403 只有教师可以管理图谱
+    结束
+    设 re = ^(?P<ca>[^~]+)~(?P<cb>.+)$
+    设 mm = 匹配 {ct_key} {re}
+    如果 {mm.matched} 不等于 是
+      报错 400 对照参数不对
+    结束
+    设 w = 调用 删对照 a_code={mm.named.ca} b_code={mm.named.cb} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 r = 调用 图谱管理页面 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    返回 {r}
+  结束
+
+  公开 函数 导入预检页面 learner imp_kind imp_upload_path current_role? auth_mode? subject?
+    如果 {auth_mode} 等于 on 且 {current_role} 不等于 teacher
+      报错 403 只有教师可以管理图谱
+    结束
+    如果 {imp_kind} 等于 知识点
+      设 kd = point
+    否则如果 {imp_kind} 等于 条目
+      设 kd = item
+    否则如果 {imp_kind} 等于 前置边
+      设 kd = edge
+    否则如果 {imp_kind} 等于 对照
+      设 kd = contrast
+    否则
+      报错 400 导入类型不对
+    结束
+    设 pv = 调用 导入预检 kind={kd} file_path={imp_upload_path} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 rows = 解析JSON []
+    遍历 x 于 {pv.rows}
+      设 ir = {"imp_line": {x.line}, "imp_code": "{x.code}", "imp_label": "{x.label}", "imp_action": "{x.action}", "imp_reason": "{x.reason 或}"}
+      设 rows = 列表加项 {rows} {ir}
+    结束
+    设 head = 共{pv.total}行：新增{pv.created}、更新{pv.updated}、报错{pv.error_count}
+    设 okv = 1
+    如果 {pv.error_count} 大于 0
+      设 okv = 0
+      设 head = {head}。改好文件重新上传，一行都不会写入
+    结束
+    返回 {"imp_rows": {rows}, "imp_head": "{head}", "imp_ok": {okv}, "form": {"imp_kind": "{imp_kind}", "imp_file": "{imp_upload_path}"}}
+  结束
+
+  公开 函数 确认导入页面 learner imp_kind imp_file current_role? auth_mode? subject?
+    如果 {auth_mode} 等于 on 且 {current_role} 不等于 teacher
+      报错 403 只有教师可以管理图谱
+    结束
+    如果 {imp_kind} 等于 知识点
+      设 kd = point
+    否则如果 {imp_kind} 等于 条目
+      设 kd = item
+    否则如果 {imp_kind} 等于 前置边
+      设 kd = edge
+    否则如果 {imp_kind} 等于 对照
+      设 kd = contrast
+    否则
+      报错 400 导入类型不对
+    结束
+    设 cf = 调用 确认导入 kind={kd} file_path={imp_file} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 r = 调用 图谱管理页面 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 head = 已导入：新增{cf.created}、更新{cf.updated}
+    返回 {"graph": {r.graph}, "kgm_points": {r.kgm_points}, "kgm_items": {r.kgm_items}, "kgm_edges": {r.kgm_edges}, "kgm_contrasts": {r.kgm_contrasts}, "point_options": {r.point_options}, "kgm_head": "{r.kgm_head}", "kgm_role": "{r.kgm_role}", "can_write": {r.can_write}, "imp_rows": [], "imp_ok": 0, "imp_head": "{head}"}
+  结束
+
+  公开 函数 导出页面 learner exp_kind? current_role? auth_mode? subject?
+    如果 {auth_mode} 等于 on 且 {current_role} 不等于 teacher
+      报错 403 只有教师可以管理图谱
+    结束
+    设 sb = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    如果 {exp_kind} 为空 或 {exp_kind} 等于 全部
+      设 kd = all
+    否则如果 {exp_kind} 等于 知识点
+      设 kd = point
+    否则如果 {exp_kind} 等于 条目
+      设 kd = item
+    否则如果 {exp_kind} 等于 前置边
+      设 kd = edge
+    否则如果 {exp_kind} 等于 对照
+      设 kd = contrast
+    否则
+      报错 400 导出类型不对
+    结束
+    设 ex = 调用 导出文本 kind={kd} subject={sb.subject_id}
+    设 head = 共{ex.count}行
+    如果 {kd} 等于 all
+      设 head = {head}。四段要按段拆开分别导入
+    结束
+    返回 {"export_text": "{ex.text}", "export_head": "{head}"}
+  结束
+
 结束

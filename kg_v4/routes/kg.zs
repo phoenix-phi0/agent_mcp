@@ -172,3 +172,97 @@
   设 r = 调用 kg.导出文本 kind={kind 或} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   返回 {r}
 结束
+
+接口 POST /kg/manage/home 动作 kgm_home 角色 teacher
+  设 r = 调用 kg.图谱管理页面 learner={learner} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  响应 state {r}
+结束
+
+接口 POST /kg/manage/point/open 动作 kgm_point_open 角色 teacher
+  设 r = 调用 kg.载入知识点页面 learner={learner} kgp_orig={kgp_orig 或} code={code 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  响应 form {r}
+结束
+
+接口 POST /kg/manage/point/save 动作 kgm_point_save 角色 teacher
+  设 r = 调用 kg.保存知识点页面 learner={learner} kgp_title={kgp_title} kgp_orig={kgp_orig 或} kgp_code={kgp_code 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  设 _msg = 知识点已保存
+  消息 系统 {_msg} ok
+  响应 state {r}
+结束
+
+接口 POST /kg/manage/point/delete 动作 kgm_point_delete 角色 teacher
+  设 r = 调用 kg.删知识点页面 learner={learner} kgp_orig={kgp_orig} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  设 _msg = 知识点已删除
+  消息 系统 {_msg} ok
+  响应 state {r}
+结束
+
+接口 POST /kg/manage/edge/add 动作 kgm_edge_add 角色 teacher
+  设 r = 调用 kg.加前置边页面 learner={learner} edge_pre={edge_pre} edge_point={edge_point} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  设 _msg = 前置边已加上
+  消息 系统 {_msg} ok
+  响应 state {r}
+结束
+
+接口 POST /kg/manage/edge/delete 动作 kgm_edge_delete 角色 teacher
+  设 r = 调用 kg.删前置边页面 learner={learner} edge_key={edge_key} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  设 _msg = 前置边已删除
+  消息 系统 {_msg} ok
+  响应 state {r}
+结束
+
+接口 POST /kg/manage/item/open 动作 kgm_item_open 角色 teacher
+  设 r = 调用 kg.载入条目页面 learner={learner} kgi_orig={kgi_orig 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  响应 form {r}
+结束
+
+接口 POST /kg/manage/item/save 动作 kgm_item_save 角色 teacher
+  设 r = 调用 kg.保存条目页面 learner={learner} kgi_name={kgi_name} kgi_point={kgi_point} kgi_orig={kgi_orig 或} kgi_code={kgi_code 或} kgi_after={kgi_after 或} kgi_prev={kgi_prev 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  设 _msg = 条目已保存
+  消息 系统 {_msg} ok
+  响应 state {r}
+结束
+
+接口 POST /kg/manage/item/delete 动作 kgm_item_delete 角色 teacher
+  设 r = 调用 kg.删条目页面 learner={learner} kgi_orig={kgi_orig} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  设 _msg = 条目已删除
+  消息 系统 {_msg} ok
+  响应 state {r}
+结束
+
+接口 POST /kg/manage/contrast/add 动作 kgm_contrast_add 角色 teacher
+  设 r = 调用 kg.加对照页面 learner={learner} ct_a={ct_a} ct_b={ct_b} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  设 _msg = 对照已加上
+  消息 系统 {_msg} ok
+  响应 state {r}
+结束
+
+接口 POST /kg/manage/contrast/delete 动作 kgm_contrast_delete 角色 teacher
+  设 r = 调用 kg.删对照页面 learner={learner} ct_key={ct_key} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  设 _msg = 对照已删除
+  消息 系统 {_msg} ok
+  响应 state {r}
+结束
+
+接口 POST /kg/manage/import/preview 动作 kgm_import_preview 角色 teacher
+  设 imp_upload_path = 存文件 imp_upload 类型=md,txt,csv,json 上限=20MB
+  如果 {imp_upload_path} 开头是 [
+    返回 {"error":"{imp_upload_path}"} 400
+  结束
+  设 r = 调用 kg.导入预检页面 learner={learner} imp_kind={imp_kind} imp_upload_path={imp_upload_path} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  响应 state {r}
+  响应 form {r.form}
+结束
+
+接口 POST /kg/manage/import/confirm 动作 kgm_import_confirm 角色 teacher
+  设 r = 调用 kg.确认导入页面 learner={learner} imp_kind={imp_kind} imp_file={imp_file} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  设 _msg = 导入完成
+  消息 系统 {_msg} ok
+  响应 state {r}
+结束
+
+接口 POST /kg/manage/export 动作 kgm_export 角色 teacher
+  设 r = 调用 kg.导出页面 learner={learner} exp_kind={exp_kind 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  响应 state {r}
+结束
+
