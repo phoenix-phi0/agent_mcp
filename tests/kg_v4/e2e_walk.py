@@ -472,7 +472,7 @@ def kg_create_point(page, code, title, ck, label):
        f"{label}：知识点 {code} 建成且在表里")
 
 
-def kg_mgmt_flow(t1, t2, t3, ck, marks):
+def kg_mgmt_flow(t1, t2, t3, ck, marks, tmp):
     """图谱管理段（K99b，约定 k98_design/kg_manage.ui）。断言与数据内容无关：
     只认本段自建的 walk99.* 编号和自取的提示条文字，不写死种子数据的任何内容。"""
     t1._allowed_status = ("400", "409")   # 成环 400 / 引用 409 是故意打的，不算 JS 错误
@@ -546,20 +546,19 @@ def kg_mgmt_flow(t1, t2, t3, ck, marks):
     clear_toast(t1)
     t1.locator('button:has-text("批量导入")').first.click()
     t1.wait_for_selector(".overlay", timeout=8000)
-    f = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8")
+    # 上传文件不能在预检后立刻删：图谱管理页每个动作的 FormData 都带着 imp_upload，
+    # 文件没了后面的请求（如导出）会在发出前失败（K105）。建在走查 tmp 里，随 rmtree 删
+    f = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8", dir=tmp)
     f.write(KG_P1 + "imp|预检好的行\n坏 编号|预检坏行\n")
     f.close()
-    try:
-        t1.locator('.overlay input[type="file"]').first.set_input_files(f.name)
-        # 不能 index=0：下拉第一项是「请选择」占位（imp_kind 空 → 400 导入类型不对）
-        t1.locator('.overlay label.field:has-text("类型") select').first.select_option(label="知识点")
-        t1.locator('.overlay button:has-text("预检")').first.click()
-        t1.wait_for_selector(".overlay tr", timeout=10000)
-        ck(t1.locator(".overlay tr").count() >= 1, "预检出了逐行结果")
-        ck(t1.locator('.overlay button:has-text("确认导入")').count() == 0,
-           "有一行错：确认导入按钮不出现")
-    finally:
-        os.unlink(f.name)
+    t1.locator('.overlay input[type="file"]').first.set_input_files(f.name)
+    # 不能 index=0：下拉第一项是「请选择」占位（imp_kind 空 → 400 导入类型不对）
+    t1.locator('.overlay label.field:has-text("类型") select').first.select_option(label="知识点")
+    t1.locator('.overlay button:has-text("预检")').first.click()
+    t1.wait_for_selector(".overlay tr", timeout=10000)
+    ck(t1.locator(".overlay tr").count() >= 1, "预检出了逐行结果")
+    ck(t1.locator('.overlay button:has-text("确认导入")').count() == 0,
+       "有一行错：确认导入按钮不出现")
     t1.locator('.overlay button:has-text("返回")').first.click()
     t1.wait_for_selector(".overlay", state="detached", timeout=8000)
     clear_toast(t1)
@@ -570,9 +569,6 @@ def kg_mgmt_flow(t1, t2, t3, ck, marks):
     t1.wait_for_selector(".overlay", timeout=8000)
     t1.locator('.overlay label.field:has-text("类型") select').first.select_option(label="全部")
     t1.locator('.overlay button:has-text("生成")').first.click()
-    # 已知问题（K103s，断言不弱化）：全量走查里此步稳定失败，POST /kg/manage/export 报
-    # net::ERR_ALPN_NEGOTIATION_FAILED（服务端收不到）；单独跑正常，待查。
-    # 导出功能本身由 tests/kg_v4/test_kg_export.py 直接 HTTP 验证。
     try:
         t1.wait_for_function(
             "() => [...document.querySelectorAll('.overlay .dyn-v')]"
@@ -696,7 +692,7 @@ def main(argv=None):
                     t3 = new_page(browser.new_context(), "t3")
                     login(t3, base, "t3", end="/teacher")
                     snapshot(marks)
-                    kg_mgmt_flow(t1, t2k, t3, ck, marks)
+                    kg_mgmt_flow(t1, t2k, t3, ck, marks, tmp)
                     err = drain_errors(marks)
                     ck(not err, "图谱管理流程无 JS 错误", err)
 
