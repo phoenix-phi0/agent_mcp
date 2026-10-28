@@ -1,6 +1,6 @@
 业务 kg
   依赖 subject
-  用包 common db text doc
+  用包 common db text doc data
 
   公开 函数 取知识点 code learner? current_role? auth_mode? subject?
     设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
@@ -925,6 +925,636 @@
       报错 400 编号要以「{sc}.」开头
     结束
     返回 {"ok": 1}
+  结束
+
+  函数 拼原因 rs add
+    如果 {rs} 为空
+      返回 {"r": "{add}"}
+    结束
+    返回 {"r": "{rs}；{add}"}
+  结束
+
+  函数 边可达 edges start target
+    设 vis = @{start}@
+    设 changed = 1
+    当 {changed} 等于 1 最多 500 次
+      设 changed = 0
+      遍历 ed 于 {edges}
+        设 k1 = @{ed.pre_code}@
+        如果 {vis} 包含 {k1}
+          设 k2 = @{ed.point_code}@
+          如果 {vis} 不包含 {k2}
+            设 vis = {vis}{ed.point_code}@
+            设 changed = 1
+          结束
+        结束
+      结束
+    结束
+    设 tk = @{target}@
+    设 rv = 0
+    如果 {vis} 包含 {tk}
+      设 rv = 1
+    结束
+    返回 {"r": {rv}}
+  结束
+
+  公开 函数 导入前置边 file_path learner? current_role? auth_mode? subject?
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
+    设 doc = 读文档 {file_path}
+    如果 {doc.error} 不为空
+      报错 400 导入文件有错
+    结束
+    设 lines = 按正则切分 {doc.text} \r?\n
+    设 re = ^(?P<pa>[^|]*)[|](?P<pb>[^|]*)$
+    设 total = 0
+    遍历 raw 于 {lines}
+      设 line = 替换 {raw} ^\s+|\s+$
+      设 cm = 匹配 {line} ^\x23
+      如果 {line} 不为空 且 {cm.matched} 不等于 是
+        设 mm = 匹配 {line} {re}
+        如果 {mm.matched} 不等于 是
+          报错 400 导入文件有错
+        结束
+        如果 {mm.named.pa} 为空 或 {mm.named.pb} 为空 或 {mm.named.pa} 等于 {mm.named.pb}
+          报错 400 导入文件有错
+        结束
+        设 p1 = 查一行 app.db kg_point_by_code code={mm.named.pa} subject_id={sb.subject_id}
+        设 p2 = 查一行 app.db kg_point_by_code code={mm.named.pb} subject_id={sb.subject_id}
+        如果 {p1} 为空 或 {p2} 为空
+          报错 400 前置边对不上知识点
+        结束
+        设 total = 计算 {total} + 1
+      结束
+    结束
+    设 created = 0
+    设 updated = 0
+    事务 app.db
+      遍历 raw 于 {lines}
+        设 line = 替换 {raw} ^\s+|\s+$
+        设 cm = 匹配 {line} ^\x23
+        如果 {line} 不为空 且 {cm.matched} 不等于 是
+          设 mm = 匹配 {line} {re}
+          设 pre = {mm.named.pa}
+          设 pst = {mm.named.pb}
+          设 ex = 查一值 app.db kg_edge_exists pre_code={pre} point_code={pst} subject_id={sb.subject_id}
+          如果 {ex} 大于 0
+            设 updated = 计算 {updated} + 1
+          否则
+            设 cy = 查一值 app.db kg_edge_cycle pre_code={pre} point_code={pst} subject_id={sb.subject_id}
+            如果 {cy} 大于 0
+              报错 400 这批前置边会形成环
+            结束
+            设 w = 写库 app.db kg_edge_insert pre_code={pre} point_code={pst} subject_id={sb.subject_id}
+            设 created = 计算 {created} + 1
+          结束
+        结束
+      结束
+    结束
+    返回 {"ok": 1, "total": {total}, "created": {created}, "updated": {updated}}
+  结束
+
+  函数 读导入行 kind file_path
+    设 rows = 解析JSON []
+    设 m1 = 匹配 {file_path} (?i)[.](md|txt)$
+    设 m2 = 匹配 {file_path} (?i)[.]csv$
+    设 m3 = 匹配 {file_path} (?i)[.]json$
+    如果 {m1.matched} 等于 是
+      设 doc = 读文档 {file_path}
+      如果 {doc.error} 不为空
+        报错 400 导入文件读不了
+      结束
+      设 lines = 按正则切分 {doc.text} \r?\n
+      设 re = ^(?P<a>[^|]*)[|](?P<b>[^|]*)[|](?P<c>[^|]*)[|](?P<d>[^|]*)[|](?P<e>[^|]*)(?:[|].*)?$
+      设 ln = 0
+      遍历 raw 于 {lines}
+        设 ln = 计算 {ln} + 1
+        设 line = 替换 {raw} ^\s+|\s+$
+        设 cm = 匹配 {line} ^\x23
+        如果 {line} 不为空 且 {cm.matched} 不等于 是
+          设 padded = {line}||||
+          设 mm = 匹配 {padded} {re}
+          设 it = {"line": {ln}, "a": "{mm.named.a}", "b": "{mm.named.b}", "c": "{mm.named.c}", "d": "{mm.named.d}", "e": "{mm.named.e}"}
+          设 rows = 列表加项 {rows} {it}
+        结束
+      结束
+    否则如果 {m2.matched} 等于 是 或 {m3.matched} 等于 是
+      设 src = 解析JSON []
+      设 ln = 0
+      如果 {m2.matched} 等于 是
+        设 src = 读CSV {file_path}
+        设 ln = 1
+      否则
+        读JSON js = {file_path}
+        设 src = {js}
+      结束
+      设 c1 = code
+      设 c2 = title
+      设 c3 = {nothing 或}
+      如果 {kind} 等于 item
+        设 c2 = name
+        设 c3 = point_code
+      否则如果 {kind} 等于 edge
+        设 c1 = pre_code
+        设 c2 = point_code
+      否则如果 {kind} 等于 contrast
+        设 c1 = a_code
+        设 c2 = b_code
+      结束
+      设 da = 0
+      设 db2 = 0
+      设 dc = 0
+      遍历 x 于 {src}
+        设 ln = 计算 {ln} + 1
+        设 ra = {nothing 或}
+        设 rb = {nothing 或}
+        设 rc = {nothing 或}
+        设 rd = {nothing 或}
+        设 rf = {nothing 或}
+        如果 {kind} 等于 point
+          设 ra = {x.code 或}
+          设 rb = {x.title 或}
+        否则如果 {kind} 等于 item
+          设 ra = {x.code 或}
+          设 rb = {x.name 或}
+          设 rc = {x.point_code 或}
+          设 rd = {x.after_form 或}
+          设 rf = {x.prev_code 或}
+        否则如果 {kind} 等于 edge
+          设 ra = {x.pre_code 或}
+          设 rb = {x.point_code 或}
+        否则
+          设 ra = {x.a_code 或}
+          设 rb = {x.b_code 或}
+        结束
+        如果 {ra} 不为空
+          设 da = 计算 {da} + 1
+        结束
+        如果 {rb} 不为空
+          设 db2 = 计算 {db2} + 1
+        结束
+        如果 {rc} 不为空
+          设 dc = 计算 {dc} + 1
+        结束
+        设 it = {"line": {ln}, "a": "{ra}", "b": "{rb}", "c": "{rc}", "d": "{rd}", "e": "{rf}"}
+        设 rows = 列表加项 {rows} {it}
+      结束
+      设 n0 = 列表长度 {rows}
+      如果 {n0} 大于 0
+        如果 {da} 等于 0
+          报错 400 导入文件读不了（缺{c1}）
+        结束
+        如果 {db2} 等于 0
+          报错 400 导入文件读不了（缺{c2}）
+        结束
+        如果 {c3} 不为空 且 {dc} 等于 0
+          报错 400 导入文件读不了（缺{c3}）
+        结束
+      结束
+    否则
+      报错 400 文件类型只能是 md、txt、csv、json
+    结束
+    设 n = 列表长度 {rows}
+    如果 {n} 等于 0
+      报错 400 导入文件没有数据行
+    结束
+    如果 {n} 大于 2000
+      报错 400 一次最多导入2000行
+    结束
+    返回 {"rows": {rows}}
+  结束
+
+  公开 函数 导入预检 kind file_path learner? current_role? auth_mode? subject?
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
+    如果 {kind} 不等于 point 且 {kind} 不等于 item 且 {kind} 不等于 edge 且 {kind} 不等于 contrast
+      报错 400 导入类型不对
+    结束
+    设 sid = {sb.subject_id}
+    设 acts = {"e": "报错", "u": "更新", "n": "新增"}
+    设 rd = 调用 读导入行 kind={kind} file_path={file_path}
+    设 fileitems = @
+    如果 {kind} 等于 item
+      遍历 x 于 {rd.rows}
+        设 fileitems = {fileitems}{x.a}@
+      结束
+    结束
+    设 mid = 解析JSON []
+    遍历 x 于 {rd.rows}
+      设 xa = {x.a}
+      设 xb = {x.b}
+      设 xc = {x.c}
+      设 xd = {x.d}
+      设 xe = {x.e}
+      设 rs = {nothing 或}
+      设 cdv = {xa}
+      如果 {kind} 等于 point
+        如果 {xa} 为空
+          设 t = 调用 拼原因 rs={rs} add=缺编号
+          设 rs = {t.r}
+        结束
+        如果 {xb} 为空
+          设 t = 调用 拼原因 rs={rs} add=缺名称
+          设 rs = {t.r}
+        结束
+        如果 {xa} 不为空
+          设 fc = 调用 编号格式检查 subject_id={sid} code={xa} 出错时 er
+          如果 {er} 不为空
+            设 t = 调用 拼原因 rs={rs} add={er.error}
+            设 rs = {t.r}
+          结束
+          设 oc = 查一值 app.db kg_point_other code={xa} subject_id={sid}
+          如果 {oc} 大于 0
+            设 t = 调用 拼原因 rs={rs} add=编号已被其他科目使用
+            设 rs = {t.r}
+          结束
+        结束
+        设 lt = 截取 {xb} 61
+        如果 {lt} 不为空
+          设 t = 调用 拼原因 rs={rs} add=名称最长60字
+          设 rs = {t.r}
+        结束
+      否则如果 {kind} 等于 item
+        如果 {xa} 为空
+          设 t = 调用 拼原因 rs={rs} add=缺编号
+          设 rs = {t.r}
+        结束
+        如果 {xb} 为空
+          设 t = 调用 拼原因 rs={rs} add=缺名称
+          设 rs = {t.r}
+        结束
+        如果 {xc} 为空
+          设 t = 调用 拼原因 rs={rs} add=缺知识点编号
+          设 rs = {t.r}
+        结束
+        如果 {xa} 不为空
+          设 fc = 调用 编号格式检查 subject_id={sid} code={xa} 出错时 er
+          如果 {er} 不为空
+            设 t = 调用 拼原因 rs={rs} add={er.error}
+            设 rs = {t.r}
+          结束
+          设 oc = 查一值 app.db kg_item_other code={xa} subject_id={sid}
+          如果 {oc} 大于 0
+            设 t = 调用 拼原因 rs={rs} add=编号已被其他科目使用
+            设 rs = {t.r}
+          结束
+        结束
+        设 lt = 截取 {xb} 61
+        如果 {lt} 不为空
+          设 t = 调用 拼原因 rs={rs} add=名称最长60字
+          设 rs = {t.r}
+        结束
+        如果 {xc} 不为空
+          设 pp = 查一行 app.db kg_point_by_code code={xc} subject_id={sid}
+          如果 {pp} 为空
+            设 t = 调用 拼原因 rs={rs} add=没有这个知识点
+            设 rs = {t.r}
+          结束
+        结束
+        如果 {xe} 不为空
+          设 pi = 查一行 app.db kg_item_by_code code={xe} subject_id={sid}
+          设 fk = @{xe}@
+          如果 {pi} 为空 且 {fileitems} 不包含 {fk}
+            设 t = 调用 拼原因 rs={rs} add=没有这个前一个条目
+            设 rs = {t.r}
+          结束
+        结束
+      否则如果 {kind} 等于 edge
+        设 cdv = {xa}>{xb}
+        如果 {xa} 为空
+          设 t = 调用 拼原因 rs={rs} add=缺前置编号
+          设 rs = {t.r}
+        结束
+        如果 {xb} 为空
+          设 t = 调用 拼原因 rs={rs} add=缺后续编号
+          设 rs = {t.r}
+        结束
+        如果 {xa} 不为空 且 {xa} 等于 {xb}
+          设 t = 调用 拼原因 rs={rs} add=不能以自己为前置
+          设 rs = {t.r}
+        结束
+        设 nf = 0
+        如果 {xa} 不为空
+          设 p1 = 查一行 app.db kg_point_by_code code={xa} subject_id={sid}
+          如果 {p1} 为空
+            设 nf = 1
+          结束
+        结束
+        如果 {xb} 不为空
+          设 p2 = 查一行 app.db kg_point_by_code code={xb} subject_id={sid}
+          如果 {p2} 为空
+            设 nf = 1
+          结束
+        结束
+        如果 {nf} 等于 1
+          设 t = 调用 拼原因 rs={rs} add=没有这个知识点
+          设 rs = {t.r}
+        结束
+      否则
+        设 cdv = {xa}~{xb}
+        如果 {xa} 为空 或 {xb} 为空
+          设 t = 调用 拼原因 rs={rs} add=缺编号
+          设 rs = {t.r}
+        结束
+        如果 {xa} 不为空 且 {xa} 等于 {xb}
+          设 t = 调用 拼原因 rs={rs} add=对照两端不能相同
+          设 rs = {t.r}
+        结束
+        如果 {xa} 不为空
+          设 pc1 = 调用 编号前缀检查 subject_id={sid} code={xa} 出错时 er
+          如果 {er} 不为空
+            设 t = 调用 拼原因 rs={rs} add={er.error}
+            设 rs = {t.r}
+          结束
+        结束
+        如果 {xb} 不为空
+          设 pc2 = 调用 编号前缀检查 subject_id={sid} code={xb} 出错时 er
+          如果 {er} 不为空
+            设 t = 调用 拼原因 rs={rs} add={er.error}
+            设 rs = {t.r}
+          结束
+        结束
+      结束
+      设 mr = {"line": {x.line}, "code": "{cdv}", "label": "{xb}", "reason": "{rs}", "a": "{xa}", "b": "{xb}", "c": "{xc}", "d": "{xd}", "e": "{xe}"}
+      设 mid = 列表加项 {mid} {mr}
+    结束
+    设 mid2 = {mid}
+    如果 {kind} 等于 edge
+      设 combined = 查询 app.db kg_edge_list subject_id={sid}
+      遍历 x 于 {mid}
+        如果 {x.reason} 为空
+          设 ce = {"pre_code": "{x.a}", "point_code": "{x.b}"}
+          设 combined = 列表加项 {combined} {ce}
+        结束
+      结束
+      设 mid2 = 解析JSON []
+      遍历 x 于 {mid}
+        设 rs = {x.reason}
+        如果 {rs} 为空
+          设 rch = 调用 边可达 edges={combined} start={x.b} target={x.a}
+          如果 {rch.r} 等于 1
+            设 rs = 会形成环：{x.a}>{x.b}>…>{x.a}
+          结束
+        结束
+        设 nr = {"line": {x.line}, "code": "{x.code}", "label": "{x.label}", "reason": "{rs}", "a": "{x.a}", "b": "{x.b}", "c": "{x.c}", "d": "{x.d}", "e": "{x.e}"}
+        设 mid2 = 列表加项 {mid2} {nr}
+      结束
+    结束
+    设 out = 解析JSON []
+    设 seen = @
+    设 created = 0
+    设 updated = 0
+    设 errn = 0
+    遍历 x 于 {mid2}
+      设 rs = {x.reason}
+      设 act = {acts.e}
+      如果 {rs} 不为空
+        设 errn = 计算 {errn} + 1
+      否则
+        设 xa = {x.a}
+        设 xb = {x.b}
+        设 xc = {x.c}
+        设 xd = {x.d}
+        设 xe = {x.e}
+        设 ex = 0
+        设 same = 0
+        设 k = {xa}
+        如果 {kind} 等于 point
+          设 p = 查一行 app.db kg_point_by_code code={xa} subject_id={sid}
+          如果 {p} 不为空
+            设 ex = 1
+            如果 {p.title} 等于 {xb}
+              设 same = 1
+            结束
+          结束
+        否则如果 {kind} 等于 item
+          设 p = 查一行 app.db kg_item_by_code code={xa} subject_id={sid}
+          如果 {p} 不为空
+            设 ex = 1
+            设 paf = {p.after_form 或}
+            设 ppv = {p.prev_code 或}
+            如果 {p.name} 等于 {xb} 且 {p.point_code} 等于 {xc} 且 {paf} 等于 {xd} 且 {ppv} 等于 {xe}
+              设 same = 1
+            结束
+          结束
+        否则如果 {kind} 等于 edge
+          设 k = {xa}>{xb}
+          设 ec = 查一值 app.db kg_edge_exists pre_code={xa} point_code={xb} subject_id={sid}
+          如果 {ec} 大于 0
+            设 ex = 1
+            设 same = 1
+          结束
+        否则
+          设 lo = 查一值 app.db kg_str_min a={xa} b={xb}
+          设 hi = 查一值 app.db kg_str_max a={xa} b={xb}
+          设 k = {lo}~{hi}
+          设 ec = 查一值 app.db kg_contrast_count a_code={lo} b_code={hi} subject_id={sid}
+          如果 {ec} 大于 0
+            设 ex = 1
+            设 same = 1
+          结束
+        结束
+        设 sk = @{k}@
+        如果 {ex} 等于 1
+          设 act = {acts.u}
+          设 updated = 计算 {updated} + 1
+          如果 {same} 等于 1
+            如果 {kind} 等于 edge 或 {kind} 等于 contrast
+              设 rs = 已存在
+            否则
+              设 rs = 内容相同
+            结束
+          结束
+        否则如果 {seen} 包含 {sk}
+          设 act = {acts.u}
+          设 updated = 计算 {updated} + 1
+          设 rs = 本文件重复，以后一行为准
+        否则
+          设 act = {acts.n}
+          设 created = 计算 {created} + 1
+        结束
+        设 seen = {seen}{sk}
+      结束
+      设 orow = {"line": {x.line}, "code": "{x.code}", "label": "{x.label}", "action": "{act}", "reason": "{rs}", "a": "{x.a}", "b": "{x.b}", "c": "{x.c}", "d": "{x.d}", "e": "{x.e}"}
+      设 out = 列表加项 {out} {orow}
+    结束
+    设 total = 列表长度 {out}
+    设 okn = 计算 {created} + {updated}
+    返回 {"kind": "{kind}", "total": {total}, "ok_count": {okn}, "error_count": {errn}, "created": {created}, "updated": {updated}, "rows": {out}}
+  结束
+
+  函数 写入导入行 kind rows subject_id
+    设 created = 0
+    设 updated = 0
+    设 total = 0
+    事务 app.db
+      遍历 x 于 {rows}
+        设 total = 计算 {total} + 1
+        如果 {kind} 等于 point
+          设 p = 查一行 app.db kg_point_by_code code={x.a} subject_id={subject_id}
+          设 pa.code = {x.a}
+          设 pa.title = {x.b}
+          设 pa.subject_id = {subject_id}
+          如果 {p} 为空
+            设 w = 写库表 app.db kg_point_insert {pa}
+            设 created = 计算 {created} + 1
+          否则
+            设 w = 写库表 app.db kg_point_update {pa}
+            设 updated = 计算 {updated} + 1
+          结束
+        否则如果 {kind} 等于 item
+          设 p = 查一行 app.db kg_item_by_code code={x.a} subject_id={subject_id}
+          设 ia.code = {x.a}
+          设 ia.name = {x.b}
+          设 ia.point_code = {x.c}
+          设 ia.after_form = {x.d}
+          设 ia.prev_code = {x.e}
+          设 ia.subject_id = {subject_id}
+          如果 {p} 为空
+            设 w = 写库表 app.db kg_item_insert {ia}
+            设 created = 计算 {created} + 1
+          否则
+            设 w = 写库表 app.db kg_item_update {ia}
+            设 updated = 计算 {updated} + 1
+          结束
+        否则如果 {kind} 等于 edge
+          设 ex = 查一值 app.db kg_edge_exists pre_code={x.a} point_code={x.b} subject_id={subject_id}
+          如果 {ex} 大于 0
+            设 updated = 计算 {updated} + 1
+          否则
+            设 cy = 查一值 app.db kg_edge_cycle pre_code={x.a} point_code={x.b} subject_id={subject_id}
+            如果 {cy} 大于 0
+              报错 400 导入文件有错
+            结束
+            设 w = 写库 app.db kg_edge_insert pre_code={x.a} point_code={x.b} subject_id={subject_id}
+            设 created = 计算 {created} + 1
+          结束
+        否则
+          设 lo = 查一值 app.db kg_str_min a={x.a} b={x.b}
+          设 hi = 查一值 app.db kg_str_max a={x.a} b={x.b}
+          设 ex = 查一值 app.db kg_contrast_count a_code={lo} b_code={hi} subject_id={subject_id}
+          如果 {ex} 大于 0
+            设 updated = 计算 {updated} + 1
+          否则
+            设 w = 写库 app.db kg_contrast_insert a_code={lo} b_code={hi} subject_id={subject_id}
+            设 created = 计算 {created} + 1
+          结束
+        结束
+      结束
+      如果 {kind} 等于 item
+        设 bad = 查一值 app.db kg_item_bad_count subject_id={subject_id}
+        如果 {bad} 大于 0
+          报错 400 导入文件有错
+        结束
+      结束
+    结束
+    返回 {"ok": 1, "total": {total}, "created": {created}, "updated": {updated}}
+  结束
+
+  公开 函数 确认导入 kind file_path learner? current_role? auth_mode? subject?
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
+    设 sid = {sb.subject_id}
+    设 bp = 匹配 {file_path} (^/)|([.][.])|([\\])
+    设 xm = 匹配 {file_path} (?i)[.](md|txt|csv|json)$
+    如果 {bp.matched} 等于 是 或 {xm.matched} 不等于 是
+      报错 400 导入文件路径不对
+    结束
+    设 pv = 调用 导入预检 kind={kind} file_path={file_path} subject={sid}
+    如果 {pv.error_count} 大于 0
+      设 msg = {nothing 或}
+      遍历 x 于 {pv.rows}
+        如果 {msg} 为空 且 {x.action} 等于 报错
+          设 msg = 第{x.line}行：{x.reason}
+        结束
+      结束
+      报错 400 导入文件有错（{msg}）
+    结束
+    设 tm = 匹配 {file_path} (?i)[.](md|txt)$
+    如果 {tm.matched} 等于 是
+      如果 {kind} 等于 point
+        设 r = 调用 导入知识点 file_path={file_path} subject={sid}
+      否则如果 {kind} 等于 item
+        设 r = 调用 导入条目 file_path={file_path} subject={sid}
+      否则如果 {kind} 等于 contrast
+        设 r = 调用 导入对照 file_path={file_path} subject={sid}
+      否则
+        设 r = 调用 导入前置边 file_path={file_path} subject={sid}
+      结束
+    否则
+      设 r = 调用 写入导入行 kind={kind} rows={pv.rows} subject_id={sid}
+    结束
+    返回 {"ok": 1, "kind": "{kind}", "total": {r.total}, "created": {r.created}, "updated": {r.updated}}
+  结束
+
+  公开 函数 导出文本 kind? learner? current_role? auth_mode? subject?
+    设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+    设 kd = {kind 或}
+    如果 {kd} 为空
+      设 kd = all
+    结束
+    如果 {kd} 不等于 all 且 {kd} 不等于 point 且 {kd} 不等于 item 且 {kd} 不等于 edge 且 {kd} 不等于 contrast
+      报错 400 导出类型不对
+    结束
+    设 g = 调用 导出图 subject={sb.subject_id}
+    设 il = 调用 列条目 subject={sb.subject_id}
+    设 tp = {nothing 或}
+    遍历 x 于 {g.points}
+      设 l1 = {x.code}|{x.title}
+      如果 {tp} 为空
+        设 tp = {l1}
+      否则
+        设 tp = {tp}§{l1}
+      结束
+    结束
+    设 ti = {nothing 或}
+    遍历 x 于 {il.items}
+      设 l1 = {x.code}|{x.name}|{x.point_code}|{x.after_form 或}|{x.prev_code 或}
+      如果 {ti} 为空
+        设 ti = {l1}
+      否则
+        设 ti = {ti}§{l1}
+      结束
+    结束
+    设 te = {nothing 或}
+    遍历 x 于 {g.edges}
+      设 l1 = {x.pre_code}|{x.point_code}
+      如果 {te} 为空
+        设 te = {l1}
+      否则
+        设 te = {te}§{l1}
+      结束
+    结束
+    设 tc = {nothing 或}
+    遍历 x 于 {g.contrasts}
+      设 l1 = {x.a_code}|{x.b_code}
+      如果 {tc} 为空
+        设 tc = {l1}
+      否则
+        设 tc = {tc}§{l1}
+      结束
+    结束
+    设 cnt = 0
+    设 txt = {nothing 或}
+    如果 {kd} 等于 point
+      设 txt = {tp}
+      设 cnt = {g.point_count}
+    否则如果 {kd} 等于 item
+      设 txt = {ti}
+      设 cnt = {il.total}
+    否则如果 {kd} 等于 edge
+      设 txt = {te}
+      设 cnt = {g.edge_count}
+    否则如果 {kd} 等于 contrast
+      设 txt = {tc}
+      设 cnt = {g.contrast_count}
+    否则
+      设 h1 = {"t": "# 知识点"}
+      设 h2 = {"t": "# 条目"}
+      设 h3 = {"t": "# 前置边"}
+      设 h4 = {"t": "# 对照"}
+      设 txt = {h1.t}§{tp}§{h2.t}§{ti}§{h3.t}§{te}§{h4.t}§{tc}
+      设 cnt = 计算 {g.point_count} + {il.total} + {g.edge_count} + {g.contrast_count}
+    结束
+    设 txt = 替换 {txt} § \n
+    返回 {"kind": "{kd}", "count": {cnt}, "text": "{txt}"}
   结束
 
 结束

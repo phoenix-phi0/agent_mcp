@@ -144,3 +144,31 @@
   设 r = 调用 kg.查引用 code={code} kind={kind 或} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   返回 {r}
 结束
+
+接口 POST /kg/import/edges 角色 teacher
+  设 file_path = 存文件 file 类型=md,txt 上限=20MB
+  如果 {file_path} 开头是 [
+    返回 {"error":"{file_path}"} 400
+  结束
+  设 r = 调用 kg.导入前置边 file_path={file_path} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  返回 {r}
+结束
+
+接口 POST /kg/import/preview 角色 teacher
+  设 file_path = 存文件 file 类型=md,txt,csv,json 上限=20MB
+  如果 {file_path} 开头是 [
+    返回 {"error":"{file_path}"} 400
+  结束
+  设 r = 调用 kg.导入预检 kind={kind} file_path={file_path} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  返回 {r}
+结束
+
+接口 POST /kg/import/confirm 角色 teacher
+  设 r = 调用 kg.确认导入 kind={kind} file_path={file_path} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  返回 {r}
+结束
+
+接口 GET /kg/export/text 角色 teacher
+  设 r = 调用 kg.导出文本 kind={kind 或} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  返回 {r}
+结束
