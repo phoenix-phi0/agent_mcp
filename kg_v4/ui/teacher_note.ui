@@ -20,13 +20,16 @@
 #
 # 「当」的条件里不能有空格；「提示」里不能有双引号和空格。
 
-界面 自定义 AI老师设定 端 教师
+界面 自定义 AI老师设定 端 教师 侧 管理
   动作 teacher_note_home 远程 进入时 隐藏 刷新
 
-  分组 说明
-    文案 这里写的只进「问老师」里AI老师的提示词，学生看不到。记忆：每次都带上，适合「这周全班重点是て形」。作者注：紧贴学生最新一句之前，引导最强，适合「接下来回答尽量简短，最后出一道小题」，可以只用于下一条回复。关键词卡：学生最近几句提到任一关键词才带上，适合「提到～ばかり时，强调和～たばかり的区别」。给某个学生单独写的，在「学情」里点进这个学生。
-  结束
-  分组 顶栏 横排 间距 12px 对齐 center
+  # 页面抬头：当前科目（subject_head 由 teacher_note_home 返回）。
+  # 说明直接挂在界面下，不再包一层「说明」分组——分组名会被画成 h3 标题。
+  显示 subject_head
+  文案 这里写的只进「问老师」里AI老师的提示词，学生看不到。记忆：每次都带上，适合「这周全班重点是て形」。作者注：紧贴学生最新一句之前，引导最强，适合「接下来回答尽量简短，最后出一道小题」，可以只用于下一条回复。关键词卡：学生最近几句提到任一关键词才带上，适合「提到～ばかり时，强调和～たばかり的区别」。给某个学生单独写的，在「学情」里点进这个学生。
+  文案 每条设定和传达有「适用范围」：当前科目只对本科目的学生生效，全部科目对所有科目生效。
+  文案 当 shared.note_is_owner===0 全部科目的设定和传达只有科目负责人能改；你可以改本科目的（表里没有编辑按钮的行是只读的）。
+  分组 顶栏 横排 顶栏 间距 12px 对齐 center
     动作 new_note 打开 编辑设定 重置 新增设定
     动作 new_relay 打开 编辑传达 重置 新增传达
   结束
@@ -36,16 +39,17 @@
       文案 当 lists.class_notes&&!lists.class_notes.length 还没有全班的设定。
       列表 全班设定表 绑 class_notes 当 lists.class_notes&&lists.class_notes.length
         列 note_id 编号
+        列 note_subject_label 科目
         列 note_kind 种类
         列 note_keywords 关键词
         列 note_brief 内容
         列 note_state 状态
         列 note_updated 更新时间
         列 note_by 写的人
-        动作 edit_note 打开 编辑设定 带 note_id 编辑
-        动作 teacher_note_disable 远程 带 note_id 当 row.note_state!=='停用' 停用
-        动作 teacher_note_enable 远程 带 note_id 当 row.note_state==='停用' 启用
-        动作 teacher_note_delete 远程 危险 带 note_id 删除
+        动作 edit_note 打开 编辑设定 带 note_id 当 row.can_edit==1 编辑
+        动作 teacher_note_disable 远程 带 note_id 当 row.can_edit==1&&row.note_state!=='停用' 停用
+        动作 teacher_note_enable 远程 带 note_id 当 row.can_edit==1&&row.note_state==='停用' 启用
+        动作 teacher_note_delete 远程 危险 带 note_id 当 row.can_edit==1 删除
       结束
     结束
     区域 预览
@@ -75,6 +79,7 @@
       文案 当 lists.class_relays&&!lists.class_relays.length 还没有全班的传达。
       列表 全班传达表 绑 class_relays 当 lists.class_relays&&lists.class_relays.length
         列 relay_id 编号
+        列 relay_subject_label 科目
         列 relay_urgency 紧急程度
         列 relay_voice 口吻
         列 relay_brief 要点
@@ -84,10 +89,10 @@
         列 relay_state_text 状态
         列 relay_updated 更新时间
         列 relay_by 写的人
-        动作 edit_relay 打开 编辑传达 带 relay_id 编辑
-        动作 teacher_relay_disable 远程 带 relay_id 当 row.relay_state_text!=='停用' 停用
-        动作 teacher_relay_enable 远程 带 relay_id 当 row.relay_state_text==='停用' 启用
-        动作 teacher_relay_delete 远程 危险 带 relay_id 删除
+        动作 edit_relay 打开 编辑传达 带 relay_id 当 row.can_edit==1 编辑
+        动作 teacher_relay_disable 远程 带 relay_id 当 row.can_edit==1&&row.relay_state_text!=='停用' 停用
+        动作 teacher_relay_enable 远程 带 relay_id 当 row.can_edit==1&&row.relay_state_text==='停用' 启用
+        动作 teacher_relay_delete 远程 危险 带 relay_id 当 row.can_edit==1 删除
       结束
       文案 当 lists.class_relay_states&&lists.class_relay_states.length 各学生的传达状态：
       列表 传达状态表 绑 class_relay_states 当 lists.class_relay_states&&lists.class_relay_states.length
@@ -104,6 +109,7 @@
   浮层 编辑设定 宽 560px 载入 teacher_note_open
     分组 主体 竖排 间距 12px
       字段 note_kind 控件 下拉 种类
+      字段 note_subject_scope 控件 下拉 适用范围（全部科目只有科目负责人能改）
       字段 note_keywords 提示 关键词卡才要填，逗号分隔，比如：ばかり,たばかり 关键词
       字段 note_content 控件 多行 提示 最多400字。学生看不到，只进AI老师的提示词 内容
       字段 note_once 控件 开关 只用于下一条回复（只对作者注有效）
@@ -116,6 +122,7 @@
 
   浮层 编辑传达 宽 600px 载入 teacher_relay_open
     分组 主体 竖排 间距 12px
+      字段 relay_subject_scope 控件 下拉 适用范围（全部科目只有科目负责人能改）
       字段 relay_point 控件 多行 提示 写要让学生明白什么（意图，不是台词），最多300字 要点
       字段 relay_urgency 控件 下拉 紧急程度（不选是尽快。顺便：话题沾边才说；尽快：一两轮内；立即：下一条就说）
       字段 relay_voice 控件 下拉 口吻（不选是以老师名义）

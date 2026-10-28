@@ -25,7 +25,7 @@
 # 「当」的条件里不能有空格；「提示」里不能有双引号（会截断输入框的 placeholder 属性，
 # 整个编辑页画不出来）。
 
-界面 自定义 教材导入 端 教师 载入 import_load
+界面 自定义 教材导入 端 教师 侧 管理 载入 import_load
   动作 import_home 远程 进入时 隐藏 刷新
   动作 import_poll 远程 隐藏 每隔 2 当 params.job&&shared.job&&shared.job.running 轮询
 
@@ -33,11 +33,12 @@
   # 字段只能放在「分组」里、分组不能套分组，所以新建表单拆成几个横排的分组
   分组 新建导入 当 !params.job&&!params.draft&&!params.manage
     文案 上传一本教材（pdf、docx、md、txt，20MB 以内）。后台按课切块、请模型抽出每课并映射到网站已有的条目和知识点（不新建），你逐课审阅后再导入成一个新的教材系列。
+    文案 课号前缀规则：日语科目用小写字母开头、只含小写字母和数字、不超过20个字；其他科目要以「科目编码.」开头，比如 math. 。系列代号和课号前缀全站唯一，已被别的系列（包括别的科目）占用时会提示换一个，建议先看下面的系列表有没有重名。
   结束
   分组 系列 横排 间距 12px 当 !params.job&&!params.draft&&!params.manage
     字段 series 宽 160px 提示 英文小写，比如mnn 系列代号
     字段 label 宽 200px 提示 教材页下拉里显示的名字 显示名
-    字段 prefix 宽 120px 提示 不填就用系列代号 课号前缀
+    字段 prefix 宽 120px 提示 小写字母开头，只含小写字母和数字（不填就用系列代号） 课号前缀
   结束
   分组 出处 横排 间距 12px 当 !params.job&&!params.draft&&!params.manage
     字段 source 宽 220px 提示 书名、出版社或网站 来源
