@@ -315,7 +315,17 @@ def test_trigger():
     check("触发表按界面名给出", 'const triggers = {"问老师": "teacher_send"};' in js, True)
     check("跑之前用 replaceState 清掉地址参数（不留历史）",
           'history.replaceState(null, "", "#" + encodeURIComponent(name));' in js, True)
-    check("「触发」排在「进入时」后面", js.index("await runTrigger(name)") > js.index("for (const a of acts)"), True)
+    check("「触发」排在「进入时」后面", js.index("await runTrigger(name, loaded)") > js.index("for (const a of acts)"), True)
+    # K112：浮层开着（地址有「浮层」）时参数是浮层的，不清——清了刷新浮层就关了
+    cut = js.index("async function runTrigger(")
+    body = js[cut:js.index("async function runEnter(", cut)]
+    check("地址有「浮层」时 runTrigger 不清地址参数",
+          body.index('if (!all["浮层"]) {') < body.index("history.replaceState(") < body.index("params.value = {};"), True)
+    # K112：载入刚为同样参数发过同一个动作，触发不再发（节点图点一次原先发两遍）
+    check("runLoader 把发出的动作名交给 runTrigger、同名不再发",
+          ("return loader;" in js, "const loaded = await runLoader(name);" in js,
+           "runLoader(route.value).then(loaded => runTrigger(route.value, loaded));" in js,
+           "act === loaded) return;" in body), (True, True, True, True))
     r2 = compile_ui(ui, backend="vue", options={"endpoints": {"teacher_state": "/teacher/state"}})
     check("触发的接口不存在：报 missing_endpoint",
           [i.code for i in r2.get("issues", []) if "触发" in i.message], ["missing_endpoint"])
