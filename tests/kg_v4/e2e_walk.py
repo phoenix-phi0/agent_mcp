@@ -570,6 +570,9 @@ def kg_mgmt_flow(t1, t2, t3, ck, marks):
     t1.wait_for_selector(".overlay", timeout=8000)
     t1.locator('.overlay label.field:has-text("类型") select').first.select_option(label="全部")
     t1.locator('.overlay button:has-text("生成")').first.click()
+    # 已知问题（K103s，断言不弱化）：全量走查里此步稳定失败，POST /kg/manage/export 报
+    # net::ERR_ALPN_NEGOTIATION_FAILED（服务端收不到）；单独跑正常，待查。
+    # 导出功能本身由 tests/kg_v4/test_kg_export.py 直接 HTTP 验证。
     try:
         t1.wait_for_function(
             "() => [...document.querySelectorAll('.overlay .dyn-v')]"

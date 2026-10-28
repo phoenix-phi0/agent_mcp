@@ -133,8 +133,10 @@
 
   浮层 编辑知识点 宽 520px 载入 kgm_point_open
     分组 主体 竖排 间距 12px
-      字段 kgp_code 当 !params.kgp_orig&&!params.code 提示 如math.linear_fn 编号（建后不能改）
-      显示 kgp_code 当 params.kgp_orig||params.code 编号
+      # K103s：params 在行上/节点图开浮层时恒空 → 改看 form.kgp_orig（载入回填；新建/重置为空）
+      字段 kgp_code 当 !form.kgp_orig 提示 如math.linear_fn 编号（建后不能改）
+      # 「显示」读 shared、不读 form，载入回填的是 form → 显示出来是空；改成文案（编号在表格行里看）
+      文案 当 form.kgp_orig 编号建后不能改（见表格里的编号列）。
       字段 kgp_title 提示 最长60字 名称
       # K103：行上/节点图开浮层时地址不带参数，「当 params…」恒假、说明永远不出；
       # 而载入（kgm_point_open）真会发请求并按 form 回填 → 改绑 form，说明就出来了
@@ -148,8 +150,8 @@
 
   浮层 编辑条目 宽 560px 载入 kgm_item_open
     分组 主体 竖排 间距 12px
-      字段 kgi_code 当 !params.kgi_orig 提示 如math.slope_formula 编号（建后不能改）
-      显示 kgi_code 当 params.kgi_orig 编号
+      字段 kgi_code 当 !form.kgi_orig 提示 如math.slope_formula 编号（建后不能改）
+      文案 当 form.kgi_orig 编号建后不能改（见表格里的编号列）。
       字段 kgi_name 提示 最长60字 名称
       字段 kgi_point 控件 下拉 选项来自 point_options 所属知识点
       字段 kgi_after 提示 可空 接在哪个形式后
