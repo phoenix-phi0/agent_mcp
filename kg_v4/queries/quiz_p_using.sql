@@ -1,0 +1,1 @@
+SELECT learner FROM quiz_progress WHERE subject_id = CAST(:subject_id AS INTEGER) AND (current_no = :question_no OR instr(',' || COALESCE(asked_nos, '') || ',', ',' || :question_no || ',') > 0) LIMIT 1

@@ -1,0 +1,1 @@
+INSERT INTO quiz_question (question_no, course, level, category, stem, options, answer, accepted, "explain", item_code, subject_id) VALUES (:question_no, :course, :level, :category, :stem, :options, :answer, :accepted, :explain, :item_code, CAST(:subject_id AS INTEGER))

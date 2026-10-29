@@ -28,6 +28,26 @@
     返回 {"ok": 1}
   结束
 
+  函数 是助手题号 subject_id code
+    如果 {subject_id} 等于 1
+      设 m1 = 匹配 {code} ^ta[0-9]+-[0-9]+$
+      如果 {m1.matched} 等于 是
+        返回 {"is_ta": 1}
+      结束
+      返回 {"is_ta": 0}
+    结束
+    设 sc = 查一值 app.db quiz_subject_code subject_id={subject_id}
+    设 pre = {sc 或}
+    如果 {pre} 为空
+      返回 {"is_ta": 0}
+    结束
+    设 m2 = 匹配 {code} ^{pre}\.ta[0-9]+-[0-9]+$
+    如果 {m2.matched} 等于 是
+      返回 {"is_ta": 1}
+    结束
+    返回 {"is_ta": 0}
+  结束
+
   函数 取轮大小 mode
     # 返回 整数，这一轮的题数
     # mode 等于 lesson 返回 5，否则返回 10
@@ -371,8 +391,17 @@
     设 sk = 0
     设 skn = {zz 或}
     设 seen = ,
+    设 kept = 0
     事务 app.db
-      设 w0 = 写库 app.db quiz_q_delete_all subject_id={sj.subject_id}
+      设 allq = 查询 app.db quiz_q_nos subject_id={sj.subject_id}
+      遍历 aq 于 {allq}
+        设 ta0 = 调用 是助手题号 subject_id={sj.subject_id} code={aq.question_no}
+        如果 {ta0.is_ta} 等于 1
+          设 kept = 计算 {kept} + 1
+        否则
+          设 w0 = 写库 app.db quiz_q_delete_one question_no={aq.question_no} subject_id={sj.subject_id}
+        结束
+      结束
       遍历 ln 于 {lines}
         设 mb = 匹配 {ln} ^\s*(#.*)?$
         如果 {mb.matched} 不等于 是
@@ -432,6 +461,10 @@
             报错 400 题号不能含逗号或空白
           结束
           设 pc = 调用 编号前缀检查 subject_id={sj.subject_id} code={f1}
+          设 tac = 调用 是助手题号 subject_id={sj.subject_id} code={f1}
+          如果 {tac.is_ta} 等于 1
+            报错 400 ta 格式的题号留给教师助手
+          结束
           设 ot = 查一行 app.db quiz_q_other_subject question_no={f1} subject_id={sj.subject_id}
           如果 {ot} 不为空
             报错 400 题号已被其他科目使用
@@ -472,7 +505,177 @@
       结束
       设 w2 = 写库 app.db quiz_p_fix_stale subject_id={sj.subject_id}
     结束
-    返回 {"ok": 1, "total": {total}, "imported": {imp}, "skipped": {sk}, "skipped_nos": "{skn}"}
+    返回 {"ok": 1, "total": {total}, "imported": {imp}, "skipped": {sk}, "skipped_nos": "{skn}", "kept": {kept}}
+  结束
+
+  公开 函数 追加题目 rows_json learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 chk = 匹配 {rows_json} ^\s*\[
+    如果 {chk.matched} 不等于 是
+      报错 400 题目列表不对
+    结束
+    设 rows = 解析JSON {rows_json}
+    设 nrows = 列表长度 {rows}
+    如果 {nrows} 小于 1 或 {nrows} 大于 20
+      报错 400 题目列表不对
+    结束
+    设 seenS = ,
+    遍历 r 于 {rows}
+      设 qn = 替换 {r.question_no 或} ^\s+|\s+$
+      设 lv = 替换 {r.level 或} ^\s+|\s+$
+      设 cg = 替换 {r.category 或} ^\s+|\s+$
+      设 st = 替换 {r.stem 或} ^\s+|\s+$
+      设 an = 替换 {r.answer 或} ^\s+|\s+$
+      设 ic = 替换 {r.item_code 或} ^\s+|\s+$
+      如果 {qn} 为空 或 {lv} 为空 或 {cg} 为空 或 {st} 为空 或 {an} 为空 或 {ic} 为空
+        报错 400 题库有坏题
+      结束
+      设 pt = ,{qn},
+      如果 {seenS} 包含 {pt}
+        报错 400 题库有坏题
+      结束
+      设 seenS = {seenS}{qn},
+      设 op = {r.options 或}
+      如果 {op} 不为空
+        设 texts = 按正则切分 {op} \^
+        设 n = 列表长度 {texts}
+        如果 {n} 小于 2 或 {n} 大于 6
+          报错 400 题库有坏题
+        结束
+        设 so = ^
+        遍历 tx 于 {texts}
+          设 tt = 替换 {tx} ^\s+|\s+$
+          如果 {tt} 为空
+            报错 400 题库有坏题
+          结束
+          设 tp = ^{tt}^
+          如果 {so} 包含 {tp}
+            报错 400 题库有坏题
+          结束
+          设 so = {so}{tt}^
+        结束
+        设 allowed = 截取 ABCDEF 1 {n}
+        设 up = 转大写 {an}
+        设 am = 匹配 {up} ^[A-F]$
+        如果 {am.matched} 不等于 是
+          报错 400 题库有坏题
+        结束
+        如果 {allowed} 不包含 {up}
+          报错 400 题库有坏题
+        结束
+      结束
+    结束
+    遍历 r 于 {rows}
+      设 qn = 替换 {r.question_no 或} ^\s+|\s+$
+      设 mc = 匹配 {qn} [,\s]
+      如果 {mc.matched} 等于 是
+        报错 400 题号不能含逗号或空白
+      结束
+    结束
+    遍历 r 于 {rows}
+      设 qn = 替换 {r.question_no 或} ^\s+|\s+$
+      设 pc = 调用 编号前缀检查 subject_id={sj.subject_id} code={qn}
+    结束
+    遍历 r 于 {rows}
+      设 qn = 替换 {r.question_no 或} ^\s+|\s+$
+      设 tac = 调用 是助手题号 subject_id={sj.subject_id} code={qn}
+      如果 {tac.is_ta} 不等于 1
+        报错 400 追加的题号必须是助手题号
+      结束
+    结束
+    遍历 r 于 {rows}
+      设 ic = 替换 {r.item_code 或} ^\s+|\s+$
+      设 ki = 调用 kg.取条目 code={ic} subject={sj.subject_id}
+      如果 {ki} 为空
+        报错 400 条目不存在
+      结束
+    结束
+    遍历 r 于 {rows}
+      设 qn = 替换 {r.question_no 或} ^\s+|\s+$
+      设 ex = 查一行 app.db quiz_q_exists question_no={qn}
+      如果 {ex} 不为空
+        报错 409 题号已存在
+      结束
+    结束
+    设 qnos = {zz 或}
+    设 cntw = 0
+    事务 app.db
+      遍历 r 于 {rows}
+        设 qn = 替换 {r.question_no 或} ^\s+|\s+$
+        设 an = 替换 {r.answer 或} ^\s+|\s+$
+        设 ic = 替换 {r.item_code 或} ^\s+|\s+$
+        设 row.question_no = {qn}
+        设 row.course = {r.course 或}
+        设 row.level = {r.level 或}
+        设 row.category = {r.category 或}
+        设 row.stem = {r.stem 或}
+        设 row.options = {r.options 或}
+        设 row.answer = {an}
+        设 row.accepted = {r.accepted 或}
+        设 row.explain = {r.explain 或}
+        设 row.item_code = {ic}
+        设 row.subject_id = {sj.subject_id}
+        设 w = 写库表 app.db quiz_q_append {row}
+        设 cntw = 计算 {cntw} + 1
+        如果 {qnos} 为空
+          设 qnos = {qn}
+        否则
+          设 qnos = {qnos},{qn}
+        结束
+      结束
+    结束
+    返回 {"ok": 1, "imported": {cntw}, "question_nos": "{qnos}"}
+  结束
+
+  公开 函数 删助手题目 question_nos learner? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
+    设 parts = 按正则切分 {question_nos} ,
+    设 lst = 解析JSON []
+    设 seenS = ,
+    遍历 p 于 {parts}
+      设 tq = 替换 {p} ^\s+|\s+$
+      如果 {tq} 不为空
+        设 pt = ,{tq},
+        如果 {seenS} 不包含 {pt}
+          设 seenS = {seenS}{tq},
+          设 lst = 列表加项 {lst} {tq}
+        结束
+      结束
+    结束
+    设 cnt = 列表长度 {lst}
+    如果 {cnt} 等于 0
+      报错 400 题号列表不能为空
+    结束
+    遍历 q1 于 {lst}
+      设 tac = 调用 是助手题号 subject_id={sj.subject_id} code={q1}
+      如果 {tac.is_ta} 不等于 1
+        报错 400 只能删助手题目
+      结束
+    结束
+    遍历 q2 于 {lst}
+      设 qr = 查一行 app.db quiz_q_by_no question_no={q2} subject_id={sj.subject_id}
+      如果 {qr} 为空
+        报错 404 没有这道题
+      结束
+    结束
+    遍历 q3 于 {lst}
+      设 pa = 查一行 app.db quiz_pa_by_no question_no={q3} subject_id={sj.subject_id}
+      如果 {pa} 不为空
+        报错 409 已有学生做过这道题，不能删除
+      结束
+    结束
+    遍历 q4 于 {lst}
+      设 pu = 查一行 app.db quiz_p_using question_no={q4} subject_id={sj.subject_id}
+      如果 {pu} 不为空
+        报错 409 有学生正在做这道题，不能删除
+      结束
+    结束
+    事务 app.db
+      遍历 q5 于 {lst}
+        设 w = 写库 app.db quiz_q_delete_one question_no={q5} subject_id={sj.subject_id}
+      结束
+    结束
+    返回 {"ok": 1, "deleted": {cnt}}
   结束
 
   公开 函数 取做题状态 learner current_role? auth_mode? subject?
