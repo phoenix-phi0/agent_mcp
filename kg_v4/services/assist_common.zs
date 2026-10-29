@@ -7,10 +7,13 @@
     返回 {r}
   结束
 
-  函数 学生范围 subject_id
+  公开 函数 学生范围 learner? current_role? auth_mode? subject?
     设 blank = {zz 或}
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
     设 al = 调用 account.列学生
     设 ss = 调用 subject.列科目学生 subject_id={subject_id}
+    设 cnt = 0
     设 out = {blank}
     遍历 s 于 {al.students}
       设 hit = 0
@@ -20,6 +23,7 @@
         结束
       结束
       如果 {hit} 等于 1
+        设 cnt = 计算 {cnt} + 1
         设 it = {"username": "{s.username}", "display_name": "{s.display_name}", "status": "{s.status}", "last_at": "{s.last_at}"}
         如果 {out} 为空
           设 out = {it}
@@ -28,17 +32,17 @@
         结束
       结束
     结束
-    返回 [{out}]
+    返回 {"total": {cnt}, "students": [{out}]}
   结束
 
   公开 函数 匹配学生 name learner? current_role? auth_mode? subject?
     设 blank = {zz 或}
     设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 subject_id = {sj.subject_id}
-    设 r = 调用 学生范围 subject_id={subject_id}
+    设 r = 调用 学生范围 subject={subject_id}
     设 roster = {blank}
     设 i = 0
-    遍历 s 于 {r}
+    遍历 s 于 {r.students}
       如果 {i} 小于 10
         如果 {roster} 为空
           设 roster = {s.display_name}（{s.username}）
@@ -73,7 +77,7 @@
     设 d2 = {blank}
     设 u3 = {blank}
     设 d3 = {blank}
-    遍历 s 于 {r}
+    遍历 s 于 {r.students}
       设 lu = 查一值 app.db assist_common_lower s={s.username}
       设 dl = 查一值 app.db assist_common_len t={s.display_name}
       设 it = {"username": "{s.username}", "display_name": "{s.display_name}", "status": "{s.status}"}
