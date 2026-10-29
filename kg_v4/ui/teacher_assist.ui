@@ -34,7 +34,7 @@
 
   布局 占满 横排
     区域 对话
-      消息流 talk 占满
+      消息流 talk 占满 按钮 assist_draft_confirm,assist_draft_discard,assist_draft_undo
       文案 当 pending==='assist_send' 助手正在查数据并整理回答…（生成草稿一般要30到60秒）
       文案 当 pending==='assist_draft_confirm' 正在写入…
       文案 当 pending==='assist_draft_undo' 正在撤销…

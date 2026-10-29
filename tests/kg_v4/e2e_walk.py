@@ -25,6 +25,8 @@
       「production is not defined」告警，见 kg_v4/README.md）
   3.  教师端 6 个界面都能打开（学情、教师助手、学生管理、科目管理*、AI老师设定、教材导入；
       图谱管理** 合并后是第 7 个）
+  3b. 教师助手草稿（M4-P1）：发「出3道题」→ 消息里出现 确认 / 放弃 按钮 → 点确认 → 待确认列表
+      状态「已执行」→ 撤销 →「已撤销」；发传达草稿 → 放弃 →「已放弃」（假模型走 DSL_MOCK_SCRIPT）
   4.  导航分组：学生端右侧「看看」、教师端右侧「管理」
   5.* 科目管理流程：t1 建科目（私有草稿）→ 成员浮层加 t2 协作 → 分配 s1 →
       启用 → s1 顶栏可切到新科目 → t2 在该科目行只见「成员」→ t1 停用后
@@ -156,12 +158,13 @@ def build_workspace(tmp, src, kg_mgmt=False):
     return proj
 
 
-def start_server(proj, port, log):
-    """gen run --登录，离线假模型，临时端口。返回 Popen（独立进程组）。"""
+def start_server(proj, port, log, env=None):
+    """gen run --登录，离线假模型，临时端口。返回 Popen（独立进程组）。env：额外环境变量（如 DSL_MOCK_SCRIPT）。"""
     proc = subprocess.Popen(
         [str(REPO_PY), "-m", "gen", "run", str(proj), "--登录",
          "--port", str(port), "--不开浏览器", "--host", "127.0.0.1"],
-        cwd=REPO, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        cwd=REPO, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+        env={**os.environ, **(env or {})})
     deadline = time.time() + 60
     while time.time() < deadline:
         if proc.poll() is not None:
@@ -375,6 +378,75 @@ def walk_teacher(page, base, ck, marks, subject_mgmt, kg_mgmt=False):
         err = visit(page, n, marks)
         ck(not err, f"教师端「{n}」打开且无 JS 错误", err)
     return kg_ok
+
+
+def write_assist_mock(proj, tmp):
+    """教师助手段用的假模型规则（DSL_MOCK_SCRIPT）：意图分类和草稿生成各回一份合法 JSON。
+    出题要用库里真有的条目编号，所以建好库之后从 app.db 取一个。→ 规则文件路径"""
+    con = sqlite3.connect(proj / "app.db")
+    try:
+        row = con.execute("SELECT code FROM kg_item ORDER BY code LIMIT 1").fetchone()
+    finally:
+        con.close()
+    if not row:
+        raise RuntimeError("库里没有条目，出题草稿造不出来")
+    qs = [{"stem": f"走查题{i}", "options": ["甲", "乙", "丙"], "answer": "B", "explain": "走查", "item_code": row[0]}
+          for i in (1, 2, 3)]
+    rules = [
+        {"when": ["意图分类器", "发传达"],
+         "reply": json.dumps({"intent": "make_draft", "draft_kind": "relay_add", "student": "s1"}, ensure_ascii=False)},
+        {"when": ["意图分类器", "出3道题"],
+         "reply": json.dumps({"intent": "make_draft", "draft_kind": "quiz_add", "count": "3"}, ensure_ascii=False)},
+        {"when": ["item_code", "questions"],
+         "reply": json.dumps({"title": "走查出3道题", "questions": qs}, ensure_ascii=False)},
+        {"when": ["must_info", "urgency"],
+         "reply": json.dumps({"title": "给s1发传达", "students": ["s1"], "must_info": "周五小测", "facts": "",
+                              "urgency": "normal", "rounds": 2}, ensure_ascii=False)},
+    ]
+    f = tmp / "assist_mock.json"
+    f.write_text(json.dumps({"rules": rules}, ensure_ascii=False), encoding="utf-8")
+    return f
+
+
+def assist_send(page, text):
+    box = page.locator("textarea").last
+    box.fill(text)
+    page.locator("button", has_text="发送").last.click()
+
+
+def assist_flow(t1, ck, marks):
+    """M4-P1：教师助手草稿。发「出3道题」→ 消息里出现草稿按钮 → 点确认 → 待确认列表变「已执行」→ 撤销 → 「已撤销」；
+    发传达草稿 → 放弃 → 「已放弃」。假模型走 write_assist_mock 的规则。"""
+    name = "教师助手草稿"
+    try:
+        t1.evaluate("location.hash = encodeURIComponent('教师助手')")
+        wait_screen(t1, "教师助手")
+        t1.wait_for_timeout(1500)
+        assist_send(t1, "出3道题")
+        btn = t1.locator(".smsg-actions button", has_text="确认")
+        btn.first.wait_for(timeout=90000)
+        labels = t1.locator(".smsg-actions button").all_inner_texts()
+        ck("确认" in labels and "放弃" in labels, f"{name}：出题草稿消息里有 确认 / 放弃 按钮", labels)
+        t1.get_by_text("待确认", exact=True).first.wait_for(timeout=8000)
+        ck(t1.locator("table tbody tr, .list-row, tr").filter(has_text="待确认").count() >= 1,
+           f"{name}：右边待确认列表出现这份草稿（状态待确认）")
+        btn.first.click()
+        t1.locator("tr", has_text="已执行").first.wait_for(timeout=30000)
+        ck(True, f"{name}：点确认后列表状态变「已执行」")
+        t1.locator("tr", has_text="已执行").first.get_by_text("撤销", exact=True).click(timeout=8000)
+        t1.locator("tr", has_text="已撤销").first.wait_for(timeout=30000)
+        ck(True, f"{name}：点撤销后列表状态变「已撤销」")
+        # 传达草稿 → 放弃
+        assist_send(t1, "给s1发传达：周五小测")
+        t1.locator("tr", has_text="待确认").first.wait_for(timeout=90000)
+        t1.locator("tr", has_text="待确认").first.get_by_text("放弃", exact=True).click(timeout=8000)
+        t1.locator("tr", has_text="已放弃").first.wait_for(timeout=30000)
+        ck(True, f"{name}：传达草稿点放弃后状态变「已放弃」")
+    except Exception as e:
+        ck(False, name, f"{type(e).__name__}: {str(e)[:300]}")
+    err = drain_errors(marks)
+    ck(not err, f"{name}流程无 JS 错误", err)
+    t1.evaluate("location.hash = ''")
 
 
 WITHDRAW_SERIES = "wk117"
@@ -752,7 +824,7 @@ def main(argv=None):
         proj = build_workspace(tmp, Path(a.src), kg_mgmt=kg_mgmt)
         seed_imported_series(proj)
         with open(tmp / "server.log", "w") as log:
-            proc = start_server(proj, port, log)
+            proc = start_server(proj, port, log, env={"DSL_MOCK_SCRIPT": str(write_assist_mock(proj, tmp))})
             base = f"http://127.0.0.1:{port}"
             print("服务起来了")
             with sync_playwright() as pw:
@@ -778,6 +850,7 @@ def main(argv=None):
                 snapshot(marks)      # 登录前 401 跳登录页是预期行为，不计 JS 错误
                 kg_mgmt = walk_teacher(t1, base, ck, marks, subject_mgmt, kg_mgmt)
                 import_withdraw_flow(t1, ck, marks)
+                assist_flow(t1, ck, marks)
                 if subject_mgmt:
                     subject_flow(t1, base, ck, marks)
                     student_switch(s1, ck, marks)
