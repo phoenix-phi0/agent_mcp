@@ -1204,6 +1204,7 @@
       结束
     结束
     设 can = 转数字 0
+    设 note = {zz 或}
     如果 {found} 等于 1
       如果 {series_code} 不等于 hanabira
         设 can = 转数字 1
@@ -1211,8 +1212,12 @@
       设 head = 系列{series_code}（{fname}）：{flc}课。在用，教材页的下拉里能选到。
     否则
       设 head = 没有这个系列（{series_code}），可能已经撤下了。
+      设 wn = 查一值 app.db textbook_import_task_withdrawn_count series_code={series_code} subject_id={subject_id}
+      如果 {wn} 大于 0
+        设 note = 撤下了：这个系列已经撤下，教材页的下拉里不再有它。
+      结束
     结束
-    返回 {"series_view": {"code": "{series_code}", "head": "{head}", "note": "", "can_withdraw": {can}, "back": "#%E6%95%99%E6%9D%90%E5%AF%BC%E5%85%A5"}}
+    返回 {"series_view": {"code": "{series_code}", "head": "{head}", "note": "{note}", "can_withdraw": {can}, "back": "#%E6%95%99%E6%9D%90%E5%AF%BC%E5%85%A5"}}
   结束
 
   公开 函数 导入视图 task_id? draft_id? series_code? learner? current_role? auth_mode? subject?
