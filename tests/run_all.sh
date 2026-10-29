@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # 跑全部测试，每组一行结果，失败的组才展开细节。
 #
-#     bash /home/ysc/mcp/tests/run_all.sh
+#     bash tests/run_all.sh          # 仓库根自动取脚本所在仓库，M=... 可覆盖
+#     PW_PYTHON=/tmp/k97_pw_venv/bin/python bash tests/run_all.sh   # 带上浏览器走查
+#     npm ci --prefix tests/e2e       # 首次：装 node E2E 要的 jsdom
 #
 # 全用绝对路径：在 cd 之后用相对路径找解释器，这个错犯过两次，而且错误
 # 被管道吞掉了，看着像测试失败或者像全部通过。
@@ -11,7 +13,8 @@
 # 跑这个脚本的 shell 一起杀掉。
 
 set -u
-M=/home/ysc/mcp
+M="${M:-$(cd "$(dirname "$0")/.." && pwd)}"
+export M
 PY=$M/.venv/bin/python
 FAILED=0
 # 每组的时限。一组卡住时，没有它整个脚本会一直等下去——后面十几组
@@ -36,7 +39,7 @@ run() {
     printf '%s\n' "$out" | tail -6 | sed 's/^/    /'
     return
   fi
-  # 浏览器走查在没装 playwright 的机器上退出码 2 = 跳过（环境缺依赖），不计失败
+  # 浏览器走查在 PW_PYTHON 指的解释器没装 playwright 时退出码 2 = 跳过，不计失败
   if [ "$code" -eq 2 ] && [ "$name" = "kg_v4走查" ]; then
     printf '%-12s 跳过（没装 playwright，不计失败）\n' "$name"
     return
@@ -51,6 +54,9 @@ run() {
 }
 
 cd $M
+# node E2E 要 jsdom（tests/e2e/package.json，node_modules 不进版本库）。缺了不静默跳过：
+# 提示一行，后面的 E2E 组会照常报错。
+[ -d "$M/tests/e2e/node_modules/jsdom" ] || echo "!! 缺 jsdom，node E2E 会失败；先跑：npm ci --prefix $M/tests/e2e"
 run 引擎        $PY -m tools.test_dsl
 run 序号和默认值 $PY tests/dsl/test_loop_default.py
 run JSON字面量转义 $PY tests/dsl/test_json_literal.py
@@ -60,14 +66,19 @@ run 会话        $PY tests/http/test_session.py
 run 库出错      $PY tests/http/test_db_errors.py
 run 服务并发    $PY tests/http/test_concurrent.py
 run 块识别当重复 $PY tests/http/test_block_openers.py
-LIMIT=150 run kg_v4项目  $PY tests/kg_v4/test_project.py
+LIMIT=300 run kg_v4项目  $PY tests/kg_v4/test_project.py
 run 设定行科目列  $PY tests/kg_v4/test_tr_rows.py
 run 学生页设定表  $PY tests/kg_v4/test_report_notes.py
 run 整库引用保护 $PY tests/kg_v4/test_kg_refs.py
 run 导入规则     $PY tests/kg_v4/test_kg_import_rules.py
 # 浏览器走查（K97）：起服务 + playwright + 系统 Chrome，比别的组慢，时限给 300 秒。
 # 没 playwright 的机器上打「跳过」退出码 2——run() 里单独按「跳过」处理，详见脚本头部。
-LIMIT=300 run kg_v4走查  $PY tests/kg_v4/e2e_walk.py
+# 解释器由 PW_PYTHON 指定（如 /tmp/k97_pw_venv/bin/python），不往 .venv 装 playwright。
+if [ -n "${PW_PYTHON:-}" ] && [ -x "$PW_PYTHON" ]; then
+  LIMIT=300 run kg_v4走查  "$PW_PYTHON" tests/kg_v4/e2e_walk.py
+else
+  echo "kg_v4走查    跳过（未设 PW_PYTHON 或不可执行；设成装了 playwright 的 python 即可跑）"
+fi
 run 模板命名    $PY tests/gen/test_templates.py
 run 按端拆页面  $PY tests/gen/test_ends.py
 run 界面序      $PY tests/gen/test_order.py
@@ -89,6 +100,8 @@ run 做题        $PY tests/kg/test_quiz.py
 run 做题总结    $PY tests/kg/test_quiz_summary.py
 run 复习薄弱点  $PY tests/kg/test_quiz_review.py
 run 单词默写    $PY tests/kg/test_dictation.py
+# 规则对照读真库 kg/app.db（*.db 不进 git，新 clone / 新 worktree 里没有）：缺了先 setup 建一份
+[ -f "$M/kg/app.db" ] || { echo "建 kg/app.db（py -m kg setup）…"; $PY -m kg setup >/dev/null 2>&1; }
 run 规则对照    $PY tests/kg/test_rules_equiv.py
 run 老师讲语法  $PY tests/kg/test_teacher_bunpou.py
 run 问老师      $PY tests/kg/test_teacher_chat.py

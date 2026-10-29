@@ -25,7 +25,7 @@ const fs = require("fs");
 const net = require("net");
 const { JSDOM } = require("jsdom");
 
-const MCP = "/home/ysc/mcp";
+const MCP = process.env.M || require("path").resolve(__dirname, "../..");
 const PY = MCP + "/.venv/bin/python";
 const PROJ = "/tmp/e2e_review";
 const PORT = 8195;

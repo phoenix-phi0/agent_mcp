@@ -14,7 +14,7 @@ const { execFileSync, spawn } = require("child_process");
 const fs = require("fs");
 const { JSDOM } = require("jsdom");
 
-const MCP = "/home/ysc/mcp";
+const MCP = process.env.M || require("path").resolve(__dirname, "../..");
 const PY = MCP + "/.venv/bin/python";
 const PROJ = "/tmp/e2e_auth";
 // 端口可配：8197 常年跑着 kg 的常驻服务，早先写死 8197 时这一组总是起不来。

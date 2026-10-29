@@ -38,7 +38,7 @@ const fs = require("fs");
 const net = require("net");
 const { JSDOM, VirtualConsole } = require("jsdom");
 
-const MCP = "/home/ysc/mcp";
+const MCP = process.env.M || require("path").resolve(__dirname, "../..");
 const PY = MCP + "/.venv/bin/python";
 const PROJ = "/tmp/e2e_multiuser";
 const PORT = Number(process.env.MULTIUSER_E2E_PORT || 8186);

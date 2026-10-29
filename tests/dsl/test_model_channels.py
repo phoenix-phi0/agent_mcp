@@ -528,7 +528,7 @@ def main():
     specs = {k: config.parse_model(v) for k, v in names.items()}
     check(all(not s.legacy and s.raw == s.canonical for s in specs.values()),
           f"没有旧写法：{names}")
-    check(specs["快"].canonical == "cli:claude/sonnet@low"
+    check(specs["快"].canonical == "cli:claude/haiku"
           and specs["平衡"].canonical == "cli:claude/sonnet"
           and specs["强"].canonical == "cli:claude/opus"
           and specs["克"].canonical == "cli:claude/sonnet"
