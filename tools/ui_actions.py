@@ -63,7 +63,8 @@ def actions_of(project):
     """→ 远程动作列表，按文件与页面顺序。每项：
     {动作, 界面, 端, 表单, lists, state, 带, 触发时机, 文件, 行}
     「动作 <名> 远程」是按钮发起的请求；界面/浮层上的「载入 x」「触发 x」和字段的「改时 x」也是一次远程调用
-    （带着地址参数进来时自动跑，tools/ui.py 的 check 和 gen build 都按动作名对 endpoints），一并提取。"""
+    （带着地址参数进来时自动跑，tools/ui.py 的 check 和 gen build 都按动作名对 endpoints），一并提取。
+    消息流「按钮 a,b」白名单里的动作是消息上的按钮点出的请求，也提取。"""
     from tools.ui import parse
 
     out = []
@@ -94,6 +95,16 @@ def actions_of(project):
                             "带": "", "触发时机": f"被「{word} {name}」引用（进页面 / 值一改就调）",
                             "文件": f.name, "行": n.line,
                         }
+                # 消息流「按钮 a,b」：后端回的消息上的按钮点了调这些动作（带的键在消息的 carry 里）
+                if n.kind == "消息流":
+                    for name in [x.strip() for x in (n.buttons or "").split(",") if x.strip()]:
+                        if name not in seen:
+                            seen[name] = {
+                                "动作": name, "界面": s.name, "端": s.audience or "",
+                                "表单": keys["表单"], "lists": keys["lists"], "state": keys["state"],
+                                "带": "消息的 carry", "触发时机": f"消息流「{n.name}」里消息上的按钮",
+                                "文件": f.name, "行": n.line,
+                            }
             out.extend(seen.values())
     return out
 

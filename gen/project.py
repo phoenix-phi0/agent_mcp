@@ -72,6 +72,7 @@ BLOCKING = {
     "syntax", "unknown_field", "untyped", "dup_screen", "path_conflict",
     "missing_endpoint", "not_screen", "empty_when", "unknown_entity",
     "unknown_screen", "unknown_overlay", "carry_without_goto",
+    "buttons_not_stream", "empty_button",
 }
 
 SAMPLE = """\

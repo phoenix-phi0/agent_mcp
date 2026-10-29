@@ -558,6 +558,126 @@ def test_state_lists_sync():
     check("响应同时带 lists 时 lists 覆盖 state 同名键", got.get("second"), [{"label": "新"}])
 
 
+def test_msg_actions():
+    print("\n[消息流「按钮」：消息带按钮（E1）]")
+    from tools.ui import dump
+    ui = ("界面 自定义 助手\n"
+          "  消息流 talk 占满 按钮 draft_confirm,draft_drop\n"
+          "  分组 底 底栏\n"
+          "    字段 content 控件 多行\n"
+          "    动作 send 提交 远程 发送\n"
+          "  结束\n"
+          "结束\n"
+          "界面 自定义 别处\n"
+          "  消息流 chat 占满\n"
+          "结束\n")
+    ss = parse(ui)
+    st = ss[0].children[0]
+    check("「按钮 a,b」进 buttons，不进名字、标签；占满照旧",
+          (st.kind, st.name, st.label, st.buttons, st.has("占满")),
+          ("消息流", "talk", "talk", "draft_confirm,draft_drop", True))
+    check("dump 带「按钮=…」", "按钮=draft_confirm,draft_drop" in dump(ss), True)
+    eps = {"send": "/send", "draft_confirm": "/d/ok", "draft_drop": "/d/drop"}
+    r = compile_ui(ui, backend="vue", fields={"content": "文本"}, options={"endpoints": eps})
+    # 两个界面各一条流会出 ambiguous_stream 那条提示（不挡编译），跟按钮无关，排除
+    check("编译没有 issue（白名单里的动作不用另写「动作 … 远程」）",
+          [i.code for i in r.get("issues", []) if i.code != "ambiguous_stream"], [])
+    js = r["result"]["files"]["app.js"]
+    css = r["result"]["files"]["style.css"]
+    check("白名单按消息流名生成：只有写了按钮的 talk，没写的 chat 不在表里",
+          'const streamActions = {"talk": ["draft_confirm", "draft_drop"]};' in js, True)
+    check("talk 的消息下画按钮：v-for 过 msgActions、点了 onMsgAction，标签走 {{ }} 转义",
+          ("msgActions('talk', m)" in js, "@click=\"onMsgAction('talk', a)\"" in js,
+           "{{ a.label || a.action }}" in js, 'class="smsg-actions"' in js), (True, True, True, True))
+    check("kind：primary / danger / 其余普通按钮；请求中锁住",
+          ":class=\"a.kind === 'primary' ? 'btn-primary' : (a.kind === 'danger' ? 'btn-danger' : 'btn-ghost')\"" in js
+          and ':disabled="busy"' in js, True)
+    check("带按钮的消息加 smsg-card；样式表有 .smsg-card / .smsg-actions",
+          ("'smsg-card'" in js, ".smsg-card {" in css, ".smsg-actions {" in css), (True, True, True))
+    check("没写按钮的 chat 流照旧：不调 msgActions",
+          "msgActions('chat'" in js, False)
+    check("onMsgAction 生成、导出给模板", "async function onMsgAction(stream, a)" in js
+          and ", msgActions, onMsgAction" in js, True)
+
+    plain_ui = "界面 自定义 甲\n  消息流 chat 占满\n  动作 send 提交 远程 发\n结束\n"
+    plain = compile_ui(plain_ui, backend="vue", options={"endpoints": {"send": "/s"}})["result"]["files"]
+    check("对照：没写「按钮」的项目一行相关代码、一条相关样式都不生成",
+          ("msgActions" in plain["app.js"], "onMsgAction" in plain["app.js"],
+           "streamActions" in plain["app.js"], "smsg-card" in plain["style.css"],
+           "smsg-actions" in plain["style.css"]), (False, False, False, False, False))
+    check("对照：没写按钮的消息流还是原来那行 :class",
+          ":class=\"'smsg-' + (m.kind || 'text')\">\n<span class=\"who\">" in plain["app.js"], True)
+
+    miss = compile_ui(ui, backend="vue", fields={"content": "文本"},
+                      options={"endpoints": {"send": "/send", "draft_confirm": "/d/ok"}})
+    check("白名单里的动作没有接口：报 missing_endpoint，点名是哪个",
+          [(i.code, "draft_drop" in i.message) for i in miss["issues"] if i.code != "ambiguous_stream"],
+          [("missing_endpoint", True)])
+    empty = compile_ui("界面 自定义 甲\n  消息流 chat 按钮 a,,b\n结束\n", backend="vue",
+                       options={"endpoints": {"a": "/a", "b": "/b"}})
+    check("白名单里有空名字（a,,b）：报 empty_button", [i.code for i in empty["issues"]], ["empty_button"])
+    bare = compile_ui("界面 自定义 甲\n  消息流 chat 占满 按钮\n结束\n", backend="vue")
+    check("行尾只写「按钮」没写动作（被当成标签）：报 empty_button",
+          [i.code for i in bare["issues"]], ["empty_button"])
+    blank = compile_ui("界面 自定义 甲\n  消息流 chat 按钮 ,\n结束\n", backend="vue")
+    bjs = blank["result"]["files"]["app.js"]
+    check("白名单全是空名（按钮 ,）：报 empty_button，模板和函数两边都不生成（不会调到不存在的 msgActions）",
+          ([i.code for i in blank["issues"]], "msgActions" in bjs), (["empty_button"], False))
+    wrong = compile_ui("界面 自定义 甲\n  显示 x 按钮 a 标题\n结束\n", backend="vue",
+                       options={"endpoints": {"a": "/a"}})
+    check("「按钮」写在消息流以外：报 buttons_not_stream",
+          [i.code for i in wrong["issues"]], ["buttons_not_stream"])
+    from gen.project import BLOCKING
+    check("这几种都挡住 gen build", {"missing_endpoint", "empty_button", "buttons_not_stream"} <= BLOCKING, True)
+
+    # 行为：把生成的 msgActions / onMsgAction 抠出来在 node 里跑
+    import shutil, subprocess, json as _json
+    node = shutil.which("node")
+    a = js.find("const streamActions")
+    b = js.find("\n    }\n", js.find("async function onMsgAction"))
+    if not node or a < 0 or b < a:
+        print("  - 没有 node，跳过行为检查")
+        return
+    harness = (
+        "const posted=[], applied=[], pushed=[];\n"
+        "const endpoints={send:'/send', draft_confirm:'/d/ok', draft_drop:'/d/drop', evil:'/evil'};\n"
+        "const current={value:{name:'助手'}}, route={value:'助手'}, inflight={value:{}};\n"
+        "const form={value:{content:'草稿说明', draft_id:'表单里的'}}, params={value:{subject:'s1', '浮层':'x'}};\n"
+        "async function postTo(url, body){ posted.push([url, body]); return {messages:[{who:'助手', text:'已确认'}]}; }\n"
+        "function applyResponse(r){ applied.push(r); }\n"
+        "function pushMessages(s, arr){ pushed.push([s, arr]); }\n"
+        "function showNotice(){}\n"
+        + js[a:b + 6] +
+        "\n(async () => {\n"
+        "  const m = {who:'助手', text:'草稿', actions:[\n"
+        "    {label:'确认', action:'draft_confirm', carry:{draft_id:7, n:[1,2]}, kind:'primary'},\n"
+        "    {label:'越权', action:'evil'}, {label:'坏的'}, null,\n"
+        "    {label:'放弃', action:'draft_drop', carry:{draft_id:7}, kind:'danger'}]};\n"
+        "  const shown = msgActions('talk', m).map(x => x.action);\n"
+        "  const other = msgActions('chat', m).length;\n"
+        "  const none = msgActions('talk', {who:'a', text:'b'}).length;\n"
+        "  await onMsgAction('talk', m.actions[0]);\n"
+        "  await onMsgAction('talk', {label:'越权', action:'evil'});\n"
+        "  await onMsgAction('chat', m.actions[4]);\n"
+        "  console.log(JSON.stringify({shown, other, none, posted, applied: applied.length, left: inflight.value}));\n"
+        "})();\n")
+    p = subprocess.run([node, "-e", harness], capture_output=True, text=True, timeout=30)
+    try:
+        got = _json.loads(p.stdout.strip().splitlines()[-1])
+    except Exception:
+        got = {"错误": (p.stdout + p.stderr)[-400:]}
+    check("只画白名单里的动作（越权的、没 action 的、null 都滤掉），顺序照后端给的",
+          got.get("shown"), ["draft_confirm", "draft_drop"])
+    check("别的流（没写按钮）、没有 actions 的消息：一个都不画",
+          (got.get("other"), got.get("none")), (0, 0))
+    check("点「确认」：发到 draft_confirm 的接口，form = 表单 + 地址参数（去掉浮层）+ carry（carry 盖掉同名键）",
+          got.get("posted"),
+          [["/d/ok", {"action": "draft_confirm",
+                      "form": {"content": "草稿说明", "draft_id": 7, "subject": "s1", "n": [1, 2]}}]])
+    check("白名单外的动作（evil，接口其实存在）、别的流上的点击：都不发请求；返回交给 applyResponse 一次、锁放开",
+          (len(got.get("posted") or []), got.get("applied"), got.get("left")), (1, 1, {}))
+
+
 # ----------------------------------------------------------------------
 
 
@@ -581,6 +701,7 @@ def main() -> int:
         test_audience,
         test_order_narrow,
         test_state_lists_sync,
+        test_msg_actions,
     ]:
         try:
             fn()

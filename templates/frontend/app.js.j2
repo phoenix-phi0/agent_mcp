@@ -27,6 +27,8 @@
 <% set nav_sides = nav_sides if nav_sides is defined else [] %>
 <% set has_poll = has_poll if has_poll is defined else false %>
 <% set has_row_remote = has_row_remote if has_row_remote is defined else false %>
+<% set has_msg_actions = has_msg_actions if has_msg_actions is defined else false %>
+<% if stream_actions_json is not defined %><% set stream_actions_json = "{}" %><% endif %>
 <% set nav_logout = nav_logout if nav_logout is defined else false %>
 <% set has_me = has_me if has_me is defined else false %>
 <% set has_logout = has_logout if has_logout is defined else false %>
@@ -853,6 +855,45 @@ const _app = createApp({
       }
     }
 <% endif %>
+<% if has_msg_actions %>
+    // 消息上的按钮（消息流「按钮 a,b」，见 tools/ui.py）。消息流名 -> 白名单：后端
+    // 回的 m.actions 里动作名不在这张表里的不画、点了也不发——消息里有模型写的
+    // 东西，不能回一个任意的动作名就把它调了。
+    const streamActions = <%= stream_actions_json %>;
+    function msgActions(stream, m) {
+      const allow = streamActions[stream] || [];
+      if (!m || !Array.isArray(m.actions)) return [];
+      return m.actions.filter(a => a && typeof a.action === "string" && allow.includes(a.action));
+    }
+    // 点了跟行上的「远程 带 id」一样：锁住这个界面，表单、地址参数照样带上，
+    // carry 最后合进去、以它为准（草稿的 id）。返回走 applyResponse，请求回来时
+    // 人已经切走了就不往别的界面上放。
+    async function onMsgAction(stream, a) {
+      if (!a || !(streamActions[stream] || []).includes(a.action)) return;
+      const screen = current.value.name;
+      if (inflight.value[screen]) return;
+      const ep = typeof endpoints !== "undefined" ? endpoints[a.action] : null;
+      if (!ep) { console.log("msg action", a.action, a.carry); return; }
+      const payload = JSON.parse(JSON.stringify(form.value));
+      for (const [k, v] of Object.entries(params.value || {})) {
+        if (k !== "浮层") payload[k] = v;
+      }
+      if (a.carry && typeof a.carry === "object" && !Array.isArray(a.carry)) {
+        Object.assign(payload, JSON.parse(JSON.stringify(a.carry)));
+      }
+      inflight.value = { ...inflight.value, [screen]: a.action };
+      try {
+        const resp = await postTo(ep, { action: a.action, form: payload });
+        if (route.value === screen) applyResponse(resp);
+      } catch (e) {
+        if (typeof pushMessages === "function") pushMessages(stream, [{ who: "出错", text: String(e), kind: "no" }]);
+        else showNotice(String(e), "no");
+      } finally {
+        const { [screen]: _done, ...rest } = inflight.value;
+        inflight.value = rest;
+      }
+    }
+<% endif %>
 <% if has_poll %>
     // 「每隔 N」的动作：界面开着、「当」成立时由 <zs-poll> 定时调这里。悄悄
     // 发——不锁按钮、不清输入框、不摆占位：人在这页上照常点别的，后台
@@ -1286,7 +1327,7 @@ const _app = createApp({
 <% endif %>
     }
 <% endif %>
-    return { route, params, forms, form, rowsOf, lists, notice, nav, PAGE, AUTH_SCREENS, current<% if has_me %>, me<% endif %><% if has_subject_switch %>, switchSubject<% endif %>, visible, busy, pending, go, isHref, hrefOf, targetOf, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_row_remote %>, onRowRemote<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
+    return { route, params, forms, form, rowsOf, lists, notice, nav, PAGE, AUTH_SCREENS, current<% if has_me %>, me<% endif %><% if has_subject_switch %>, switchSubject<% endif %>, visible, busy, pending, go, isHref, hrefOf, targetOf, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_row_remote %>, onRowRemote<% endif %><% if has_msg_actions %>, msgActions, onMsgAction<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
   },
   template: `
 {#- 顶部导航。两种来路：

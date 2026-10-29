@@ -162,6 +162,11 @@ nav.nav-role-teacher a.active { background:#b4690e; border-color:#b4690e; }
 /* 消息带的链接（老师给的「去做题」）：单独一行，看得出能点 */
 .smsg-link { display:inline-block; margin-top:8px; color:var(--accent, #2563eb); }
 .smsg-links { display:flex; flex-wrap:wrap; gap:4px 16px; }
+<% if has_msg_actions is defined and has_msg_actions %>
+/* 消息下面的按钮（消息流「按钮」）：带按钮的消息画成一张卡，看得出是待确认的一件事 */
+.smsg-card { border:1px solid var(--line, #e5e5e5); border-radius:10px; padding:12px 14px; }
+.smsg-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+<% endif %>
 
 /* 工具调用折叠面板 */
 .tools {

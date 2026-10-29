@@ -10,7 +10,7 @@
 
 返回 {kind, text, pages, paragraphs, chars, error}：
 
-  kind        pdf / docx / md / txt（按扩展名）
+  kind        pdf / docx / md / txt / csv / tsv（按扩展名）
   text        纯文本。docx 的标题段落前面补「# 」（标题 1）「## 」（标题 2）
               ……，表格一行一行拼成「格 | 格」——后面按章节切块（text 包的
               「切章节」）要靠标题认出哪儿是一课
@@ -28,6 +28,10 @@
 docx 不用第三方库——它就是个 zip，正文在 word/document.xml，标准库的
 zipfile + ElementTree 读得了。md / txt 先按 UTF-8（带不带 BOM 都行）读，不行
 再按 GB18030（国标，兼容 GBK）读。
+
+csv / tsv 也按文本读（同一套编码规则，Excel 另存的带 BOM 的 UTF-8 也行），
+原样返回，不拆列——要统计的接口自己按行、按逗号切。xlsx 不收，让人另存为
+csv。空文件不算错：text 是空串、chars 是 0。
 
 路径限制在工作目录内，跟 data 包一样。
 """
@@ -169,15 +173,15 @@ def read_document(path: Path) -> dict:
         return read_pdf(path)
     if kind == "docx":
         return read_docx(path)
-    if kind in ("md", "txt", "markdown"):
+    if kind in ("md", "txt", "markdown", "csv", "tsv"):
         return read_text_file(path, "md" if kind == "markdown" else kind)
-    return _result(kind, error=f"不支持 .{kind}，只收 pdf、docx、md、txt")
+    return _result(kind, error=f"不支持 .{kind}，只收 pdf、docx、md、txt、csv、tsv")
 
 
 def register(reg, workspace):
     workspace = Path(workspace).resolve()
 
-    @reg.verb("读文档（pdf、docx、md、txt）取纯文本，返回 {kind, text, pages, paragraphs, "
+    @reg.verb("读文档（pdf、docx、md、txt、csv、tsv）取纯文本，返回 {kind, text, pages, paragraphs, "
               "chars, error}。读不了时 error 是一句人话（扫描版 PDF 说要 OCR）。"
               "例如 设 doc = 读文档 uploads/a.pdf")
     def 读文档(路径: str) -> dict:
