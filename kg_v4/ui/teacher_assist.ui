@@ -1,6 +1,8 @@
 # 教师助手（教师端 /teacher）：老师跟 AI 助手对话，问全班情况、某个学生、某个知识点的全班掌握、
 # 教学建议，也能闲聊、问系统怎么用；M4 P1 起还能让助手「动手」——出题、给学生发传达，但助手只出
-# 草稿，老师点「确认」才写库，7 天内可以撤销（约定见 contracts/teacher_assist.md，设计见 K124 design.md §2）。
+# 草稿，老师点「确认」才写库，7 天内可以撤销（约定见 contracts/teacher_assist.md；M4 拆模块后草稿本身在 contracts/assist_draft.md，
+# 本界面的动作名、接口路径不变：assist_draft_open/confirm/discard/undo 仍是 teacher_assist 的页面函数，待确认列表的 GET /teacher_assist/drafts
+# 归 assist_draft；设计见 K124 design.md §2）。
 # M4 P1b 再加两种草稿：改本科目的 AI 老师设定（setting_save）、加知识点/条目/前置边（kg_add）。界面不另开区域：
 # 待确认列表、消息按钮照旧；草稿详情浮层多一段「设定改前改后」（draft.compare_text，只有改已有设定的草稿才有）；
 # 知识点 / 条目 / 前置边的列表就在 draft.preview 里（后端按「知识点：」「条目：」「前置边：」分段拼好），执行后逐条结果在 draft.result_text。

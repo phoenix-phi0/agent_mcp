@@ -4,8 +4,8 @@
     cd /workspace/agent_mcp && .venv/bin/python tests/kg_v4/test_project.py
 
 拷一份 kg_v4（不带 app.db / web / uploads）到临时目录再检查，不动仓库里的文件。离线，不调模型。
-  一、13 个模块的约定检查 + 全局检查 + 加载检查 + 跨模块调用核对（xcall，见 test_xcall.py）
-  二、全量回归（每个模块的约定用例在临时库上跑）13/13
+  一、17 个模块的约定检查 + 全局检查 + 加载检查 + 跨模块调用核对（xcall，见 test_xcall.py）
+  二、全量回归（每个模块的约定用例在临时库上跑）17/17
   三、gen build：97 个接口
   四、setup/init_data.py：用裁小的单词表（200 条）+ 仓库题库灌一遍，各类条数对；
       再跑一次，已有数据全部跳过、条数不变
@@ -34,7 +34,8 @@ def check(ok, msg, detail=None):
     print(("  ✓ " if ok else "  ✗ ") + msg + ("" if ok or detail is None else f"\n      {detail}"))
 
 
-NAMES = "subject kg lesson progress account quiz vocab dictation teacher_rules tutor report textbook_import teacher_assist".split()
+NAMES = ("subject kg lesson progress account quiz vocab dictation teacher_rules tutor report textbook_import "
+         "assist_common assist_kg assist_setting assist_draft teacher_assist").split()
 tmp = Path(tempfile.mkdtemp(prefix="kg_v4_test_"))
 proj = tmp / "kg_v4"
 shutil.copytree(SRC, proj, ignore=shutil.ignore_patterns("app.db", "web", "uploads", "sessions", ".auth_secret", "__pycache__"))

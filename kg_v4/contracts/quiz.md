@@ -49,7 +49,7 @@
   伪代码 返回 {"ok": 1}
 
 函数 是助手题号 subject_id code
-  返回 {is_ta}；1 是教师助手出的题的题号（M4，题号由 teacher_assist 生成），0 不是
+  返回 {is_ta}；1 是教师助手出的题的题号（M4，题号由 assist_draft 确认出题草稿时生成），0 不是
   伪代码 subject_id 等于 1（日语）：code 匹配 ^ta[0-9]+-[0-9]+$ 为 1（如 ta12-3：草稿 12 的第 3 题）
   伪代码 其它科目：按 subject_id 查 subject_info 的 code（科目编码，查询 quiz_subject_code），code 匹配 ^<编码>\.ta[0-9]+-[0-9]+$ 为 1（如 math.ta12-3）；编码查不到为 0
   伪代码 其余为 0；只读，不报错
@@ -144,7 +144,7 @@
   伪代码 返回 {"ok": 1, "total": 有效行数, "imported": 写入数, "skipped": 跳过数, "skipped_nos": 逗号连接, "kept": 保留的助手题数}
 
 公开 函数 追加题目 rows_json learner? current_role? auth_mode? subject?
-  返回 {ok, imported, question_nos}；imported 是写入题数，question_nos 是写入的题号按 rows 顺序用英文逗号连接。给 teacher_assist 确认出题草稿用（M4）：只插入、不删旧题、不动 quiz_progress；整批要么全写、要么全不写
+  返回 {ok, imported, question_nos}；imported 是写入题数，question_nos 是写入的题号按 rows 顺序用英文逗号连接。给 assist_draft 确认出题草稿用（M4）：只插入、不删旧题、不动 quiz_progress；整批要么全写、要么全不写
   报错 400 题目列表不对
   报错 400 题库有坏题
   报错 400 题号不能含逗号或空白
@@ -170,7 +170,7 @@
   伪代码 返回 {"ok": 1, "imported": 写入数, "question_nos": 逗号连接}
 
 公开 函数 删助手题目 question_nos learner? current_role? auth_mode? subject?
-  返回 {ok, deleted}；给 teacher_assist 撤销出题草稿用（M4）：只删本科目的助手题，整批要么全删、要么全不删
+  返回 {ok, deleted}；给 assist_draft 撤销出题草稿用（M4）：只删本科目的助手题，整批要么全删、要么全不删
   报错 400 题号列表不能为空
   报错 400 只能删助手题目
   报错 404 没有这道题
