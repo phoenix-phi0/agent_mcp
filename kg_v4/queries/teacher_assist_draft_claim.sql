@@ -1,0 +1,1 @@
+UPDATE teacher_assist_draft SET status = :to_state, claim = :token, decided_at = CASE WHEN :to_state IN ('running', 'discarded') THEN :now ELSE decided_at END WHERE id = CAST(:id AS INTEGER) AND teacher = :teacher AND INSTR(',' || :from_states || ',', ',' || status || ',') > 0

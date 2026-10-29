@@ -1,0 +1,1 @@
+SELECT * FROM teacher_assist_draft WHERE teacher = :teacher AND subject_id = CAST(:subject_id AS INTEGER) AND ((:status = '' AND status <> 'superseded') OR (:status <> '' AND status = :status)) ORDER BY id DESC LIMIT CAST(:n AS INTEGER)
