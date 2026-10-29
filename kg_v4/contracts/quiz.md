@@ -48,6 +48,12 @@
   伪代码 否则按 subject_id 查 subject_info 的 code（科目编码，查询 quiz_subject_code）；编码为空、或 code 不匹配 ^[a-z][a-z0-9_]*\.[A-Za-z0-9_-]+$、或 code 不以「<编码>.」开头，报错 400 编号要以「<编码>.」开头（文案里的 <编码> 换成真实编码）
   伪代码 返回 {"ok": 1}
 
+函数 是助手题号 subject_id code
+  返回 {is_ta}；1 是教师助手出的题的题号（M4，题号由 teacher_assist 生成），0 不是
+  伪代码 subject_id 等于 1（日语）：code 匹配 ^ta[0-9]+-[0-9]+$ 为 1（如 ta12-3：草稿 12 的第 3 题）
+  伪代码 其它科目：按 subject_id 查 subject_info 的 code（科目编码，查询 quiz_subject_code），code 匹配 ^<编码>\.ta[0-9]+-[0-9]+$ 为 1（如 math.ta12-3）；编码查不到为 0
+  伪代码 其余为 0；只读，不报错
+
 函数 取轮大小 mode
   返回 整数，这一轮的题数
   伪代码 mode 等于 lesson 返回 5，否则返回 10
@@ -111,8 +117,9 @@
   伪代码 返回 出下一题 的结果
 
 公开 函数 导入题库 file_path learner? current_role? auth_mode? subject?
-  返回 {ok, total, imported, skipped, skipped_nos}；total 是有效行数，imported 是写入题数，skipped 是条目对不上而没进库的题数，skipped_nos 是这些题号用英文逗号连接（报告里说明）
+  返回 {ok, total, imported, skipped, skipped_nos, kept}；total 是有效行数，imported 是写入题数，skipped 是条目对不上而没进库的题数，skipped_nos 是这些题号用英文逗号连接（报告里说明），kept 是本科目保留下来的助手题数（D13）
   报错 400 导入文件有错
+  报错 400 ta 格式的题号留给教师助手
   报错 400 题库有坏题
   报错 400 编号要以「<编码>.」开头
   报错 400 题号不能含逗号或空白
@@ -130,10 +137,58 @@
   伪代码 坏题：字段数少于 7、题号为空、标准答案为空、同一文件内题号重复；出现任一，报错 400 题库有坏题（整批不写，库保持原样）
   伪代码 题号字符：每行题号含英文逗号或任一空白字符（空格、制表符等），报错 400 题号不能含逗号或空白，整批不写（asked_nos 按英文逗号拼接和拆分，题号含逗号会让已出题集合错乱）；先于前缀检查
   伪代码 题号前缀：每行题号调用本模块 编号前缀检查 subject_id=subject_id code=题号（日语 subject_id=1 豁免，其它科目要以「<科目编码>.」开头），不符报错 400 编号要以「<编码>.」开头，整批不写
-  伪代码 跨科目重号：题号全局唯一；任一题号已存在于别的科目（quiz_question 中 subject_id 不等于本科目）的行里，报错 400 题号已被其他科目使用，整批不写（本科目自己的旧题会被整表重灌覆盖，不算重号）
+  伪代码 助手题号（D13）：每行题号调用本模块 是助手题号 subject_id=subject_id code=题号，任一行 is_ta 为 1，报错 400 ta 格式的题号留给教师助手，整批不写（文件里不许出现助手题号，这样保留下来的助手题不会和文件撞号）；在前缀检查之后
+  伪代码 跨科目重号：题号全局唯一；任一题号已存在于别的科目（quiz_question 中 subject_id 不等于本科目）的行里，报错 400 题号已被其他科目使用，整批不写（本科目自己的旧题会被整表重灌覆盖，不算重号；本科目保留的助手题都是助手题号，文件里不会有）
   伪代码 条目编号为空，或调用 kg.取条目 code=条目编号 subject=subject_id 取不到（包括属于别的科目）：这一题不进库，计入 skipped 与 skipped_nos
-  伪代码 在一个事务里：只删除 quiz_question 中 subject_id 等于本科目的行（按科目重灌，别的科目的题不动），再逐题插入其余题 (question_no, course, level, category, stem, options, answer, accepted, explain, item_code, subject_id)；然后清理本科目失效进度（同一事务内）：把 quiz_progress 中 subject_id 等于本科目、current_no 不为空、且 current_no 已不在 quiz_question 本科目的行重置为 current_no 空、answered=0、last_correct=0（level、category、mode、lesson_code、right_count、asked_nos、asked_count、round_start_id、seq 保持不动，学习者回到「未出当前题」状态，点下一题/再来一轮即可继续，不会卡在 404/400）；别的科目的 quiz_progress 行一律不动，current_no 仍指向存在的题的行也不动
-  伪代码 返回 {"ok": 1, "total": 有效行数, "imported": 写入数, "skipped": 跳过数, "skipped_nos": 逗号连接}
+  伪代码 在一个事务里：只删除 quiz_question 中 subject_id 等于本科目、且题号不是助手题号（是助手题号 为 0）的行（按科目重灌，别的科目的题不动；本科目的助手题保留，D13；kept 为保留下来的助手题数），再逐题插入其余题 (question_no, course, level, category, stem, options, answer, accepted, explain, item_code, subject_id)；然后清理本科目失效进度（同一事务内）：把 quiz_progress 中 subject_id 等于本科目、current_no 不为空、且 current_no 已不在 quiz_question 本科目的行重置为 current_no 空、answered=0、last_correct=0（level、category、mode、lesson_code、right_count、asked_nos、asked_count、round_start_id、seq 保持不动，学习者回到「未出当前题」状态，点下一题/再来一轮即可继续，不会卡在 404/400）；别的科目的 quiz_progress 行一律不动，current_no 仍指向存在的题的行也不动
+  伪代码 返回 {"ok": 1, "total": 有效行数, "imported": 写入数, "skipped": 跳过数, "skipped_nos": 逗号连接, "kept": 保留的助手题数}
+
+公开 函数 追加题目 rows_json learner? current_role? auth_mode? subject?
+  返回 {ok, imported, question_nos}；imported 是写入题数，question_nos 是写入的题号按 rows 顺序用英文逗号连接。给 teacher_assist 确认出题草稿用（M4）：只插入、不删旧题、不动 quiz_progress；整批要么全写、要么全不写
+  报错 400 题目列表不对
+  报错 400 题库有坏题
+  报错 400 题号不能含逗号或空白
+  报错 400 编号要以「<编码>.」开头
+  报错 400 追加的题号必须是助手题号
+  报错 400 条目不存在
+  报错 409 题号已存在
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 403 没有权限修改该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号，权限由调用方已校验），四个都不传得 1；写操作传 need=write，auth_mode 等于 on 时只有该科目的负责/协作教师能写，公共科目的其他教师、学生报 403 没有权限修改该科目；下面所有查询和写入都只限这个 subject_id；调用 kg. 的函数时带 subject=subject_id
+  伪代码 rows_json 是题目列表（列表，或它的 JSON 文本，先解析）；每项 {question_no, course?, level, category, stem, options?, answer, accepted?, explain?, item_code}，字段含义与 quiz_question 列相同：options、accepted 是用 ^ 隔开的文本（选择题的 answer 是字母 A B C…，按 options 位置）；解析失败、不是列表、为空列表、或超过 20 项，报错 400 题目列表不对
+  伪代码 校验全部做完才写库，任一不过整批不写，按下面顺序报第一个错：
+  伪代码 ①坏题：question_no、level、category、stem、answer、item_code 任一去首尾空白后为空；同一批里题号重复；options 不为空时拆出的选项少于 2 个或多于 6 个、或有空选项、或有重复选项；options 不为空时 answer 不是 A 到第 n 个字母之一（n 为选项数）——报错 400 题库有坏题
+  伪代码 ②题号字符：含英文逗号或任一空白字符，报错 400 题号不能含逗号或空白
+  伪代码 ③题号前缀：调用本模块 编号前缀检查 subject_id=subject_id code=题号，不符原样报 400 编号要以「<编码>.」开头
+  伪代码 ④助手题号：调用本模块 是助手题号 subject_id=subject_id code=题号，is_ta 为 0，报错 400 追加的题号必须是助手题号（题号由调用方给：日语 ta<草稿号>-<序号>，其它科目 <编码>.ta<草稿号>-<序号>；本函数只收助手题号，与导入题库的老师题号分开）
+  伪代码 ⑤条目：调用 kg.取条目 code=item_code subject=subject_id 取不到（包括属于别的科目），报错 400 条目不存在（不像导入题库那样跳过）
+  伪代码 ⑥同号：任一题号已在 quiz_question 里（不论科目），报错 409 题号已存在
+  伪代码 在一个事务里逐题插入 (question_no, course, level, category, stem, options, answer, accepted, explain, item_code, subject_id)；stem 原样入库（不做 \n 转义还原：调用方给的是真换行）；插入出错（如并发撞了唯一约束）整批回滚并原样抛出
+  伪代码 返回 {"ok": 1, "imported": 写入数, "question_nos": 逗号连接}
+
+公开 函数 删助手题目 question_nos learner? current_role? auth_mode? subject?
+  返回 {ok, deleted}；给 teacher_assist 撤销出题草稿用（M4）：只删本科目的助手题，整批要么全删、要么全不删
+  报错 400 题号列表不能为空
+  报错 400 只能删助手题目
+  报错 404 没有这道题
+  报错 409 已有学生做过这道题，不能删除
+  报错 409 有学生正在做这道题，不能删除
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 403 没有权限修改该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；入参约定同 追加题目；下面所有查询和写入都只限这个 subject_id
+  伪代码 question_nos 按英文逗号拆开、去首尾空白、去掉空项、去重；拆完为空，报错 400 题号列表不能为空
+  伪代码 每个题号调用本模块 是助手题号 subject_id=subject_id code=题号，任一 is_ta 为 0，报错 400 只能删助手题目（老师导入的题不能经这里删）
+  伪代码 任一题号在 quiz_question 里查不到 subject_id 等于本科目的行（包括属于别的科目），报错 404 没有这道题
+  伪代码 任一题号在 progress_answer 里有 question_no 相等且 subject_id 等于本科目的行（任何学习者；直读 progress 的表，只读，quiz 已依赖 progress），报错 409 已有学生做过这道题，不能删除
+  伪代码 任一题号是 quiz_progress 中本科目某行的 current_no，或在其 asked_nos（英文逗号连接）里，报错 409 有学生正在做这道题，不能删除
+  伪代码 在一个事务里删除这些题号在本科目的 quiz_question 行
+  伪代码 返回 {"ok": 1, "deleted": 删除数}
 
 公开 函数 取做题状态 learner current_role? auth_mode? subject?
   返回 {learner, started, mode, level, category, lesson_code, current_no, answered, right_count, asked_count, round_size, last_correct, round_key, question}；mode 为 free/lesson/review；question 是当前题的 组题面 对象（含已打乱选项，不含答案），没有当前题时为空串；没有进度行时 started=0、数字项为 0、字符串项为空串、mode=free、round_size=10
@@ -1047,3 +1102,246 @@ POST /quiz/import -> 导入题库 上传 file 类型 md,txt 上限 20MB 角色 t
   先 数据 quiz_progress learner=me level=N5 category=接续 current_no=math.q1 answered=0 right_count=0 asked_nos=math.q1 asked_count=1 round_start_id=0 seq=1 last_correct=0 subject_id=2
   调用 取做题状态 learner=me subject=2
   得 started=1 current_no=math.q1
+
+用例 追加题目_不删旧题
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 quiz_question question_no=Q1 level=N5 category=接续 stem=旧题一 answer=A item_code=I1
+  先 数据 quiz_question question_no=Q2 level=N5 category=接续 stem=旧题二 answer=A item_code=I1
+  先 数据 quiz_question question_no=Q3 level=N5 category=接续 stem=旧题三 answer=A item_code=I1
+  调用 追加题目 rows_json=[{"question_no":"ta1-1","level":"N5","category":"接续","stem":"助手题一","options":"甲^乙","answer":"A","item_code":"I1"},{"question_no":"ta1-2","level":"N5","category":"接续","stem":"助手题二","options":"甲^乙^丙","answer":"C","accepted":"丙","explain":"解析","item_code":"I1"}]
+  得 ok=1 imported=2 question_nos=ta1-1,ta1-2
+  库 quiz_question 共 5 行
+  库 quiz_question 含 question_no=Q1
+  库 quiz_question 含 question_no=ta1-2 options=甲^乙^丙 answer=C item_code=I1 subject_id=1
+
+用例 追加题目_不动做题进度
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 quiz_question question_no=Q1 level=N5 category=接续 stem=旧题一 answer=A item_code=I1
+  先 数据 quiz_progress learner=me level=N5 category=接续 current_no=Q1 answered=0 right_count=0 asked_nos=Q1 asked_count=1 round_start_id=0 seq=1 last_correct=0
+  调用 追加题目 rows_json=[{"question_no":"ta1-1","level":"N5","category":"接续","stem":"助手题一","options":"甲^乙","answer":"A","item_code":"I1"}]
+  得 ok=1 imported=1
+  库 quiz_progress 含 learner=me current_no=Q1 asked_nos=Q1 asked_count=1
+
+用例 追加题目_同号冲突409整批不写
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 quiz_question question_no=ta1-1 level=N5 category=接续 stem=已有助手题 answer=A item_code=I1
+  调用 追加题目 rows_json=[{"question_no":"ta1-2","level":"N5","category":"接续","stem":"新题","options":"甲^乙","answer":"A","item_code":"I1"},{"question_no":"ta1-1","level":"N5","category":"接续","stem":"撞号","options":"甲^乙","answer":"A","item_code":"I1"}]
+  报错 409
+  库 quiz_question 共 1 行
+  库 quiz_question 含 question_no=ta1-1 stem=已有助手题
+
+用例 追加题目_题号被别的科目占用409
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 quiz_question question_no=ta1-1 level=N5 category=接续 stem=别科目的题 answer=A item_code=x subject_id=2
+  调用 追加题目 rows_json=[{"question_no":"ta1-1","level":"N5","category":"接续","stem":"新题","options":"甲^乙","answer":"A","item_code":"I1"}]
+  报错 409
+  库 quiz_question 共 1 行
+
+用例 追加题目_同批重号是坏题
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  调用 追加题目 rows_json=[{"question_no":"ta1-1","level":"N5","category":"接续","stem":"一","options":"甲^乙","answer":"A","item_code":"I1"},{"question_no":"ta1-1","level":"N5","category":"接续","stem":"二","options":"甲^乙","answer":"B","item_code":"I1"}]
+  报错 400
+  库 quiz_question 共 0 行
+
+用例 追加题目_缺答案是坏题
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  调用 追加题目 rows_json=[{"question_no":"ta1-1","level":"N5","category":"接续","stem":"一","options":"甲^乙","answer":"","item_code":"I1"}]
+  报错 400
+  库 quiz_question 共 0 行
+
+用例 追加题目_选择题答案越界是坏题
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  调用 追加题目 rows_json=[{"question_no":"ta1-1","level":"N5","category":"接续","stem":"一","options":"甲^乙","answer":"C","item_code":"I1"}]
+  报错 400
+  库 quiz_question 共 0 行
+
+用例 追加题目_选项重复是坏题
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  调用 追加题目 rows_json=[{"question_no":"ta1-1","level":"N5","category":"接续","stem":"一","options":"甲^甲","answer":"A","item_code":"I1"}]
+  报错 400
+  库 quiz_question 共 0 行
+
+用例 追加题目_空列表
+  调用 追加题目 rows_json=[]
+  报错 400
+
+用例 追加题目_不是JSON
+  调用 追加题目 rows_json=abc
+  报错 400
+
+用例 追加题目_非助手题号400
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  调用 追加题目 rows_json=[{"question_no":"Q9","level":"N5","category":"接续","stem":"一","options":"甲^乙","answer":"A","item_code":"I1"}]
+  报错 400
+  库 quiz_question 共 0 行
+
+用例 追加题目_题号含逗号400
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  调用 追加题目 rows_json=[{"question_no":"ta1-1,ta1-2","level":"N5","category":"接续","stem":"一","options":"甲^乙","answer":"A","item_code":"I1"}]
+  报错 400
+  库 quiz_question 共 0 行
+
+用例 追加题目_条目不存在整批不写
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  调用 追加题目 rows_json=[{"question_no":"ta1-1","level":"N5","category":"接续","stem":"一","options":"甲^乙","answer":"A","item_code":"I1"},{"question_no":"ta1-2","level":"N5","category":"接续","stem":"二","options":"甲^乙","answer":"A","item_code":"NOPE"}]
+  报错 400
+  库 quiz_question 共 0 行
+
+用例 跨科目_追加题目条目在别的科目400
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  调用 追加题目 rows_json=[{"question_no":"ta1-1","level":"N5","category":"接续","stem":"一","options":"甲^乙","answer":"A","item_code":"math.i1"}]
+  报错 400
+  库 quiz_question 共 0 行
+
+用例 跨科目_追加题目其它科目带编码前缀
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  调用 追加题目 rows_json=[{"question_no":"math.ta3-1","level":"初一","category":"计算","stem":"一","options":"1^2","answer":"B","item_code":"math.i1"}] subject=2
+  得 ok=1 imported=1 question_nos=math.ta3-1
+  库 quiz_question 含 question_no=math.ta3-1 subject_id=2
+
+用例 跨科目_追加题目其它科目缺编码前缀400
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  调用 追加题目 rows_json=[{"question_no":"ta3-1","level":"初一","category":"计算","stem":"一","options":"1^2","answer":"B","item_code":"math.i1"}] subject=2
+  报错 400
+  库 quiz_question 共 0 行
+
+用例 跨科目_追加题目公开科目非负责教师403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  调用 追加题目 rows_json=[{"question_no":"math.ta3-1","level":"初一","category":"计算","stem":"一","options":"1^2","answer":"B","item_code":"math.i1"}] learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 quiz_question 共 0 行
+
+用例 跨科目_追加题目学生403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_student subject_id=2 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  调用 追加题目 rows_json=[{"question_no":"math.ta3-1","level":"初一","category":"计算","stem":"一","options":"1^2","answer":"B","item_code":"math.i1"}] learner=s1 current_role=student auth_mode=on subject=2
+  报错 403
+  库 quiz_question 共 0 行
+
+用例 跨科目_追加题目协作教师可写
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  调用 追加题目 rows_json=[{"question_no":"math.ta3-1","level":"初一","category":"计算","stem":"一","options":"1^2","answer":"B","item_code":"math.i1"}] learner=t2 current_role=teacher auth_mode=on subject=2
+  得 ok=1 imported=1
+  库 quiz_question 含 question_no=math.ta3-1 subject_id=2
+
+用例 删助手题目_正常
+  先 数据 quiz_question question_no=Q1 level=N5 category=接续 stem=老师的题 answer=A item_code=I1
+  先 数据 quiz_question question_no=ta1-1 level=N5 category=接续 stem=助手题一 answer=A item_code=I1
+  先 数据 quiz_question question_no=ta1-2 level=N5 category=接续 stem=助手题二 answer=A item_code=I1
+  调用 删助手题目 question_nos=ta1-1,ta1-2
+  得 ok=1 deleted=2
+  库 quiz_question 共 1 行
+  库 quiz_question 含 question_no=Q1
+
+用例 删助手题目_已被作答409整批不删
+  先 数据 quiz_question question_no=ta1-1 level=N5 category=接续 stem=助手题一 answer=A item_code=I1
+  先 数据 quiz_question question_no=ta1-2 level=N5 category=接续 stem=助手题二 answer=A item_code=I1
+  先 数据 progress_answer learner=s1 point_code=P1 question_no=ta1-2 correct=1 at=2026-01-01
+  调用 删助手题目 question_nos=ta1-1,ta1-2
+  报错 409
+  库 quiz_question 共 2 行
+
+用例 删助手题目_在本轮题单里409
+  先 数据 quiz_question question_no=ta1-1 level=N5 category=接续 stem=助手题一 answer=A item_code=I1
+  先 数据 quiz_progress learner=me level=N5 category=接续 current_no=Q1 answered=1 right_count=1 asked_nos=Q1,ta1-1 asked_count=2 round_start_id=0 seq=2 last_correct=1
+  调用 删助手题目 question_nos=ta1-1
+  报错 409
+  库 quiz_question 共 1 行
+
+用例 删助手题目_是当前题409
+  先 数据 quiz_question question_no=ta1-1 level=N5 category=接续 stem=助手题一 answer=A item_code=I1
+  先 数据 quiz_progress learner=me level=N5 category=接续 current_no=ta1-1 answered=0 right_count=0 asked_nos=ta1-1 asked_count=1 round_start_id=0 seq=1 last_correct=0
+  调用 删助手题目 question_nos=ta1-1
+  报错 409
+  库 quiz_question 共 1 行
+
+用例 删助手题目_老师的题不能删
+  先 数据 quiz_question question_no=Q1 level=N5 category=接续 stem=老师的题 answer=A item_code=I1
+  先 数据 quiz_question question_no=ta1-1 level=N5 category=接续 stem=助手题一 answer=A item_code=I1
+  调用 删助手题目 question_nos=ta1-1,Q1
+  报错 400
+  库 quiz_question 共 2 行
+
+用例 删助手题目_题号为空
+  调用 删助手题目 question_nos=空
+  报错 400
+
+用例 跨科目_删助手题目别的科目的题404
+  先 数据 quiz_question question_no=ta1-1 level=N5 category=接续 stem=别科目同号 answer=A item_code=x subject_id=2
+  调用 删助手题目 question_nos=ta1-1
+  报错 404
+  库 quiz_question 共 1 行
+
+用例 跨科目_删助手题目公开科目非负责教师403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 quiz_question question_no=math.ta1-1 level=初一 category=计算 stem=一 answer=A item_code=math.i1 subject_id=2
+  调用 删助手题目 question_nos=math.ta1-1 learner=t2 current_role=teacher auth_mode=on subject=2
+  报错 403
+  库 quiz_question 共 1 行
+
+用例 导入题库_保留助手题
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 quiz_question question_no=OLD level=N5 category=接续 stem=旧题 answer=x item_code=I1
+  先 数据 quiz_question question_no=ta1-1 level=N5 category=接续 stem=助手题 answer=A item_code=I1
+  先 文件 quiz/k1.md 内容=Q1|C1|N5|接续|题干一|甲^乙|A||解析|I1
+  调用 导入题库 file_path=quiz/k1.md
+  得 ok=1 total=1 imported=1 kept=1
+  库 quiz_question 共 2 行
+  库 quiz_question 含 question_no=ta1-1 stem=助手题
+  库 quiz_question 无 question_no=OLD
+
+用例 导入题库_文件里有助手题号整批不写
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  先 数据 quiz_question question_no=OLD level=N5 category=接续 stem=旧题 answer=x item_code=I1
+  先 文件 quiz/k2.md 内容=Q1|C1|N5|接续|题干一|甲^乙|A||解析|I1\nta5-1|C1|N5|接续|题干二|甲^乙|A||解析|I1
+  调用 导入题库 file_path=quiz/k2.md
+  报错 400
+  库 quiz_question 共 1 行
+  库 quiz_question 含 question_no=OLD
+
+用例 跨科目_导入题库保留本科目助手题不动别科目
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=math.a title=代数 subject_id=2
+  先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
+  先 数据 quiz_question question_no=ta1-1 level=N5 category=接续 stem=日语助手题 answer=A item_code=I1
+  先 数据 quiz_question question_no=math.old level=初一 category=计算 stem=旧数学题 answer=A item_code=math.i1 subject_id=2
+  先 数据 quiz_question question_no=math.ta2-1 level=初一 category=计算 stem=数学助手题 answer=A item_code=math.i1 subject_id=2
+  先 文件 quiz/k3.md 内容=math.q1|C1|初一|计算|题干一|1^2|A||解析|math.i1
+  调用 导入题库 file_path=quiz/k3.md subject=2
+  得 ok=1 imported=1 kept=1
+  库 quiz_question 共 3 行
+  库 quiz_question 含 question_no=ta1-1 subject_id=1
+  库 quiz_question 含 question_no=math.ta2-1 subject_id=2
+  库 quiz_question 无 question_no=math.old

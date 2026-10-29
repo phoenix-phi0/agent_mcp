@@ -1,38 +1,75 @@
-# 教师助手（教师端 /teacher）：老师跟只读的 AI 助手对话，问全班情况、某个学生、某个知识点
-# 的全班掌握、教学建议；也能闲聊、问系统怎么用。三段式——顶栏一句说明、中间消息流、底下输入框，
-# 跟学生端的「问老师」（teacher.ui）同一个样子，区别见下面。
+# 教师助手（教师端 /teacher）：老师跟 AI 助手对话，问全班情况、某个学生、某个知识点的全班掌握、
+# 教学建议，也能闲聊、问系统怎么用；M4 P1 起还能让助手「动手」——出题、给学生发传达，但助手只出
+# 草稿，老师点「确认」才写库，7 天内可以撤销（约定见 contracts/teacher_assist.md，设计见 K124 design.md §2）。
 #
-# 助手只读：不改设定、不给学生发话、不出题、不起草传达（这些去「AI老师设定」「学情」页做）。
-# 回答里的数字和名单都来自后端查好的数据段（services/teacher_assist.zs），不是模型凭空写的。
+# 布局：两栏（窄屏上下堆叠，由引擎的布局样式负责）——左边「对话」（消息流 + 等待提示 + 底栏输入框），
+# 右边「待确认」（本人在本科目的草稿列表，行上 查看 / 确认 / 放弃 / 撤销）；「草稿详情」浮层看全文。
+# 进入时 assist_state 回整页状态 {talk, drafts, readonly}：talk 整条替换消息流、drafts 喂待确认列表、
+# readonly 为 1 时顶栏提示只读（D14）。发送 assist_send 也回整页（page），所以发完消息流是含本轮的历史、
+# 新草稿那条消息带按钮、待确认列表多一行；确认 / 放弃 / 撤销同样回整页，按钮跟着状态变。
 #
-# 跟学生端 teacher.ui 的异同：
-#   相同  消息流 + 多行输入框 + 回显 / 清空 + 「进入时」把历史对话拉回来（state 里的 talk 整条替换）
-#   不同  1. 「端 教师」：只在教师端，学生端（/）上没有这一页，学生 cookie 调接口 403
-#         2. 没有「触发」：不接受 #教师助手?lesson=… 这类地址参数直达（没有对应的入口）
-#         3. 消息没有链接（后端返回的消息不带 links / link，消息流模板对没有的键不画）
-#         4. 多一句等待话：回复要二三十秒，期间输入框上面显示「助手正在查数据…」
-#         5. 提示里写明可以问哪几类，输入框的提示也给了例子
+# 消息按钮（依赖引擎 E1，K125 在分支 m4-p0 实现）：生成草稿的那条助手消息 kind 为 draft，带
+#   actions=[{label, action, carry:{draft_id}, kind}]（确认 assist_draft_confirm / 放弃 assist_draft_discard /
+#   撤销 assist_draft_undo），和 links=[{href:"#教师助手?浮层=草稿详情&draft_id=N", text}]。
+#   按钮调的动作都在下面「待确认」列表里声明过（前端只认本界面声明过的远程动作）。E1 若要求在消息流上
+#   另写动作白名单，按 K125 落地的语法给「消息流 talk」补上这三个动作名。没有 E1 时消息照常显示文字和
+#   「查看草稿」链接，确认 / 放弃 / 撤销在右边列表里点，功能不缺。
 #
-# 等待态：不用改前端。前端提交时本来就会往消息流里先摆一条「…」（kind 是 pending），请求回来
-# 就换掉；同时 pending 变量存的是正在请求的动作名，下面「文案 当 pending==='assist_send'」在
-# 请求期间显示、回复到了自动消失。两样合起来就是「发送后显示正在思考…、回复后消失」。
+# 等待态：前端提交时往消息流里先摆一条「…」（kind 是 pending），请求回来整条替换；pending 变量存的是
+# 正在请求的动作名，下面「文案 当 pending===…」在请求期间显示、回来自动消失。请求期间前端会挡住同一
+# 动作的第二次点击；后端另有 claim 抢占，重复确认只执行一次（409「这份草稿已处理」）。
 #
-# 文本：消息流把 text 当纯文本显示（保留换行，不渲染 Markdown），所以后端提示词要求助手只输出
-# 纯文本、名单每人一行用「・」开头；不要让它写表格或 ## 标题。
-#
-# 标签和提示都不能以修饰词开头，值里也不能有空格（提示里用全角括号）。
+# 文本：消息流把 text 当纯文本显示（保留换行，不渲染 Markdown），后端提示词要求只输出纯文本。
+# 约束照旧：当 的条件里不能有空格；标签、提示不能以修饰词开头，值里不能有空格（提示用全角括号）；
+# 分组不能套分组；布局里只能放区域。附件条、分析区、教学材料浮层是 P2–P4 的事，这一版不画。
 
 界面 自定义 教师助手 端 教师 序 12
   动作 assist_state 远程 进入时 隐藏 刷新
 
   分组 顶栏 横排 顶栏 间距 12px 对齐 center
-    文案 可以问：全班学得怎么样、某位学生的情况、某个语法点全班掌握得如何、接下来课上该讲什么。助手只读，不能改设定或给学生发话。
+    文案 可以问学情，也可以让我出题、给学生发传达。我做的改动都先出草稿，你点确认才写入，7天内可以撤销。
     文案 当 shared.mode==='mock' 模拟模式：回复不是真模型
+    文案 当 String(shared.readonly)==='1' 你在这个科目只有读权限：可以问学情，不能让助手出题或发传达。
   结束
-  消息流 talk 占满
-  文案 当 pending==='assist_send' 助手正在查数据并整理回答…（真模型一般 20 到 40 秒）
-  分组 底栏 横排 底栏 间距 10px 对齐 flex-end 内边距 14px,20px
-    字段 content 控件 多行 单行高 提示 问助手…（例：小明最近怎么样？／助词が全班掌握得如何？，Enter发送，Shift+Enter换行）
-    动作 assist_send 提交 远程 回显 清空 发送
+
+  布局 占满 横排
+    区域 对话
+      消息流 talk 占满
+      文案 当 pending==='assist_send' 助手正在查数据并整理回答…（生成草稿一般要30到60秒）
+      文案 当 pending==='assist_draft_confirm' 正在写入…
+      文案 当 pending==='assist_draft_undo' 正在撤销…
+      分组 底栏 横排 底栏 间距 10px 对齐 flex-end 内边距 14px,20px
+        字段 content 控件 多行 单行高 提示 问助手…（例：小明最近怎么样？／按〜たばかり出5道题／给小明发传达：周五小测，Enter发送，Shift+Enter换行）
+        动作 assist_send 提交 远程 回显 清空 发送
+      结束
+    结束
+
+    区域 待确认 当 shared.drafts&&shared.drafts.length
+      文案 助手生成的改动草稿。点确认才写库；7天内可以撤销（已有学生做过的题不能撤，已带到的传达只能停用）。
+      列表 草稿表 绑 drafts
+        列 draft_id 编号
+        列 draft_kind 类型
+        列 draft_brief 内容
+        列 draft_state 状态
+        列 draft_at 时间
+        动作 open_draft 打开 草稿详情 带 draft_id 查看
+        动作 assist_draft_confirm 远程 带 draft_id 当 row.draft_state==='待确认' 确认
+        动作 assist_draft_discard 远程 次要 带 draft_id 当 row.draft_state==='待确认' 放弃
+        动作 assist_draft_undo 远程 危险 带 draft_id 当 String(row.can_undo)==='1' 撤销
+      结束
+    结束
+  结束
+
+  浮层 草稿详情 宽 680px 载入 assist_draft_open
+    显示 draft.head
+    显示 draft.preview 正文
+    显示 draft.result_text 当 shared.draft&&shared.draft.result_text 执行结果
+    显示 draft.error 当 shared.draft&&shared.draft.error 出错原因
+    分组 底栏 横排 底栏
+      动作 assist_draft_confirm 远程 关闭 当 shared.draft&&shared.draft.state==='待确认' 确认
+      动作 assist_draft_discard 远程 次要 关闭 当 shared.draft&&shared.draft.state==='待确认' 放弃
+      动作 assist_draft_undo 远程 危险 关闭 当 shared.draft&&String(shared.draft.can_undo)==='1' 撤销
+      动作 close_draft 次要 关闭 返回
+    结束
   结束
 结束
