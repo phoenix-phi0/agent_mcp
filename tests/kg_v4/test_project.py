@@ -6,7 +6,7 @@
 拷一份 kg_v4（不带 app.db / web / uploads）到临时目录再检查，不动仓库里的文件。离线，不调模型。
   一、13 个模块的约定检查 + 全局检查 + 加载检查 + 跨模块调用核对（xcall，见 test_xcall.py）
   二、全量回归（每个模块的约定用例在临时库上跑）13/13
-  三、gen build：93 个接口
+  三、gen build：97 个接口
   四、setup/init_data.py：用裁小的单词表（200 条）+ 仓库题库灌一遍，各类条数对；
       再跑一次，已有数据全部跳过、条数不变
 """
@@ -76,7 +76,7 @@ try:
 
     print("三、编译")
     r = subprocess.run([sys.executable, "-m", "gen", "build", str(proj)], cwd=ROOT, capture_output=True, text=True)
-    check(r.returncode == 0 and "93 个接口" in r.stdout, "gen build：93 个接口", (r.stdout + r.stderr)[-300:])
+    check(r.returncode == 0 and "97 个接口" in r.stdout, "gen build：97 个接口", (r.stdout + r.stderr)[-300:])
 
     print("四、数据初始化脚本")
     content = tmp / "content"

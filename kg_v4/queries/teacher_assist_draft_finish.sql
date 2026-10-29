@@ -1,0 +1,1 @@
+UPDATE teacher_assist_draft SET status = :status, result = :result, error = :error, claim = '', undone_at = CASE WHEN :status = 'undone' THEN :now ELSE undone_at END WHERE id = CAST(:id AS INTEGER) AND claim = :token
