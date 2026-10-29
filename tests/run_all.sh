@@ -148,6 +148,7 @@ run 经WSL调CLI  $PY tests/dsl/test_cli_via_wsl.py
 run 运行模式    $PY tests/dsl/test_run_mode.py
 run 命名约定    $PY tests/dsl/test_naming.py
 run 字符串动词  $PY tests/dsl/test_text_verbs.py
+run 读csv       $PY tests/dsl/test_doc_csv.py
 run 参数或默认  $PY tests/dsl/test_alt_args.py
 run 条件计算正则 $PY tests/dsl/test_cond_calc_regex.py
 run 循环        $PY tests/dsl/test_loop_while.py
@@ -193,6 +194,7 @@ run 导航路由E2E bash -c "cd $M/tests/e2e && node route_run.js"
 run 显式主键E2E bash -c "cd $M/tests/e2e && node pk_run.js"
 run 做题页E2E   bash -c "cd $M/tests/e2e && node quiz_run.js"
 run 问老师E2E   bash -c "cd $M/tests/e2e && node teacher_run.js"
+run 消息按钮E2E bash -c "cd $M/tests/e2e && node msg_actions_run.js"
 run 复习E2E     bash -c "cd $M/tests/e2e && node review_run.js"
 run 默写E2E     bash -c "cd $M/tests/e2e && node dictation_run.js"
 run 教材进度E2E bash -c "cd $M/tests/e2e && node pages_run.js"

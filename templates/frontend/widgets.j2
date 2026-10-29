@@ -173,12 +173,17 @@
     m.links 是链接列表 [{href, text}]，正文下面一排链接（text 不给就显示
     地址）；没有 links（或是空列表）时退回旧写法：m.link 一个链接，m.link_text
     是链接上的字。两种都给只画 links，不重复。只认 # 开头的站内地址
-    （#做题?lesson=…，点了就切界面）和 http(s)，别的（javascript: 之类）不渲染。 -#}
+    （#做题?lesson=…，点了就切界面）和 http(s)，别的（javascript: 之类）不渲染。
+    m.actions 是消息下面的一排按钮 [{label, action, carry, kind}]，只有消息流写了
+    「按钮 a,b」才画，而且只画白名单里的动作（msgActions 过滤）；没写的流这段
+    一个字都不生成。点了走 onMsgAction，把 carry 合进请求。 -#}
 <%- macro 消息流(n) -%>
 <section class="stream"<%= 当(n) %><% if n.ratio %> style="flex:<%= n.ratio %> 1 0%;min-height:0"<% endif %>>
 <% if n.label and n.label != n.name %><header class="region-h"><%= n.label %></header>
 <% endif %><div class="stream-body" :ref="el => setStreamEl('<%= n.name %>', el)">
-<div v-for="(m, i) in shared['<%= n.name %>'] || []" :key="i" class="smsg" :class="'smsg-' + (m.kind || 'text')">
+<% if n.buttons %><div v-for="(m, i) in shared['<%= n.name %>'] || []" :key="i" class="smsg" :class="['smsg-' + (m.kind || 'text'), msgActions('<%= n.name %>', m).length ? 'smsg-card' : '']">
+<% else %><div v-for="(m, i) in shared['<%= n.name %>'] || []" :key="i" class="smsg" :class="'smsg-' + (m.kind || 'text')">
+<% endif %>
 <span class="who">{{ m.who }}</span>
 <div class="body">{{ m.text }}</div>
 <div v-if="Array.isArray(m.links) && m.links.length" class="smsg-links"><template v-for="(k, j) in m.links" :key="j"><a v-if="k && typeof k.href === 'string' && (k.href.startsWith('#') || k.href.startsWith('http://') || k.href.startsWith('https://'))" class="smsg-link" :href="hrefOf(k.href)" :target="targetOf(k.href)">{{ k.text || k.href }}</a></template></div>
@@ -188,7 +193,8 @@
 <div v-for="(c, j) in m.calls" :key="j">{{ c.name }}({{ c.arguments }})
   → {{ c.result }}</div>
 </details>
-</div>
+<% if n.buttons %><div v-if="msgActions('<%= n.name %>', m).length" class="smsg-actions"><button v-for="(a, j) in msgActions('<%= n.name %>', m)" :key="j" type="button" class="btn" :class="a.kind === 'primary' ? 'btn-primary' : (a.kind === 'danger' ? 'btn-danger' : 'btn-ghost')" :disabled="busy" :data-action="a.action" @click="onMsgAction('<%= n.name %>', a)">{{ a.label || a.action }}</button></div>
+<% endif %></div>
 </div>
 </section>
 <%- endmacro -%>

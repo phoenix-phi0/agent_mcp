@@ -179,6 +179,9 @@ class Node:
     order: Optional[int] = None  # 界面的「序 1」：导航顺序和入口（hash 为空时的界面）。
                                  # 合并几个 .ui 时按它排，没写的排在写了的后面、
                                  # 照文件名序。见 tools/ui_site.py 的 merge
+    buttons: str = ""            # 消息流的「按钮 draft_ok,draft_drop」：后端返回的消息里
+                                 # actions 能调的动作白名单（逗号隔开）。没写就不画
+                                 # 消息上的按钮，见下面 KEYED_MODIFIERS 里「按钮」的说明
     every: int = 0               # 动作的「每隔 2」：所在界面开着、「当」成立时
                                  # 每 2 秒悄悄提交一次（后台任务的进度轮询）
     required: Optional[bool] = None
@@ -424,6 +427,22 @@ KEYED_MODIFIERS = KEYED_MODIFIERS | {"序"}
 #   动作 quiz_next 远程 回车 当 shared.phase==='done' 下一题
 FLAG_MODIFIERS = FLAG_MODIFIERS | {"回车"}
 
+# 消息流「按钮 <动作,动作…>」：消息下面可以画按钮（助手出了草稿，就在那条消息下
+# 放「确认」「放弃」）。按钮是后端给的：messages 里一条消息带
+#   actions: [{label, action, carry: {键: 值}, kind}]
+# label 按钮上的字；action 点了调哪个动作；carry 合进请求的 form（最后合，
+# 盖掉表单和地址里的同名键）；kind 样式：primary / danger，别的或不给是普通按钮。
+# 返回跟别的远程动作一样走 applyResponse（state、messages、lists ……）。
+#
+# action 必须在这里列出的白名单里，前端才画、才调——消息内容里有模型写的
+# 东西，不能让后端回一个任意动作名就把它调了。没写「按钮」的消息流一个按钮
+# 都不画（生成的页面跟以前一字不差）。白名单里的动作编译时对 endpoints，
+# 写错了报 missing_endpoint（见 check_loaders）。不用另写一行「动作 x 远程 隐藏」。
+# 白名单管的是「界面上不画、不调」，不是服务端鉴权：接口本身照样能被直接 POST，
+# 谁能确认哪个草稿仍要接口自己查（只许、need=write、carry 里的 id 归不归这个人）。
+#   消息流 talk 占满 按钮 draft_confirm,draft_drop
+KEYED_MODIFIERS = KEYED_MODIFIERS | {"按钮"}
+
 SCREEN_ROLES = {"表单", "列表", "自定义"}
 DEFAULT_ROLE = "自定义"
 
@@ -531,6 +550,8 @@ def _apply_keyed(node: Node, keyed: dict):
         node.audience = keyed["端"]
     if node.kind == "界面" and "序" in keyed and keyed["序"].isascii() and keyed["序"].isdigit():
         node.order = int(keyed["序"])   # 只认界面上的；不是非负整数的 parse 那里报错
+    if "按钮" in keyed:
+        node.buttons = keyed["按钮"]
     if "每隔" in keyed:
         try:
             node.every = max(int(keyed["每隔"]), 0)
@@ -740,6 +761,8 @@ def dump(nodes, indent: int = 0) -> str:
             extras.append(f"序={n.order}")
         if getattr(n, "every", 0):
             extras.append(f"每隔={n.every}")
+        if getattr(n, "buttons", ""):
+            extras.append(f"按钮={n.buttons}")
         if n.type:
             extras.append(f"类型={n.type}")
         if n.ratio:
@@ -838,6 +861,30 @@ def validate(screens, require_bind: bool = False, endpoints=None) -> list:
                     f"动作「{a.name}」要打开浮层「{a.opens}」，"
                     f"但界面「{screen.name}」里没有这个浮层",
                     line=a.line, code="unknown_overlay"))
+
+    # 「按钮」只挂在消息流上；写在别处不会画任何东西。白名单里不能有空名字
+    # （「a,,b」「a,」）——动作名存不存在要对 endpoints，在 check_loaders 里。
+    for screen in screens:
+        for n in screen.walk():
+            if not getattr(n, "buttons", ""):
+                continue
+            if n.kind != "消息流":
+                issues.append(Issue(
+                    f"「按钮 {n.buttons}」只能写在消息流上（写在了{n.kind}「{n.name}」上）",
+                    line=n.line, code="buttons_not_stream"))
+            elif any(not x.strip() for x in n.buttons.split(",")):
+                issues.append(Issue(
+                    f"消息流「{n.name}」的「按钮 {n.buttons}」里有空的动作名",
+                    line=n.line, code="empty_button"))
+    # 行尾只写了「按钮」没写动作：带参修饰缺值时解析器把它当成标签，消息流头上多一行
+    # 「按钮」、一个按钮也不画，而且不报错——拦一道
+    for screen in screens:
+        for n in screen.walk():
+            if (n.kind == "消息流" and not getattr(n, "buttons", "")
+                    and (n.label or "").split()[:1] == ["按钮"]):
+                issues.append(Issue(
+                    f"消息流「{n.name}」写了「按钮」但后面没有动作名（要写「按钮 a,b」）",
+                    line=n.line, code="empty_button"))
 
     # 节点图「点开」指向的浮层要在同一界面里。写错了不报错、点节点也不弹，
     # 跟「打开」「切到」写错是同一类静默失败，所以一样拦一道。
@@ -1139,6 +1186,27 @@ def _screen_streams(screens) -> dict:
     return out
 
 
+def _stream_buttons(n) -> list:
+    """消息流「按钮 a,b」→ [a, b]（去空、去重保序）。"""
+    return list(dict.fromkeys(x.strip() for x in (getattr(n, "buttons", "") or "").split(",")
+                              if x.strip()))
+
+
+def _stream_actions(screens) -> dict:
+    """消息流名 -> 它的消息上允许画、允许调的动作（「按钮」白名单）。
+
+    按消息流的 name 取：模板里消息流读的就是 shared[name]。没写「按钮」的流不在
+    表里，前端查不到就一个按钮也不画。
+    """
+    out = {}
+    for s in screens:
+        for n in s.walk():
+            if n.kind == "消息流" and _stream_buttons(n):
+                out.setdefault(n.name, [])
+                out[n.name] += [a for a in _stream_buttons(n) if a not in out[n.name]]
+    return out
+
+
 def _lookup(state, path, default=""):
     """Read a dotted path out of baked-in state (standalone backend)."""
     node = state
@@ -1271,6 +1339,12 @@ def render_vue(screens, title="UI", options_map=None, rows=None,
     endpoints = endpoints or {}
     _tag_submit_action(screens)
     _tag_clears(screens)
+    # 模板按 n.buttons 决定画不画按钮行、生成不生成 msgActions——先规整成去空后的白名单，
+    # 「按钮 ,」这种空白名单就两边都不生成，不会只生成一边（模板里调了不存在的函数）
+    for s in screens:
+        for n in s.walk():
+            if n.kind == "消息流":
+                n.buttons = ",".join(_stream_buttons(n))
     shared = _shared_defaults(screens)
     has_remote = any(a.has("远程") for s in screens for a in s.actions())
     ctx = {
@@ -1288,6 +1362,9 @@ def render_vue(screens, title="UI", options_map=None, rows=None,
                             key=lambda x: [s.side for s in screens].index(x)),
         # 有「每隔」的动作才生成轮询那段
         "has_poll": any(a.every for s in screens for a in s.actions()),
+        # 消息流名 -> 消息上的按钮能调哪些动作。没有写「按钮」的项目一行相关代码都不生成
+        "stream_actions_json": json.dumps(_stream_actions(screens), ensure_ascii=False),
+        "has_msg_actions": bool(_stream_actions(screens)),
         "has_row_remote": any(a.has("远程") for s in screens for n in _walk_nodes(s)
                               if n.kind == "列表" for a in n.of_kind("动作")),
         "form_defaults_json": json.dumps(_form_defaults(screens), ensure_ascii=False),
@@ -1465,6 +1542,16 @@ def check_loaders(screens, endpoints) -> list:
                 issues.append(Issue(
                     f"字段「{node.name}」要「改时 {node.on_change}」，但没有这个接口",
                     line=node.line, code="missing_endpoint"))
+        # 消息流「按钮 a,b」：白名单里的动作要有接口——写错了的话，后端回的按钮
+        # 画出来了，点下去什么都不发
+        for node in _walk_nodes(screen):
+            if node.kind != "消息流" or endpoints is None:
+                continue
+            for name in _stream_buttons(node):
+                if name not in endpoints:
+                    issues.append(Issue(
+                        f"消息流「{node.name}」的「按钮」里有「{name}」，但没有这个接口",
+                        line=node.line, code="missing_endpoint"))
         if screen.trigger and endpoints is not None and screen.trigger not in endpoints:
             issues.append(Issue(
                 f"界面「{screen.name}」要「触发 {screen.trigger}」，但没有这个接口",

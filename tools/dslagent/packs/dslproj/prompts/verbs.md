@@ -29,7 +29,7 @@
   清登录失败 用户名 → ok（连续失败 5 次锁 5 分钟，和上面几个整段动词共用同一套限流计数）；签发登录 用户名 → ok（让路由器发登录 cookie）
 
 ### doc 包（从上传的文档取纯文本，要先 用包 doc）
-- 读文档 路径 → {kind, text, pages, paragraphs, chars, error}：按扩展名读 pdf/docx/md/txt；读不了（扫描版、密码、坏了）error 是一句人话给用户看，不抛错
+- 读文档 路径 → {kind, text, pages, paragraphs, chars, error}：按扩展名读 pdf/docx/md/txt/csv/tsv（csv、tsv 按文本原样返回、不拆列，带 BOM 的 UTF-8 和 GBK 都认；空文件 text 是空串、不算错；xlsx 不收）；读不了（扫描版、密码、坏了）error 是一句人话给用户看，不抛错
 
 ### common 包
 - 解析JSON 文本 → 结构；列表长度 列表 → 数；转数字 文本；取字段 JSON文本 路径；当前时间 [日期|时间戳]
