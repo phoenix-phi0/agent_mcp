@@ -32,8 +32,3 @@
   设 r = 调用 teacher_assist.撤销草稿页面 current_user={current_user} draft_id={draft_id} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   响应 state {r}
 结束
-
-接口 GET /teacher_assist/drafts 角色 teacher
-  设 r = 调用 teacher_assist.列草稿 current_user={current_user} status={status 或} limit={limit 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
-  返回 {r}
-结束

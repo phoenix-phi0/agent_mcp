@@ -108,7 +108,7 @@ def engine(handler=None):
 def run(fn, tag="c", eng=None, **args):
     """→ (结果, 报错码或空)"""
     eng = eng or engine()
-    r, err = K.call(eng, "teacher_assist", fn, args, tag)
+    r, err = K.call(eng, "assist_draft", fn, args, tag)
     K.settle()
     return r, (str(err.get("code")) if isinstance(err, dict) else ("" if err in ("", None) else str(err)))
 
