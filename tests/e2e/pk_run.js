@@ -14,7 +14,7 @@ const { execFileSync, spawn } = require("child_process");
 const fs = require("fs");
 const { JSDOM } = require("jsdom");
 
-const MCP = "/home/ysc/mcp";
+const MCP = process.env.M || require("path").resolve(__dirname, "../..");
 const PY = MCP + "/.venv/bin/python";
 const PROJ = "/tmp/e2e_pk";
 const PORT = 8192;
