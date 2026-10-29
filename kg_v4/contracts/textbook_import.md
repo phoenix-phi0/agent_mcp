@@ -393,7 +393,8 @@
   伪代码 返回 {"draft": draft, "draft_note": "", "draft_maps": 映射行, "map_options": 选项, "form": form}（draft_note 清空，「保存了。」由调用方另放）
 
 函数 系列视图 series_code subject_id
-  返回 教材导入页系列块的状态 {series_view}；series_view = {code, head, note, can_withdraw, back}；没有这个系列（或已撤下）为 {code, head: 「没有这个系列（{series_code}），可能已经撤下了。」, note: 空串, can_withdraw: 0, back}
+  返回 教材导入页系列块的状态 {series_view}；series_view = {code, head, note, can_withdraw, back}；没有这个系列（或已撤下）为 {code, head: 「没有这个系列（{series_code}），可能已经撤下了。」, note, can_withdraw: 0, back}，note 在本科目存在 series_code 相等且 status=已撤下 的 textbook_import_task 时为「撤下了：这个系列已经撤下，教材页的下拉里不再有它。」（撤下后重新载入页面，不能把撤下的提示丢掉），否则（从没导入过、没有这个系列）为空串
+  伪代码 找不到系列时：在 textbook_import_task 里查 series_code 相等、subject_id 等于 subject_id 且 status 等于 已撤下 的行，有则 note 为上面那句「撤下了：…」，没有则 note 为空串；找到系列（在用）时 note 为空串，不查任务表
   伪代码 调用 列已导入系列 series_code=series_code subject=subject_id 得 s，在 series 里找 code 相等的；找到 head = 「系列 {code}（{name}）：{lesson_count} 课。在用，教材页的下拉里能选到。」，note 空串，can_withdraw 在 code 不等于 hanabira 时为 1 否则 0，back = #%E6%95%99%E6%9D%90%E5%AF%BC%E5%85%A5
 
 公开 函数 导入视图 task_id? draft_id? series_code? learner? current_role? auth_mode? subject?
@@ -1277,6 +1278,16 @@ GET /textbook_import/chunk/prompt -> 块提示词 角色 teacher
 用例 导入视图_带系列
   先 数据 lesson_series code=s1 name=系列一 sort_order=100
   调用 导入视图 series_code=s1
+  得 有返回
+
+用例 导入视图_撤下后载入该系列
+  先 数据 lesson_series code=s1 name=系列一 sort_order=-1
+  先 数据 textbook_import_task series_code=s1 series_name=系列一 file_name=a.md raw_text=x status=已撤下 created_at=2026-01-01
+  调用 导入视图 series_code=s1
+  得 有返回
+
+用例 导入视图_没导入过的系列载入
+  调用 导入视图 series_code=NOPE
   得 有返回
 
 用例 导入视图_什么都没带

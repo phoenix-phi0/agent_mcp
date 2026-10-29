@@ -17,6 +17,16 @@ M="${M:-$(cd "$(dirname "$0")/.." && pwd)}"
 export M
 PY=$M/.venv/bin/python
 FAILED=0
+KNOWN_FAILED=0
+# 已知失败：「组名|该组里唯一允许失败的检查点文字」。这组仍照常运行，
+# 失败的 ✗ 行全是这个检查点时记为「已知失败」，单独计数、不算失败；
+# 该组还有别的 ✗、或崩溃 / 超时，照常算失败。修好后该检查点转绿，条目就该删。
+#   教材导入E2E｜确认后撤下了：旧 kg 项目（kg/routes）撤下后重新载入把
+#   「撤下了：…」提示盖掉，用户决定旧 kg 不修（kg_v4 已修，见 data/reports/kg_K116.md、
+#   kg_K117.md）。
+KNOWN=(
+  "教材导入E2E|确认后撤下了"
+)
 # 每组的时限。一组卡住时，没有它整个脚本会一直等下去——后面十几组
 # 根本没机会跑，而「卡住」和「很慢」从外面看一模一样。实际撞上过：
 # 跑了十分钟没结果，查完才知道是某一组挂在那儿。
@@ -48,6 +58,19 @@ run() {
   [ -z "$last" ] && last=$(printf '%s\n' "$out" | grep -v '^\s*$' | tail -1)
   printf '%-12s 退出码 %s  %s\n' "$name" "$code" "$last"
   if [ "$code" -ne 0 ]; then
+    local k known="" marks others
+    for k in "${KNOWN[@]}"; do
+      [ "${k%%|*}" = "$name" ] && known=${k#*|}
+    done
+    if [ -n "$known" ] && [ "$code" -eq 1 ]; then
+      marks=$(printf '%s\n' "$out" | grep -c '✗')
+      others=$(printf '%s\n' "$out" | grep '✗' | grep -vc -- "$known")
+      if [ "$marks" -ge 1 ] && [ "$others" -eq 0 ] && ! printf '%s\n' "$out" | grep -qE 'Traceback|Error'; then
+        KNOWN_FAILED=$((KNOWN_FAILED + 1))
+        printf '    已知失败：%s（旧 kg 项目，按决定不修，见 data/reports/kg_K116.md）\n' "$known"
+        return
+      fi
+    fi
     FAILED=$((FAILED + 1))
     printf '%s\n' "$out" | grep -E '✗|Error|Traceback|失败' | head -12 | sed 's/^/    /'
   fi
@@ -207,5 +230,6 @@ kill -TERM -"$UPID" 2>/dev/null
 rm -f "$ULOG"
 
 echo "----"
+echo "已知失败 $KNOWN_FAILED"
 if [ "$FAILED" -eq 0 ]; then echo "全部通过"; else echo "$FAILED 组失败"; fi
 exit "$FAILED"

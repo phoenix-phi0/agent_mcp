@@ -42,6 +42,7 @@ import json
 import os
 import shutil
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -376,6 +377,49 @@ def walk_teacher(page, base, ck, marks, subject_mgmt, kg_mgmt=False):
     return kg_ok
 
 
+WITHDRAW_SERIES = "wk117"
+WITHDRAW_NOTE = "撤下了：这个系列已经撤下，教材页的下拉里不再有它。"
+
+
+def seed_imported_series(proj):
+    """教材导入撤下段的前置：直接往库里放一个已导入的系列和它的任务。
+    走真导入要调模型解析，离线假模型走不通；确认导入这一步由接口测试
+    （contracts/textbook_import.md 的用例）覆盖，这里只验撤下后的页面。"""
+    con = sqlite3.connect(proj / "app.db")
+    try:
+        con.execute("INSERT INTO lesson_series(code,name,sort_order,subject_id) VALUES(?,?,?,1)",
+                    (WITHDRAW_SERIES, "走查撤下系列", 900))
+        con.execute("INSERT INTO textbook_import_task(series_code,series_name,file_name,raw_text,"
+                    "status,created_at,subject_id) VALUES(?,?,?,?,?,?,1)",
+                    (WITHDRAW_SERIES, "走查撤下系列", "walk.md", "x", "已导入", "2026-01-01 00:00:00"))
+        con.commit()
+    finally:
+        con.close()
+
+
+def import_withdraw_flow(t1, ck, marks):
+    """K117：教材导入页管理系列 → 撤下 → 提示可见 → 重新载入（刷新）提示仍在。"""
+    t1.evaluate("location.hash = encodeURIComponent('教材导入') + '?manage=%s'" % WITHDRAW_SERIES)
+    try:
+        t1.get_by_text("撤下这个系列", exact=True).first.click(timeout=15000)
+        t1.wait_for_selector(".overlay", timeout=8000)
+        t1.locator(".overlay").get_by_text("确认撤下", exact=True).last.click(timeout=8000)
+        t1.get_by_text(WITHDRAW_NOTE, exact=False).first.wait_for(timeout=15000)
+        ck(True, "教材导入：撤下后提示「撤下了：…」可见")
+    except Exception as e:
+        ck(False, "教材导入：撤下后提示「撤下了：…」可见", f"{type(e).__name__}: {str(e)[:200]}")
+        return
+    t1.reload()
+    try:
+        t1.get_by_text(WITHDRAW_NOTE, exact=False).first.wait_for(timeout=15000)
+        ck(True, "教材导入：撤下后重新载入，提示仍在")
+    except Exception as e:
+        ck(False, "教材导入：撤下后重新载入，提示仍在", f"{type(e).__name__}: {str(e)[:200]}")
+    err = drain_errors(marks)
+    ck(not err, "教材导入撤下流程无 JS 错误", err)
+    t1.evaluate("location.hash = ''")
+
+
 def subject_flow(t1, base, ck, marks):
     """科目管理前半段（都在 t1 的教师端页面上做）。"""
     visit(t1, "科目管理", marks)
@@ -706,6 +750,7 @@ def main(argv=None):
     print(f"临时目录 {tmp}，端口 {port}")
     try:
         proj = build_workspace(tmp, Path(a.src), kg_mgmt=kg_mgmt)
+        seed_imported_series(proj)
         with open(tmp / "server.log", "w") as log:
             proc = start_server(proj, port, log)
             base = f"http://127.0.0.1:{port}"
@@ -732,6 +777,7 @@ def main(argv=None):
                 login(t1, base, TEACHER_USER, end="/teacher")
                 snapshot(marks)      # 登录前 401 跳登录页是预期行为，不计 JS 错误
                 kg_mgmt = walk_teacher(t1, base, ck, marks, subject_mgmt, kg_mgmt)
+                import_withdraw_flow(t1, ck, marks)
                 if subject_mgmt:
                     subject_flow(t1, base, ck, marks)
                     student_switch(s1, ck, marks)
