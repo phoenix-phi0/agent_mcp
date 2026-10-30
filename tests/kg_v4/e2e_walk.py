@@ -458,7 +458,6 @@ def assist_flow(t1, ck, marks):
         row.first.wait_for(timeout=90000)
         row.first.get_by_text("确认", exact=True).click(timeout=8000)
         t1.locator("tr", has_text="走查记设定").filter(has_text="已执行").first.wait_for(timeout=30000)
-        ck(True, f"{name}：设定草稿点确认后状态变「已执行」")
         t1.evaluate("location.hash = encodeURIComponent('AI老师设定')")
         wait_screen(t1, "AI老师设定")
         t1.get_by_text("走查设定内容K134").first.wait_for(timeout=15000)
