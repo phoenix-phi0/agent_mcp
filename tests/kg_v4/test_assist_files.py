@@ -291,6 +291,27 @@ try:
     rc, out = clean(db, "--keep", "2", "--apply")
     left = [r[0] for r in q(db, "select id from teacher_assist_file order by id")]
     check(rc == 0 and left == [2, 3, 4, 5], "--keep 按老师分开数：t1 3 个删最旧的，t2 2 个不动", (out, left))
+
+    # M4-P3：未保存（draft）且 7 天前的教学材料一并删，saved 的不动；表不存在时跳过
+    db = seed([])
+    rc, out = clean(db, "--apply")
+    check(rc == 0 and "删了 0 行" in out, "材料表不存在：跳过，不报错", out)
+    con = sqlite3.connect(db)
+    con.execute("create table teacher_assist_material(id integer primary key, teacher text, subject_id integer, kind text, title text,"
+                " content text, status text, created_at text, updated_at text)")
+    for t, st, ca in (
+            ("旧未保存", "draft", "2020-01-01 00:00:00"),   # 1 → 删
+            ("旧已保存", "saved", "2020-01-01 00:00:00"),   # 2 → 留
+            ("新未保存", "draft", "2099-01-01 00:00:00")):  # 3 → 留
+        con.execute("insert into teacher_assist_material(teacher, subject_id, kind, title, content, status, created_at, updated_at)"
+                    " values('t1', 1, 'handout', ?, 'x', ?, ?, ?)", (t, st, ca, ca))
+    con.commit()
+    con.close()
+    rc, out = clean(db)
+    check(rc == 0 and "将删 1 份未保存材料" in out and len(q(db, "select id from teacher_assist_material")) == 3, "材料 dry-run：报告将删 1 份，库没变", out)
+    rc, out = clean(db, "--apply")
+    left = [r[0] for r in q(db, "select id from teacher_assist_material order by id")]
+    check(rc == 0 and left == [2, 3], "材料 --apply：7 天前的 draft 删了，saved 和新的 draft 不动", (out, left))
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

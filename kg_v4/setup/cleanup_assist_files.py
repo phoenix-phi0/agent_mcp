@@ -13,7 +13,9 @@
      （attached=1 的那行计数但不删）。
 --apply：先在一个事务里删行，提交后再删磁盘文件；某行的 path 已没有任何 teacher_assist_file 行引用，并且
 textbook_import_* 表里没有叫 path / file_path 的列引用同一路径时才删文件；文件不存在不算错。
-上传文件的相对路径（uploads/…）相对 --db 所在目录。只读写 teacher_assist_file 这一张表。正式库上跑之前照例先备份。
+上传文件的相对路径（uploads/…）相对 --db 所在目录。只读写 teacher_assist_file 这一张表（和下面的材料表）。正式库上跑之前照例先备份。
+另外（M4-P3）：教学材料表 teacher_assist_material 里 status=draft（未保存）且 created_at 早于 7 天前的行一并删，只删行；
+saved 的不动；表不存在时跳过。dry-run / --apply 的规则同上。
 """
 import argparse
 import sqlite3
@@ -58,6 +60,19 @@ def pick_rows(con, days, keep, now):
     return sorted(chosen.values(), key=lambda r: r["id"]), skipped
 
 
+MATERIAL_DAYS = 7
+
+
+def pick_materials(con, now):
+    """→ 要删的未保存材料行 [dict]；表不存在返回 []。"""
+    if not con.execute("select 1 from sqlite_master where type='table' and name='teacher_assist_material'").fetchone():
+        return []
+    cutoff = (now - timedelta(days=MATERIAL_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+    cur = con.execute("select id, teacher, title, created_at from teacher_assist_material"
+                      " where status='draft' and created_at < ? order by id", (cutoff,))
+    return [dict(zip(("id", "teacher", "title", "created_at"), r)) for r in cur]
+
+
 def other_refs(con, path, ignore_ids=()):
     """path 是否还被别处引用（teacher_assist_file 里不在 ignore_ids 里的行，或 textbook_import_* 里的 path / file_path 列）。"""
     for (i,) in con.execute("select id from teacher_assist_file where path=?", (path,)):
@@ -87,7 +102,9 @@ def main(argv=None):
     base = db.resolve().parent
     con = sqlite3.connect(db)
     try:
-        victims, skipped = pick_rows(con, a.days, a.keep, datetime.now())
+        now = datetime.now()
+        victims, skipped = pick_rows(con, a.days, a.keep, now)
+        mats = pick_materials(con, now)
         files = []
         for r in victims:
             print("行 id=%s teacher=%s subject_id=%s name=%s last_used_at=%s path=%s"
@@ -104,6 +121,9 @@ def main(argv=None):
                 if not other_refs(con, p, ids):
                     files.append(p)
                     print("文件 %s" % p)
+            for m in mats:
+                print("材料 id=%s teacher=%s title=%s created_at=%s" % (m["id"], m["teacher"], m["title"], m["created_at"]))
+            print("将删 %d 份未保存材料（dry-run）" % len(mats))
             print("将删 %d 行、%d 个文件（跳过当前附件 %d 个）（dry-run，没有改动；加 --apply 执行）"
                   % (len(victims), len(files), skipped))
             return 0
@@ -111,6 +131,9 @@ def main(argv=None):
         try:
             for r in victims:
                 con.execute("delete from teacher_assist_file where id=?", (r["id"],))
+            for m in mats:
+                con.execute("delete from teacher_assist_material where id=?", (m["id"],))
+                print("删材料 id=%s title=%s" % (m["id"], m["title"]))
             con.commit()
         except Exception:
             con.rollback()
