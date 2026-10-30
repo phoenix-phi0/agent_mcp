@@ -553,7 +553,7 @@ def seed_trend_answers(proj):
 
 def material_flow(t1, ck, marks):
     """M4-P3：教学材料。对话里「写教案」→ 消息里有材料卡片（保存 / 导出按钮）→ 点保存 → 教学材料页看到「已保存」→
-    卡片导出看到全文 → 表格行点编辑（正文非空）改后保存 → 再从表格行打开是新内容 → 课堂练习「做成出题草稿」→ 待确认多一行。"""
+    卡片导出看到全文 → 表格行点编辑（正文非空）改后保存 → 再从表格行打开是新内容 → 先编辑再导出（行导出、卡片导出）看到新全文 → 课堂练习「做成出题草稿」→ 待确认多一行。"""
     name = "教学材料"
     try:
         t1.evaluate("location.hash = encodeURIComponent('教师助手')")
@@ -573,17 +573,20 @@ def material_flow(t1, ck, marks):
         row = t1.locator("tr", has_text="教案").filter(has_text="已保存")
         row.first.wait_for(timeout=15000)
         ck(True, f"{name}：教学材料页能看到这份教案，状态「已保存」")
-        # 卡片「导出」跳到导出浮层看到全文
-        # （已知遗留：同一页面会话里编辑过之后再导出，导出浮层「载入」因表单已是这条被跳过、全文为空；
-        #  列表行带导出两键解不了它——浮层显示读的是接口返回，不是行。见 kg_K152 未解决，所以导出仍放在编辑之前）
-        t1.evaluate("location.hash = encodeURIComponent('教师助手')")
-        wait_screen(t1, "教师助手")
-        t1.wait_for_timeout(1500)
-        t1.locator(".smsg-actions button", has_text="导出").first.click(timeout=15000)
-        t1.wait_for_function("() => decodeURIComponent(location.hash).includes('浮层=导出材料&mat_id=1')", timeout=15000)
-        t1.get_by_text("走查教案正文第一条", exact=False).first.wait_for(timeout=15000)
-        ck(True, f"{name}：卡片「导出」跳到导出浮层，看到全文")
-        t1.locator("button", has_text="返回").last.click(timeout=8000)
+        # 导出浮层读表单字段（多行框），按框里的值核对全文
+        has_text = "txt => Array.from(document.querySelectorAll('textarea')).some(t => t.value.includes(txt))"
+
+        def card_export(txt, what):
+            t1.evaluate("location.hash = encodeURIComponent('教师助手')")
+            wait_screen(t1, "教师助手")
+            t1.wait_for_timeout(1500)
+            t1.locator(".smsg-actions button", has_text="导出").first.click(timeout=15000)
+            t1.wait_for_function("() => decodeURIComponent(location.hash).includes('浮层=导出材料&mat_id=1')", timeout=15000)
+            t1.wait_for_function(has_text, arg=txt, timeout=15000)
+            ck(True, f"{name}：卡片「导出」跳到导出浮层，{what}能看到全文")
+            t1.locator("button", has_text="返回").last.click(timeout=8000)
+
+        card_export("走查教案正文第一条", "编辑前")
         t1.evaluate("location.hash = encodeURIComponent('教学材料')")
         wait_screen(t1, "教学材料")
         row = t1.locator("tr", has_text="教案").filter(has_text="已保存")
@@ -604,6 +607,12 @@ def material_flow(t1, ck, marks):
         t1.wait_for_function("() => Array.from(document.querySelectorAll('textarea')).some(t => t.value.includes('K152'))", timeout=10000)
         ck(True, f"{name}：编辑保存后再从表格行打开，内容是新的")
         t1.locator("button", has_text="取消").last.click(timeout=8000)
+        # 先编辑再导出：表格行点「导出」、卡片「导出」都能看到编辑后的全文
+        t1.locator("tr", has_text="教案").first.locator("button, a", has_text="导出").first.click(timeout=8000)
+        t1.wait_for_function(has_text, arg="走查改过的正文K152", timeout=10000)
+        ck(True, f"{name}：先编辑再导出，表格行「导出」浮层能看到编辑后的全文")
+        t1.locator("button", has_text="返回").last.click(timeout=8000)
+        card_export("走查改过的正文K152", "先编辑再导出，")
         # 课堂练习 → 做成出题草稿
         t1.evaluate("location.hash = encodeURIComponent('教师助手')")
         wait_screen(t1, "教师助手")

@@ -296,7 +296,7 @@
   伪代码 返回 调用 材料页面 current_user=current_user subject=subject_id 的结果
 
 公开 函数 导出材料页面 current_user mat_id current_role? auth_mode? subject?
-  返回 {mat_id, mat_export_head, mat_export_text}；动作 material_export（「导出材料」浮层的「载入」，地址 #教学材料?浮层=导出材料&mat_id=5；对话卡片的「导出」也跳到这里），state 给浮层「显示」
+  返回 {mat_id, mat_export_head, mat_export_text}；动作 material_export（「导出材料」浮层的「载入」，地址 #教学材料?浮层=导出材料&mat_id=5；对话卡片的「导出」也跳到这里），state 给浮层「显示」；K153 起「导出材料」浮层改为读表单字段 mat_title / mat_content（「载入」用 material_open，行上点导出带行字段），不再用本动作，接口保留不动
   报错 400 mat_id 不合法
   报错 404 没有这份材料
   报错 400 subject 不对
