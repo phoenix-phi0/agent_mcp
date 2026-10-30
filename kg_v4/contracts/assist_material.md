@@ -63,8 +63,9 @@
   伪代码 按 id 查 teacher_assist_material；查不到、teacher 不等于 current_user、或 subject_id 不等于入参 subject_id，一律报错 404 没有这份材料（不泄露别人或别的科目有这份材料）
 
 函数 材料行 mat
-  返回 {mat_id, mat_title, mat_kind, mat_state, mat_updated}：材料表的一行（键名就是 .ui 列名）
+  返回 {mat_id, mat_title, mat_kind, mat_state, mat_updated, mat_content, mat_export_head, mat_export_text}：材料表的一行（键名就是 .ui 列名；用户批准：列表行带正文，修「表格行点编辑时引擎认为表单已是这条而跳过载入，编辑浮层正文为空」。导出浮层同样依赖行数据——先编辑再导出时导出浮层的载入也会被跳过——所以导出用的两个键同口径一并带上，与 导出材料 的结果完全一致）
   伪代码 mat_id=mat.id；mat_title=mat.title；mat_kind=类型名 kind=mat.kind；mat_state=状态名 status=mat.status；mat_updated=mat.updated_at 的前 16 个字符
+  伪代码 mat_content=mat.content 全文（不截断）；mat_export_text=mat.title + 换行 + 换行 + mat.content；mat_export_head=「类型名 · 状态名 · n 字 · 更新于 updated_at 前 16 个字符。全选下面的文字复制即可」（n 是 content 的字数，口径同 导出材料）
 
 函数 材料按钮 mat
   返回 {actions, links}：挂在生成这份材料的那条助手消息上的卡片按钮（E1，形状同 assist_draft 的 草稿按钮；action 是 teacher_assist.ui 消息流「按钮」白名单里的远程动作名，前端只认白名单里的）
@@ -159,7 +160,7 @@
   伪代码 返回 {"ok": 1, "mat_id": mat_id}
 
 公开 函数 列材料 current_user kind? status? limit? current_role? auth_mode? subject?
-  返回 {total, drafts, materials}；materials 是 材料行 的列表：本人在本科目的材料按 updated_at 降序、id 降序取前 limit 条（默认 100）；kind 不为空时只列这一类（英文码或中文名都收，「全部」等于不筛）；status 不为空时只列 draft 或 saved；total 是筛选后的条数，drafts 是其中未保存的条数
+  返回 {total, drafts, materials}；materials 是 材料行 的列表（每行带正文 mat_content 全文，材料页面 的列表同）：本人在本科目的材料按 updated_at 降序、id 降序取前 limit 条（默认 100）；kind 不为空时只列这一类（英文码或中文名都收，「全部」等于不筛）；status 不为空时只列 draft 或 saved；total 是筛选后的条数，drafts 是其中未保存的条数
   报错 400 current_user 不能为空
   报错 400 材料类型不对
   报错 400 status 不合法
@@ -434,6 +435,11 @@ GET /assist_material/list -> 列材料 角色 teacher
   先 数据 teacher_assist_material teacher=t1 subject_id=2 kind=handout title=丁 content=x status=saved created_at=2025-12-31 updated_at=2025-12-31
   调用 列材料 current_user=t1
   得 total=2 drafts=1
+
+用例 列材料_每行带正文
+  先 数据 teacher_assist_material teacher=t1 subject_id=1 kind=handout title=甲 content=【要点】\n・条目一 status=saved created_at=2025-12-31 updated_at=2025-12-31
+  调用 列材料 current_user=t1
+  得 total=1 drafts=0
 
 用例 列材料_按类型筛
   先 数据 teacher_assist_material teacher=t1 subject_id=1 kind=handout title=甲 content=x status=draft created_at=2025-12-31 updated_at=2025-12-31
