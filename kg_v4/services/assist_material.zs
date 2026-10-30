@@ -65,7 +65,10 @@
     设 k = 调用 类型名 kind={mat.kind}
     设 s = 调用 状态名 status={mat.status}
     设 u = 截取 {mat.updated_at} 1 16
-    返回 {"mat_id": {mat.id}, "mat_title": "{mat.title}", "mat_kind": "{k}", "mat_state": "{s}", "mat_updated": "{u}"}
+    设 n = 查一值 app.db assist_material_len id={mat.id}
+    设 head = {k} · {s} · {n} 字 · 更新于 {u}。全选下面的文字复制即可
+    设 etext = 查一值 app.db assist_material_export_text id={mat.id}
+    返回 {"mat_id": {mat.id}, "mat_title": "{mat.title}", "mat_kind": "{k}", "mat_state": "{s}", "mat_updated": "{u}", "mat_content": "{mat.content}", "mat_export_head": "{head}", "mat_export_text": "{etext}"}
   结束
 
   函数 材料按钮 mat
