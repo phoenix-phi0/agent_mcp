@@ -20,7 +20,7 @@ from tools.dsl_core import (
     split_args, split_head, split_raw_cmp,
 )
 from tools.verbs import VerbRegistry
-from tools.dsl_http import scan_routes, split_endpoints
+from tools.dsl_http import API_RE, scan_routes, split_endpoints
 from tools.dsl_service import Services, parse_call_text, split_target
 
 
@@ -476,9 +476,32 @@ def check_route_calls(text, rel, svc):
     return probs
 
 
+ROUTE_HEAD_RE = re.compile(r"^接口(\s|/|$)")       # 「接口/x」（少了空格）也算；「接口出错」这类词不算
+
+
+def bad_route_heads(text):
+    """路由文件里顶层（不在任何接口块里）以「接口」开头、却匹配不上 dsl_http.API_RE 的行 → [(行号, 去掉首尾空白的原文)]。
+    split_endpoints 遇到这种行不报错、直接跳过（连同块里的脚本），服务照常启动，这条接口悄悄不生效；
+    这里只给 dslagent 的加载检查 / 比对约定用，不改引擎的切块行为（线上服务和所有项目都靠它）。"""
+    try:
+        eps, _ports = split_endpoints(text, Path("x.zs"))
+    except DSLError:
+        eps = []
+    inside = set()
+    for ep in eps:
+        inside.update(range(ep.line, ep.line + len(ep.body) + 2))      # 接口头 + 块体 + 结束
+    out = []
+    for n, raw in enumerate(text.splitlines(), 1):
+        s = raw.strip()
+        if n not in inside and ROUTE_HEAD_RE.match(s) and not API_RE.match(s):
+            out.append((n, s))
+    return out
+
+
 def check_text(text, rel, route):
     """一份文本按服务的方式加载。route=True：接口文件（切接口块逐块解析）；False：scripts 下的流程（整个当脚本）。
-    返回问题列表，每条形如「[接口出错] 文件: 报错原话」，与服务打印的一致。"""
+    返回问题列表，每条形如「[接口出错] 文件: 报错原话」，与服务打印的一致。
+    接口文件另查 bad_route_heads（服务那边静默跳过、不打印，这里补报）。"""
     if not route:
         e = parse_script(text)
         return [f"[接口出错] {rel}: {e}"] if e else []
@@ -486,7 +509,10 @@ def check_text(text, rel, route):
         eps, _ports = split_endpoints(text, Path(rel))
     except DSLError as e:
         return [f"[接口出错] {rel}: {e}"]
-    probs = []
+    probs = [f"[接口出错] {rel} 第 {n} 行：接口头写法认不出「{s}」，服务启动时这一块会被静默跳过（接口不生效）。"
+             f"接口头只能是「接口 [方法] 路径 [动作 名] [公开|角色 代号]」；「上传/类型/上限」是约定接口行的标记，路由里不能写，"
+             f"上传要在路由体里写「设 <字段>_path = 存文件 <字段> …」、失败回 400 的分支和「上传信息」"
+             for n, s in bad_route_heads(text)]
     for ep in eps:
         e = parse_script(ep.script)
         if e:

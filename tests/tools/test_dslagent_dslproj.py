@@ -997,6 +997,63 @@ def t_flow():
     check(SC.guard("services/progress.zs") == "", "流程结束后范围拦截关闭")
 
 
+def t_upload_head():
+    print("三b、上传接口的接口头写错（K141）：比对约定指出哪一行并附渲染块、加载检查报接口头不匹配")
+    from tools.dslagent import loadcheck as LC
+    from tools.dslagent.v3 import scaffold as S
+    ctext = ("模块 doc\n## 函数\n公开 函数 新建导入 file_path file_name\n公开 函数 列表\n## 接口\n"
+             "POST /doc/import -> 新建导入 上传 file 上限 10MB 角色 teacher\nGET /doc/list -> 列表 角色 teacher\n"
+             "## 用例\n用例 u\n  调用 新建导入 file_path=a file_name=b\n  得 有返回\n用例 u2\n  调用 列表\n  得 有返回\n")
+    c, probs = C.parse(ctext)
+    check(not probs, "带上传的约定解析无问题", probs)
+    good = S.route_text("doc", c, {})
+    want = S.route_text("doc", dict(c, 接口=[c["接口"][0]]), {}).strip()
+    check(good.startswith("接口 POST /doc/import 角色 teacher\n") and "存文件 file 上限=10MB" in good, "骨架渲染：接口头不带上传，路由体里存文件", good)
+
+    def proj(name, routes):
+        q = TMP / name
+        shutil.rmtree(q, ignore_errors=True)
+        (q / "services").mkdir(parents=True)
+        (q / "routes").mkdir()
+        (q / "services" / "doc.zs").write_text(S.service_text("doc", c), encoding="utf-8")
+        (q / "routes" / "doc.zs").write_text(routes, encoding="utf-8")
+        return q
+    # ② 正确写法照常通过
+    q = proj("up_ok", good)
+    r = P.compare(q, "doc", c, ["doc"])
+    check(r["一致"] and r["差异"] == [], "正确写法（接口头不写上传、路由体存文件）：比对一致", r)
+    check(LC.bad_route_heads(good) == [] and not any("接口头写法认不出" in x for x in LC.check_project(q)), "正确写法：加载检查不报接口头")
+    # ① 接口头带「上传 x 上限 10MB」→ 指出第几行、附渲染块，不只报缺接口
+    bad = good.replace("接口 POST /doc/import 角色 teacher\n", "接口 POST /doc/import 上传 file 上限 10MB 角色 teacher\n", 1)
+    q = proj("up_bad", bad)
+    d = P.compare(q, "doc", c, ["doc"])["差异"]
+    hit = [x for x in d if "doc.zs 第 1 行接口头写法认不出" in x]
+    check(len(hit) == 1 and "「上传/类型/上限」是约定行的标记" in hit[0] and "应是：" in hit[0]
+          and all(("    " + l) in hit[0] for l in want.splitlines()), "接口头带「上传 file 上限 10MB」：报第 1 行写法认不出，并附 route_text 渲染的整块", d)
+    check(not any(x.startswith("缺接口") for x in d) and not any("/doc/list" in x for x in d), "不再只报「缺接口」；写对的另一个接口不受影响", d)
+    # ③ loadcheck 报接口头不匹配
+    check(LC.bad_route_heads(bad) == [(1, "接口 POST /doc/import 上传 file 上限 10MB 角色 teacher")], "bad_route_heads 找出认不出的接口头", LC.bad_route_heads(bad))
+    lp = LC.check_project(q)
+    check(any(x.startswith("[接口出错] routes/doc.zs 第 1 行：接口头写法认不出") and "存文件" in x for x in lp), "加载检查报接口头匹配不上（服务会静默跳过这一块）", lp)
+    check(any("接口头写法认不出" in x for x in P.load_problems(q, "doc", ["doc"])), "load_problems（核查阶段）也带出这条")
+    # 没写方法（按 POST）同样对得上；接口块里的行、别的路径不算
+    q = proj("up_nomethod", good.replace("接口 POST /doc/import 角色 teacher\n", "接口 /doc/import 上传 file 角色 teacher\n", 1))
+    check(any("第 1 行接口头写法认不出" in x for x in P.compare(q, "doc", c, ["doc"])["差异"]), "接口头省略方法（= POST）也认得是这条接口")
+    nosp = good.replace("接口 POST /doc/import 角色 teacher\n", "接口/doc/import 角色 teacher\n", 1)
+    q = proj("up_nospace", nosp)
+    check(LC.bad_route_heads(nosp) == [(1, "接口/doc/import 角色 teacher")] and any("第 1 行接口头写法认不出" in x for x in P.compare(q, "doc", c, ["doc"])["差异"]),
+          "「接口/doc/import」（少了空格，API_RE 也不认）同样报；「接口出错」这类词不算接口头", LC.bad_route_heads(nosp))
+    check(LC.bad_route_heads("接口说明在下面\n") == [], "以「接口」开头的别的词不误报")
+    # 真缺：「缺接口」也附渲染块
+    q = proj("up_missing", good.split("\n\n")[1])
+    d = P.compare(q, "doc", c, ["doc"])["差异"]
+    check(any(x.startswith("缺接口 POST /doc/import") and "应是：" in x and "    设 file_path = 存文件 file 上限=10MB" in x for x in d), "真缺接口：「缺接口」后附应是的整块", d)
+    # kg_v4 现有上传路由（kg.zs、textbook_import.zs 等）不误报
+    kr = sorted((ROOT / "kg_v4" / "routes").glob("*.zs"))
+    badk = {f.name: LC.bad_route_heads(f.read_text(encoding="utf-8")) for f in kr}
+    check(kr and not any(badk.values()) and any("存文件" in f.read_text(encoding="utf-8") for f in kr), f"kg_v4 routes {len(kr)} 个文件（含上传路由）没有误报接口头", {k: v for k, v in badk.items() if v})
+
+
 def t_mock_json():
     print("跑用例里的模型调用（问JSON 按格式示例回）")
     ws = TMP / "mockjson"
@@ -1014,6 +1071,7 @@ def main():
         t_contract()
         t_project()
         t_compare()
+        t_upload_head()
         t_cases()
         t_mock_json()
         t_case_files()

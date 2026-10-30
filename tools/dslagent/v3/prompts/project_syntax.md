@@ -72,6 +72,21 @@
 ```
 - 接口行格式：`接口 [GET|POST|PUT|DELETE] /路径 [动作 名] [公开] [角色 代号 | 只许 中文名]`，方法省略 = POST；「公开」「角色」「只许」都可省。同一方法 + 路径不能重复声明；同一动作名不能被两个接口声明。
 - 接口里只收请求、调约定里写的那个函数、返回。请求体 / GET 查询参数直接是变量（`{learner}`），没传是空串。
+- **带上传的接口**（约定行 `POST /doc/import -> 新建导入 上传 file 类型 pdf,md 上限 10MB 角色 teacher`）：接口头**不写**「上传/类型/上限」
+  （那是约定行的标记；写进接口头，引擎认不出这一行，整块被静默跳过，比对约定报「接口头写法认不出」），路由体里写存文件、失败回 400、上传信息：
+```
+接口 POST /doc/import 角色 teacher
+  设 file_path = 存文件 file 类型=pdf,md 上限=10MB
+  如果 {file_path} 开头是 [
+    返回 {"error":"{file_path}"} 400
+  结束
+  设 file_info = 上传信息 file
+  设 file_name = {file_info.name}
+  设 r = 调用 doc.新建导入 file_path={file_path} file_name={file_name}
+  返回 {r}
+结束
+```
+  比对约定报「缺接口」或「接口头写法认不出」时会附上「应是：」整块（和骨架同一份渲染），**照比对约定给出的『应是』原样写**，不要自己改接口头。
 - **给前端的接口（约定里声明了「动作」或「模板」）由骨架按封装模板生成**，组装信封只用这些现有动词（页面信封 = messages / state / lists / form / go，前端 applyResponse 只认这几个键）：
 ```
 接口 POST /note/list 动作 note_list 角色 teacher
