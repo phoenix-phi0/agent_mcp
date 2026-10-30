@@ -515,6 +515,26 @@ def test_order_narrow():
            ".row { display:flex; gap:12px; align-items:flex-start; }" in css), (True, True))
 
 
+def test_clear_file_field():
+    print("\n[回显 清空 遇到文件字段]")
+    ui = ("界面 自定义 助手\n"
+          "  分组 底栏 横排 底栏\n"
+          "    字段 afile 接受 .txt 最大 10MB 附件\n"
+          "    字段 content 控件 多行 单行高 提示 说点什么\n"
+          "    动作 send 提交 远程 回显 清空 发送\n"
+          "  结束\n"
+          "结束\n")
+    r = compile_ui(ui, backend="vue", fields={"afile": "文件", "content": "文本"},
+                   options={"endpoints": {"send": "/s"}})
+    js = r["result"]["files"]["app.js"]
+    # 文件字段不在表单默认值里：src 有、src[last] 为 undefined 时不能 JSON.parse
+    check("清空：src 里没有该键就不 JSON.parse",
+          '(src && last in src) ? JSON.parse(JSON.stringify(src[last])) : ""' in js, True)
+    check("清空：旧写法已去掉",
+          'node[last] = src ? JSON.parse' in js, False)
+    check("文件字段仍由 files 分支清掉", "fileEls[fname].value" in js, True)
+
+
 def test_state_lists_sync():
     print("\n[页面状态里的列表同步进 lists]")
     ui = ("界面 自定义 学情 载入 report_home\n"
@@ -701,6 +721,7 @@ def main() -> int:
         test_audience,
         test_order_narrow,
         test_state_lists_sync,
+        test_clear_file_field,
         test_msg_actions,
     ]:
         try:

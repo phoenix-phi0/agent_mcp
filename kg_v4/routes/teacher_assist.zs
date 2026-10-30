@@ -32,3 +32,31 @@
   设 r = 调用 teacher_assist.撤销草稿页面 current_user={current_user} draft_id={draft_id} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   响应 state {r}
 结束
+
+接口 POST /teacher_assist/attach 动作 assist_attach 角色 teacher
+  设 assist_file_path = 存文件 assist_file 上限=10MB
+  如果 {assist_file_path} 开头是 [
+    返回 {"error":"{assist_file_path}"} 400
+  结束
+  设 assist_file_info = 上传信息 assist_file
+  设 file_name = {assist_file_info.name}
+  设 file_size = {assist_file_info.size}
+  设 file_ext = {assist_file_info.ext}
+  设 r = 调用 teacher_assist.挂附件页面 current_user={current_user} assist_file_path={assist_file_path} file_name={file_name 或} file_size={file_size 或} file_ext={file_ext 或} message={content 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  响应 state {r.page}
+结束
+
+接口 POST /teacher_assist/attach/pick 动作 assist_attach_pick 角色 teacher
+  设 r = 调用 teacher_assist.挂上附件页面 current_user={current_user} file_id={att_id} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  响应 state {r}
+结束
+
+接口 POST /teacher_assist/attach/drop 动作 assist_attach_drop 角色 teacher
+  设 r = 调用 teacher_assist.移除附件页面 current_user={current_user} file_id={file_id 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  响应 state {r}
+结束
+
+接口 POST /teacher_assist/attach/delete 动作 assist_attach_delete 角色 teacher
+  设 r = 调用 teacher_assist.删除附件页面 current_user={current_user} file_id={att_id} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  响应 state {r}
+结束

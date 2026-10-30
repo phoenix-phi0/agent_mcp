@@ -632,7 +632,7 @@ const _app = createApp({
           node = node && node[k]; src = src && src[k];
         }
         const last = parts[parts.length - 1];
-        if (node) node[last] = src ? JSON.parse(JSON.stringify(src[last])) : "";
+        if (node) node[last] = (src && last in src) ? JSON.parse(JSON.stringify(src[last])) : "";
       }
 <% if has_files %>
       // 文件也要清：不清的话下次提交会把上次的再传一遍，而且界面上还

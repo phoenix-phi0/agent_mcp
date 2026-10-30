@@ -1,0 +1,1 @@
+INSERT INTO teacher_assist_file (teacher, subject_id, name, ext, "size", path, pages, chars, "text", stats, "rows", status, attached, created_at, last_used_at) VALUES (:teacher, CAST(:subject_id AS INTEGER), :name, :ext, CAST(:size AS INTEGER), :path, CAST(:pages AS INTEGER), CAST(:chars AS INTEGER), :text, :stats, CAST(:rows AS INTEGER), 'ok', 1, :now, :now)
