@@ -37,6 +37,10 @@
       设 o = 出题
     否则如果 {kind} 等于 relay_add
       设 o = 发传达
+    否则如果 {kind} 等于 setting_save
+      设 o = 改设定
+    否则如果 {kind} 等于 kg_add
+      设 o = 加知识点
     结束
     返回 {o}
   结束
@@ -113,7 +117,7 @@
     设 pcode = {blank}
     设 ptitle = {blank}
     如果 {point} 不为空
-      设 m = 调用 匹配知识点 keyword={point} subject={subject_id}
+      设 m = 调用 assist_common.匹配知识点 keyword={point} subject={subject_id}
       如果 {m.status} 等于 none
         返回 {"status": "ask", "hint": "没有找到「{point}」这个知识点或条目，换个说法试试", "point_code": "", "point_title": "", "items": []}
       否则如果 {m.status} 等于 many
@@ -155,7 +159,7 @@
     设 nl = 查一值 app.db assist_draft_nl
     设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 subject_id = {sj.subject_id}
-    如果 {kind} 不等于 quiz_add 且 {kind} 不等于 relay_add
+    如果 {kind} 不等于 quiz_add 且 {kind} 不等于 relay_add 且 {kind} 不等于 setting_save 且 {kind} 不等于 kg_add
       报错 400 草稿类型不对
     结束
     设 errs = []
@@ -217,6 +221,28 @@
     结束
     设 norm = {blank}
     设 preview = {blank}
+    如果 {kind} 等于 setting_save
+      设 sv = 调用 assist_setting.校验设定草稿 payload_json={p} subject={subject_id}
+      遍历 er 于 {sv.errors}
+        设 errs = 列表加项 {errs} {er}
+      结束
+      设 norm = {sv.normalized}
+      设 preview = {sv.preview}
+      如果 {title} 为空
+        设 title = {sv.title 或}
+      结束
+    结束
+    如果 {kind} 等于 kg_add
+      设 sv = 调用 assist_kg.校验图谱草稿 payload_json={p} learner={learner} subject={subject_id}
+      遍历 er 于 {sv.errors}
+        设 errs = 列表加项 {errs} {er}
+      结束
+      设 norm = {sv.normalized}
+      设 preview = {sv.preview}
+      如果 {title} 为空
+        设 title = {sv.title 或}
+      结束
+    结束
     如果 {kind} 等于 quiz_add
       设 nq = []
       设 qs = {p.questions 或}
@@ -234,6 +260,12 @@
           遍历 q 于 {qs}
             设 i = 计算 {i} + 1
             设 pf = {blank}第{i}题：
+            设 qm = 匹配 {q} ^\s*\{
+            如果 {qm.matched} 不等于 是
+              设 msg = {pf}格式不对
+              设 errs = 列表加项 {errs} {msg}
+              继续
+            结束
             设 stem = {q.stem 或}
             如果 {stem} 不为空
               设 stem = 替换 {stem} ^\s+|\s+$
@@ -405,7 +437,7 @@
           设 errs = 列表加项 {errs} {msg}
         否则
           遍历 nm 于 {sts}
-            设 m = 调用 匹配学生 name={nm} subject={subject_id}
+            设 m = 调用 assist_common.匹配学生 name={nm} subject={subject_id}
             如果 {m.status} 等于 none
               设 msg = 没有找到叫「{nm}」的学生
               设 errs = 列表加项 {errs} {msg}
@@ -445,7 +477,7 @@
       否则
         设 ml = 查一值 app.db assist_draft_len t={mi}
         如果 {ml} 大于 300
-          设 msg = 要传达的内容超过300字
+          设 msg = {blank}要传达的内容超过 300 字
           设 errs = 列表加项 {errs} {msg}
         结束
       结束
@@ -453,7 +485,7 @@
       如果 {fc} 不为空
         设 fl = 查一值 app.db assist_draft_len t={fc}
         如果 {fl} 大于 300
-          设 msg = 必须准确的信息超过300字
+          设 msg = {blank}必须准确的信息超过 300 字
           设 errs = 列表加项 {errs} {msg}
         结束
       结束
@@ -531,7 +563,7 @@
     如果 {msg} 为空
       报错 400 消息不能为空
     结束
-    如果 {kind} 不等于 quiz_add 且 {kind} 不等于 relay_add
+    如果 {kind} 不等于 quiz_add 且 {kind} 不等于 relay_add 且 {kind} 不等于 setting_save 且 {kind} 不等于 kg_add
       报错 400 草稿类型不对
     结束
     设 sj = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
@@ -580,9 +612,9 @@
         结束
       结束
       设 base = {sysp}{nl}任务：出题，题目数量{cnt}。输出JSON对象，含title（标题）和questions（列表）。每题含stem（题干，不超过300字）、options（2到6个选项文字，选择题才有）、answer（选项文字或字母）、accepted（可选，其他可接受答案的列表）、explain（解析，不超过500字，可选）、item_code（只能从候选条目里选）、level、category。不要写题号。{nl}候选条目（编号｜名字｜所属知识点｜等级）：{nl}{cl}{nl}老师的话：{msg}
-    否则
+    否则如果 {kind} 等于 relay_add
       如果 {students} 为空
-        设 m0 = 调用 匹配学生 name={blank} subject={subject_id}
+        设 m0 = 调用 assist_common.匹配学生 name={blank} subject={subject_id}
         返回 {"ok": 1, "status": "ask", "draft_id": "", "title": "", "preview": "", "hint": "要发给哪几位学生？现有学生：{m0.roster}", "tries": 0}
       结束
       设 parts = 按正则切分 {students} [、，,]
@@ -594,7 +626,7 @@
           设 nm = 替换 {nm} ^\s+|\s+$
         结束
         如果 {nm} 不为空
-          设 m = 调用 匹配学生 name={nm} subject={subject_id}
+          设 m = 调用 assist_common.匹配学生 name={nm} subject={subject_id}
           如果 {m.status} 等于 none
             返回 {"ok": 1, "status": "ask", "draft_id": "", "title": "", "preview": "", "hint": "没有找到叫「{nm}」的学生。现有学生：{m.roster}", "tries": 0}
           结束
@@ -618,10 +650,91 @@
         结束
       结束
       如果 {nn} 等于 0
-        设 m0 = 调用 匹配学生 name={blank} subject={subject_id}
+        设 m0 = 调用 assist_common.匹配学生 name={blank} subject={subject_id}
         返回 {"ok": 1, "status": "ask", "draft_id": "", "title": "", "preview": "", "hint": "要发给哪几位学生？现有学生：{m0.roster}", "tries": 0}
       结束
       设 base = {sysp}{nl}任务：给学生发传达。学生名单（显示名（用户名））：{nlist}。输出JSON对象，含title（可选）、students（学生显示名列表）、must_info（要传达的内容，不超过300字）、facts（必须准确的信息，可选）、urgency（只能是low、normal、urgent）、deadline（YYYY-MM-DD或空）、rounds（1到10的整数，可选）、keywords（可选）。{nl}老师的话：{msg}
+    否则如果 {kind} 等于 setting_save
+      设 nlist = {blank}
+      如果 {students} 不为空
+        设 parts = 按正则切分 {students} [、，,]
+        遍历 p0 于 {parts}
+          设 nm = {p0}
+          如果 {nm} 不为空
+            设 nm = 替换 {nm} ^\s+|\s+$
+          结束
+          如果 {nm} 不为空
+            设 m = 调用 assist_common.匹配学生 name={nm} subject={subject_id}
+            如果 {m.status} 等于 none
+              返回 {"ok": 1, "status": "ask", "draft_id": "", "title": "", "preview": "", "hint": "没有找到叫「{nm}」的学生。现有学生：{m.roster}", "tries": 0}
+            结束
+            如果 {m.status} 等于 many
+              设 cn = {blank}
+              遍历 x 于 {m.candidates}
+                如果 {cn} 为空
+                  设 cn = {x.display_name}（{x.username}）
+                否则
+                  设 cn = {cn}、{x.display_name}（{x.username}）
+                结束
+              结束
+              返回 {"ok": 1, "status": "ask", "draft_id": "", "title": "", "preview": "", "hint": "「{nm}」找到多位：{cn}，你指哪一位？", "tries": 0}
+            结束
+            如果 {nlist} 为空
+              设 nlist = {m.display_name}（{m.username}）
+            否则
+              设 nlist = {nlist}、{m.display_name}（{m.username}）
+            结束
+          结束
+        结束
+      结束
+      设 who = 全班
+      如果 {nlist} 不为空
+        设 who = {nlist}
+      结束
+      设 sc = 调用 assist_setting.设定候选 subject={subject_id}
+      设 el = {blank}
+      遍历 x 于 {sc.editable}
+        设 line = 编号{x.id}｜{x.kind}｜{x.student}｜{x.keywords}｜{x.content}
+        如果 {el} 为空
+          设 el = {line}
+        否则
+          设 el = {el}{nl}{line}
+        结束
+      结束
+      设 rl = {blank}
+      遍历 x 于 {sc.readonly}
+        设 line = 编号{x.id}｜{x.kind}｜{x.content}
+        如果 {rl} 为空
+          设 rl = {line}
+        否则
+          设 rl = {rl}{nl}{line}
+        结束
+      结束
+      设 base = {sysp}{nl}任务：起草AI老师设定。针对的学生：{who}。输出JSON对象，含title（可选）和settings（列表，一份最多10条）；每项含kind（memory记忆：长期记住的事；note作者注：对AI老师措辞的要求，once=1只用于下一条；card关键词卡：学生说到关键词时才拼进去，必须写keywords）、content、student（可选）、keywords（可选）、once（可选）；改已有设定写target_id，新建不写；不要写scope、subject_id、enabled。{nl}本科目已有设定（编号｜种类｜针对谁｜关键词｜内容）：{nl}{el}{nl}全部科目的设定（只读，助手不能改）：{nl}{rl}{nl}老师的话：{msg}
+    否则
+      设 pf = 调用 assist_kg.图谱编号前缀 learner={current_user} subject={subject_id}
+      设 pts = 调用 kg.列知识点 subject={subject_id}
+      设 pl = {blank}
+      设 pn = 0
+      遍历 x 于 {pts.points}
+        如果 {pn} 小于 80
+          设 line = {x.code}｜{x.title}
+          如果 {pl} 为空
+            设 pl = {line}
+          否则
+            设 pl = {pl}{nl}{line}
+          结束
+          设 pn = 计算 {pn} + 1
+        结束
+      结束
+      设 hint2 = {blank}
+      如果 {point} 不为空
+        设 pm = 调用 assist_common.匹配知识点 keyword={point} subject={subject_id}
+        如果 {pm.status} 等于 one
+          设 hint2 = {nl}老师说的「{point}」已经有了：{pm.title}（{pm.code}），不要重复建，可以往它下面加条目。
+        结束
+      结束
+      设 base = {sysp}{nl}任务：往图谱里加知识点、条目、前置边。编号前缀（非日语科目必须以它开头）：{pf.prefix}；编号只能用字母、数字、点、下划线、短横。输出JSON对象，含title（可选）、points（列表，每项{code,title}）、items（列表，每项{code,name,point_code,after_form可选,prev_code可选}）、edges（列表，每项{pre_code,point_code}）。已有的知识点不要重复建，条目可以挂在已有知识点或本草稿的新知识点上，前置边两端只能是知识点。{nl}已有知识点（编号｜名称）：{nl}{pl}{hint2}{nl}老师的话：{msg}
     结束
     如果 {old} 不为空
       设 base = {base}{nl}旧草稿内容：{old.payload}{nl}按老师这句话修改：{msg}
@@ -636,14 +749,18 @@
         设 pr = {base}{extra}
         如果 {kind} 等于 quiz_add
           问JSON j = {pr} 格式 title:文本 questions:列表 用 平衡 出错时 e
-        否则
+        否则如果 {kind} 等于 relay_add
           问JSON j = {pr} 格式 title?:文本 students:列表 must_info:文本 facts?:文本 urgency?:low|normal|urgent deadline?:文本 rounds?:数字 keywords?:文本 用 平衡 出错时 e
+        否则如果 {kind} 等于 setting_save
+          问JSON j = {pr} 格式 title?:文本 settings:列表 用 平衡 出错时 e
+        否则
+          问JSON j = {pr} 格式 title?:文本 points?:列表 items?:列表 edges?:列表 用 平衡 出错时 e
         结束
         如果 {e} 不为空
           设 lasterr = 模型暂时无法回答
           设 extra = {nl}上次输出的问题：模型暂时无法回答，请改正后重新输出完整JSON
         否则
-          设 v = 调用 校验草稿 kind={kind} payload_json={j} subject={subject_id}
+          设 v = 调用 校验草稿 kind={kind} payload_json={j} learner={current_user} subject={subject_id}
           如果 {v.ok} 等于 1
             设 good = 1
           否则
@@ -734,7 +851,7 @@
       设 rj = 解析JSON {rres}
       如果 {row.kind} 等于 quiz_add
         设 rt = 写入题号：{rj.question_nos}
-      否则
+      否则如果 {row.kind} 等于 relay_add
         遍历 x 于 {rj.items}
           设 ud = {x.undo 或}
           设 ln = {x.display_name}：已建传达 #{x.relay_id}
@@ -751,9 +868,101 @@
             设 rt = {rt}{nl}{ln}
           结束
         结束
+      否则
+        遍历 x 于 {rj.items}
+          设 ud = {x.undo 或}
+          设 ln = {x.label}：已建
+          如果 {row.kind} 等于 setting_save
+            如果 {x.op 或} 等于 edit
+              设 ln = {x.label}：已改设定 #{x.setting_id}
+            否则
+              设 ln = {x.label}：已建设定 #{x.setting_id}
+            结束
+          否则如果 {x.type 或} 等于 edge 且 {x.created 或} 等于 0
+            设 ln = {x.label}：已存在未新建
+          结束
+          如果 {x.ok} 不等于 1
+            设 ln = {x.label}：失败：{x.error 或}
+          否则如果 {ud} 等于 deleted
+            设 ln = {x.label}：已删除
+          否则如果 {ud} 等于 restored
+            设 ln = {x.label}：已恢复改前内容
+          否则如果 {ud} 等于 gone
+            设 ln = {x.label}：已不在
+          结束
+          如果 {rt} 为空
+            设 rt = {ln}
+          否则
+            设 rt = {rt}{nl}{ln}
+          结束
+        结束
       结束
     结束
-    设 d = {"id": {row.id}, "kind": "{row.kind}", "kind_label": "{kn}", "title": "{row.title}", "head": "{head}", "preview": "{row.preview 或}", "status": "{row.status}", "state": "{stn}", "error": "{row.error 或}", "result_text": "{rt}", "can_undo": {cu}, "created_at": "{row.created_at}", "decided_at": "{row.decided_at 或}", "undone_at": "{row.undone_at 或}"}
+    设 ct = {blank}
+    如果 {row.kind} 等于 setting_save
+      设 pj = 解析JSON {row.payload}
+      设 sn2 = 解析JSON {row.snapshot 或}
+      设 rj2 = 解析JSON {row.result 或}
+      遍历 s 于 {pj.settings}
+        如果 {s.op 或} 等于 edit
+          设 sid = {s.target_id}
+          设 bk = {blank}
+          设 bs = {blank}
+          设 bw = {blank}
+          设 bc = {blank}
+          设 ak = {s.kind 或}
+          设 a_s = {s.student 或}
+          设 aw = {s.keywords 或}
+          设 ac = {s.content 或}
+          设 seg = {blank}
+          如果 {row.result 或} 不为空
+            如果 {row.snapshot 或} 不为空
+              遍历 b 于 {sn2.settings}
+                如果 {b.setting_id} 等于 {sid}
+                  设 bk = {b.before.kind 或}
+                  设 bs = {b.before.student 或}
+                  设 bw = {b.before.keywords 或}
+                  设 bc = {b.before.content 或}
+                结束
+              结束
+            结束
+            设 awr = 0
+            遍历 it 于 {rj2.items}
+              如果 {it.setting_id 或} 等于 {sid} 且 {it.ok 或} 等于 1
+                设 awr = 1
+                设 ak = {it.written.kind 或}
+                设 a_s = {it.written.student 或}
+                设 aw = {it.written.keywords 或}
+                设 ac = {it.written.content 或}
+              结束
+            结束
+            如果 {awr} 等于 0
+              设 seg = {blank}设定 #{sid}{nl}改后：未改
+            结束
+          否则
+            设 cur = 调用 teacher_rules.取设定 setting_id={sid} subject={subject_id} 出错时 ge
+            如果 {ge} 不为空
+              设 seg = {blank}设定 #{sid}{nl}改前：已不在
+            否则
+              设 bk = {cur.kind 或}
+              设 bs = {cur.student 或}
+              设 bw = {cur.keywords 或}
+              设 bc = {cur.content 或}
+            结束
+          结束
+          如果 {seg} 为空
+            设 pr2 = 调用 对比段 sid={sid} bk={bk} bs={bs} bw={bw} bc={bc} ak={ak} a_s={a_s} aw={aw} ac={ac}
+            设 seg = {pr2.text}
+          结束
+          如果 {ct} 为空
+            设 ct = {seg}
+          否则
+            设 ct = {ct}{nl}{nl}{seg}
+          结束
+        结束
+      结束
+    结束
+    设 d = {"id": {row.id}, "kind": "{row.kind}", "kind_label": "{kn}", "title": "{row.title}", "head": "{head}", "preview": "{row.preview 或}", "compare_text": "{ct}", "status": "{row.status}", "state": "{stn}", "error": "{row.error 或}", "result_text": "{rt}", "can_undo": {cu}, "created_at": "{row.created_at}", "decided_at": "{row.decided_at 或}", "undone_at": "{row.undone_at 或}"}
     返回 {"draft": {d}}
   结束
 
@@ -779,6 +988,7 @@
     设 resj = {blank}
     设 qnos = {blank}
     设 failtxt = {blank}
+    设 snap = {blank}
     如果 {dr.kind} 等于 quiz_add
       设 total = 列表长度 {pl.questions}
       设 pref = {blank}
@@ -820,7 +1030,7 @@
         设 dn = {total}
         设 resj = {"question_nos": "{qnos}"}
       结束
-    否则
+    否则如果 {dr.kind} 等于 relay_add
       设 total = 列表长度 {pl.items}
       设 recs = []
       遍历 it 于 {pl.items}
@@ -843,24 +1053,68 @@
       否则如果 {dn} 大于 0
         设 rs = partial
       结束
+    否则
+      如果 {dr.kind} 等于 setting_save
+        设 ex = 调用 assist_setting.执行设定草稿 payload_json={dr.payload} current_user={current_user} subject={subject_id}
+      否则
+        设 ex = 调用 assist_kg.执行图谱草稿 payload_json={dr.payload} learner={current_user} subject={subject_id}
+      结束
+      设 total = {ex.total}
+      设 dn = {ex.done}
+      设 err = {ex.error 或}
+      设 recs = {ex.items}
+      设 resj = {"items": {recs}}
+      设 snap = {ex.snapshot 或}
+      遍历 x 于 {recs}
+        如果 {failtxt} 为空 且 {x.ok} 不等于 1
+          设 failtxt = {x.label} 失败：{x.error 或}
+        结束
+      结束
+      如果 {dn} 等于 {total} 且 {total} 大于 0
+        设 rs = done
+      否则如果 {dn} 大于 0
+        设 rs = partial
+      结束
     结束
-    设 now = 当前时间
-    设 fq = {"id": "{draft_id}", "status": "{rs}", "result": "{resj}", "error": "{err}", "token": "{token}", "now": "{now}"}
-    设 n0 = 写库表 app.db assist_draft_finish {fq}
+    设 fq = {"id": "{draft_id}", "status": "{rs}", "result": "{resj}", "error": "{err}", "snapshot": "{snap}", "token": "{token}"}
+    设 n0 = 写库表 app.db assist_draft_finish_snap {fq}
     设 pre = 草稿
     设 summary = {blank}
     如果 {rs} 等于 done
       如果 {dr.kind} 等于 quiz_add
         设 summary = {pre} #{draft_id} 已执行：写入 {dn} 道题（题号{qnos}）
-      否则
+      否则如果 {dr.kind} 等于 relay_add
         设 summary = {pre} #{draft_id} 已执行：给 {dn} 名学生建了传达
+      否则
+        设 ca = 0
+        设 cb = 0
+        设 cc = 0
+        遍历 x 于 {recs}
+          如果 {x.ok} 等于 1
+            如果 {x.op 或} 等于 edit
+              设 cb = 计算 {cb} + 1
+            否则如果 {x.op 或} 等于 add
+              设 ca = 计算 {ca} + 1
+            否则如果 {x.type 或} 等于 point
+              设 ca = 计算 {ca} + 1
+            否则如果 {x.type 或} 等于 item
+              设 cb = 计算 {cb} + 1
+            否则
+              设 cc = 计算 {cc} + 1
+            结束
+          结束
+        结束
+        如果 {dr.kind} 等于 setting_save
+          设 summary = {pre} #{draft_id} 已执行：新建 {ca} 条、修改 {cb} 条 AI 老师设定
+        否则
+          设 summary = {pre} #{draft_id} 已执行：建了 {ca} 个知识点、{cb} 个条目、{cc} 条前置边
+        结束
       结束
     否则如果 {rs} 等于 partial
       设 summary = {pre} #{draft_id} 部分执行：成功 {dn} / {total}，{failtxt}
     否则
       设 summary = {pre} #{draft_id} 执行失败：{err}
     结束
-    设 mid = 调用 记一条 current_user={current_user} content={summary} subject_id={subject_id}
     设 sn = 调用 状态名 status={rs}
     返回 {"ok": 1, "draft_id": {draft_id}, "status": "{rs}", "state": "{sn}", "done": {dn}, "total": {total}, "error": "{err}", "summary": "{summary}"}
   结束
@@ -927,7 +1181,7 @@
       设 total = {dq.deleted}
       设 rs = undone
       设 summary = {pre} #{draft_id} 已撤销：删除 {undone} 道题
-    否则
+    否则如果 {dr.kind} 等于 relay_add
       设 ni = []
       设 okn = 0
       设 left = 0
@@ -988,11 +1242,140 @@
       否则
         设 summary = {pre} #{draft_id} 撤销了 {undone} / {total} 条，{failtxt}
       结束
+    否则
+      如果 {dr.kind} 等于 setting_save
+        设 ur = 调用 assist_setting.撤销设定草稿 result_json={resj} snapshot_json={dr.snapshot 或} current_user={current_user} subject={subject_id} 出错时 ke
+      否则
+        设 ur = 调用 assist_kg.撤销图谱草稿 result_json={resj} learner={current_user} subject={subject_id} 出错时 ke
+      结束
+      如果 {ke} 不为空
+        设 fq2 = {"id": "{draft_id}", "status": "{old}", "result": "{resj}", "error": "{ke.error}", "token": "{token}", "now": "{now}"}
+        设 n0 = 写库表 app.db assist_draft_finish {fq2}
+        如果 {ke.code} 等于 409
+          报错 409 {ke.error}
+        否则如果 {ke.code} 等于 404
+          报错 404 {ke.error}
+        结束
+        报错 400 {ke.error}
+      结束
+      设 undone = {ur.undone}
+      设 total = {ur.total}
+      设 resj = {"items": {ur.items}}
+      设 left = 0
+      设 ca = 0
+      设 cb = 0
+      设 cc = 0
+      设 failtxt = {blank}
+      遍历 x 于 {ur.items}
+        如果 {x.ok} 等于 1
+          如果 {x.undo 或} 为空
+            设 left = 计算 {left} + 1
+            如果 {failtxt} 为空
+              设 failtxt = {x.label} 没撤成：{x.error 或}
+            结束
+          否则如果 {x.op 或} 等于 edit
+            设 cb = 计算 {cb} + 1
+          否则如果 {x.op 或} 等于 add
+            设 ca = 计算 {ca} + 1
+          否则如果 {x.type 或} 等于 point
+            设 ca = 计算 {ca} + 1
+          否则如果 {x.type 或} 等于 item
+            设 cb = 计算 {cb} + 1
+          否则
+            设 cc = 计算 {cc} + 1
+          结束
+        结束
+      结束
+      如果 {left} 等于 0
+        设 rs = undone
+        如果 {dr.kind} 等于 setting_save
+          设 summary = {pre} #{draft_id} 已撤销：删除 {ca} 条新建的设定，恢复 {cb} 条改前内容
+        否则
+          设 summary = {pre} #{draft_id} 已撤销：删除 {ca} 个知识点、{cb} 个条目、{cc} 条前置边
+        结束
+      否则
+        设 err = {ur.error 或}
+        设 summary = {pre} #{draft_id} 撤销了 {undone} / {total} 条，{failtxt}
+      结束
     结束
     设 fq = {"id": "{draft_id}", "status": "{rs}", "result": "{resj}", "error": "{err}", "token": "{token}", "now": "{now}"}
     设 n1 = 写库表 app.db assist_draft_finish {fq}
-    设 mid = 调用 记一条 current_user={current_user} content={summary} subject_id={subject_id}
     设 sn = 调用 状态名 status={rs}
     返回 {"ok": 1, "draft_id": {draft_id}, "status": "{rs}", "state": "{sn}", "undone": {undone}, "total": {total}, "error": "{err}", "summary": "{summary}"}
+  结束
+
+  函数 对比段 sid bk bs bw bc ak a_s aw ac
+    设 blank = {zz 或}
+    设 nl = 查一值 app.db assist_draft_nl
+    设 f1 = {blank}
+    设 f2 = {blank}
+    设 f3 = {blank}
+    设 f4 = {blank}
+    如果 {bk} 不等于 {ak}
+      设 f1 = （改）
+    结束
+    如果 {bs} 不等于 {a_s}
+      设 f2 = （改）
+    结束
+    如果 {bw} 不等于 {aw}
+      设 f3 = （改）
+    结束
+    如果 {bc} 不等于 {ac}
+      设 f4 = （改）
+    结束
+    设 t = {blank}设定 #{sid}{nl}改前：种类 {bk}；针对谁 {bs}；关键词 {bw}；内容 {bc}{nl}改后：种类 {ak}{f1}；针对谁 {a_s}{f2}；关键词 {aw}{f3}；内容 {ac}{f4}
+    返回 {"text": "{t}"}
+  结束
+
+  公开 函数 按消息列草稿 current_user msg_ids current_role? auth_mode? subject?
+    如果 {current_user} 为空
+      报错 400 current_user 不能为空
+    结束
+    设 sj = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
+    设 ids = ,
+    设 nid = 0
+    设 parts = 按正则切分 {msg_ids} [,，\s]+
+    遍历 p0 于 {parts}
+      如果 {p0} 不为空
+        设 bad = 替换 {p0} [0-9]
+        如果 {bad} 为空
+          如果 {p0} 不小于 1
+            设 ids = {ids}{p0},
+            设 nid = 计算 {nid} + 1
+          结束
+        结束
+      结束
+    结束
+    如果 {nid} 等于 0
+      返回 {"total": 0, "items": []}
+    结束
+    设 rows = 查询 app.db assist_draft_by_msgs teacher={current_user} subject_id={subject_id} ids={ids}
+    设 out = []
+    遍历 x 于 {rows}
+      设 bt = 调用 草稿按钮 draft={x}
+      设 it = {"source_msg_id": {x.source_msg_id}, "draft_id": {x.id}, "actions": {bt.actions}, "links": {bt.links}}
+      设 out = 列表加项 {out} {it}
+    结束
+    设 total = 列表长度 {out}
+    返回 {"total": {total}, "items": {out}}
+  结束
+
+  公开 函数 挂回消息 current_user draft_id msg_id current_role? auth_mode? subject?
+    如果 {current_user} 为空
+      报错 400 current_user 不能为空
+    结束
+    设 sj = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
+    设 bad = 替换 {msg_id} [0-9]
+    如果 {msg_id} 为空 或 {bad} 不为空
+      报错 400 msg_id 不合法
+    结束
+    如果 {msg_id} 小于 1
+      报错 400 msg_id 不合法
+    结束
+    设 dr = 调用 取本人草稿 current_user={current_user} draft_id={draft_id} subject_id={subject_id}
+    设 n0 = 写库 app.db assist_draft_source id={draft_id} msg={msg_id}
+    返回 {"ok": 1, "draft_id": {draft_id}, "source_msg_id": {msg_id}}
   结束
 结束
