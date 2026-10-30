@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 NAMES = ("subject kg lesson progress account quiz vocab dictation teacher_rules tutor report textbook_import "
-         "assist_common assist_kg assist_setting assist_draft assist_file teacher_assist").split()
+         "assist_common assist_kg assist_setting assist_draft assist_file assist_material assist_insight teacher_assist").split()
 IDENT = r"[A-Za-z0-9_一-鿿]+"
 
 

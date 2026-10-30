@@ -1,0 +1,24 @@
+# 教师助手教学材料（M4-P3，归 assist_material）。学习记录类：老师的材料，不能重建；未保存（draft）7 天后由 setup/cleanup_assist_files.py 删行。
+实体 teacher_assist_material 学习记录
+  字段 teacher 文本 必填 索引 教师用户名（材料归谁）
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
+  字段 kind 文本 必填 类型（lesson_plan/exercise/handout/report）
+  字段 title 文本 必填 标题
+  字段 content 长文本 必填 正文（纯文本）
+  字段 status 文本 必填 状态（draft 未保存/saved 已保存）
+  字段 source_msg_id 整数 来源对话（助手消息编号）
+  字段 file_id 整数 据哪个附件生成
+  字段 created_at 文本 必填 生成时间
+  字段 updated_at 文本 必填 更新时间
+结束
+
+页面 实体 assist_material_view 教学材料页面
+  字段 mat_id 整数 材料编号
+  字段 mat_title 文本 标题
+  字段 mat_kind 枚举 教案,课堂练习,讲义,学情报告 类型
+  字段 mat_content 长文本 内容
+  字段 mat_state 文本 状态
+  字段 mat_updated 文本 更新时间
+  字段 mat_filter 枚举 全部,教案,课堂练习,讲义,学情报告 类型
+  字段 mat_note 文本 抬头
+结束

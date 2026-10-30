@@ -35,7 +35,7 @@ def check(ok, msg, detail=None):
 
 
 NAMES = ("subject kg lesson progress account quiz vocab dictation teacher_rules tutor report textbook_import "
-         "assist_common assist_kg assist_setting assist_draft assist_file teacher_assist").split()
+         "assist_common assist_kg assist_setting assist_draft assist_file assist_material assist_insight teacher_assist").split()
 tmp = Path(tempfile.mkdtemp(prefix="kg_v4_test_"))
 proj = tmp / "kg_v4"
 shutil.copytree(SRC, proj, ignore=shutil.ignore_patterns("app.db", "web", "uploads", "sessions", ".auth_secret", "__pycache__"))

@@ -238,6 +238,21 @@
   伪代码 筛选学习者（student 不为空取 student，否则非登录模式取 learner）不为空时只留该学习者
   伪代码 返回 {"total": 学习者数, "learners": 列表}
 
+公开 函数 按天统计作答 days? week? student? learner? current_role? auth_mode? subject?
+  报错 403 只有老师可以查看作答统计
+  返回 {days, since, total, rows}；rows 是 [{period, learner, n, right}]：本科目最近 days 天（含今天，默认 28）的作答按「时段 + 学习者」分组的作答数 n 与答对数 right，按 period 升序、learner 升序；period 是日期 YYYY-MM-DD（week 为 1 时是该周周一的日期）；since 是窗口第一天 YYYY-MM-DD；total 是 rows 的行数。M4-P4 新增（design §6.1 趋势、掉队规则用；只读，给 assist_insight 调，学生范围、正确率、字符图都由调用方算）
+  报错 400 days 不合法
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 先校验角色（同 统计作答）：auth_mode 等于 on 且 current_role 不等于 teacher，报错 403 只有老师可以查看作答统计；非登录模式不校验
+  伪代码 科目：调用本模块 本科目 learner=（auth_mode 等于 on 取 learner，否则空串） current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；全部入参可选（别的模块调用时只传 subject=已解析的科目编号和需要的筛选），都不传得 1 号科目最近 28 天；下面的查询只限这个 subject_id
+  伪代码 days 为空取 28；不是 1 到 90 的整数，报错 400 days 不合法
+  伪代码 since = date(当前时间, 「-(days-1) days」)（当前时间同其它函数，用例里是 DSL_NOW=2026-01-01 09:00:00，days=28 时 since=2025-12-05）
+  伪代码 查 progress_answer 中 subject_id 等于本科目、substr(at,1,10) 大于等于 since 的行（student 不为空时再加 learner=student）；period 取 substr(at,1,10)，week 等于 1 时取 date(at, '-6 days', 'weekday 1')（该周周一）；按 period、learner 分组，n=count(*)，right=sum(correct)（CAST 成整数）
+  伪代码 返回 {"days": days, "since": since, "total": 行数, "rows": 列表}
+
 函数 取点级映射 subject_id
   返回 {code: level}，本科目知识点编号到 N5–N1 等级的映射；没有等级的知识点不在映射里；subject_id 是已解析的科目编号（整数）
   伪代码 调用 kg.列知识点 subject=subject_id 得本科目全部点；对每点调用 lesson.取知识点等级 point_code=该点编号 subject=subject_id，level 非空才收
@@ -945,3 +960,18 @@ POST /progress/point -> 知识点页面 动作 node_detail 模板 页面状态 �
   先 数据 progress_answer learner=s2 point_code=math.a question_no=Q1 correct=0 at=2026-01-03 subject_id=2
   调用 统计作答 learner=t1 current_role=teacher auth_mode=on subject=2
   得 total=2
+
+用例 按天统计作答_按天按人分组只取窗口内
+  先 数据 progress_answer learner=s1 point_code=P1 question_no=q1 correct=1 at=2025-12-30
+  先 数据 progress_answer learner=s1 point_code=P1 question_no=q2 correct=0 at=2025-12-30
+  先 数据 progress_answer learner=s2 point_code=P1 question_no=q1 correct=1 at=2025-12-31
+  先 数据 progress_answer learner=s1 point_code=P1 question_no=q3 correct=1 at=2025-11-01
+  先 数据 progress_answer learner=s1 point_code=P1 question_no=q4 correct=1 at=2025-12-30 subject_id=2
+  调用 按天统计作答
+  得 days=28 since=2025-12-05 total=2
+
+用例 按天统计作答_按学生筛选
+  先 数据 progress_answer learner=s1 point_code=P1 question_no=q1 correct=1 at=2025-12-30
+  先 数据 progress_answer learner=s2 point_code=P1 question_no=q1 correct=1 at=2025-12-31
+  调用 按天统计作答 student=s2 days=7
+  得 total=1 since=2025-12-26
