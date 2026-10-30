@@ -124,10 +124,9 @@
   伪代码 返回 {"ok": 1, "mat_id": mat_id, "status": "saved", "saved": 0 或 1}
 
 公开 函数 改材料 current_user mat_id mat_title? mat_kind? mat_content? current_role? auth_mode? subject?
-  返回 {ok, mat_id, status}；编辑浮层「保存」：改标题、类型、正文（没传的保持原值），一律同时置 saved（编辑过就是要留着）、updated_at 更新
+  返回 {ok, mat_id, status}；编辑浮层「保存」：改标题、类型、正文（没传的保持原值；mat_title 为空串即视为没传，保留原标题），一律同时置 saved（编辑过就是要留着）、updated_at 更新
   报错 400 mat_id 不合法
   报错 404 没有这份材料
-  报错 400 标题不能为空
   报错 400 标题不能超过 60 个字
   报错 400 材料类型不对
   报错 400 内容不能为空
@@ -139,7 +138,7 @@
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id
   伪代码 调用 本人材料 current_user=current_user mat_id=mat_id subject_id=subject_id（400/404 原样抛）得原行
-  伪代码 title：mat_title 没传取原值；传了去首尾空白，为空报错 400 标题不能为空，超过 60 个字报错 400 标题不能超过 60 个字
+  伪代码 title：mat_title 去首尾空白后为空串（没传或传了空串，引擎分不出，一律视为没传）取原标题；否则超过 60 个字报错 400 标题不能超过 60 个字
   伪代码 kind：mat_kind 没传取原值；传了调用 类型码 kind=mat_kind，为空报错 400 材料类型不对
   伪代码 content：mat_content 没传取原值；传了去首尾空白，为空报错 400 内容不能为空，超过 20000 字报错 400 内容不能超过 20000 字（编辑时不截断，原样拒）
   伪代码 UPDATE 该行 SET title, kind, content, status=saved, updated_at=当前时间 WHERE id=mat_id AND teacher=current_user
@@ -269,7 +268,6 @@
   返回 材料页面 的全部键 {materials, mat_note}；动作 material_update（编辑浮层「保存」，提交后关浮层、列表刷新）
   报错 400 mat_id 不合法
   报错 404 没有这份材料
-  报错 400 标题不能为空
   报错 400 标题不能超过 60 个字
   报错 400 材料类型不对
   报错 400 内容不能为空
@@ -410,12 +408,6 @@ GET /assist_material/list -> 列材料 角色 teacher
   调用 改材料页面 current_user=t1 mat_id=1 mat_title=新讲义 mat_kind=课堂练习 mat_content=新内容
   得 mat_note=共1份
   库 teacher_assist_material 含 id=1 title=新讲义 kind=exercise content=新内容 status=saved
-
-用例 改材料_标题为空
-  先 数据 teacher_assist_material teacher=t1 subject_id=1 kind=handout title=讲义 content=旧内容 status=draft created_at=2025-12-31 updated_at=2025-12-31
-  调用 改材料 current_user=t1 mat_id=1 mat_title=空
-  报错 400
-  库 teacher_assist_material 含 id=1 title=讲义 status=draft
 
 用例 删材料页面_删掉本人的
   先 数据 teacher_assist_material teacher=t1 subject_id=1 kind=handout title=讲义 content=x status=saved created_at=2025-12-31 updated_at=2025-12-31
