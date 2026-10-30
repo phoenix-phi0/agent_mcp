@@ -351,6 +351,11 @@
       报错 400 标题不能超过 60 个字
     结束
     设 kcode = {m.kind}
+    设 kprobe = x{mat_kind}x
+    设 kws = 匹配 {kprobe} ^x\s+x$
+    如果 {kws.matched} 等于 是
+      报错 400 材料类型不对
+    结束
     如果 {mat_kind} 不为空
       设 kcode = 调用 类型码 kind={mat_kind}
       如果 {kcode} 为空
@@ -358,6 +363,11 @@
       结束
     结束
     设 content = {m.content}
+    设 cprobe = x{mat_content}x
+    设 cws = 匹配 {cprobe} ^x\s+x$
+    如果 {cws.matched} 等于 是
+      报错 400 内容不能为空
+    结束
     如果 {mat_content} 不为空
       设 content = 替换 {mat_content} ^\s+
       设 content = 替换 {content} \s+$

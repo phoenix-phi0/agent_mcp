@@ -204,6 +204,9 @@
     设 firstrate = {o.z 或}
     设 lastrate = {o.z 或}
     遍历 a 于 {agg}
+      如果 {na} 等于 0
+        继续
+      结束
       设 idx = 计算 {idx} + 1
       设 rate = 计算 ({a.right} * 200 + {a.n}) // (2 * {a.n})
       设 bar = 调用 字符条 rate={rate}
@@ -243,6 +246,9 @@
       设 per = 查一值 app.db assist_insight_date_shift d={start} n={off}
       设 rv = {o.wz}
       遍历 x 于 {ar}
+        如果 {na} 等于 0
+          继续
+        结束
         如果 {x.period} 等于 {per}
           设 rv = {x.rate}
         结束
@@ -483,7 +489,11 @@
     设 rows = []
     设 chbody = {o.z 或}
     设 ctxbody = {o.z 或}
+    设 rn0 = 列表长度 {ranked}
     遍历 po 于 {ranked}
+      如果 {rn0} 等于 0
+        继续
+      结束
       设 rk = 计算 {rk} + 1
       设 bar = 调用 字符条 rate={po.acc}
       设 ri = {"ana_day": "{po.dn}", "ana_n": {po.total}, "ana_rate": {po.acc}, "ana_bar": "{bar}"}
