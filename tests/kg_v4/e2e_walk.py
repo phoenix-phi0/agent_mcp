@@ -407,6 +407,9 @@ def write_assist_mock(proj, tmp):
          "reply": json.dumps({"intent": "make_draft", "draft_kind": "relay_add", "student": "s1"}, ensure_ascii=False)},
         {"when": ["意图分类器", "出3道题"],
          "reply": json.dumps({"intent": "make_draft", "draft_kind": "quiz_add", "count": "3"}, ensure_ascii=False)},
+        {"when": ["意图分类器", "总结走查附件"],
+         "reply": json.dumps({"intent": "file_qa"}, ensure_ascii=False)},
+        {"when": ["【资料】", "走查附件正文"], "reply": "走查附件回答：这份资料讲了走查附件正文。"},
         {"when": ["item_code", "questions"],
          "reply": json.dumps({"title": "走查出3道题", "questions": qs}, ensure_ascii=False)},
         {"when": ["must_info", "urgency"],
@@ -472,6 +475,39 @@ def assist_flow(t1, ck, marks):
         row.first.get_by_text("确认", exact=True).click(timeout=8000)
         t1.locator("tr", has_text="走查加知识点").filter(has_text="已执行").first.wait_for(timeout=30000)
         ck(True, f"{name}：知识点草稿点确认后状态变「已执行」")
+    except Exception as e:
+        ck(False, name, f"{type(e).__name__}: {str(e)[:300]}")
+    err = drain_errors(marks)
+    ck(not err, f"{name}流程无 JS 错误", err)
+    t1.evaluate("location.hash = ''")
+
+
+def attach_flow(t1, tmp, ck, marks):
+    """M4-P2：教师助手附件。传 txt → 附件条显示 → 问一句（假模型）→ 移除附件 → 附件条消失；传 xlsx → 提示另存 csv 原文。"""
+    name = "教师助手附件"
+    try:
+        t1.evaluate("location.hash = encodeURIComponent('教师助手')")
+        wait_screen(t1, "教师助手")
+        t1.wait_for_timeout(1500)
+        txt = tmp / "walk_attach.txt"
+        txt.write_text("走查附件正文：第一段。\n\n第二段讲授今天的语法。\n", encoding="utf-8")
+        t1.locator("input[type=file]").first.set_input_files(str(txt))
+        t1.locator("textarea").last.fill("总结走查附件")
+        t1.locator("button", has_text="传附件").last.click()
+        bar = t1.locator("text=附件：walk_attach.txt")
+        bar.first.wait_for(timeout=90000)
+        ck(True, f"{name}：传 txt 后附件条显示文件名")
+        t1.get_by_text("走查附件回答", exact=False).first.wait_for(timeout=90000)
+        ck(True, f"{name}：带着附件问一句，助手按资料回答（假模型）")
+        t1.locator("button", has_text="移除附件").first.click(timeout=8000)
+        t1.locator("button", has_text="移除附件").first.wait_for(state="detached", timeout=30000)
+        ck(t1.locator("text=附件：walk_attach.txt").count() == 0, f"{name}：移除附件后附件条消失")
+        xls = tmp / "walk_attach.xlsx"
+        xls.write_bytes(b"PK\x03\x04walk")
+        t1.locator("input[type=file]").first.set_input_files(str(xls))
+        t1.locator("button", has_text="传附件").last.click()
+        t1.get_by_text("请在 Excel 里另存为 csv", exact=False).first.wait_for(timeout=30000)
+        ck(True, f"{name}：传 xlsx 提示「另存为 csv」")
     except Exception as e:
         ck(False, name, f"{type(e).__name__}: {str(e)[:300]}")
     err = drain_errors(marks)
@@ -881,6 +917,7 @@ def main(argv=None):
                 kg_mgmt = walk_teacher(t1, base, ck, marks, subject_mgmt, kg_mgmt)
                 import_withdraw_flow(t1, ck, marks)
                 assist_flow(t1, ck, marks)
+                attach_flow(t1, tmp, ck, marks)
                 if subject_mgmt:
                     subject_flow(t1, base, ck, marks)
                     student_switch(s1, ck, marks)
