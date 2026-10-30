@@ -60,3 +60,20 @@
   设 r = 调用 teacher_assist.删除附件页面 current_user={current_user} file_id={att_id} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   响应 state {r}
 结束
+
+接口 POST /teacher_assist/material/save 动作 assist_material_save 角色 teacher
+  设 r = 调用 teacher_assist.材料保存页面 current_user={current_user} mat_id={mat_id} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  响应 state {r}
+结束
+
+接口 POST /teacher_assist/material/export 动作 assist_material_export 角色 teacher
+  设 r = 调用 teacher_assist.材料导出跳转 current_user={current_user} mat_id={mat_id} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  设 _msg = 打开导出
+  消息 系统 {_msg} ok
+  响应 go #教学材料?浮层=导出材料&mat_id={r.mat_id}
+结束
+
+接口 POST /teacher_assist/material/to_draft 动作 assist_material_to_draft 角色 teacher
+  设 r = 调用 teacher_assist.材料转草稿页面 current_user={current_user} mat_id={mat_id} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  响应 state {r}
+结束
