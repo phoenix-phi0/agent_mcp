@@ -203,30 +203,29 @@
     设 tot = 0
     设 firstrate = {o.z 或}
     设 lastrate = {o.z 或}
-    遍历 a 于 {agg}
-      如果 {na} 等于 0
-        继续
-      结束
-      设 idx = 计算 {idx} + 1
-      设 rate = 计算 ({a.right} * 200 + {a.n}) // (2 * {a.n})
-      设 bar = 调用 字符条 rate={rate}
-      设 lab = {a.period}
-      如果 {week} 等于 1
-        设 lab = {a.period} 起一周
-      结束
-      设 cnt = {a.n} 题 / {a.m} 人
-      设 ri = {"ana_day": "{lab}", "ana_n": "{cnt}", "ana_rate": {rate}, "ana_bar": "{bar}"}
-      设 rows = 列表加项 {rows} {ri}
-      设 ai = {"period": "{a.period}", "rate": {rate}}
-      设 ar = 列表加项 {ar} {ai}
-      设 tot = 计算 {tot} + {a.n}
-      如果 {idx} 等于 1
-        设 firstrate = {rate}
-      结束
-      设 lastrate = {rate}
-      设 ctxbody = {ctxbody}{o.nl}{a.period}｜作答 {a.n}｜答对 {a.right}｜正确率 {rate}%｜人数 {a.m}
-      如果 {idx} 大于 {skip}
-        设 chbody = {chbody}{o.nl}{lab} {bar} {rate}%（{cnt}）
+    如果 {na} 大于 0
+      遍历 a 于 {agg}
+        设 idx = 计算 {idx} + 1
+        设 rate = 计算 ({a.right} * 200 + {a.n}) // (2 * {a.n})
+        设 bar = 调用 字符条 rate={rate}
+        设 lab = {a.period}
+        如果 {week} 等于 1
+          设 lab = {a.period} 起一周
+        结束
+        设 cnt = {a.n} 题 / {a.m} 人
+        设 ri = {"ana_day": "{lab}", "ana_n": "{cnt}", "ana_rate": {rate}, "ana_bar": "{bar}"}
+        设 rows = 列表加项 {rows} {ri}
+        设 ai = {"period": "{a.period}", "rate": {rate}}
+        设 ar = 列表加项 {ar} {ai}
+        设 tot = 计算 {tot} + {a.n}
+        如果 {idx} 等于 1
+          设 firstrate = {rate}
+        结束
+        设 lastrate = {rate}
+        设 ctxbody = {ctxbody}{o.nl}{a.period}｜作答 {a.n}｜答对 {a.right}｜正确率 {rate}%｜人数 {a.m}
+        如果 {idx} 大于 {skip}
+          设 chbody = {chbody}{o.nl}{lab} {bar} {rate}%（{cnt}）
+        结束
       结束
     结束
     设 today = 当前时间 日期
@@ -245,12 +244,11 @@
       设 off = 计算 ({i} - 1) * {step}
       设 per = 查一值 app.db assist_insight_date_shift d={start} n={off}
       设 rv = {o.wz}
-      遍历 x 于 {ar}
-        如果 {na} 等于 0
-          继续
-        结束
-        如果 {x.period} 等于 {per}
-          设 rv = {x.rate}
+      如果 {na} 大于 0
+        遍历 x 于 {ar}
+          如果 {x.period} 等于 {per}
+            设 rv = {x.rate}
+          结束
         结束
       结束
       设 rates = 列表加项 {rates} {rv}
