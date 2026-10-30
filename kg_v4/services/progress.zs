@@ -470,6 +470,35 @@
     返回 {"total": {cnt}, "learners": {rows}}
   结束
 
+  公开 函数 按天统计作答 days? week? student? learner? current_role? auth_mode? subject?
+    如果 {auth_mode} 等于 on 且 {current_role} 不等于 teacher
+      报错 403 只有老师可以查看作答统计
+    结束
+    设 lr = {zz 或}
+    如果 {auth_mode} 等于 on
+      设 lr = {learner}
+    结束
+    设 s0 = 调用 本科目 learner={lr} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 sid = {s0.subject_id}
+    设 dy = {days 或 28}
+    设 md = 匹配 {dy} ^\d+$
+    如果 {md.matched} 不等于 是
+      报错 400 days 不合法
+    结束
+    设 dn = 转数字 {dy}
+    如果 {dn} 小于 1 或 {dn} 大于 90
+      报错 400 days 不合法
+    结束
+    设 back = 计算 {dn} - 1
+    设 today = 当前时间 日期
+    设 since = 查一值 app.db progress_cutoff today={today} days={back}
+    设 wk = {week 或 0}
+    设 st = {student 或}
+    设 rows = 查询 app.db progress_daily since={since} week={wk} student={st} subject_id={sid}
+    设 cnt = 列表长度 {rows}
+    返回 {"days": {dn}, "since": "{since}", "total": {cnt}, "rows": {rows}}
+  结束
+
   函数 取点级映射 subject_id
     设 lst = 调用 kg.列知识点 subject={subject_id}
     设 out = 解析JSON []
