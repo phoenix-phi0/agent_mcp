@@ -394,6 +394,9 @@ def write_assist_mock(proj, tmp):
     qs = [{"stem": f"走查题{i}", "options": ["甲", "乙", "丙"], "answer": "B", "explain": "走查", "item_code": row[0]}
           for i in (1, 2, 3)]
     rules = [
+        # 放最前：分类器提示里带着【最近对话】，前面几轮的「走查加知识点」等字样会让靠前的规则先中
+        {"when": ["意图分类器", "总结走查附件"],
+         "reply": json.dumps({"intent": "file_qa"}, ensure_ascii=False)},
         {"when": ["意图分类器", "走查加知识点"],
          "reply": json.dumps({"intent": "make_draft", "draft_kind": "kg_add"}, ensure_ascii=False)},
         {"when": ["往图谱里加知识点", "points"],
@@ -407,8 +410,6 @@ def write_assist_mock(proj, tmp):
          "reply": json.dumps({"intent": "make_draft", "draft_kind": "relay_add", "student": "s1"}, ensure_ascii=False)},
         {"when": ["意图分类器", "出3道题"],
          "reply": json.dumps({"intent": "make_draft", "draft_kind": "quiz_add", "count": "3"}, ensure_ascii=False)},
-        {"when": ["意图分类器", "总结走查附件"],
-         "reply": json.dumps({"intent": "file_qa"}, ensure_ascii=False)},
         {"when": ["【资料】", "走查附件正文"], "reply": "走查附件回答：这份资料讲了走查附件正文。"},
         {"when": ["item_code", "questions"],
          "reply": json.dumps({"title": "走查出3道题", "questions": qs}, ensure_ascii=False)},
@@ -501,7 +502,8 @@ def attach_flow(t1, tmp, ck, marks):
         ck(True, f"{name}：带着附件问一句，助手按资料回答（假模型）")
         t1.locator("button", has_text="移除附件").first.click(timeout=8000)
         t1.locator("button", has_text="移除附件").first.wait_for(state="detached", timeout=30000)
-        ck(t1.locator("text=附件：walk_attach.txt").count() == 0, f"{name}：移除附件后附件条消失")
+        ck(t1.locator("button", has_text="移除附件").count() == 0, f"{name}：移除附件后附件条消失")
+        t1._allowed_status = ("400",)   # xlsx 被拒是故意的 400，不算 JS 错误
         xls = tmp / "walk_attach.xlsx"
         xls.write_bytes(b"PK\x03\x04walk")
         t1.locator("input[type=file]").first.set_input_files(str(xls))
@@ -509,8 +511,13 @@ def attach_flow(t1, tmp, ck, marks):
         t1.get_by_text("请在 Excel 里另存为 csv", exact=False).first.wait_for(timeout=30000)
         ck(True, f"{name}：传 xlsx 提示「另存为 csv」")
     except Exception as e:
-        ck(False, name, f"{type(e).__name__}: {str(e)[:300]}")
+        try:
+            seen = t1.locator(".screen").first.inner_text(timeout=3000)[-600:]
+        except Exception:
+            seen = ""
+        ck(False, name, f"{type(e).__name__}: {str(e)[:300]} 页面末尾：{seen!r}")
     err = drain_errors(marks)
+    t1._allowed_status = ()
     ck(not err, f"{name}流程无 JS 错误", err)
     t1.evaluate("location.hash = ''")
 
