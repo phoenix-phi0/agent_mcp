@@ -409,6 +409,12 @@ GET /assist_material/list -> 列材料 角色 teacher
   得 mat_note=共1份
   库 teacher_assist_material 含 id=1 title=新讲义 kind=exercise content=新内容 status=saved
 
+用例 改材料_标题为空保留原标题
+  先 数据 teacher_assist_material teacher=t1 subject_id=1 kind=handout title=讲义 content=旧内容 status=draft created_at=2025-12-31 updated_at=2025-12-31
+  调用 改材料 current_user=t1 mat_id=1 mat_content=新内容
+  得 status=saved
+  库 teacher_assist_material 含 id=1 title=讲义 content=新内容 status=saved
+
 用例 删材料页面_删掉本人的
   先 数据 teacher_assist_material teacher=t1 subject_id=1 kind=handout title=讲义 content=x status=saved created_at=2025-12-31 updated_at=2025-12-31
   调用 删材料页面 current_user=t1 mat_id=1
