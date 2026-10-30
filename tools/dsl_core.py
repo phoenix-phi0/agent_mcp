@@ -404,11 +404,22 @@ def put(obj, path: str, value) -> bool:
 
 
 def iter_items(value):
-    """循环要遍历什么。列表直接遍历，字典遍历键，字符串按逗号拆。"""
+    """循环要遍历什么。列表直接遍历，字典遍历键，JSON 列表文本按列表遍历，
+    其余字符串按逗号拆。
+
+    `设 x = []` 存下来的是文本 "[]"；不解析的话会被当成一项，空列表多跑一轮。
+    """
     if isinstance(value, list):
         return value
     if isinstance(value, dict):
         return list(value.keys())
+    if isinstance(value, str) and value.lstrip()[:1] == "[":
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, list):
+            return parsed
     return split_items(to_text(value))
 
 

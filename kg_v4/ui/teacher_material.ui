@@ -1,0 +1,63 @@
+# 教学材料（教师端，右侧「管理」组，D10；M4-P3，约定见 contracts/assist_material.md，设计 K124 design.md §5）：
+# 教师助手生成的教案、课堂练习、讲义、学情报告。只看自己在当前科目下的材料（跨科目隔离、别人的看不到）。
+#
+# 进入时 material_home 回 {materials, mat_note}；顶栏类型下拉 mat_filter 改时重新拉。
+# 材料表行动作：
+#   编辑（打开「编辑材料」浮层，地址 #教学材料?浮层=编辑材料&mat_id=5，「载入」material_open 回填表单）
+#   导出（打开「导出材料」浮层，地址 #教学材料?浮层=导出材料&mat_id=5，「载入」material_open 回填表单；
+#        浮层读表单字段 mat_title / mat_content，全文让老师全选复制——行上点导出带着行里的字段，卡片跳转进来由「载入」回填，
+#        两条路径都有；不用「显示 mat_export_*」：显示读接口返回，表单已是这条时「载入」被跳过会是空的（K152）；
+#        mat_export_* 是页面实体之外的键，字段表里没有，浮层字段读不了，所以复用编辑浮层同一对字段。
+#        下载文件要引擎 E3，没批，P3 只做复制，照 kg_manage 的导出）
+#   保存（只在「未保存」的行上；不保存的 7 天后由清理脚本删）
+#   做成出题草稿（只在课堂练习行上：生成一份 quiz_add 草稿，回教师助手的「待确认」里确认后才进题库；结果一句话走消息）
+#   删除（直接删行）
+# 对话里的材料卡片（teacher_assist.ui）的「打开」链接、「导出」按钮会带着 mat_id 跳到这里的两个浮层。
+#
+# 约束照旧：当 的条件里不能有空格；标签、提示不能以修饰词开头，值里不能有空格（提示用全角括号）；分组不能套分组。
+# 编辑浮层的字段 mat_kind 是枚举（教案/课堂练习/讲义/学情报告），后端收中文名；编辑过的材料一律算已保存。
+
+界面 自定义 教学材料 端 教师 侧 管理
+  动作 material_home 远程 进入时 隐藏 刷新
+  # 约定里 material_export 是前端动作，保留声明（隐藏，不绑按钮）；导出浮层不再用它，见顶部说明
+  动作 material_export 远程 隐藏
+
+  分组 顶栏 横排 顶栏 间距 12px 对齐 center
+    文案 教师助手生成的材料（教案、课堂练习、讲义、学情报告）。没点「保存」的过7天自动清掉；编辑保存后算已保存。
+    字段 mat_filter 控件 下拉 改时 material_home 宽 140px 类型
+  结束
+  显示 mat_note
+
+  文案 当 shared.materials&&!shared.materials.length 还没有材料。去「教师助手」说：写一份〜たばかり的教案／出一份课堂练习／写一份全班学情报告。
+  列表 材料表 绑 materials 当 shared.materials&&shared.materials.length
+    列 mat_title 标题
+    列 mat_kind 类型
+    列 mat_state 状态
+    列 mat_updated 更新时间
+    动作 edit_material 打开 编辑材料 带 mat_id 编辑
+    动作 open_export 打开 导出材料 带 mat_id 导出
+    动作 material_save 远程 带 mat_id 当 row.mat_state==='未保存' 保存
+    动作 material_to_draft 远程 带 mat_id 当 row.mat_kind==='课堂练习' 做成出题草稿
+    动作 material_delete 远程 危险 带 mat_id 删除
+  结束
+
+  浮层 编辑材料 宽 820px 载入 material_open
+    分组 主体 竖排 间距 12px
+      字段 mat_title 标题
+      字段 mat_kind 控件 下拉 类型
+      字段 mat_content 控件 多行 提示 纯文本（小节用【】，条目用・，题目用1.2.编号） 内容
+    结束
+    分组 底栏 横排 底栏
+      动作 material_update 提交 远程 关闭 保存
+      动作 cancel_material 次要 关闭 取消
+    结束
+  结束
+
+  浮层 导出材料 宽 760px 载入 material_open
+    字段 mat_title 标题
+    字段 mat_content 控件 多行 导出内容（全选复制）
+    分组 底栏 横排 底栏
+      动作 close_export 次要 关闭 返回
+    结束
+  结束
+结束

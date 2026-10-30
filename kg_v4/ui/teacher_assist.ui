@@ -26,7 +26,7 @@
 #
 # 文本：消息流把 text 当纯文本显示（保留换行，不渲染 Markdown），后端提示词要求只输出纯文本。
 # 约束照旧：当 的条件里不能有空格；标签、提示不能以修饰词开头，值里不能有空格（提示用全角括号）；
-# 分组不能套分组；布局里只能放区域。分析区、教学材料浮层是 P3–P4 的事，这一版不画。
+# 分组不能套分组；布局里只能放区域。教学材料在单独的页面（P3），深度学情的图在回答正文里（P4），本页不另开区域。
 #
 # M4 P2 附件（约定见 contracts/assist_file.md 与 teacher_assist.md 的 挂附件页面 等；设计 K124 design.md §4，D5–D8）：
 #   底栏多一个文件字段 assist_file 和按钮「传附件」（assist_attach，接口 /teacher_assist/attach 声明了「上传 assist_file 上限 10MB」）。
@@ -38,30 +38,42 @@
 #   进入时 assist_state 回的整页状态多 attach、files、att_note 三个键；四个附件动作都回整页。
 #   引擎支撑：文件字段（字段 … 接受 … 最大 …）与 multipart 已有（kg_manage.ui、textbook_import.ui 在用）；csv 靠 E4（读文档 收 csv）；
 #   附件不用消息按钮（E1），挂上/移除/删除都在附件条和附件表上。
+#
+# M4 P3 教学材料（约定见 contracts/assist_material.md 与 teacher_assist.md 的 问助手 make_material 段、材料保存页面 等；设计 K124 design.md §5）：
+#   老师说「写一份〜たばかり的教案」「出一份课堂练习」→ 助手生成一份「未保存」的材料，那条助手消息 kind 为 material，带卡片按钮（E1）：
+#   保存 assist_material_save（只在未保存时出现）/ 导出 assist_material_export（E1 按钮开不了浮层：后端核对归属后用 go 跳到
+#   #教学材料?浮层=导出材料&mat_id=N，在教学材料页的导出浮层里全选复制）/ 课堂练习多一个「做成出题草稿」assist_material_to_draft
+#   （转成一份出题草稿，对话里多一句带确认/放弃按钮的话，确认后才进题库）；links 里「打开材料 #N」跳到 #教学材料?浮层=编辑材料&mat_id=N。
+#   三个动作都写进消息流的「按钮」白名单（它们只从消息上点，界面上不另放按钮；接口见 teacher_assist.md 的 /teacher_assist/material/*）。
+#   材料的列表、编辑、删除在新页面 ui/teacher_material.ui（教学材料，右侧「管理」组）。
+# M4 P4 深度学情（约定见 contracts/assist_insight.md；设计 §6）：老师问趋势、错题归因、学生对比、掉队名单，回答末尾附后端画好的
+#   字符图（▁▂▃▅▆ 迷你图、████░░ 横条，D12，不改引擎），就是一条普通助手消息，界面不另开「分析」区域；空态是模板话。
+#   「给掉队的学生发传达」照常出一份传达草稿（名单由后端按掉队规则算）。
 
 界面 自定义 教师助手 端 教师 序 12
   动作 assist_state 远程 进入时 隐藏 刷新
 
   分组 顶栏 横排 顶栏 间距 12px 对齐 center
-    文案 可以问学情，也可以让我出题、给学生发传达、改AI老师设定、加知识点和条目，还可以传文件让我看或按文件出题。我做的改动都先出草稿，你点确认才写入，7天内可以撤销。
+    文案 可以问学情（也能看趋势、错题归因、学生对比、掉队名单），也可以让我出题、给学生发传达、改AI老师设定、加知识点和条目，写教案、课堂练习、讲义、学情报告，还可以传文件让我看或按文件出题。我做的改动都先出草稿，你点确认才写入，7天内可以撤销。
     文案 当 shared.mode==='mock' 模拟模式：回复不是真模型
     文案 当 String(shared.readonly)==='1' 你在这个科目只有读权限：可以问学情，不能让助手出题、发传达、改设定或加知识点。
   结束
 
   布局 占满 横排
     区域 对话
-      消息流 talk 占满 按钮 assist_draft_confirm,assist_draft_discard,assist_draft_undo
+      消息流 talk 占满 按钮 assist_draft_confirm,assist_draft_discard,assist_draft_undo,assist_material_save,assist_material_export,assist_material_to_draft
       文案 当 pending==='assist_send' 助手正在查数据并整理回答…（生成草稿一般要30到60秒）
       文案 当 pending==='assist_draft_confirm' 正在写入…
       文案 当 pending==='assist_draft_undo' 正在撤销…
       文案 当 pending==='assist_attach' 正在读文件…（带了问题的话还要等助手回答）
+      文案 当 pending==='assist_material_to_draft' 正在把课堂练习做成出题草稿…（一般要30到60秒）
       分组 附件条 横排 间距 10px 对齐 center 当 shared.attach&&shared.attach.file_id
         显示 attach.label
         动作 assist_attach_drop 远程 次要 移除附件
       结束
       分组 底栏 横排 底栏 间距 10px 对齐 flex-end 内边距 14px,20px
         字段 assist_file 接受 .txt,.md,.csv,.pdf,.docx 最大 10MB 附件
-        字段 content 控件 多行 单行高 提示 问助手…（例：小明最近怎么样？／按〜たばかり出5道题／给小明发传达：周五小测／总结一下这份附件／按附件出5道题，Enter发送，Shift+Enter换行；传附件要先选文件再点「传附件」，只点发送不带文件）
+        字段 content 控件 多行 单行高 提示 问助手…（例：小明最近怎么样？／按〜たばかり出5道题／给小明发传达：周五小测／写一份〜たばかり的教案／最近四周的趋势／有没有掉队的学生／总结一下这份附件／按附件出5道题，Enter发送，Shift+Enter换行；传附件要先选文件再点「传附件」，只点发送不带文件）
         动作 assist_send 提交 远程 回显 清空 发送
         动作 assist_attach 提交 远程 回显 清空 次要 传附件
       结束
