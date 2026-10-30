@@ -553,7 +553,7 @@ def seed_trend_answers(proj):
 
 def material_flow(t1, ck, marks):
     """M4-P3：教学材料。对话里「写教案」→ 消息里有材料卡片（保存 / 导出按钮）→ 点保存 → 教学材料页看到「已保存」→
-    编辑保存后再打开内容是新的 → 卡片「导出」跳到导出浮层看到全文 → 课堂练习「做成出题草稿」→ 待确认多一行。"""
+    表格行点编辑（正文非空）改后保存 → 卡片「导出」跳到导出浮层看到全文 → 再从表格行打开是新内容 → 课堂练习「做成出题草稿」→ 待确认多一行。"""
     name = "教学材料"
     try:
         t1.evaluate("location.hash = encodeURIComponent('教师助手')")
@@ -573,32 +573,30 @@ def material_flow(t1, ck, marks):
         row = t1.locator("tr", has_text="教案").filter(has_text="已保存")
         row.first.wait_for(timeout=15000)
         ck(True, f"{name}：教学材料页能看到这份教案，状态「已保存」")
-        # 卡片「导出」跳到导出浮层看到全文
-        # （K150 已知问题：同一页面会话里先开过编辑浮层再从卡片导出，导出浮层的「载入」不发、全文为空，见报告；所以导出放在编辑之前）
+        # 表格行点「编辑」：列表行带正文，浮层里正文非空且是原文
+        row.first.locator("button, a", has_text="编辑").first.click(timeout=8000)
+        box = t1.locator("textarea").last
+        box.wait_for(timeout=8000)
+        t1.wait_for_function("() => Array.from(document.querySelectorAll('textarea')).some(t => t.value.includes('走查教案正文第一条'))", timeout=10000)
+        ck(True, f"{name}：表格行点「编辑」，浮层正文非空且是原文")
+        box.fill("【教学目标】\n・走查改过的正文K152")
+        t1.locator("button", has_text="保存").last.click(timeout=8000)
+        t1.wait_for_timeout(1500)
+        # 编辑之后，卡片「导出」跳到导出浮层仍看到全文（新正文）
         t1.evaluate("location.hash = encodeURIComponent('教师助手')")
         wait_screen(t1, "教师助手")
         t1.wait_for_timeout(1500)
         t1.locator(".smsg-actions button", has_text="导出").first.click(timeout=15000)
         t1.wait_for_function("() => decodeURIComponent(location.hash).includes('浮层=导出材料&mat_id=1')", timeout=15000)
-        t1.get_by_text("走查教案正文第一条", exact=False).first.wait_for(timeout=15000)
-        ck(True, f"{name}：卡片「导出」跳到导出浮层，看到全文")
+        t1.get_by_text("走查改过的正文K152", exact=False).first.wait_for(timeout=15000)
+        ck(True, f"{name}：编辑之后卡片「导出」跳到导出浮层，看到全文")
         t1.locator("button", has_text="返回").last.click(timeout=8000)
-        # 编辑保存后再打开是新内容
-        # 注：从表格行上点「编辑」时行里没有 mat_content，引擎跳过「载入」，正文会是空的（K150 已知问题，见报告）；
-        # 这里走卡片「打开材料」链接同样的地址（直接带参数开浮层），载入会发
-        t1.evaluate("location.hash = '#' + encodeURIComponent('教学材料') + '?浮层=编辑材料&mat_id=1'")
-        box = t1.locator("textarea").last
-        box.wait_for(timeout=8000)
-        t1.wait_for_function("() => Array.from(document.querySelectorAll('textarea')).some(t => t.value.includes('走查教案正文'))", timeout=10000)
-        ck(True, f"{name}：编辑浮层「载入」回填了原正文")
-        box.fill("【教学目标】\n・走查改过的正文K150")
-        t1.locator("button", has_text="保存").last.click(timeout=8000)
-        t1.wait_for_timeout(1500)
+        # 编辑保存后再从表格行打开是新内容
         t1.evaluate("location.hash = encodeURIComponent('教学材料')")
-        t1.wait_for_timeout(800)
-        t1.evaluate("location.hash = '#' + encodeURIComponent('教学材料') + '?浮层=编辑材料&mat_id=1'")
-        t1.wait_for_function("() => Array.from(document.querySelectorAll('textarea')).some(t => t.value.includes('K150'))", timeout=10000)
-        ck(True, f"{name}：编辑保存后再打开，内容是新的")
+        wait_screen(t1, "教学材料")
+        t1.locator("tr", has_text="教案").first.locator("button, a", has_text="编辑").first.click(timeout=8000)
+        t1.wait_for_function("() => Array.from(document.querySelectorAll('textarea')).some(t => t.value.includes('K152'))", timeout=10000)
+        ck(True, f"{name}：编辑保存后再从表格行打开，内容是新的")
         t1.locator("button", has_text="取消").last.click(timeout=8000)
         # 课堂练习 → 做成出题草稿
         t1.evaluate("location.hash = encodeURIComponent('教师助手')")

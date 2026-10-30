@@ -212,6 +212,12 @@ try:
     r, e, _ = gen("x", kind="report", message="全班学情报告")
     check("还没有学生" in r["hint"], "没有学生的 hint", r["hint"])
 
+    long_body = "【要点】\n・带\"引号\"与反斜杠\\的条目\n" + "长" * 5000
+    seed(BASE + [mat(content=long_body)])
+    r, e = run("材料页面", current_user="t1")
+    check(e == "" and r["materials"][0]["mat_content"] == long_body and len(r["materials"][0]["mat_content"]) > 5000,
+          "列表行正文不截断，引号/反斜杠/换行原样", (e, r["materials"][0]["mat_content"][:60] if e == "" else ""))
+
     print("四、生成 → 保存 → 改 → 导出 → 删")
     db = seed(BASE)
     r, e, _ = gen("【要点】\n旧正文", kind="handout", message="写一份讲义", point="点一")
@@ -221,6 +227,13 @@ try:
           "列材料：total=1 drafts=1 状态=未保存", (r, e))
     r, e = run("材料页面", current_user="t1")
     check(r["mat_note"] == "共1份，未保存1份（7天后自动清掉）", "材料页抬头", r)
+    row = r["materials"][0]
+    check(row["mat_content"] == "【要点】\n旧正文", "材料页面：列表行带正文 mat_content 全文", row)
+    ex, e = run("导出材料页面", current_user="t1", mat_id=mid)
+    check(row["mat_export_text"] == ex["mat_export_text"] and row["mat_export_head"] == ex["mat_export_head"],
+          "材料页面：列表行的导出两键与 导出材料页面 一致", (row, ex))
+    r, e = run("列材料", current_user="t1")
+    check(r["materials"][0]["mat_content"] == "【要点】\n旧正文", "列材料：每行带 mat_content", r)
     r, e = run("导出材料页面", current_user="t1", mat_id=mid)
     check(e == "" and r["mat_export_text"] == "讲义：点一\n\n【要点】\n旧正文" and r["mat_export_head"].startswith("讲义 · 未保存 · 8 字 · 更新于 2026-01-01"),
           "导出：title+空行+content；未保存也能导出", r)
