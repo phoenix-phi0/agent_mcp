@@ -329,6 +329,21 @@ def _action_diffs(project, module, contract, modules):
     return diffs
 
 
+def _head_is(line, i):
+    """这一行是不是约定接口 i 的接口头（只看「接口 [方法] 路径」开头；没写方法按 POST，同 dsl_http.API_RE）。"""
+    m = re.match(r"^接口\s*(?:(GET|POST|PUT|DELETE)\s+)?(/\S*)", line, re.I)
+    return bool(m) and m.group(2) == i["路径"] and (m.group(1) or "POST").upper() == i["方法"].upper()
+
+
+def _route_block(module, contract, i):
+    """scaffold.route_text 对这一条接口渲染出的整块（与骨架同一份渲染）；约定不全渲染不了返回空串。"""
+    from tools.dslagent.v3 import scaffold as S
+    try:
+        return S.route_text(module, dict(contract, 接口=[i]), {}).strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def compare(project, module, contract, modules):
     """实际文件与约定是否一致：脚本（约定「## 脚本」）、业务文件（模块名 / 依赖 / 每个函数的名字、公开与否、入参顺序与可选）、接口（方法 + 路径存在、只调约定里那个函数）、
     约定里的表在 entities/<模块>.entity 里都有、约定里明确写出的唯一声明在实体里有对应旗标（单列「唯一」旗标 / 多列「唯一 a b」行，
@@ -337,6 +352,7 @@ def compare(project, module, contract, modules):
     以及自由文本入参的用例没覆盖空格 / 换行，见 C.text_space_problems）。"""
     from tools.dsl_http import split_endpoints
     from tools.dsl_service import ServiceProblem, parse_module
+    from tools.dslagent import loadcheck as L
     project = Path(project)
     diffs = []
     sf = project / "services" / f"{module}.zs"
@@ -369,10 +385,12 @@ def compare(project, module, contract, modules):
             for n, a in mod.funcs.items():
                 if a.public and n not in want:
                     diffs.append(f"多了约定里没有的公开函数「{n}」")
-    eps = []
+    eps, bad = [], []           # bad：(文件名, 行号, 原文)，以「接口」开头但 API_RE 认不出的行（split_endpoints 静默跳过）
     for rf in route_files(project, module, modules):
+        text = rf.read_text(encoding="utf-8")
+        bad += [(rf.name, n, s) for n, s in L.bad_route_heads(text)]
         try:
-            got, _ = split_endpoints(rf.read_text(encoding="utf-8"), rf)
+            got, _ = split_endpoints(text, rf)
         except Exception as e:  # noqa: BLE001
             diffs.append(f"{rf.name} 接口切块失败：{e}")
             continue
@@ -381,7 +399,16 @@ def compare(project, module, contract, modules):
     for i in contract["接口"]:
         e = by.pop((i["方法"], i["路径"]), None)
         if e is None:
-            diffs.append(f"缺接口 {i['方法']} {i['路径']}（routes/{module}*.zs）")
+            # 接口其实写了、只是接口头写法不对（常见：把约定行的「上传 x 上限 10MB」抄进了接口头）时，只报「缺接口」
+            # 模型看着文件里明明有这一行，会当误报拒改（K141）；所以指出是哪一行，并附骨架同一份渲染的整块让它照抄。
+            want = _route_block(module, contract, i)
+            want = ("，应是：\n" + "\n".join("    " + l for l in want.splitlines())) if want else ""
+            hit = next((b for b in bad if _head_is(b[2], i)), None)
+            if hit:
+                diffs.append(f"接口 {i['方法']} {i['路径']}：{hit[0]} 第 {hit[1]} 行接口头写法认不出"
+                             f"（「上传/类型/上限」是约定行的标记，路由里不能写；这一块会被静默跳过，等于缺这个接口）{want}")
+            else:
+                diffs.append(f"缺接口 {i['方法']} {i['路径']}（routes/{module}*.zs）{want}")
             continue
         called = {f"{m or module}.{fn}" for m, fn in CALL_IN_ROUTE.findall(e.script)}
         if called != {f"{module}.{i['函数']}"}:

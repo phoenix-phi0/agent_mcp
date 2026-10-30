@@ -1775,7 +1775,8 @@ def test_trunk2_entries():
     r = res.get("returned") or {}
     ag = [c for c in fk.calls if c["tag"] == "v3_agent_modify_module"]
     check(res["status"] == "成功" and len(ag) == 1 and ag[0]["user"].split("\n")[0] == "模块 graph", "change2：module_issue 只派 issues 里的模块 graph 一次", [c["tag"] for c in fk.calls])
-    check(set(r) == {"changed", "failed"} and len(r["changed"]) == 1 and r["failed"] == [], "change2 返回 {changed, failed}（不跑回归）", r)
+    check(set(r) == {"changed", "failed", "cmods", "fmods"} and len(r["changed"]) == 1 and r["failed"] == [] and r["cmods"] == "|graph|" and r["fmods"] == "",
+          "change2 返回 {changed, failed, cmods, fmods}（不跑回归；cmods/fmods 给 fix2 判提前停）", r)
     aj.write_text(json.dumps({"result": "ok"}), encoding="utf-8")
     fk = Fake()
     res = core.run_entry("change2", p, fresh("c2_out"), "需求", backend=fk, module_cmd=CMD)
@@ -1840,8 +1841,8 @@ def test_change2_fix2():
     check(res["status"] == "成功" and not ag and fk.calls == [], "ok 不派", res)
 
     # fix2：audit2 写 plan/audit2.json 之后 change2 读它；派任务的 tag 按调用顺序编号（dsl01…），每轮核查 3 个模块 → 第 k 轮是 dsl(3k-2)…dsl(3k)
-    def fix(rounds_replies, rounds=5):
-        sc = {"v3_agent_modify_module": ["改好了"]}
+    def fix(rounds_replies, rounds=5, mm=("改好了",)):
+        sc = {"v3_agent_modify_module": list(mm)}
         for k in range(1, 16):               # 没写的轮数/模块 = ok
             sc[f"dsl{k:02d}"] = [a2_reply("ok")]
         for ri, rr in enumerate(rounds_replies):
@@ -1865,6 +1866,14 @@ def test_change2_fix2():
     res, fk = fix([{2: issue}, {2: issue}, {2: issue}, {2: issue}], rounds=3)
     check(res["status"] == "失败" and fk.n("v3_agent_modify_module") == 3 and fk.n("dsl") == 12 and "改了 3 轮" in res["reason"]
           and "少接口" in res["reason"], "fix2：改满 3 轮后再核查 1 次（核查 4 次 × 3 模块、改 3 次）仍有问题 → 失败，带最后一次核查结果", res)
+    # 提前停：连续两轮 modify_module 都没改成（假回复为空 = v2 没过）、同样的模块 → 第 2 轮改完就停，不用满 5 轮
+    sc_fail = [{2: issue}] * 6
+    res, fk = fix(sc_fail, mm=("",))
+    check(res["status"] == "失败" and fk.n("v3_agent_modify_module") == 2 and fk.n("dsl") == 6 and "提前停止" in res["reason"] and "vocab" in res["reason"],
+          "fix2：连续两轮同一模块都没改成 → 提前停止（改 2 次、核查 2 轮）", res)
+    res, fk = fix([{2: issue}] * 4, rounds=3, mm=("", "改好了", ""))
+    check(res["status"] == "失败" and fk.n("v3_agent_modify_module") == 3 and "改了 3 轮" in res["reason"] and "提前停止" not in res["reason"],
+          "fix2：没改成之间隔了一轮改成 → 不提前停，照常改满", res)
     res, fk = fix([{2: issue}], rounds=1)
     check(res["status"] == "成功" and fk.n("v3_agent_modify_module") == 1 and fk.n("dsl") == 6 and "第 2 轮" in res["reason"],
           "fix2：rounds=1 改一次后再核查，ok → 成功", res)
