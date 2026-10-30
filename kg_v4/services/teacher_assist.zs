@@ -35,8 +35,8 @@
     设 sname = {blank}
     设 ptitle = {blank}
     如果 {st} 不为空
-      设 r = 调用 学生范围 subject_id={subject_id}
-      遍历 s 于 {r}
+      设 r = 调用 assist_common.学生范围 subject={subject_id}
+      遍历 s 于 {r.students}
         如果 {s.username} 等于 {st}
           设 sname = {s.display_name}
         结束
@@ -283,7 +283,8 @@
       设 lt = 没有课文
     结束
     设 out = 知识点：{title}（{code}），等级 {level}{nl}条目：{inames}{nl}相关课文：{lt}
-    设 sl = 调用 学生范围 subject_id={subject_id}
+    设 sr = 调用 assist_common.学生范围 subject={subject_id}
+    设 sl = {sr.students}
     设 slt = 列表长度 {sl}
     如果 {slt} 等于 0
       设 out = {out}{nl}还没有学生账号
@@ -430,7 +431,7 @@
     如果 {intent} 等于 class_overview
       设 ctx = 调用 班级上下文 current_user=助手 subject_id={subject_id}
     否则如果 {intent} 等于 student_detail
-      设 m = 调用 匹配学生 name={student} subject={subject_id}
+      设 m = 调用 assist_common.匹配学生 name={student} subject={subject_id}
       如果 {student} 为空
         设 status = ask
         设 hint = 你想看哪位学生？现有学生：{m.roster}
@@ -450,8 +451,8 @@
         设 hint = 找到多位：{names}，你指哪一位？
       否则
         设 la = {blank}
-        设 r = 调用 学生范围 subject_id={subject_id}
-        遍历 s 于 {r}
+        设 r = 调用 assist_common.学生范围 subject={subject_id}
+        遍历 s 于 {r.students}
           如果 {s.username} 等于 {m.username}
             设 la = {s.last_at}
           结束
@@ -461,7 +462,7 @@
         设 sname = {m.display_name}
       结束
     否则如果 {intent} 等于 point_status
-      设 m = 调用 匹配知识点 keyword={point} subject={subject_id}
+      设 m = 调用 assist_common.匹配知识点 keyword={point} subject={subject_id}
       如果 {point} 为空
         设 status = ask
         设 hint = 你想看哪个知识点？
@@ -487,11 +488,11 @@
     否则如果 {intent} 等于 teaching_advice
       设 ctx = 调用 建议上下文 current_user=助手 subject_id={subject_id}
       如果 {student} 不为空
-        设 m = 调用 匹配学生 name={student} subject={subject_id}
+        设 m = 调用 assist_common.匹配学生 name={student} subject={subject_id}
         如果 {m.status} 等于 one
           设 la = {blank}
-          设 r = 调用 学生范围 subject_id={subject_id}
-          遍历 s 于 {r}
+          设 r = 调用 assist_common.学生范围 subject={subject_id}
+          遍历 s 于 {r.students}
             如果 {s.username} 等于 {m.username}
               设 la = {s.last_at}
             结束
@@ -503,7 +504,7 @@
         结束
       结束
       如果 {point} 不为空
-        设 m2 = 调用 匹配知识点 keyword={point} subject={subject_id}
+        设 m2 = 调用 assist_common.匹配知识点 keyword={point} subject={subject_id}
         如果 {m2.status} 等于 one
           设 pc = 调用 知识点上下文 code={m2.code} title={m2.title} subject_id={subject_id}
           设 ctx = {ctx}{nl}{pc}
@@ -516,7 +517,7 @@
         设 ctx = 查一值 app.db teacher_assist_substr t={ctx} n=4500
       结束
     否则
-      设 ctx = 系统功能说明：{nl}教师端的页面有：学情（看全班和单个学生的学习情况，可生成AI学情总结）；教师助手（就是现在这个对话页，按数据回答老师的问题，也能按老师的话生成出题、给学生发传达两种草稿）；学生管理（建学生账号、重置密码、停用或启用）；科目管理（管理科目、协作教师和学生的分配）；图谱管理（管理本科目的知识点、条目、前置边和对照，可批量导入导出）；AI老师设定（设定学生端问老师的说话方式和规则）；教材导入（导入课文教材）。{nl}学生端共有6个页面：问老师（向AI老师提问）；做题（按知识点做题）；默写（单词默写）；教材（阅读课文）；学习进度（看进度和得分）；知识图谱（看知识点之间的前置关系）。{nl}助手能按老师的话生成「出题」「给学生发传达」两种草稿，草稿要老师在对话里或右边「待确认」列表里点「确认」才写入，7 天内可以撤销；助手不能直接改数据，不能改 AI 老师设定、科目设置和成员；只读老师只能提问不能生成草稿。
+      设 ctx = 系统功能说明：{nl}教师端的页面有：学情（看全班和单个学生的学习情况，可生成AI学情总结）；教师助手（就是现在这个对话页，按数据回答老师的问题，也能按老师的话生成出题、给学生发传达、改AI老师设定、加知识点/条目/前置边的草稿）；学生管理（建学生账号、重置密码、停用或启用）；科目管理（管理科目、协作教师和学生的分配）；图谱管理（管理本科目的知识点、条目、前置边和对照，可批量导入导出）；AI老师设定（设定学生端问老师的说话方式和规则）；教材导入（导入课文教材）。{nl}学生端共有6个页面：问老师（向AI老师提问）；做题（按知识点做题）；默写（单词默写）；教材（阅读课文）；学习进度（看进度和得分）；知识图谱（看知识点之间的前置关系）。{nl}助手能按老师的话生成「出题」「给学生发传达」「改 AI 老师设定」「加知识点/条目/前置边」四种草稿，草稿要老师在对话里或右边「待确认」列表里点「确认」才写入，7 天内可以撤销（设定在确认后被别人改过的不撤、知识点和条目已被引用的不撤）；助手不能直接改数据，只能改本科目的设定，「全部科目」的设定、科目设置和成员它做不了；只读老师只能提问不能生成草稿。
     结束
     返回 {"ok": 1, "intent": "{intent}", "status": "{status}", "student": "{st}", "student_name": "{sname}", "point": "{pt}", "point_title": "{ptitle}", "hint": "{hint}", "context_text": "{ctx}"}
   结束
@@ -524,7 +525,7 @@
   函数 判意图 message recent focus_text draft_text
     设 blank = {zz 或}
     设 nl = 查一值 app.db teacher_assist_nl
-    设 pr = 你是日语学习系统里教师端助手的意图分类器。根据老师的话、最近对话、上一轮聚焦，判断意图并抽取学生名和知识点名。意图只能六选一：class_overview（问全班整体情况、班级薄弱点）、student_detail（问某个具体学生的情况）、point_status（问某个知识点或语法条目全班的掌握情况）、teaching_advice（想要教学建议、讲什么、怎么讲、推荐课文）、chitchat（闲聊、问系统怎么用、其他）、make_draft（老师要助手动手改数据：出题quiz_add、给学生发传达转告通知relay_add；只问情况问建议不算）。student填老师话里提到的学生名原文，point填提到的知识点名或条目名原文，没提到就留空；老师说他、她、这个学生时，student填上一轮聚焦的学生显示名；说这个语法、这个点时，point填上一轮聚焦的知识点标题；拿不准选chitchat。make_draft时draft_kind填quiz_add或relay_add，count填要出几道题的数字，relay_add时student填学生名（多个用顿号隔开）；待确认草稿不为空且老师要改这份草稿时intent为make_draft、draft_kind取这份草稿的类型、revise为1，否则revise为0。{nl}【上一轮聚焦】{focus_text}{nl}【待确认草稿】{draft_text}{nl}【最近对话】{recent}{nl}【老师的话】{message}
+    设 pr = 你是日语学习系统里教师端助手的意图分类器。根据老师的话、最近对话、上一轮聚焦，判断意图并抽取学生名和知识点名。意图只能六选一：class_overview（问全班整体情况、班级薄弱点）、student_detail（问某个具体学生的情况）、point_status（问某个知识点或语法条目全班的掌握情况）、teaching_advice（想要教学建议、讲什么、怎么讲、推荐课文）、chitchat（闲聊、问系统怎么用、其他）、make_draft（老师要助手动手改数据：出题quiz_add、给学生发传达转告通知relay_add、新建或修改AI老师设定记忆作者注关键词卡setting_save、加知识点条目前置边kg_add；只问情况、问建议、问设定怎么用不算）。student填老师话里提到的学生名原文，point填提到的知识点名或条目名原文，没提到就留空；老师说他、她、这个学生时，student填上一轮聚焦的学生显示名；说这个语法、这个点时，point填上一轮聚焦的知识点标题；拿不准选chitchat。make_draft时draft_kind填quiz_add、relay_add、setting_save或kg_add，count填要出几道题的数字，relay_add时student填学生名（多个用顿号隔开），setting_save时student填设定针对的学生名（全班留空），kg_add时point填老师说的知识点名；待确认草稿不为空且老师要改这份草稿时intent为make_draft、draft_kind取这份草稿的类型、revise为1，否则revise为0。{nl}【上一轮聚焦】{focus_text}{nl}【待确认草稿】{draft_text}{nl}【最近对话】{recent}{nl}【老师的话】{message}
     问JSON j = {pr} 格式 intent:文本 student?:文本 point?:文本 draft_kind?:文本 count?:文本 revise?:文本 用 快 出错时 e
     设 intent = {j.intent 或}
     设 valid = 0
@@ -543,12 +544,24 @@
         如果 {draft_text} 包含 发传达
           设 dk = relay_add
         结束
+        如果 {draft_text} 包含 改设定
+          设 dk = setting_save
+        结束
+        如果 {draft_text} 包含 加知识点
+          设 dk = kg_add
+        结束
       否则如果 {message} 包含 出题 或 {message} 包含 编题 或 {mm.matched} 等于 是
         设 intent = make_draft
         设 dk = quiz_add
       否则如果 {message} 包含 传达 或 {message} 包含 转告 或 {message} 包含 通知 或 {message} 包含 告诉
         设 intent = make_draft
         设 dk = relay_add
+      否则如果 ({message} 包含 设定 或 {message} 包含 作者注 或 {message} 包含 关键词卡 或 {message} 包含 记住 或 {message} 包含 AI老师) 且 ({message} 包含 加 或 {message} 包含 改 或 {message} 包含 新建 或 {message} 包含 设 或 {message} 包含 写 或 {message} 包含 记)
+        设 intent = make_draft
+        设 dk = setting_save
+      否则如果 ({message} 包含 知识点 或 {message} 包含 条目 或 {message} 包含 前置) 且 ({message} 包含 加 或 {message} 包含 建 或 {message} 包含 新增 或 {message} 包含 添)
+        设 intent = make_draft
+        设 dk = kg_add
       否则如果 {message} 包含 全班 或 {message} 包含 班级 或 {message} 包含 大家 或 {message} 包含 整体 或 {message} 包含 所有学生
         设 intent = class_overview
       结束
@@ -565,13 +578,17 @@
     设 dk = {j.draft_kind 或}
     如果 {intent} 不等于 make_draft
       设 dk = {blank}
-    否则如果 {dk} 不等于 quiz_add 且 {dk} 不等于 relay_add
+    否则如果 {dk} 不等于 quiz_add 且 {dk} 不等于 relay_add 且 {dk} 不等于 setting_save 且 {dk} 不等于 kg_add
       设 dk = {blank}
       设 mm = 匹配 {message} 出[0-9一二两三四五六七八九十几]+道
       如果 {message} 包含 出题 或 {message} 包含 编题 或 {mm.matched} 等于 是
         设 dk = quiz_add
       否则如果 {message} 包含 传达 或 {message} 包含 转告 或 {message} 包含 通知 或 {message} 包含 告诉
         设 dk = relay_add
+      否则如果 ({message} 包含 设定 或 {message} 包含 作者注 或 {message} 包含 关键词卡 或 {message} 包含 记住 或 {message} 包含 AI老师) 且 ({message} 包含 加 或 {message} 包含 改 或 {message} 包含 新建 或 {message} 包含 设 或 {message} 包含 写 或 {message} 包含 记)
+        设 dk = setting_save
+      否则如果 ({message} 包含 知识点 或 {message} 包含 条目 或 {message} 包含 前置) 且 ({message} 包含 加 或 {message} 包含 建 或 {message} 包含 新增 或 {message} 包含 添)
+        设 dk = kg_add
       结束
     结束
     设 ct = {j.count 或}
@@ -601,7 +618,7 @@
   函数 答一轮 current_user user_text intent context_text student point subject_id
     设 nl = 查一值 app.db teacher_assist_nl
     设 recent = 调用 取最近对话 current_user={current_user} limit=6 subject_id={subject_id}
-    设 sysp = 你是日语学习系统教师端的教学助手，像同事一样和老师说话，只读。回答规则：①数字、人名、名单、知识点名、课号、标题、日期只能原样取自【数据】，不得自己推算新数字，不得写大约、差不多之类的估算，唯一允许的是数一数【数据】里列出的行；②【数据】里没有的就直说「这份数据里没有」，不猜不编，也不要说系统没有的功能；③不要写昨天、上周、几天前这类相对时间，只能原样引用【数据】里写明的日期；④最近对话里出现过的数字可能已过时，以【数据】为准；⑤你不能直接改数据：出题、给学生发传达只能生成草稿等老师确认（老师直接说出题或给某某发传达就会生成）；改AI老师设定、科目设置、成员你做不了，告诉老师去哪个页面做；⑥只输出纯文本，不用Markdown的标题、加粗、表格、列表符号，不用emoji；名单每人一行，行首用「・」；⑦一般不超过300字，名单最多列10人；⑧给教学建议时先说依据（引用【数据】里的哪几项），再给1到3条具体做法，推荐课文只能用【数据】里的课号和标题；⑨闲聊或问系统用法时简短自然地回应，用法只依据【数据】里的系统功能说明。
+    设 sysp = 你是日语学习系统教师端的教学助手，像同事一样和老师说话，只读。回答规则：①数字、人名、名单、知识点名、课号、标题、日期只能原样取自【数据】，不得自己推算新数字，不得写大约、差不多之类的估算，唯一允许的是数一数【数据】里列出的行；②【数据】里没有的就直说「这份数据里没有」，不猜不编，也不要说系统没有的功能；③不要写昨天、上周、几天前这类相对时间，只能原样引用【数据】里写明的日期；④最近对话里出现过的数字可能已过时，以【数据】为准；⑤你不能直接改数据：出题、给学生发传达、改本科目的AI老师设定、加知识点/条目/前置边只能生成草稿等老师确认（老师直接说出5道题、给某某发传达、加一条作者注、加个知识点就会生成）；全部科目的设定、科目设置、成员你做不了，告诉老师去哪个页面做；⑥只输出纯文本，不用Markdown的标题、加粗、表格、列表符号，不用emoji；名单每人一行，行首用「・」；⑦一般不超过300字，名单最多列10人；⑧给教学建议时先说依据（引用【数据】里的哪几项），再给1到3条具体做法，推荐课文只能用【数据】里的课号和标题；⑨闲聊或问系统用法时简短自然地回应，用法只依据【数据】里的系统功能说明。
     设 full = {sysp}{nl}{nl}【数据】{nl}{context_text}{nl}{nl}【最近对话】{nl}{recent}{nl}{nl}【老师最新一句】{nl}{user_text}
     问 reply = {full} 用 平衡 出错时 e
     如果 {e} 不为空 或 {reply} 为空
@@ -643,7 +660,7 @@
     否则如果 {fp} 不为空
       设 focus_text = {fp}
     结束
-    设 pl = 调用 列草稿 current_user={current_user} status=pending limit=1 subject={subject_id}
+    设 pl = 调用 assist_draft.列草稿 current_user={current_user} status=pending limit=1 subject={subject_id}
     设 pend_id = {blank}
     设 pend_kind = {blank}
     设 draft_text = {blank}
@@ -653,6 +670,12 @@
         设 pend_kind = quiz_add
         如果 {x0.draft_kind} 等于 发传达
           设 pend_kind = relay_add
+        结束
+        如果 {x0.draft_kind} 等于 改设定
+          设 pend_kind = setting_save
+        结束
+        如果 {x0.draft_kind} 等于 加知识点
+          设 pend_kind = kg_add
         结束
         设 pre = 草稿
         设 draft_text = {pre} #{pend_id}（{x0.draft_kind}）：{x0.draft_brief}
@@ -686,14 +709,14 @@
         如果 {we.code} 不等于 403
           报错 400 {we.error}
         结束
-        设 reply = 你在这个科目只有读权限，不能让助手生成改动草稿（出题、发传达）；学情照样可以问。
+        设 reply = 你在这个科目只有读权限，不能让助手生成改动草稿（出题、发传达、改设定、加知识点）；学情照样可以问。
       否则
         如果 {d.revise} 等于 1 且 {pend_id} 不为空
           设 rep = {pend_id}
           设 dk = {pend_kind}
         结束
         如果 {dk} 为空
-          设 reply = 你是想让我出题，还是给学生发传达？
+          设 reply = 你是想让我出题、给学生发传达、改AI老师设定，还是加知识点/条目？
         否则
           设 st2 = {d.student}
           设 pt2 = {d.point}
@@ -703,7 +726,7 @@
           如果 {dk} 等于 quiz_add 且 {pt2} 为空 且 {f.point_title} 不为空
             设 pt2 = {f.point_title}
           结束
-          设 g = 调用 生成草稿 current_user={current_user} kind={dk} message={msg} point={pt2} students={st2} count={d.count} replaces_id={rep} subject={subject_id}
+          设 g = 调用 assist_draft.生成草稿 current_user={current_user} kind={dk} message={msg} point={pt2} students={st2} count={d.count} replaces_id={rep} subject={subject_id}
           如果 {g.status} 等于 ask
             设 reply = {g.hint}
           否则
@@ -717,7 +740,7 @@
       结束
       设 rid = 调用 写一轮 current_user={current_user} user_text={msg} reply={reply} intent=make_draft student={blank} point={blank} status={status} subject_id={subject_id}
       如果 {did} 不为空
-        设 n0 = 写库 app.db teacher_assist_draft_source id={did} msg={rid}
+        设 n0 = 调用 assist_draft.挂回消息 current_user={current_user} draft_id={did} msg_id={rid} subject={subject_id}
       结束
       返回 {"ok": 1, "reply_id": {rid}, "reply": "{reply}", "intent": "make_draft", "student": "", "point": "", "status": "{status}", "draft_id": "{did}"}
     结束
@@ -757,14 +780,26 @@
     设 sj = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 subject_id = {sj.subject_id}
     设 r = 调用 列对话 current_user={current_user} limit=40 subject={subject_id}
+    设 ids = {blank}
+    遍历 x 于 {r.messages}
+      如果 {ids} 为空
+        设 ids = {x.id}
+      否则
+        设 ids = {ids},{x.id}
+      结束
+    结束
+    设 dm = {"total": 0, "items": []}
+    如果 {ids} 不为空
+      设 dm = 调用 assist_draft.按消息列草稿 current_user={current_user} msg_ids={ids} subject={subject_id}
+    结束
     设 talk = {blank}
     遍历 x 于 {r.messages}
       如果 {x.role} 等于 assistant
         设 it = {"who": "助手", "text": "{x.content}", "kind": ""}
-        设 dq = 查一行 app.db teacher_assist_draft_by_source teacher={current_user} subject_id={subject_id} msg={x.id}
-        如果 {dq} 不为空
-          设 bt = 调用 草稿按钮 draft={dq}
-          设 it = {"who": "助手", "text": "{x.content}", "kind": "draft", "actions": {bt.actions}, "links": {bt.links}}
+        遍历 y 于 {dm.items}
+          如果 {y.source_msg_id} 等于 {x.id}
+            设 it = {"who": "助手", "text": "{x.content}", "kind": "draft", "actions": {y.actions}, "links": {y.links}}
+          结束
         结束
       否则
         设 it = {"who": "你", "text": "{x.content}", "kind": "user"}
@@ -775,7 +810,7 @@
         设 talk = {talk},{it}
       结束
     结束
-    设 dl = 调用 列草稿 current_user={current_user} subject={subject_id}
+    设 dl = 调用 assist_draft.列草稿 current_user={current_user} subject={subject_id}
     设 ac = 调用 subject.科目访问 learner={current_user} current_role={current_role} subject_id={subject_id} need=write auth_mode={auth_mode}
     设 ro = 0
     如果 {ac.ok} 等于 0
@@ -803,34 +838,36 @@
   公开 函数 取草稿页面 current_user draft_id current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 subject_id = {sj.subject_id}
-    设 d = 调用 取草稿 current_user={current_user} draft_id={draft_id} subject={subject_id}
+    设 d = 调用 assist_draft.取草稿 current_user={current_user} draft_id={draft_id} subject={subject_id}
     返回 {d}
   结束
 
   公开 函数 确认草稿页面 current_user draft_id current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
     设 subject_id = {sj.subject_id}
-    设 x = 调用 确认草稿 current_user={current_user} draft_id={draft_id} subject={subject_id}
+    设 x = 调用 assist_draft.确认草稿 current_user={current_user} draft_id={draft_id} subject={subject_id}
+    设 mid = 调用 记一条 current_user={current_user} content={x.summary} subject_id={subject_id}
     设 page = 调用 列对话页面 current_user={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
-    设 d = 调用 取草稿 current_user={current_user} draft_id={draft_id} subject={subject_id}
+    设 d = 调用 assist_draft.取草稿 current_user={current_user} draft_id={draft_id} subject={subject_id}
     返回 {"talk": {page.talk}, "drafts": {page.drafts}, "readonly": {page.readonly}, "draft": {d.draft}}
   结束
 
   公开 函数 放弃草稿页面 current_user draft_id current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 subject_id = {sj.subject_id}
-    设 x = 调用 放弃草稿 current_user={current_user} draft_id={draft_id} subject={subject_id}
+    设 x = 调用 assist_draft.放弃草稿 current_user={current_user} draft_id={draft_id} subject={subject_id}
     设 page = 调用 列对话页面 current_user={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
-    设 d = 调用 取草稿 current_user={current_user} draft_id={draft_id} subject={subject_id}
+    设 d = 调用 assist_draft.取草稿 current_user={current_user} draft_id={draft_id} subject={subject_id}
     返回 {"talk": {page.talk}, "drafts": {page.drafts}, "readonly": {page.readonly}, "draft": {d.draft}}
   结束
 
   公开 函数 撤销草稿页面 current_user draft_id current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
     设 subject_id = {sj.subject_id}
-    设 x = 调用 撤销草稿 current_user={current_user} draft_id={draft_id} subject={subject_id}
+    设 x = 调用 assist_draft.撤销草稿 current_user={current_user} draft_id={draft_id} subject={subject_id}
+    设 mid = 调用 记一条 current_user={current_user} content={x.summary} subject_id={subject_id}
     设 page = 调用 列对话页面 current_user={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
-    设 d = 调用 取草稿 current_user={current_user} draft_id={draft_id} subject={subject_id}
+    设 d = 调用 assist_draft.取草稿 current_user={current_user} draft_id={draft_id} subject={subject_id}
     返回 {"talk": {page.talk}, "drafts": {page.drafts}, "readonly": {page.readonly}, "draft": {d.draft}}
   结束
 结束
