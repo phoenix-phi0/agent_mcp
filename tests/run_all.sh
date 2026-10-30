@@ -24,11 +24,8 @@ KNOWN_FAILED=0
 #   教材导入E2E｜确认后撤下了：旧 kg 项目（kg/routes）撤下后重新载入把
 #   「撤下了：…」提示盖掉，用户决定旧 kg 不修（kg_v4 已修，见 data/reports/kg_K116.md、
 #   kg_K117.md）。
-#   助手学情｜小丽 0 天：assist_insight.学情趋势 对「窗口内没作答的学生」崩（遍历空列表多跑一轮），
-#   dslagent change2 两次没改成（见 data/reports/kg_K150.md）；修好后删这一条。
 KNOWN=(
   "教材导入E2E|确认后撤下了"
-  "助手学情|小丽 0 天"
 )
 # 每组的时限。一组卡住时，没有它整个脚本会一直等下去——后面十几组
 # 根本没机会跑，而「卡住」和「很慢」从外面看一模一样。实际撞上过：
@@ -85,6 +82,7 @@ cd $M
 [ -d "$M/tests/e2e/node_modules/jsdom" ] || echo "!! 缺 jsdom，node E2E 会失败；先跑：npm ci --prefix $M/tests/e2e"
 run 引擎        $PY -m tools.test_dsl
 run 序号和默认值 $PY tests/dsl/test_loop_default.py
+run 遍历JSON列表 $PY tests/dsl/test_each_json_list.py
 run JSON字面量转义 $PY tests/dsl/test_json_literal.py
 run 动词参数    $PY tests/dsl/test_verb_params.py
 run 界面编译    $PY -m tools.test_ui
