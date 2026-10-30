@@ -27,6 +27,7 @@
       图谱管理** 合并后是第 7 个）
   3b. 教师助手草稿（M4-P1）：发「出3道题」→ 消息里出现 确认 / 放弃 按钮 → 点确认 → 待确认列表
       状态「已执行」→ 撤销 →「已撤销」；发传达草稿 → 放弃 →「已放弃」（假模型走 DSL_MOCK_SCRIPT）
+      （M4-P1b）设定草稿确认 → 列表「已执行」→ AI老师设定页可见新值；知识点草稿确认 → 列表「已执行」
   4.  导航分组：学生端右侧「看看」、教师端右侧「管理」
   5.* 科目管理流程：t1 建科目（私有草稿）→ 成员浮层加 t2 协作 → 分配 s1 →
       启用 → s1 顶栏可切到新科目 → t2 在该科目行只见「成员」→ t1 停用后
@@ -393,6 +394,15 @@ def write_assist_mock(proj, tmp):
     qs = [{"stem": f"走查题{i}", "options": ["甲", "乙", "丙"], "answer": "B", "explain": "走查", "item_code": row[0]}
           for i in (1, 2, 3)]
     rules = [
+        {"when": ["意图分类器", "走查加知识点"],
+         "reply": json.dumps({"intent": "make_draft", "draft_kind": "kg_add"}, ensure_ascii=False)},
+        {"when": ["往图谱里加知识点", "points"],
+         "reply": json.dumps({"title": "走查加知识点", "points": [{"code": "WK134P", "title": "走查知识点"}], "items": [], "edges": []},
+                             ensure_ascii=False)},
+        {"when": ["意图分类器", "走查记设定"],
+         "reply": json.dumps({"intent": "make_draft", "draft_kind": "setting_save"}, ensure_ascii=False)},
+        {"when": ["起草AI老师设定", "settings"],
+         "reply": json.dumps({"title": "走查记设定", "settings": [{"kind": "memory", "content": "走查设定内容K134"}]}, ensure_ascii=False)},
         {"when": ["意图分类器", "发传达"],
          "reply": json.dumps({"intent": "make_draft", "draft_kind": "relay_add", "student": "s1"}, ensure_ascii=False)},
         {"when": ["意图分类器", "出3道题"],
@@ -442,6 +452,27 @@ def assist_flow(t1, ck, marks):
         t1.locator("tr", has_text="待确认").first.get_by_text("放弃", exact=True).click(timeout=8000)
         t1.locator("tr", has_text="已放弃").first.wait_for(timeout=30000)
         ck(True, f"{name}：传达草稿点放弃后状态变「已放弃」")
+        # P1b：设定草稿确认后，AI 老师设定页可见新值
+        assist_send(t1, "走查记设定：记住这条")
+        row = t1.locator("tr", has_text="走查记设定").filter(has_text="待确认")
+        row.first.wait_for(timeout=90000)
+        row.first.get_by_text("确认", exact=True).click(timeout=8000)
+        t1.locator("tr", has_text="走查记设定").filter(has_text="已执行").first.wait_for(timeout=30000)
+        ck(True, f"{name}：设定草稿点确认后状态变「已执行」")
+        t1.evaluate("location.hash = encodeURIComponent('AI老师设定')")
+        wait_screen(t1, "AI老师设定")
+        t1.get_by_text("走查设定内容K134").first.wait_for(timeout=15000)
+        ck(True, f"{name}：设定草稿确认后 AI老师设定页可见新值")
+        # P1b：知识点草稿确认后列表状态变「已执行」
+        t1.evaluate("location.hash = encodeURIComponent('教师助手')")
+        wait_screen(t1, "教师助手")
+        t1.wait_for_timeout(1500)
+        assist_send(t1, "走查加知识点：加一个知识点")
+        row = t1.locator("tr", has_text="走查加知识点").filter(has_text="待确认")
+        row.first.wait_for(timeout=90000)
+        row.first.get_by_text("确认", exact=True).click(timeout=8000)
+        t1.locator("tr", has_text="走查加知识点").filter(has_text="已执行").first.wait_for(timeout=30000)
+        ck(True, f"{name}：知识点草稿点确认后状态变「已执行」")
     except Exception as e:
         ck(False, name, f"{type(e).__name__}: {str(e)[:300]}")
     err = drain_errors(marks)

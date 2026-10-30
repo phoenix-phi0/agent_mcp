@@ -10,6 +10,7 @@
   已作答的助手题不可删；传达撤销：带到过 = 停用，没带到过 = 删除
   只读老师 / 学生 / 跨科目
   模型输出不合法：重试 1 次后回模板话、不建草稿；第二次合法则建草稿（假模型按脚本出）
+  P1b：setting_save 设定被他人改过撤销 409、kg_add 知识点被引用撤销 409、两种 kind 的并发确认只成功一次
 """
 
 import json
@@ -291,6 +292,82 @@ try:
 
     run("生成草稿", eng=engine(h2), current_user="t1", kind="quiz_add", message="出两道题", count=2)
     check(len(calls) == 2 and "上次输出的问题" in calls[1], "重试的提示词带上次的错误句子", calls[1][-200:] if len(calls) > 1 else calls)
+
+    print("八、P1b：setting_save / kg_add（设定被他人改过、知识点被引用撤销 409，并发确认只成功一次）")
+    SET_PAYLOAD = json.dumps({"settings": [{"op": "add", "target_id": "", "kind": "memory", "content": "喜欢动漫", "student": "", "student_name": "",
+                                            "keywords": "", "once": 0}]}, ensure_ascii=False)
+    KG_PAYLOAD = json.dumps({"points": [{"code": "P2", "title": "点二"}],
+                             "items": [{"code": "I2", "name": "条目二", "point_code": "P2", "after_form": "", "prev_code": ""}],
+                             "edges": [{"pre_code": "P1", "point_code": "P2"}]}, ensure_ascii=False)
+    set_row = lambda **kw: ("teacher_rules_setting", dict(dict(kind="memory", student="", keywords="", content="喜欢动漫", enabled=1, once=0, version=1,  # noqa: E731
+                                                              author="t1", updated_at="2025-12-31", subject_id=1), **kw))
+    SET_RES = json.dumps({"items": [{"op": "add", "setting_id": 1, "label": "x", "ok": 1, "error": "", "undo": "",
+                                     "written": {"kind": "memory", "student": "", "keywords": "", "content": "喜欢动漫", "once": 0, "enabled": 1}}]},
+                         ensure_ascii=False)
+    # 确认：设定写入、草稿 done
+    db = seed([draft(kind="setting_save", payload=SET_PAYLOAD)])
+    r, e = run("确认草稿", current_user="t1", draft_id=1)
+    check(e == "" and r.get("status") == "done" and q(db, "SELECT count(*) FROM teacher_rules_setting")[0][0] == 1
+          and q(db, "SELECT status FROM teacher_assist_draft")[0][0] == "done", "setting_save 确认：写入设定、草稿 done", (r, e))
+    # 撤销：设定没人动 → 删掉
+    db = seed([set_row(), draft(kind="setting_save", payload=SET_PAYLOAD, result=SET_RES, status="done", decided_at="2025-12-31")])
+    r, e = run("撤销草稿", current_user="t1", draft_id=1)
+    check(e == "" and q(db, "SELECT count(*) FROM teacher_rules_setting")[0][0] == 0
+          and q(db, "SELECT status FROM teacher_assist_draft")[0][0] == "undone", "setting_save 撤销：设定没被动过 → 删除、草稿 undone", (r, e))
+    # 撤销：设定被他人改过 → 409，设定与草稿都不动
+    db = seed([set_row(content="别人又改了", version=3, author="t3"),
+               draft(kind="setting_save", payload=SET_PAYLOAD, result=SET_RES, status="done", decided_at="2025-12-31")])
+    r, e = run("撤销草稿", current_user="t1", draft_id=1)
+    check(e == "409" and q(db, "SELECT content FROM teacher_rules_setting")[0][0] == "别人又改了"
+          and q(db, "SELECT status, claim FROM teacher_assist_draft")[0] == ("done", ""), "setting_save 撤销：设定被他人改过 → 409，设定不动、草稿回到 done", (r, e))
+    # 撤销：设定已被删 → 新建的算撤掉
+    db = seed([draft(kind="setting_save", payload=SET_PAYLOAD, result=SET_RES, status="done", decided_at="2025-12-31")])
+    r, e = run("撤销草稿", current_user="t1", draft_id=1)
+    check(e == "" and q(db, "SELECT status FROM teacher_assist_draft")[0][0] == "undone", "setting_save 撤销：新建的设定已被老师删掉 → 算撤掉", (r, e))
+    # 并发确认
+    for rnd in range(3):
+        db = seed([draft(kind="setting_save", payload=SET_PAYLOAD)])
+        res = concurrent("确认草稿", current_user="t1", draft_id=1)
+        oks = [r for r, e in res if e == ""]
+        errs = [e for r, e in res if e != ""]
+        check(len(oks) == 1 and errs == ["409"], f"setting_save 并发确认 第{rnd + 1}轮：一个成功、一个 409", res)
+        check(q(db, "SELECT count(*) FROM teacher_rules_setting")[0][0] == 1
+              and q(db, "SELECT status, claim FROM teacher_assist_draft")[0] == ("done", ""), f"setting_save 并发确认 第{rnd + 1}轮：设定只写一条、草稿 done、claim 已清")
+
+    KG_RES = json.dumps({"items": [
+        {"type": "point", "code": "P2", "pre_code": "", "point_code": "", "label": "x", "ok": 1, "error": "", "created": "", "undo": ""},
+        {"type": "item", "code": "I2", "pre_code": "", "point_code": "", "label": "x", "ok": 1, "error": "", "created": "", "undo": ""},
+        {"type": "edge", "code": "P1>P2", "pre_code": "P1", "point_code": "P2", "label": "x", "ok": 1, "error": "", "created": 1, "undo": ""}]})
+    kg_rows = BASE + [("kg_point", dict(code="P2", title="点二")), ("kg_item", dict(code="I2", name="条目二", point_code="P2")),
+                      ("kg_edge", dict(pre_code="P1", point_code="P2"))]
+    kg_done = lambda: draft(kind="kg_add", payload=KG_PAYLOAD, result=KG_RES, status="done", decided_at="2025-12-31")  # noqa: E731
+    db = seed(BASE + [draft(kind="kg_add", payload=KG_PAYLOAD)])
+    r, e = run("确认草稿", current_user="t1", draft_id=1)
+    check(e == "" and r.get("status") == "done" and q(db, "SELECT count(*) FROM kg_point")[0][0] == 2
+          and q(db, "SELECT count(*) FROM kg_item")[0][0] == 2 and q(db, "SELECT count(*) FROM kg_edge")[0][0] == 1,
+          "kg_add 确认：知识点、条目、前置边都写入", (r, e))
+    db = seed(kg_rows + [kg_done()])
+    r, e = run("撤销草稿", current_user="t1", draft_id=1)
+    check(e == "" and q(db, "SELECT count(*) FROM kg_point")[0][0] == 1 and q(db, "SELECT count(*) FROM kg_item")[0][0] == 1
+          and q(db, "SELECT count(*) FROM kg_edge")[0][0] == 0 and q(db, "SELECT status FROM teacher_assist_draft")[0][0] == "undone",
+          "kg_add 撤销：没被引用 → 边、条目、知识点都删", (r, e))
+    db = seed(kg_rows + [("quiz_question", dict(question_no="q1", level="N5", category="手工", stem="题", answer="A", item_code="I2")), kg_done()])
+    r, e = run("撤销草稿", current_user="t1", draft_id=1)
+    check(e == "409" and q(db, "SELECT count(*) FROM kg_point")[0][0] == 2 and q(db, "SELECT count(*) FROM kg_item")[0][0] == 2
+          and q(db, "SELECT count(*) FROM kg_edge")[0][0] == 1 and q(db, "SELECT status, claim FROM teacher_assist_draft")[0] == ("done", ""),
+          "kg_add 撤销：条目被题目引用 → 409，什么都不删、草稿回到 done", (r, e))
+    db = seed(kg_rows + [("kg_point", dict(code="P3", title="别人的点")), ("kg_edge", dict(pre_code="P2", point_code="P3")), kg_done()])
+    r, e = run("撤销草稿", current_user="t1", draft_id=1)
+    check(e == "409" and q(db, "SELECT count(*) FROM kg_point")[0][0] == 3 and q(db, "SELECT count(*) FROM kg_edge")[0][0] == 2,
+          "kg_add 撤销：别人后来加了前置边 → 409，什么都不删", (r, e))
+    for rnd in range(3):
+        db = seed(BASE + [draft(kind="kg_add", payload=KG_PAYLOAD)])
+        res = concurrent("确认草稿", current_user="t1", draft_id=1)
+        oks = [r for r, e in res if e == ""]
+        errs = [e for r, e in res if e != ""]
+        check(len(oks) == 1 and errs == ["409"], f"kg_add 并发确认 第{rnd + 1}轮：一个成功、一个 409", res)
+        check(q(db, "SELECT count(*) FROM kg_point")[0][0] == 2 and q(db, "SELECT count(*) FROM kg_item")[0][0] == 2
+              and q(db, "SELECT status, claim FROM teacher_assist_draft")[0] == ("done", ""), f"kg_add 并发确认 第{rnd + 1}轮：只建一遍、草稿 done、claim 已清")
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
