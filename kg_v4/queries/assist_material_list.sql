@@ -1,0 +1,1 @@
+SELECT * FROM teacher_assist_material WHERE teacher = :teacher AND subject_id = CAST(:subject_id AS INTEGER) AND (:kind = '' OR kind = :kind) AND (:status = '' OR status = :status) ORDER BY updated_at DESC, id DESC LIMIT CAST(:limit AS INTEGER)

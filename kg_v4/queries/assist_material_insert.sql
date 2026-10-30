@@ -1,0 +1,1 @@
+INSERT INTO teacher_assist_material (teacher, subject_id, kind, title, content, status, source_msg_id, file_id, created_at, updated_at) VALUES (:teacher, CAST(:subject_id AS INTEGER), :kind, :title, :content, 'draft', NULL, CAST(NULLIF(:file_id, '') AS INTEGER), :now, :now)
