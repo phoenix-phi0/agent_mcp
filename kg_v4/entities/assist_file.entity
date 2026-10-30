@@ -1,0 +1,27 @@
+# 教师助手附件（M4-P2，归 assist_file）。学习记录类：老师传的文件，不能重建；清理靠 setup/cleanup_assist_files.py（跳过 attached=1）。
+实体 teacher_assist_file 学习记录
+  字段 teacher 文本 必填 索引 教师用户名（附件归谁）
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
+  字段 name 文本 必填 原文件名
+  字段 ext 文本 必填 类型（txt/md/csv/pdf/docx）
+  字段 size 整数 字节数
+  字段 path 文本 必填 索引 存放路径
+  字段 pages 整数 页数（pdf）
+  字段 chars 整数 全文字数
+  字段 text 长文本 抽出的文本（最多 50000 字）
+  字段 stats 长文本 csv 统计
+  字段 rows 整数 csv 数据行数
+  字段 status 文本 必填 状态（ok/deleted）
+  字段 attached 整数 必填 默认 0 是否为当前附件
+  字段 created_at 文本 必填 上传时间
+  字段 last_used_at 文本 必填 最近使用时间
+结束
+
+页面 实体 assist_file_view 教师助手附件
+  字段 assist_file 文件 附件
+  字段 att_id 整数 附件编号
+  字段 att_name 文本 文件
+  字段 att_info 文本 大小
+  字段 att_at 文本 上传时间
+  字段 att_on 整数 当前附件
+结束

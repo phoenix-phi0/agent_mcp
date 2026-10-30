@@ -26,13 +26,24 @@
 #
 # 文本：消息流把 text 当纯文本显示（保留换行，不渲染 Markdown），后端提示词要求只输出纯文本。
 # 约束照旧：当 的条件里不能有空格；标签、提示不能以修饰词开头，值里不能有空格（提示用全角括号）；
-# 分组不能套分组；布局里只能放区域。附件条、分析区、教学材料浮层是 P2–P4 的事，这一版不画。
+# 分组不能套分组；布局里只能放区域。分析区、教学材料浮层是 P3–P4 的事，这一版不画。
+#
+# M4 P2 附件（约定见 contracts/assist_file.md 与 teacher_assist.md 的 挂附件页面 等；设计 K124 design.md §4，D5–D8）：
+#   底栏多一个文件字段 assist_file 和按钮「传附件」（assist_attach，接口 /teacher_assist/attach 声明了「上传 assist_file 上限 10MB」）。
+#   引擎的「上传」接口要求必须带文件（没文件时 存文件 回 400），所以文件不能挂在「发送」的 /teacher_assist/ask 上：
+#   「发送」只发文字（选了文件却点「发送」，文件随请求发到 /ask 但被忽略、字段被清空，底栏提示里写明）；「传附件」把文件和输入框里的话一起发，
+#   先挂上附件、再按这句话问一轮。有文件字段的界面所有提交都走 multipart（payload 是 JSON 串），后端取法不变。
+#   附件条（对话下方，shared.attach.file_id 有值时出现）：显示 attach.label（「附件：讲义.pdf（pdf · 3 页 · 1234 字）」）和「移除附件」。
+#   右边「附件」区域：本人在本科目存着的附件（最多 20 个），行上「挂上」「删除」。
+#   进入时 assist_state 回的整页状态多 attach、files、att_note 三个键；四个附件动作都回整页。
+#   引擎支撑：文件字段（字段 … 接受 … 最大 …）与 multipart 已有（kg_manage.ui、textbook_import.ui 在用）；csv 靠 E4（读文档 收 csv）；
+#   附件不用消息按钮（E1），挂上/移除/删除都在附件条和附件表上。
 
 界面 自定义 教师助手 端 教师 序 12
   动作 assist_state 远程 进入时 隐藏 刷新
 
   分组 顶栏 横排 顶栏 间距 12px 对齐 center
-    文案 可以问学情，也可以让我出题、给学生发传达、改AI老师设定、加知识点和条目。我做的改动都先出草稿，你点确认才写入，7天内可以撤销。
+    文案 可以问学情，也可以让我出题、给学生发传达、改AI老师设定、加知识点和条目，还可以传文件让我看或按文件出题。我做的改动都先出草稿，你点确认才写入，7天内可以撤销。
     文案 当 shared.mode==='mock' 模拟模式：回复不是真模型
     文案 当 String(shared.readonly)==='1' 你在这个科目只有读权限：可以问学情，不能让助手出题、发传达、改设定或加知识点。
   结束
@@ -43,9 +54,16 @@
       文案 当 pending==='assist_send' 助手正在查数据并整理回答…（生成草稿一般要30到60秒）
       文案 当 pending==='assist_draft_confirm' 正在写入…
       文案 当 pending==='assist_draft_undo' 正在撤销…
+      文案 当 pending==='assist_attach' 正在读文件…（带了问题的话还要等助手回答）
+      分组 附件条 横排 间距 10px 对齐 center 当 shared.attach&&shared.attach.file_id
+        显示 attach.label
+        动作 assist_attach_drop 远程 次要 移除附件
+      结束
       分组 底栏 横排 底栏 间距 10px 对齐 flex-end 内边距 14px,20px
-        字段 content 控件 多行 单行高 提示 问助手…（例：小明最近怎么样？／按〜たばかり出5道题／给小明发传达：周五小测／给全班加一条作者注：多鼓励／加个知识点〜たばかり，Enter发送，Shift+Enter换行）
+        字段 assist_file 接受 .txt,.md,.csv,.pdf,.docx 最大 10MB 附件
+        字段 content 控件 多行 单行高 提示 问助手…（例：小明最近怎么样？／按〜たばかり出5道题／给小明发传达：周五小测／总结一下这份附件／按附件出5道题，Enter发送，Shift+Enter换行；传附件要先选文件再点「传附件」，只点发送不带文件）
         动作 assist_send 提交 远程 回显 清空 发送
+        动作 assist_attach 提交 远程 回显 清空 次要 传附件
       结束
     结束
 
@@ -61,6 +79,17 @@
         动作 assist_draft_confirm 远程 带 draft_id 当 row.draft_state==='待确认' 确认
         动作 assist_draft_discard 远程 次要 带 draft_id 当 row.draft_state==='待确认' 放弃
         动作 assist_draft_undo 远程 危险 带 draft_id 当 String(row.can_undo)==='1' 撤销
+      结束
+    结束
+
+    区域 附件 当 shared.files&&shared.files.length
+      显示 att_note
+      列表 附件表 绑 files
+        列 att_name 文件
+        列 att_info 大小
+        列 att_at 上传时间
+        动作 assist_attach_pick 远程 带 att_id 当 String(row.att_on)!=='1' 挂上
+        动作 assist_attach_delete 远程 危险 带 att_id 删除
       结束
     结束
   结束
