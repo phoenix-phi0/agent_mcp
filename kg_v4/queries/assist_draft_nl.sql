@@ -1,0 +1,1 @@
+SELECT CHAR(10)

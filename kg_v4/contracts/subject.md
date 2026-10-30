@@ -103,7 +103,7 @@
   伪代码 need 等于 own（仅负责人通过，给改「全部科目(0)」的内容用）且 auth_mode 等于 on：先按上面两条解析出 subject_id（显式 subject 的 400/403/404 照旧），再按「科目访问 need=settings auth_mode=on」判断，ok 为 0 时——科目不存在报错 404 没有这个科目，否则报错 403 只有科目负责人可以操作（协作教师、公共科目的其他教师、学生都是它）；ok 为 1 返回 {"subject_id": 该数字}；need 等于 own 但 auth_mode 不等于 on：不校验，同 need 缺省
 
 公开 函数 列科目学生 subject_id
-  返回 {total, students}；students 是 [{learner}]，subject_student 里该科目 status 等于 active 的学生，按 learner 升序（report、teacher_assist 用；学生范围的唯一规则，没有「1 号=全部学生」的特例）
+  返回 {total, students}；students 是 [{learner}]，subject_student 里该科目 status 等于 active 的学生，按 learner 升序（report、assist_common 用；学生范围的唯一规则，没有「1 号=全部学生」的特例）
   伪代码 查 subject_student 中 subject_id 相等且 status 等于 active 的行，按 learner 升序，去重
   伪代码 不校验权限（调用方已解析科目）、只读、不调用别的模块；科目不存在或没人登记返回 {"total": 0, "students": []}
   伪代码 返回 {"total": 数量, "students": 列表}

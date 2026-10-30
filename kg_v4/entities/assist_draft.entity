@@ -1,0 +1,19 @@
+# 教师助手草稿（M4；拆模块后归 assist_draft）。表名 teacher_assist_draft 不改：正式库里已有数据，学习记录表不能重建。
+实体 teacher_assist_draft 学习记录
+  字段 teacher 文本 必填 索引 教师用户名（草稿归谁）
+  字段 subject_id 整数 必填 索引 默认 1 所属科目
+  字段 kind 文本 必填 草稿类型（quiz_add 出题，relay_add 发传达，setting_save 改设定，kg_add 加知识点）
+  字段 title 文本 必填 标题
+  字段 payload 长文本 必填 规范化后的结构化内容（JSON）
+  字段 preview 长文本 纯文本预览
+  字段 snapshot 长文本 改已有对象时确认前的快照（JSON，setting_save 修改已有设定时记改前值，其它为空）
+  字段 result 长文本 确认后写库的结果（JSON）
+  字段 status 文本 必填 状态
+  字段 claim 文本 抢占令牌
+  字段 error 文本 失败原因
+  字段 source_msg_id 整数 生成它的助手消息编号
+  字段 replaces_id 整数 被替代的旧草稿编号
+  字段 created_at 文本 必填 生成时间
+  字段 decided_at 文本 确认或放弃时间
+  字段 undone_at 文本 撤销时间
+结束

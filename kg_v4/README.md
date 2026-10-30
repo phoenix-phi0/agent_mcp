@@ -8,7 +8,7 @@
 
 | 目录 | 内容 |
 |---|---|
-| `contracts/` | 13 个模块的约定（公开函数、用例）；约定检查、回归都以它为准 |
+| `contracts/` | 17 个模块的约定（公开函数、用例）；约定检查、回归都以它为准 |
 | `entities/` `queries/` | 实体（表）和查询 SQL |
 | `services/` `routes/` `scripts/` | 业务函数、97 个接口、教材导入用的脚本 |
 | `ui/` | 14 个 .ui，编译出 15 个界面（学生端 `/` 8 个，教师端 `/teacher` 7 个） |
@@ -22,6 +22,7 @@
 - 学生端（`/`，入口是问老师）：问老师（`teacher.ui`，序 1）→ 做题（`quiz.ui`，序 2）→ 默写（`quiz_dictation.ui`，序 3）→ 教材（`textbook.ui`，序 4）｜右侧「看看」组：知识图谱（`node.ui`）、学习进度（`progress.ui`）。
 - 教师端（`/teacher`，入口是学情）：学情（`report.ui`，序 11）→ 教师助手（`teacher_assist.ui`，序 12）→ 学生管理（`student.ui`，序 13）｜右侧「管理」组：AI老师设定（`teacher_note.ui`）、教材导入（`textbook_import.ui`）、科目管理（`subject.ui`，序 14）、图谱管理（`kg_manage.ui`，序 15）。
 教师助手（`teacher_assist` 模块）：问全班概况、某个学生、某个知识点全班掌握、教学建议，也能闲聊/问系统用法；每位教师各自一份对话（`teacher_assist_message`）；数字和名单由后端拼进数据段，模型只读；找不到学生/知识点或有多个时用模板话追问，不调回答模型。M4-P1 起还能让助手「动手」：出题（`quiz_add`）、给学生发传达（`relay_add`）——助手只生成草稿（`teacher_assist_draft`），老师点「确认」才写库，7 天内可以撤销（已有学生做过的题不能撤，已带到的传达只能停用）；只读老师只能提问。
+M4 拆模块（K133，约定先行，实现见 `plan/m4_split_impl.md`）：对话留在 `teacher_assist`；草稿框架与出题/传达归 `assist_draft`（表名 `teacher_assist_draft` 不变）；改设定草稿归 `assist_setting`、加知识点草稿归 `assist_kg`；按名字匹配学生/知识点、学生范围归 `assist_common`。接口路径和前端动作名都不变。
 
 ## 多科目底座（M1）
 
@@ -97,7 +98,7 @@
 ## 检查与测试
 
 ```
-.venv/bin/python tests/kg_v4/test_project.py     # 约定检查 + 全量回归 13/13 + 编译 97 接口 + 初始化脚本（约 1 分钟）
+.venv/bin/python tests/kg_v4/test_project.py     # 约定检查 + 全量回归 17/17 + 编译 97 接口 + 初始化脚本（约 1 分钟）
 ```
 
 `tests/run_all.sh` 里有「kg_v4 项目」一行。
