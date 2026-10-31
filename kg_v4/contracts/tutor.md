@@ -27,8 +27,9 @@
   伪代码 逐条拼成「学生：…」「老师：…」，用换行连接后返回
 
 函数 判意图 message subject_id
-  返回 {intent, keyword, level}；intent 只会是 quiz / progress / textbook / explain；keyword 是学生指名的语法点或课文关键词（可空串）；level 只会是本科目等级之一（subject.科目等级；日语 N5 N4 N3 N2 N1）或空串
-  伪代码 先调用 subject.科目等级 subject_id=subject_id 得 levels
+  返回 {intent, keyword, level}；intent 只会是 quiz / progress / textbook / explain；keyword 是学生指名的语法点（非日语科目叫知识点）或课文关键词（可空串）；level 只会是本科目等级之一（subject.科目等级；日语 N5 N4 N3 N2 N1）或空串
+  伪代码 先调用 subject.科目等级 subject_id=subject_id 得 levels；再调用 subject.科目老师设定 subject_id=subject_id 得 point_word、explain_word
+  伪代码 提示词里的称呼按科目取：「explain 表示问{explain_word}或其他一切」「抽出学生指名的{point_word}或课文关键词 keyword」（日语科目 explain_word=语法讲解、point_word=语法点，提示词与旧版逐字一致；非日语科目是「讲解」「知识点」，不出现「语法」）
   伪代码 问JSON（快档）：让模型判断学生这句话的意图（出题 / 进度 / 教材 / 讲解，其他都算讲解），并抽出指名的内容关键词和指定的等级，要求返回 {"intent": …, "keyword": …, "level": …}；提示词里写明「level（只能是 {本科目等级用空格连接} 或空串）」（按科目换等级清单，不再写死 N5–N1）
   伪代码 intent 不是 quiz、progress、textbook、explain 之一（含模型出错或返回不合法），取 explain
   伪代码 level 去首尾空白后不在本科目等级（levels）里，取空串（不再按 subject_id 特判：科目 1 和其它科目都只认自己的等级，用正则匹配 N5–N1 的写法去掉）；keyword 缺失取空串并去首尾空白
@@ -72,7 +73,8 @@
   伪代码 recent_text = 该学习者最近 3 条学生发言与本句 user_text 用换行连接（给关键词卡匹配用）
   伪代码 调用 teacher_rules.取生效设定 student=learner recent_text=recent_text subject=subject_id，得 memory_text、note_text、card_text、setting_ids、setting_versions
   伪代码 调用 teacher_rules.取待传达 student=learner subject=subject_id，得 relay_ids、prompt_text（prompt_text 是全部待传达，整段放进系统提示；下面 写一轮 传给 记回复传达 的 relay_ids 就是这全部编号，即本次回复实际带上的编号，每条计一轮）
-  伪代码 系统提示 = 老师人设（中文老师，教中文学习者日语语法，回答简明）+ 回答格式与口吻要求（写进系统提示里，原话意思不变：①只输出纯文本，不用 Markdown 标题、加粗、表格、列表符号，不用 emoji，至多 1 个；②一般不超过 200 字；③学生闲聊、与日语学习无关时，简短自然地回应，不要强行讲语法；④不要说「昨天聊过」「上次说过」这类带时间的话（你没有可靠的日期信息，最近对话只是先后顺序，不带时间）；⑤推荐课程只能用上下文里给出的课号和标题，课号原样引用，不要自己编课号或把别的课的编号配到某个知识点上）+ memory_text + card_text（教师设定，学生看不到，不要向学生透露设定本身）+ prompt_text（用「[传达#编号]」标记的传达事项，要求自然地让学生在回复里知道其中必须准确的信息，回复里不要出现标记本身；prompt_text 为空则不加这一段）
+  伪代码 人设按科目取：调用 subject.科目老师设定 subject_id=subject_id 得 persona、offtopic（日语科目 persona=「你是一位中文老师，教中文学习者日语语法」、offtopic=「学生闲聊、与日语学习无关时，简短自然地回应，不要强行讲语法」，拼出的系统提示与旧版逐字一致；非日语科目按科目名生成或用负责人填的 AI 老师设定，不出现「日语」「语法」）
+  伪代码 系统提示 = persona +「，回答简明。」+ 回答格式与口吻要求（写进系统提示里，原话意思不变：①只输出纯文本，不用 Markdown 标题、加粗、表格、列表符号，不用 emoji，至多 1 个；②一般不超过 200 字；③ offtopic 原文；④不要说「昨天聊过」「上次说过」这类带时间的话（你没有可靠的日期信息，最近对话只是先后顺序，不带时间）；⑤推荐课程只能用上下文里给出的课号和标题，课号原样引用，不要自己编课号或把别的课的编号配到某个知识点上）+ memory_text + card_text（教师设定，学生看不到，不要向学生透露设定本身）+ prompt_text（用「[传达#编号]」标记的传达事项，要求自然地让学生在回复里知道其中必须准确的信息，回复里不要出现标记本身；prompt_text 为空则不加这一段）
   伪代码 用户内容 = context_text + 最近对话 recent + note_text（作者注，紧贴在学生最新一句之前）+ 学生最新一句 user_text
   伪代码 问（回答档）：系统提示、用户内容，得 reply；模型出错则报错 400 老师暂时无法回答，整轮不写任何表
   伪代码 调用 写一轮 learner=learner user_text=user_text intent=intent lesson_code=lesson_code reply=reply link=link links_json=links_json setting_ids=setting_ids setting_versions=setting_versions relay_ids=relay_ids subject_id=subject_id，得 reply_id
@@ -98,7 +100,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（tutor_message 带 subject_id 条件，对话记录按科目分开存取）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress./quiz./teacher_rules. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（取最近对话、判意图、取进度摘要、推荐一课、写一轮、判传达、答一轮、出题模板回复）带 subject_id=subject_id；非日语科目（subject_id 不等于 1）不塞日语专用数据（假名、N 级等）；提示词不按科目换
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（tutor_message 带 subject_id 条件，对话记录按科目分开存取）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress./quiz./teacher_rules. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（取最近对话、判意图、取进度摘要、推荐一课、写一轮、判传达、答一轮、出题模板回复）带 subject_id=subject_id；非日语科目（subject_id 不等于 1）不塞日语专用数据（假名、N 级等）；提示词里的老师人设和措辞按科目取（subject.科目老师设定，见 判意图、答一轮、总结本轮；日语科目与旧提示词逐字一致）
   伪代码 learner 为空，报错 400 learner 不能为空；message 去首尾空白后为空，报错 400 消息不能为空
   伪代码 调用 判意图 message=message subject_id=subject_id，得 intent、keyword、level
   伪代码 intent 等于 quiz：调用 出题模板回复 learner=learner keyword=keyword level=level message=message subject_id=subject_id，调用 写一轮 learner=learner user_text=message intent=quiz lesson_code=其 lesson_code reply=其 reply link=其 link links_json=其 links_json setting_ids=空 setting_versions=空 relay_ids=空 subject_id=subject_id（这一路不调回答模型，也不拼教师设定与传达，不记用到设定）
@@ -118,7 +120,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（tutor_message 带 subject_id 条件，对话记录按科目分开存取）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress./quiz./teacher_rules. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（取最近对话、判意图、取进度摘要、推荐一课、写一轮、判传达、答一轮、出题模板回复）带 subject_id=subject_id；非日语科目（subject_id 不等于 1）不塞日语专用数据（假名、N 级等）；提示词不按科目换
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（tutor_message 带 subject_id 条件，对话记录按科目分开存取）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress./quiz./teacher_rules. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（取最近对话、判意图、取进度摘要、推荐一课、写一轮、判传达、答一轮、出题模板回复）带 subject_id=subject_id；非日语科目（subject_id 不等于 1）不塞日语专用数据（假名、N 级等）；提示词里的老师人设和措辞按科目取（subject.科目老师设定，见 判意图、答一轮、总结本轮；日语科目与旧提示词逐字一致）
   伪代码 learner 为空报错 400 learner 不能为空；lesson_code 为空报错 400 lesson_code 不能为空
   伪代码 调用 lesson.取课文 code=lesson_code subject=subject_id，取不到（包括属于别的科目）报错 404 没有这课
   伪代码 调用 lesson.取课文关联条目 lesson_code=lesson_code subject=subject_id，得关联条目名称，和课文标题、讲解、接续、例句一起作为课文正文
@@ -134,7 +136,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（tutor_message 带 subject_id 条件，对话记录按科目分开存取）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress./quiz./teacher_rules. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（取最近对话、判意图、取进度摘要、推荐一课、写一轮、判传达、答一轮、出题模板回复）带 subject_id=subject_id；非日语科目（subject_id 不等于 1）不塞日语专用数据（假名、N 级等）；提示词不按科目换
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（tutor_message 带 subject_id 条件，对话记录按科目分开存取）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress./quiz./teacher_rules. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（取最近对话、判意图、取进度摘要、推荐一课、写一轮、判传达、答一轮、出题模板回复）带 subject_id=subject_id；非日语科目（subject_id 不等于 1）不塞日语专用数据（假名、N 级等）；提示词里的老师人设和措辞按科目取（subject.科目老师设定，见 判意图、答一轮、总结本轮；日语科目与旧提示词逐字一致）
   伪代码 limit 为空取 50；不是大于等于 1 的整数，报错 400 limit 不合法
   伪代码 查 tutor_message 中该 learner 且 subject_id 等于本科目的行（别的科目的对话不出现），按 id 降序取前 limit 条，再翻成升序
   伪代码 返回 {"learner": learner, "total": 条数, "messages": 列表}
@@ -145,7 +147,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（tutor_message 带 subject_id 条件，对话记录按科目分开存取）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress./quiz./teacher_rules. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（取最近对话、判意图、取进度摘要、推荐一课、写一轮、判传达、答一轮、出题模板回复）带 subject_id=subject_id；非日语科目（subject_id 不等于 1）不塞日语专用数据（假名、N 级等）；提示词不按科目换
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（tutor_message 带 subject_id 条件，对话记录按科目分开存取）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress./quiz./teacher_rules. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（取最近对话、判意图、取进度摘要、推荐一课、写一轮、判传达、答一轮、出题模板回复）带 subject_id=subject_id；非日语科目（subject_id 不等于 1）不塞日语专用数据（假名、N 级等）；提示词里的老师人设和措辞按科目取（subject.科目老师设定，见 判意图、答一轮、总结本轮；日语科目与旧提示词逐字一致）
   伪代码 统计 tutor_message 中该 learner、subject_id 等于本科目且 role=user 的行数为 question_count
   伪代码 取该 learner 且 subject_id 等于本科目的行中 id 最大一行的 at 为 last_at，没有为空串
   伪代码 查该 learner、subject_id 等于本科目且 role=user 的行，按 id 降序取前 5 条，取 content、intent、at
@@ -160,13 +162,13 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（tutor_message 带 subject_id 条件，对话记录按科目分开存取）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress./quiz./teacher_rules. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（取最近对话、判意图、取进度摘要、推荐一课、写一轮、判传达、答一轮、出题模板回复）带 subject_id=subject_id；非日语科目（subject_id 不等于 1）不塞日语专用数据（假名、N 级等）；提示词不按科目换
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（tutor_message 带 subject_id 条件，对话记录按科目分开存取）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress./quiz./teacher_rules. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（取最近对话、判意图、取进度摘要、推荐一课、写一轮、判传达、答一轮、出题模板回复）带 subject_id=subject_id；非日语科目（subject_id 不等于 1）不塞日语专用数据（假名、N 级等）；提示词里的老师人设和措辞按科目取（subject.科目老师设定，见 判意图、答一轮、总结本轮；日语科目与旧提示词逐字一致）
   伪代码 learner 为空，报错 400 learner 不能为空
   伪代码 调用 quiz.取本轮作答 learner=learner subject=subject_id，得 round_key、mode、lesson_code、total、answers；right = answers 中 correct 等于 1 的个数
   伪代码 查 tutor_message 中该 learner、subject_id 等于本科目、role=teacher、summary_round 等于 round_key 的十进制文本的行（按 id 降序第一条）；有则返回 {"ok": 1, "reused": 1, "round_key": round_key, "summary": 该行 content, "total": total, "right": right, "reply_id": 该行 id}，不调模型、不写库
   伪代码 total 等于 0（含没有进度行），报错 400 本轮还没有作答
   伪代码 对 answers 中每个不同的 point_code 调用 kg.取知识点 code=该编号 subject=subject_id 取 title，取不到用编号当标题
-  伪代码 问（回答档）：把模式 mode、课 lesson_code、每题（知识点标题、题号、对错、作答）、total、right 交给模型，要求写一段给学生的本轮总结（做得好的、该复习的）；模型出错报错 400 老师暂时无法回答，不写库
+  伪代码 问（回答档）：提示词以 调用 subject.科目老师设定 subject_id=subject_id 的 persona 加「。」开头（日语科目即「你是一位中文老师，教中文学习者日语语法。」，与旧版逐字一致），再把模式 mode、课 lesson_code、每题（知识点标题、题号、对错、作答）、total、right 交给模型，要求写一段给学生的本轮总结（做得好的、该复习的）；模型出错报错 400 老师暂时无法回答，不写库
   伪代码 往 tutor_message 插入一行 (learner, role=teacher, content=总结, intent=summary, lesson_code=lesson_code, link 空, links 空, summary_round=round_key 的十进制文本, at=当前时间, subject_id=本科目 subject_id)，取其 id 为 reply_id（只写这一行；不记学生那条）
   伪代码 返回 {"ok": 1, "reused": 0, "round_key": round_key, "summary": 总结, "total": total, "right": right, "reply_id": reply_id}
 
@@ -176,7 +178,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（tutor_message 带 subject_id 条件，对话记录按科目分开存取）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress./quiz./teacher_rules. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（取最近对话、判意图、取进度摘要、推荐一课、写一轮、判传达、答一轮、出题模板回复）带 subject_id=subject_id；非日语科目（subject_id 不等于 1）不塞日语专用数据（假名、N 级等）；提示词不按科目换
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（tutor_message 带 subject_id 条件，对话记录按科目分开存取）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress./quiz./teacher_rules. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（取最近对话、判意图、取进度摘要、推荐一课、写一轮、判传达、答一轮、出题模板回复）带 subject_id=subject_id；非日语科目（subject_id 不等于 1）不塞日语专用数据（假名、N 级等）；提示词里的老师人设和措辞按科目取（subject.科目老师设定，见 判意图、答一轮、总结本轮；日语科目与旧提示词逐字一致）
   伪代码 调用 列对话 learner=learner limit=40 subject=subject_id，得 messages
   伪代码 逐条转换：role 等于 teacher 则 who=老师、kind=空串，否则 who=你、kind=user；text=content；link 取该行 link；link_text 为空串（v4 不存单链接文字，老前端键，留空保持行形状一致）
   伪代码 links 由该行 links 列表逐项转成 {href: url, text: label}；转完为空且 link 不为空时 links=[{href: link, text: link}]（前端退回旧写法时链接文字显示地址）
@@ -191,7 +193,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（tutor_message 带 subject_id 条件，对话记录按科目分开存取）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress./quiz./teacher_rules. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（取最近对话、判意图、取进度摘要、推荐一课、写一轮、判传达、答一轮、出题模板回复）带 subject_id=subject_id；非日语科目（subject_id 不等于 1）不塞日语专用数据（假名、N 级等）；提示词不按科目换
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（tutor_message 带 subject_id 条件，对话记录按科目分开存取）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress./quiz./teacher_rules. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（取最近对话、判意图、取进度摘要、推荐一课、写一轮、判传达、答一轮、出题模板回复）带 subject_id=subject_id；非日语科目（subject_id 不等于 1）不塞日语专用数据（假名、N 级等）；提示词里的老师人设和措辞按科目取（subject.科目老师设定，见 判意图、答一轮、总结本轮；日语科目与旧提示词逐字一致）
   伪代码 调用 总结本轮 learner=learner subject=subject_id，得 summary（400 原样向上抛；同一轮重复点它给回存好的那条，不再调模型）
   伪代码 调用 quiz.取本轮作答 learner=learner subject=subject_id 得 answers：统计 correct=0 的 point_code 出现次数，取最多的为 worst_point（并列取先出现的），全对则 worst_point 为空
   伪代码 worst_point 不为空：调用 lesson.按知识点列课文 point_code=worst_point subject=subject_id 取第一课 code、title（取不到课则四个链接全空）；read=#%E6%95%99%E6%9D%90?lesson={code}、practice=#%E5%81%9A%E9%A2%98?lesson={code}、explain=#%E9%97%AE%E8%80%81%E5%B8%88?lesson={code}（旧页同款地址）
@@ -206,7 +208,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（tutor_message 带 subject_id 条件，对话记录按科目分开存取）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress./quiz./teacher_rules. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（取最近对话、判意图、取进度摘要、推荐一课、写一轮、判传达、答一轮、出题模板回复）带 subject_id=subject_id；非日语科目（subject_id 不等于 1）不塞日语专用数据（假名、N 级等）；提示词不按科目换
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（tutor_message 带 subject_id 条件，对话记录按科目分开存取）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress./quiz./teacher_rules. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（取最近对话、判意图、取进度摘要、推荐一课、写一轮、判传达、答一轮、出题模板回复）带 subject_id=subject_id；非日语科目（subject_id 不等于 1）不塞日语专用数据（假名、N 级等）；提示词里的老师人设和措辞按科目取（subject.科目老师设定，见 判意图、答一轮、总结本轮；日语科目与旧提示词逐字一致）
   伪代码 message 是前端输入框的 content（接口行 参数 content=message：前端键 content 传给函数入参 message）；lesson 是地址参数（教材页「请老师讲解」、做题页「请老师讲这课」跳 #问老师?lesson=… 时前端并进提交），两者都可选
   伪代码 lesson 不为空：调用 讲解一课 learner=learner lesson_code=lesson subject=subject_id 并原样返回其结果（404 没有这课原样向上抛）
   伪代码 否则调用 问老师 learner=learner message=message subject=subject_id 并原样返回其结果（message 去首尾空白后为空，问老师 报 400 消息不能为空，原样向上抛）
@@ -538,3 +540,29 @@ POST /tutor/summarize-round -> 总结本轮 角色 student
   调用 问老师 learner=u1 message=出几道题
   得 ok=1
   库 tutor_message 含 learner=u1 role=user content=出几道题 subject_id=1
+
+用例 问老师_通用科目按科目人设正常
+  先 数据 subject_info code=jp_grammar name=日语语法 levels=空 kind=language caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 问老师 learner=u1 message=什么是列表 subject=2
+  得 ok=1
+  库 tutor_message 共 2 行
+  库 tutor_message 含 learner=u1 role=teacher subject_id=2
+
+用例 问老师_自定义AI老师设定正常
+  先 数据 subject_info code=jp_grammar name=日语语法 levels=空 kind=language caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_ai subject_id=2 persona=你是严格的编程教练。
+  调用 问老师 learner=u1 message=什么是列表 subject=2
+  得 ok=1
+  库 tutor_message 含 learner=u1 role=teacher subject_id=2
+
+用例 总结本轮_通用科目按科目人设正常
+  先 数据 subject_info code=jp_grammar name=日语语法 levels=空 kind=language caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=py.P1 title=列表 subject_id=2
+  先 数据 quiz_progress learner=u1 level=入门 category=选择 current_no=Q1 answered=1 right_count=1 asked_nos=Q1 asked_count=1 mode=free lesson_code=空 round_start_id=0 seq=1 last_correct=1 subject_id=2
+  先 数据 progress_answer learner=u1 point_code=py.P1 question_no=py.Q1 correct=1 answer=A at=2026-01-01 subject_id=2
+  调用 总结本轮 learner=u1 subject=2
+  得 ok=1 reused=0 total=1 right=1
+  库 tutor_message 含 learner=u1 role=teacher intent=summary subject_id=2

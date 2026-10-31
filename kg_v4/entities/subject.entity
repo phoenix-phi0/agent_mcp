@@ -54,6 +54,7 @@
   字段 subj_intro 长文本 科目说明
   字段 subj_kind 枚举 通用,语言 类型（页面值域中文；通用存 general、语言存 language）
   字段 subj_levels 文本 本科目等级（英文逗号分隔、从易到难；新建留空按类型取默认）
+  字段 subj_persona 长文本 AI 老师设定（subject_ai.persona；留空用按科目名生成的默认人设）
   字段 subj_visibility 文本 科目表可见性列（公共/私有）
   字段 subj_status 文本 科目表状态列（启用/停用/草稿）
   字段 subj_owner 文本 科目表创建者列

@@ -31,7 +31,7 @@
   subject_id 整数 当前科目编号
 表 subject_ai
   subject_id 整数 科目编号，唯一
-  persona 长文本 老师人设，可空
+  persona 长文本 AI 老师设定（问老师的老师人设，科目负责人在科目管理的编辑浮层里改）；空串、NULL 或没有这一行时按科目名生成默认人设（见 科目老师设定）；可空；本表其余 *_prompt 列仍未启用
   tutor_prompt 长文本 问老师提示词，可空
   assist_prompt 长文本 教师助手提示词，可空
   summary_prompt 长文本 学情总结提示词，可空
@@ -48,6 +48,7 @@
   subj_intro 长文本 科目说明
   subj_kind 枚举 通用,语言 类型（页面值域中文；通用存 general、语言存 language）
   subj_levels 文本 本科目等级，英文逗号分隔、从易到难（新建时留空按类型取默认：通用 入门,基础,进阶，语言 N5,N4,N3,N2,N1）
+  subj_persona 长文本 AI 老师设定（subject_ai.persona 原文；留空 = 用按科目名生成的默认人设；最长 2000 字）
   subj_visibility 文本 科目表「可见性」列（公共/私有）
   subj_status 文本 科目表「状态」列（启用/停用/草稿）
   subj_owner 文本 科目表「创建者」列
@@ -110,6 +111,23 @@
   伪代码 兼容规则：查不到这一行、levels 为空串、或拆完一项都没有，一律当作 N5,N4,N3,N2,N1（日语科目、旧库、没有 subject_info 行的测试库行为不变）
   伪代码 只读，不校验权限，不报错，不调用别的模块
   伪代码 返回 {"levels": 列表, "first": 第一项, "text": 逗号连接, "count": 项数, "options": 选项列表}
+
+公开 函数 科目老师设定 subject_id
+  返回 {name, custom, persona, offtopic, point_word, explain_word}；问老师（tutor）拼提示词时取的本科目老师人设和措辞，不再写死日语老师：name 是科目名；custom 是负责人填的 AI 老师设定原文去首尾空白（没填为空串）；persona 是人设句（不带句末标点，调用方自己接「，回答简明。」或「。」）；offtopic 是「学生跑题时怎么回」那一句；point_word 是学生指名内容的称呼；explain_word 是「问……」的称呼
+  伪代码 subject_id 为空或不是纯数字时按 1 处理；按 subject_id 查 subject_info 取 name（查询 subject_info_full），查 subject_ai 该科目行的 persona（新查询 subject_ai_persona）
+  伪代码 日语口径：subject_id 等于 1，或查不到 subject_info 这一行（旧库、模块用例库，行为同旧）；name 查到行时取行的 name，查不到取「日语语法」
+  伪代码 custom = persona 去首尾空白（没有行或为 NULL 是空串）
+  伪代码 persona：custom 不为空时取 custom，再去掉末尾连续的句末标点和空白（。！；，.!;, ）；否则日语口径为「你是一位中文老师，教中文学习者日语语法」（与旧提示词逐字一致）；否则为「你是一位{name}老师，用中文给学生讲解{name}」
+  伪代码 offtopic：日语口径为「学生闲聊、与日语学习无关时，简短自然地回应，不要强行讲语法」（与旧提示词逐字一致）；否则为「学生闲聊、与{name}无关时，简短自然地回应，不要硬拉回{name}；学生问的是别的科目的内容时，不要拒答，简短回答要点，并提醒可以在顶栏切换到对应科目再细问」（不论 custom 是否为空）
+  伪代码 point_word：日语口径为「语法点」，否则「知识点」；explain_word：日语口径为「语法讲解」，否则「讲解」
+  伪代码 非日语口径生成的 persona、offtopic、point_word、explain_word 里除科目名本身外不出现「日语」「语法」「JLPT」（custom 原样用，内容由负责人负责）
+  伪代码 只读，不校验权限，不报错，不调用别的模块
+  伪代码 返回 {"name": name, "custom": custom, "persona": persona, "offtopic": offtopic, "point_word": point_word, "explain_word": explain_word}
+
+函数 存科目人设 learner subject_id persona
+  返回 {changed}；把 AI 老师设定写进 subject_ai（私有，只给 保存科目页面 用；权限已由 建科目 / 改科目 校验过）
+  伪代码 persona 去首尾空白；与库里现值（subject_ai 该科目行的 persona 去首尾空白，没有行或 NULL 当空串）相同就不写库，返回 {"changed": 0}（所以编辑时不改设定、或新建时不填，都不会多出 subject_ai 行）
+  伪代码 否则写 subject_ai：没有该科目的行就插入 (subject_id, persona, updated_by=learner, updated_at=当前时间)，有就更新 persona、updated_by、updated_at（新查询 subject_ai_upsert：INSERT … ON CONFLICT(subject_id) DO UPDATE）；其余 *_prompt 列不动；返回 {"changed": 1}
 
 函数 校验等级 levels
   返回 {text, count}；把用户填的等级串整理成存库口径（私有）：text 是整理后用英文逗号连接的串
@@ -341,25 +359,26 @@
   伪代码 更新该行 status=revoked；返回 {"ok": 1}
 
 公开 函数 科目管理页面 learner current_role? auth_mode?
-  返回 {subjects, manage_head, can_create}；「科目管理」页「进入时」的整页状态（动作 subject_manage_home）；subjects 是表格行 [{subj_id, subj_code, subj_name, subj_kind, subj_levels, subj_visibility, subj_status, subj_owner, subj_my_role, subj_student_n, subj_teacher_n, can_manage, can_assign}]（subj_levels 要在行里：从行上点「编辑」时前端直接拿这一行填表单、不再发「载入」，行里没有的字段编辑框就是空的）
+  返回 {subjects, manage_head, can_create}；「科目管理」页「进入时」的整页状态（动作 subject_manage_home）；subjects 是表格行 [{subj_id, subj_code, subj_name, subj_intro, subj_kind, subj_levels, subj_persona, subj_visibility, subj_status, subj_owner, subj_my_role, subj_student_n, subj_teacher_n, can_manage, can_assign}]（编辑浮层里的字段 subj_intro、subj_levels、subj_persona 都要在行里：从行上点「编辑」时前端直接拿这一行填表单、不再发「载入」，行里没有的字段编辑框就是空的，直接保存会把说明或设定清空）
   报错 403 只有教师可以管理科目
   伪代码 调用 列可管理科目 learner=learner current_role=current_role auth_mode=auth_mode（学生 403）
-  伪代码 每行转页面口径：subj_id=id，subj_code=code，subj_name=name，subj_kind：language 为「语言」否则「通用」，subj_levels=调用本模块 科目等级 subject_id=该科目 id 的 text（存库为空串时是 N5,N4,N3,N2,N1），subj_visibility：public 为「公共」否则「私有」，subj_status：active「启用」、disabled「停用」、draft「草稿」，subj_owner=owner，subj_my_role：owner「负责」、editor「协作」、public「公共只读」、single「单人」，subj_student_n=student_n，subj_teacher_n=teacher_n，can_manage：my_role 是 owner 或 single 为 1 否则 0，can_assign：status 不是 disabled 为 1 否则 0
+  伪代码 每行转页面口径：subj_id=id，subj_code=code，subj_name=name，subj_intro=intro（NULL 时空串），subj_kind：language 为「语言」否则「通用」，subj_levels=调用本模块 科目等级 subject_id=该科目 id 的 text（存库为空串时是 N5,N4,N3,N2,N1），subj_persona=subject_ai 该科目行的 persona（没有行或 NULL 时空串；两条行查询 subject_page_rows、subject_page_rows_all 都 LEFT JOIN subject_ai），subj_visibility：public 为「公共」否则「私有」，subj_status：active「启用」、disabled「停用」、draft「草稿」，subj_owner=owner，subj_my_role：owner「负责」、editor「协作」、public「公共只读」、single「单人」，subj_student_n=student_n，subj_teacher_n=teacher_n，can_manage：my_role 是 owner 或 single 为 1 否则 0，can_assign：status 不是 disabled 为 1 否则 0
   伪代码 manage_head：「我能管理的科目共{total}个」（不含空格）；can_create：auth_mode 等于 on 时 current_role 等于 teacher 为 1，否则 1（单人模式也能建）
   伪代码 返回 {"subjects": 行表, "manage_head": 文案, "can_create": 1}
 
 公开 函数 载入科目页面 learner subj_id? current_role? auth_mode?
-  返回 回填表单 {subj_id, subj_code, subj_name, subj_intro, subj_kind, subj_levels}（动作 subject_open，「编辑科目」浮层的「载入」）
+  返回 回填表单 {subj_id, subj_code, subj_name, subj_intro, subj_kind, subj_levels, subj_persona}（动作 subject_open，「编辑科目」浮层的「载入」；直接刷新/分享浮层地址时走这里）
   报错 400 subject_id 不对
   报错 404 没有这个科目
   报错 403 只有教师可以管理科目
   报错 403 只有科目负责人可以操作
-  伪代码 subj_id 为空（新建）返回空表单 {"subj_id": "", "subj_code": "", "subj_name": "", "subj_intro": "", "subj_kind": "通用", "subj_levels": ""}（等级留空，保存时按类型取默认）
-  伪代码 否则调用 管理校验 learner=learner subject_id=subj_id need=settings current_role=current_role auth_mode=auth_mode（只有负责人能打开编辑），查 subject_info 返回 {"subj_id": id, "subj_code": code, "subj_name": name, "subj_intro": intro 或空串, "subj_kind": language 为「语言」否则「通用」, "subj_levels": 调用本模块 科目等级 subject_id=subj_id 的 text（存库为空串时是 N5,N4,N3,N2,N1）}
+  伪代码 subj_id 为空（新建）返回空表单 {"subj_id": "", "subj_code": "", "subj_name": "", "subj_intro": "", "subj_kind": "通用", "subj_levels": "", "subj_persona": ""}（等级留空，保存时按类型取默认；AI 老师设定留空即用默认人设）
+  伪代码 否则调用 管理校验 learner=learner subject_id=subj_id need=settings current_role=current_role auth_mode=auth_mode（只有负责人能打开编辑），查 subject_info 返回 {"subj_id": id, "subj_code": code, "subj_name": name, "subj_intro": intro 或空串, "subj_kind": language 为「语言」否则「通用」, "subj_levels": 调用本模块 科目等级 subject_id=subj_id 的 text（存库为空串时是 N5,N4,N3,N2,N1）, "subj_persona": subject_ai 该科目行的 persona（没有行或 NULL 为空串）}
 
-公开 函数 保存科目页面 learner subj_name subj_id? subj_code? subj_intro? subj_kind? subj_levels? current_role? auth_mode?
+公开 函数 保存科目页面 learner subj_name subj_id? subj_code? subj_intro? subj_kind? subj_levels? subj_persona? current_role? auth_mode?
   返回 刷新后的整页状态，形状同 科目管理页面
   报错 400 learner 不能为空
+  报错 400 AI老师设定最长2000字
   报错 400 类型只能是 language 或 general
   报错 400 subject_id 不对
   报错 404 没有这个科目
@@ -372,9 +391,10 @@
   报错 400 科目名称最长40字
   报错 400 等级格式不对
   报错 400 等级「<等级>」还有<n>条记录在用，先改掉题目和课文的等级再删
+  伪代码 learner 为空报错 400 learner 不能为空；接着 subj_persona 去首尾空白后超过 2000 个字，报错 400 AI老师设定最长2000字（在 建科目 / 改科目 之前检查，超了什么都不写）
   伪代码 subj_kind 页面值转换：「通用」或空为 general，「语言」为 language，其他值原样交下去（由 建科目 报 400 类型只能是 language 或 general）
-  伪代码 subj_id 为空（新建）：调用 建科目 learner=learner code=subj_code name=subj_name intro=subj_intro kind=转换后 levels=subj_levels current_role=current_role auth_mode=auth_mode
-  伪代码 subj_id 不为空（编辑）：subj_code、subj_kind 忽略（建后不可改）；调用 改科目 learner=learner subject_id=subj_id name=subj_name intro=subj_intro levels=subj_levels current_role=current_role auth_mode=auth_mode
+  伪代码 subj_id 为空（新建）：调用 建科目 learner=learner code=subj_code name=subj_name intro=subj_intro kind=转换后 levels=subj_levels current_role=current_role auth_mode=auth_mode；然后调用本模块 存科目人设 learner=learner subject_id=新 id persona=subj_persona（没填就不写）
+  伪代码 subj_id 不为空（编辑）：subj_code、subj_kind 忽略（建后不可改）；调用 改科目 learner=learner subject_id=subj_id name=subj_name intro=subj_intro levels=subj_levels current_role=current_role auth_mode=auth_mode（只有负责人能改，协作 / 公共只读教师 403 由它报）；成功后调用本模块 存科目人设 learner=learner subject_id=subj_id persona=subj_persona（subj_persona 为空即清掉自定义、回到默认人设；与库里相同不写）
   伪代码 返回 调用 科目管理页面 learner=learner current_role=current_role auth_mode=auth_mode 的结果
 
 公开 函数 设科目可见性页面 learner subj_id visibility current_role? auth_mode?
@@ -1535,3 +1555,95 @@ POST /subject/manage/disable -> 设科目状态页面 动作 subject_disable 模
   先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   调用 科目管理页面 learner=t1 current_role=teacher auth_mode=on
   得 manage_head=我能管理的科目共1个
+
+用例 科目老师设定_日语科目与旧提示词一致
+  先 数据 subject_info code=jp_grammar name=日语语法 levels=N5,N4,N3,N2,N1 kind=language caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 科目老师设定 subject_id=1
+  得 name=日语语法 custom=空 persona=你是一位中文老师，教中文学习者日语语法 offtopic=学生闲聊、与日语学习无关时，简短自然地回应，不要强行讲语法 point_word=语法点 explain_word=语法讲解
+
+用例 科目老师设定_没有科目行按日语
+  调用 科目老师设定 subject_id=9
+  得 name=日语语法 persona=你是一位中文老师，教中文学习者日语语法 point_word=语法点
+
+用例 科目老师设定_通用科目按科目名生成
+  先 数据 subject_info code=jp_grammar name=日语语法 levels=空 kind=language caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 科目老师设定 subject_id=2
+  得 name=编程 custom=空 persona=你是一位编程老师，用中文给学生讲解编程 offtopic=学生闲聊、与编程无关时，简短自然地回应，不要硬拉回编程；学生问的是别的科目的内容时，不要拒答，简短回答要点，并提醒可以在顶栏切换到对应科目再细问 point_word=知识点 explain_word=讲解
+
+用例 科目老师设定_自定义设定优先并去句末标点
+  先 数据 subject_info code=jp_grammar name=日语语法 levels=空 kind=language caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_ai subject_id=2 persona=你是严格的编程教练。
+  调用 科目老师设定 subject_id=2
+  得 custom=你是严格的编程教练。 persona=你是严格的编程教练 point_word=知识点
+
+用例 科目老师设定_日语科目也可以自定义
+  先 数据 subject_info code=jp_grammar name=日语语法 levels=空 kind=language caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_ai subject_id=1 persona=你是温和的日语老师
+  调用 科目老师设定 subject_id=1
+  得 persona=你是温和的日语老师 point_word=语法点 offtopic=学生闲聊、与日语学习无关时，简短自然地回应，不要强行讲语法
+
+用例 科目管理页面_行里带说明和AI老师设定
+  先 数据 subject_info code=py name=编程 intro=原来的说明 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_ai subject_id=1 persona=你是编程教练
+  调用 科目管理页面 learner=t1 current_role=teacher auth_mode=on
+  得 manage_head=我能管理的科目共1个
+
+用例 保存科目页面_从行编辑不改说明直接保存说明不变
+  先 数据 subject_info code=py name=编程 intro=原来的说明 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 保存科目页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 subj_name=编程 subj_intro=原来的说明 subj_levels=入门,基础,进阶 subj_persona=空
+  得 manage_head=我能管理的科目共1个
+  库 subject_info 含 code=py intro=原来的说明 levels=入门,基础,进阶
+  库 subject_ai 共 0 行
+
+用例 载入科目页面_回填AI老师设定
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_ai subject_id=1 persona=你是编程教练
+  调用 载入科目页面 learner=t1 current_role=teacher auth_mode=on subj_id=1
+  得 subj_persona=你是编程教练 subj_levels=入门,基础,进阶
+
+用例 载入科目页面_没有设定回填空串
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 载入科目页面 learner=t1 current_role=teacher auth_mode=on subj_id=1
+  得 subj_persona=空
+
+用例 保存科目页面_编辑存AI老师设定
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 保存科目页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 subj_name=编程 subj_persona=你是编程教练
+  得 manage_head=我能管理的科目共1个
+  库 subject_ai 共 1 行
+  库 subject_ai 含 subject_id=1 persona=你是编程教练 updated_by=t1
+
+用例 保存科目页面_改AI老师设定
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_ai subject_id=1 persona=旧设定 tutor_prompt=别动
+  调用 保存科目页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 subj_name=编程 subj_persona=新设定
+  得 manage_head=我能管理的科目共1个
+  库 subject_ai 共 1 行
+  库 subject_ai 含 subject_id=1 persona=新设定 tutor_prompt=别动 updated_by=t1
+
+用例 保存科目页面_清空AI老师设定回到默认
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_ai subject_id=1 persona=旧设定
+  调用 保存科目页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 subj_name=编程 subj_persona=空
+  得 manage_head=我能管理的科目共1个
+  库 subject_ai 含 subject_id=1 persona=空
+
+用例 保存科目页面_新建带AI老师设定
+  调用 保存科目页面 learner=t1 current_role=teacher auth_mode=on subj_code=py subj_name=编程 subj_kind=通用 subj_persona=你是编程教练
+  得 manage_head=我能管理的科目共1个
+  库 subject_ai 共 1 行
+  库 subject_ai 含 subject_id=1 persona=你是编程教练 updated_by=t1
+
+用例 保存科目页面_新建不填设定不写
+  调用 保存科目页面 learner=t1 current_role=teacher auth_mode=on subj_code=py subj_name=编程 subj_kind=通用
+  得 manage_head=我能管理的科目共1个
+  库 subject_ai 共 0 行
+
+用例 保存科目页面_协作教师不能改AI老师设定
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_teacher subject_id=1 teacher=t2 role=editor created_at=2026-01-01
+  调用 保存科目页面 learner=t2 current_role=teacher auth_mode=on subj_id=1 subj_name=编程 subj_persona=你是编程教练
+  报错 403
+  库 subject_ai 共 0 行
