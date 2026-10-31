@@ -187,7 +187,7 @@ run DSL规划骨架 $PY tests/tools/test_dslagent_dslplan.py
 run DSLv3流程 $PY tests/tools/test_dslagent_v3.py
 run DSLaudit2范围 $PY tests/tools/test_dslagent_k77.py
 run DSL实现简报 $PY tests/tools/test_dslagent_brief.py
-run DSL K174简报约定 $PY tests/tools/test_dslagent_k174.py
+run DSL简报约定闸 $PY tests/tools/test_dslagent_k174.py
 run DSL整份重写 $PY tests/tools/test_dslagent_k84.py
 run 批量opencode $PY tests/tools/test_obatch.py
 run 批量codex   $PY tests/tools/test_cxbatch.py
