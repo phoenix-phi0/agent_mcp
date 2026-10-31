@@ -752,6 +752,7 @@
       设 base = {sysp}{nl}任务：起草AI老师设定。针对的学生：{who}。输出JSON对象，含title（可选）和settings（列表，一份最多10条）；每项含kind（memory记忆：长期记住的事；note作者注：对AI老师措辞的要求，once=1只用于下一条；card关键词卡：学生说到关键词时才拼进去，必须写keywords）、content、student（可选）、keywords（可选）、once（可选）；改已有设定写target_id，新建不写；不要写scope、subject_id、enabled。{nl}本科目已有设定（编号｜种类｜针对谁｜关键词｜内容）：{nl}{el}{nl}全部科目的设定（只读，助手不能改）：{nl}{rl}{nl}老师的话：{msg}
     否则
       设 pf = 调用 assist_kg.图谱编号前缀 learner={current_user} subject={subject_id}
+      设 ap = 调用 subject.科目助手设定 subject_id={subject_id}
       设 pts = 调用 kg.列知识点 subject={subject_id}
       设 pl = {blank}
       设 pn = 0
@@ -773,7 +774,7 @@
           设 hint2 = {nl}老师说的「{point}」已经有了：{pm.title}（{pm.code}），不要重复建，可以往它下面加条目。
         结束
       结束
-      设 base = {sysp}{nl}任务：往图谱里加知识点、条目、前置边。编号前缀（非日语科目必须以它开头）：{pf.prefix}；编号只能用字母、数字、点、下划线、短横。输出JSON对象，含title（可选）、points（列表，每项{code,title}）、items（列表，每项{code,name,point_code,after_form可选,prev_code可选}）、edges（列表，每项{pre_code,point_code}）。已有的知识点不要重复建，条目可以挂在已有知识点或本草稿的新知识点上，前置边两端只能是知识点。{nl}已有知识点（编号｜名称）：{nl}{pl}{hint2}{nl}老师的话：{msg}
+      设 base = {sysp}{nl}任务：往图谱里加知识点、条目、前置边。{ap.prefix_note}：{pf.prefix}；编号只能用字母、数字、点、下划线、短横。输出JSON对象，含title（可选）、points（列表，每项{code,title}）、items（列表，每项{code,name,point_code,after_form可选,prev_code可选}）、edges（列表，每项{pre_code,point_code}）。已有的知识点不要重复建，条目可以挂在已有知识点或本草稿的新知识点上，前置边两端只能是知识点。{nl}已有知识点（编号｜名称）：{nl}{pl}{hint2}{nl}老师的话：{msg}
     结束
     如果 {old} 不为空
       设 base = {base}{nl}旧草稿内容：{old.payload}{nl}按老师这句话修改：{msg}

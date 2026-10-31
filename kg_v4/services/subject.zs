@@ -700,6 +700,60 @@
     返回 {"name": "{nm}", "custom": "{custom}", "persona": "{ps}", "offtopic": "{ot}", "point_word": "{pw}", "explain_word": "{ew}"}
   结束
 
+  公开 函数 科目助手设定 subject_id
+    设 sid = {subject_id 或}
+    设 mm = 匹配 {sid} ^[0-9]+$
+    如果 {mm.matched} 不等于 是
+      设 sid = 1
+    结束
+    设 si = 查一行 app.db subject_info_full id={sid}
+    设 raw = 查一值 app.db subject_ai_assist_prompt subject_id={sid}
+    设 custom = {raw 或}
+    如果 {custom} 不为空
+      设 custom = 替换 {custom} ^\s+|\s+$
+    结束
+    设 lvs = 调用 科目等级 subject_id={sid}
+    设 lt = {zz 或}
+    遍历 x 于 {lvs.levels}
+      如果 {lt} 为空
+        设 lt = {x}
+      否则
+        设 lt = {lt}、{x}
+      结束
+    结束
+    设 jp = 0
+    如果 {sid} 等于 1 或 {si} 为空
+      设 jp = 1
+    结束
+    设 nm = 日语语法
+    设 kd = language
+    如果 {si} 不为空
+      设 nm = {si.name}
+      设 kd = {si.kind}
+    结束
+    如果 {jp} 等于 1
+      设 sy = 日语学习系统
+      设 pd = 知识点或语法条目
+      设 tp = 这个语法、这个点
+      设 pn = 编号前缀（非日语科目必须以它开头）
+    否则
+      设 sy = {nm}学习系统
+      设 pd = 知识点或条目
+      设 tp = 这个知识点、这个点
+      设 pn = 编号前缀（本科目的编号必须以它开头）
+    结束
+    如果 {custom} 不为空
+      设 it = 替换 {custom} [。！；，.!;,\s]+$
+    否则
+      设 it = 你是{sy}教师端的教学助手
+    结束
+    设 et = 【示例】
+    如果 {jp} 等于 1 或 {kd} 等于 language
+      设 et = 【例句】
+    结束
+    返回 {"name": "{nm}", "kind": "{kd}", "levels": "{lt}", "custom": "{custom}", "system": "{sy}", "intro": "{it}", "point_desc": "{pd}", "this_point": "{tp}", "prefix_note": "{pn}", "example_tag": "{et}"}
+  结束
+
   函数 存科目人设 learner subject_id persona
     设 np = {persona 或}
     如果 {np} 不为空
