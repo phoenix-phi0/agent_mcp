@@ -12,9 +12,10 @@
 
 1. **O1 部署脚本里看门狗子 shell 挂住**：K159、K162、K163、K164、K166 每次上线都要手动 `kill -TERM` 一个 PID，迟早误杀。→ **已修（K173）**，见 O1。
 2. **A1 选项 / 解析拼进 JSON 字面量**：内容侧靠「不用英文双引号」规避，任何老师录一道带 `"` 的题就可能坏题卡；先实测，坏了就改。→ **核实不成立（K173）**，见 A1。
-3. **G1 audit2 开头调用 v3/contracts.check 并清掉现存 12 条约定违约**：零成本，能拦 K148 那类契约自相矛盾。
-4. **B1 lesson_text.examples_edited 迁移警告**：K119 起每次启动都报，噪声会盖住真警告；停服窗口顺手对齐。→ **已修（K173）**，见 B1。
-5. **T1 规则对照组 `no such table: question`**：全量回归每次固定红一组，靠人工判「环境问题」，迟早漏掉真失败。→ **已修（K173）**，见 T1。
+3. **B1 lesson_text.examples_edited 迁移警告**：K119 起每次启动都报，噪声会盖住真警告；停服窗口顺手对齐。→ **已修（K173）**，见 B1。
+4. **T1 规则对照组 `no such table: question`**：全量回归每次固定红一组，靠人工判「环境问题」，迟早漏掉真失败。→ **已修（K173）**，见 T1。
+
+（K174 后更新：原第 3 条 G1 已修，见下表 G1；G3 的值域预检也已透进简报，见 G3。）
 
 ---
 
@@ -105,11 +106,11 @@
 
 | 编号 | 标题 | 现象 | 位置 | 出处 | 状态 | 建议处理 | 规模 |
 |---|---|---|---|---|---|---|---|
-| G1 | v3/contracts.check 只在写规划时调用 | fix2 / audit2 / change2 都不调；kg_v4 上现存 12 条约定违约（3 条表名前缀 assist_draft/assist_file/assist_material，9 条可选入参传空 dictation 1、subject 8）没人拦 | tools/dslagent/v3/planning.py:67 | K165 §2、§4.1、§6 | 未修 | audit2 开头调用；先清掉或豁免现存 12 条（subject 8 条可加「用例期望与不传时一样」豁免） | 小 |
+| G1 | v3/contracts.check 只在写规划时调用 | K174 起已修：audit2 / fix2 开头约定闸（逐模块 contracts.check，不调模型），`--contract-check 拦截/提醒/关`，默认拦截（违约项目可用 提醒/关 过渡）；豁免写法见 v3/contracts.py（被报行正上方 `# 约定检查豁免 表名前缀/可选传空 <入参>：理由`）；kg_v4 现存 12 条违约已逐条判定并全部豁免，m4-rest 快照（K148 时期）11 条会被拦下 | tools/dslagent/v3/contracts.py、v3/audit2.zs | K165 §2、§4.1、§6；kg_K174.md | 已修（K174） | — | 小 |
 | G2 | 调用图漏边：reaches 召回 17/24 | 契约写「"level_options": 科目等级 options」而不是「调用 x.y」，QCALL_RE 只认 `调用 模块.函数` | tools/dslagent/packs/dslproj/contract.py:72 | K165 §4.2、K167 §3 | 未修 | 「提到公开函数却没写调用」出 warning；影响面只当提示不当闸 | 小 |
-| G3 | 用例数据与跨模块规则冲突的预检 | K161 quiz 7 条、assist_draft 6 条旧用例与新等级规则冲突，fix2 白跑 $2.77 | dslagent v3 | K165 §4.3、§6 推荐试点 | 未修 | 按 K165 §6 做试点（估 $3–5） | 中 |
+| G3 | 用例数据与跨模块规则冲突的预检 | K174 起已修：brief.py 值域检查（用例数据行 / 调用参数含 rows_json，内置 level=该用例科目 levels，空按 N5..N1；设计声明 `--declare` 的 值域 行可加字段），进 brief CLI / fix2 --brief 影响面和本模块简报，只是提醒不拦截；K161 回放夹具 quiz 7/7、assist_draft 6/6 全报出，HEAD 误报 2 条 | tools/dslagent/v3/brief.py | K165 §4.3、§6；kg_K174.md | 已修（K174，$0：纯规则不调模型） | — | 小 |
 | G4 | 推理机影响面接入方案 | B 侧 --modules = F 所在模块 ∪ 签名变直接调用方；A 侧「旧值→新来源函数」写死提示；不做自动闸 | /workspace/drools-engine/dslagent/impact/ | K167 §6、K168 §6 | 未修（只有实验结论） | 用户决定是否接入；接入用 Python 在 B 侧实现 | 中 |
-| G5 | 人设正则误命中问句 | 「你是想让我出题…」被当成人设 | 推理机值域规则 | K168 §5.2、§6 ② | 未修 | 正则排除问句 | 小 |
+| G5 | 人设正则误命中问句 | 「你是想让我出题…」被当成人设 | 推理机值域规则 | K168 §5.2、§6 ② | 已修（K174，简报写死盘点的 persona: 正则已排除问句） | — | 小 |
 | G6 | 实现要点规则误报多、未接入 | 抽样 20 条 9 有用；契约层 R2 0/5；R1 把写入算读；R3 不处理否定；fix2 只跑一次证据不足 | /tmp/k169/hints.py（432 行，K169 临时文件，未入任何仓库；清 /tmp 前先归档） | K169 §3.3、§5 | 未修 | 去掉契约层 R2、修 R1/R3；接入只给 modify_module；要证明省钱需同起点各跑 2–3 次 | 中 |
 | G7 | 大模块 change2 空闲超时 | teacher_assist 约 3500 行，change2 两次 rc=-9（$4.15 + $3.23） | dslagent change2 | K165 §3（K131b、K131c） | 未修 | 先按函数切片定位再改；K171 的实现简报可能相关 | 大 |
 | G8 | K171 实现简报（--brief）+ Haiku 实现（--impl-model） | 单测、全量、两项实验都未完成 | /tmp/k171_wt（分支 dslagent-brief） | K171 | 进行中 | 等 K171 报告 | 中 |
