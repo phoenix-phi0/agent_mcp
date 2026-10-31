@@ -366,7 +366,7 @@
   伪代码 排序：kind 按 memory、note、card，再全班（student 为空）在前个人在后，再按 id 升序
   伪代码 note_id=id；note_kind 转中文（memory→记忆、note→作者注、card→关键词卡）；note_scope 为「全班」或「个人」；note_keywords 原样；note_brief 是 content 超过 60 个字时取前 60 个字加「…」，否则原文；note_updated=updated_at；note_by=author；note_content 是完整内容；student 原样
   伪代码 mine：该行的 student 等于入参 student（入参为空时按空串比）为 1，否则 0——这一页能改的才是 1，行上编辑/停用/启用/删除按钮看它
-  伪代码 note_subject_label：该行 subject_id 等于 0 为「全部科目」，否则为本科目的显示名（按 subject_id 查 subject_info 的 name，查询 teacher_rules_subject_name；查不到或为空写「科目{subject_id}」）；note_subject_scope：该行 subject_id 等于 0 为「全部科目」，否则「当前科目」（行上点「编辑」整行拷进表单时，适用范围下拉回填用）
+  伪代码 note_subject_label：该行 subject_id 等于 0 为「全部科目」，否则为本科目的显示名（按 subject_id 查 subject_info 的 name，查询 teacher_rules_subject_name；查不到或为空写「科目{subject_id}」）；传参（K170）：科目显示名 sname 是库里的自由文本，查 teacher_rules_note_rows 的参数（student、subj、sname、own、wr）一律装进对象用 查询表 传，不得按位置 sname={…} 传（显示名首尾有空白时按位置传引擎直接报错）；note_subject_scope：该行 subject_id 等于 0 为「全部科目」，否则「当前科目」（行上点「编辑」整行拷进表单时，适用范围下拉回填用）
   伪代码 can_edit（当前登录的人能不能改这一行，与 mine 同时为 1 前端才画编辑/停用/启用/删除）：auth_mode 不等于 on（单人/不登录模式）一律 1；auth_mode 等于 on 时，整张表只算一次：调用 subject.科目访问 learner=learner current_role=current_role subject_id=本科目 need=settings auth_mode=auth_mode 的 ok 为 is_owner（只有科目负责人为 1），调用 subject.科目访问 learner=learner current_role=current_role subject_id=本科目 need=write auth_mode=auth_mode 的 ok 为 can_write（负责/协作教师为 1）；该行 subject_id 等于 0（全部科目）时 can_edit=is_owner，否则 can_edit=can_write；值是整数 1/0
   伪代码 note_once：该行 once 等于 1 为文本「true」，否则文本「false」（是文本不是布尔：DSL 的布尔值输出成 JSON 会变成空对象；前端开关认 'true'/'false'）
   伪代码 note_state：enabled 等于 0 为「停用」；once 等于 1 且 student 入参不为空：该学生在 teacher_rules_setting_use 里有一行 setting_ids 与 setting_versions 按位置配出 (本设定 id, 本设定当前 version) 为「只用于下一条·这个学生已用过」，否则「只用于下一条·还没用」；once 等于 1 且 student 入参为空：数出有这样配对的不同学生数 n，为「只用于下一条·已有 n 个学生用过」；其余为「启用」
@@ -384,7 +384,7 @@
   伪代码 relay_done：只在 student 入参为空时有值，否则空串。调用 account.列学生 得学生总数 total；done 是该传达在 teacher_rules_relay_state 里 confirmed 等于 1 且 student 属于这些学生的行数；文本「已传达 {done}/总 {total}」；deadline 不为空且小于今天（取运行时当前日期）且 done 小于 total，再接「，已过期 {total-done}」
   伪代码 relay_state_text：student 入参不为空时是该学生在这条上的状态，按 传达状态列表 的 relay_state_text 口径（student 入参所指学生）；student 入参为空时是「启用」或「停用」
   伪代码 message_id：student 入参不为空且该学生在这条上有 teacher_rules_relay_state 行时取该行 id，否则 0（0 时前端不画「看那条回复」）
-  伪代码 relay_subject_label、relay_subject_scope、can_edit：口径同 设定列表 的 note_subject_label、note_subject_scope、can_edit（subject_id 等于 0 为「全部科目」，否则本科目显示名，查询 teacher_rules_subject_name；can_edit 单人/不登录模式一律 1，登录模式下全部科目的行看 is_owner、本科目的行看 can_write）
+  伪代码 relay_subject_label、relay_subject_scope、can_edit：口径同 设定列表 的 note_subject_label、note_subject_scope、can_edit（subject_id 等于 0 为「全部科目」，否则本科目显示名，查询 teacher_rules_subject_name；传参（K170）：查 teacher_rules_relay_rows 的参数（student、today、studs、total、subj、sname、own、wr）一律装进对象用 查询表 传，不得按位置 sname={…} 传；调用 account.列学生 只取用户名和总数、不用 last_at，不传科目；can_edit 单人/不登录模式一律 1，登录模式下全部科目的行看 is_owner、本科目的行看 can_write）
 
 公开 函数 传达状态列表 learner? current_role? auth_mode? subject?
   返回 数组 [{relay_id, relay_brief, relay_student_label, relay_state_text, relay_excerpt, message_id}]；「AI老师设定」页「各学生的传达状态」表：每条全班传达（student 为空）对每个学生账号一行，还没带入过的也列
@@ -394,7 +394,7 @@
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
   伪代码 调用 account.列学生 得学生；对 student 为空且 subject_id 等于本科目或等于 0 的每条传达（按 id）× 每个学生账号（按用户名升序，学生范围仍是全部学生账号）出一行
-  伪代码 relay_brief 是 must_info 超过 30 个字时取前 30 个字加「…」；relay_student_label 是「显示名（用户名）」，显示名为空只写用户名；relay_excerpt 恒为「（暂不记录原话）」；message_id 是该 (传达, 学生) 的 teacher_rules_relay_state 行 id，没有行为 0
+  伪代码 relay_brief 是 must_info 超过 30 个字时取前 30 个字加「…」；relay_student_label 是「显示名（用户名）」，显示名为空只写用户名（传参（K170）：显示名是建号时老师填的原文、没去空白，「 小明」拼出的 label 以空格开头；取这一行的 teacher_rules_relay_pair 的参数（relay_id、student、today、label）一律装进对象用 查一行表 传，不得按位置 label={…} 传，显示名原样保留）；relay_excerpt 恒为「（暂不记录原话）」；message_id 是该 (传达, 学生) 的 teacher_rules_relay_state 行 id，没有行为 0
   伪代码 relay_state_text：停用的传达前缀「停用·」；该 (传达, 学生) 有状态行且 confirmed 等于 1：「已传达（{状态行 updated_at}）」；否则 deadline 不为空且小于今天：「已过期（截止 {deadline}，没传达到）」；否则「待传达（已带入 {rounds_done，没状态行为 0} 轮）」，状态行 finished 等于 1 的再接「·已带满」
 
 公开 函数 取回复用到 reply_id learner? current_role? auth_mode? subject?
@@ -418,7 +418,7 @@
   伪代码 class_notes=调用 设定列表 learner=learner current_role=current_role auth_mode=auth_mode subject=subject_id（student 空）；class_relays=调用 传达列表 learner=learner current_role=current_role auth_mode=auth_mode subject=subject_id（student 空）；class_relay_states=调用 传达状态列表 subject=subject_id（列表要带登录信息，行上 can_edit 才按当前登录的人算）
   伪代码 note_is_owner：auth_mode 不等于 on 为 1；否则调用 subject.科目访问 learner=learner current_role=current_role subject_id=subject_id need=settings auth_mode=auth_mode 取 ok（科目负责人 1，否则 0）；前端据此显示「全部科目的设定和传达只有科目负责人能改」的说明
   伪代码 subject_head：「{本科目显示名}的AI老师设定（含全部科目的）」（不含空格），显示名同 设定列表 的 note_subject_label 口径（查询 teacher_rules_subject_name，查不到写「科目{subject_id}」）
-  伪代码 note_students：调用 account.列学生，每个学生转 {value: username, label: 显示名（用户名），显示名为空只写用户名}，按用户名升序
+  伪代码 note_students：调用 account.列学生（只取用户名、不用 last_at，不传科目），每个学生转 {value: username, label: 显示名（用户名），显示名为空只写用户名}，按用户名升序；传参（K170）：显示名可能首尾有空白（建号时不去空白），取选项行的 teacher_rules_student_option 的参数（username、label）一律装进对象用 查一行表 传，不得按位置 label={…} 传，显示名原样保留
 
 公开 函数 载入设定页面 note_id? student? learner? current_role? auth_mode? subject?
   返回 回填表单 {student, note_kind, note_keywords, note_content, note_once, note_subject_scope}（动作 teacher_note_open，浮层「载入」：行上点「编辑」时整行已拷进表单，这个函数是带着地址进来的刷新用）

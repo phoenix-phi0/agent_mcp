@@ -17,6 +17,7 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
+  伪代码 传参（K170）：keyword 是用户输入的搜索词，先去首尾空白再用（「 猫 」按「猫」搜）；查询参数（keyword、point_code、subject_id）装进对象用 查询表 传，不得按位置 keyword={…} 传（首尾有空白按位置传引擎直接报错）
   伪代码 查 vocab_word 中 subject_id 相等的行
   伪代码 keyword 不为空时，只留下 kanji、kana、meaning 任一字段包含 keyword 的行
   伪代码 point_code 不为空时，只留下 point_code 等于该值的行
@@ -30,6 +31,7 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
+  伪代码 传参（K170）：kanji、kana 先去首尾空白再用（库里存的是去空白后的值）；按 kanji + kana 查的参数装进对象用 查一行表 传，不得按位置 kanji={…} kana={…} 传
   伪代码 word_id 为空且 kana 为空，报错 400 word_id 和 kana 至少要给一个
   伪代码 word_id 不为空：按 id 和 subject_id 查 vocab_word 一行（属于别的科目的词当不存在）
   伪代码 word_id 为空：在本科目内按 kanji + kana 同时相等查一行（kanji 为空串时匹配汉字为空的词）
@@ -92,7 +94,8 @@
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
-  伪代码 kana 为空，报错 400 假名不能为空
+  伪代码 传参（K170）：kanji、kana、meaning、point_code 是老师在表单里填的原文，先各自去首尾空白（「猫 」存成「猫」），下面的判空、查重、插入都用去空白后的值；查重、插入、取新编号的参数一律装进对象用 查一值表 / 写库表 传，不得按位置 kanji={…} 传（首尾有空白按位置传引擎直接报错）
+  伪代码 kana 为空（去空白后），报错 400 假名不能为空
   伪代码 point_code 不为空时，调用 kg.取知识点 code=point_code subject=subject_id，取不到（包括属于别的科目）报错 404 没有这个知识点
   伪代码 在本科目内按 kanji + kana 查 vocab_word，已有则报错 400 单词已存在（别的科目有同样的词不算重复）
   伪代码 往 vocab_word 插入一行 (kanji, kana, meaning, point_code, subject_id)
@@ -110,8 +113,9 @@
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
+  伪代码 传参（K170）：kanji、kana、meaning、point_code 先各自去首尾空白，下面的判空、查重、更新都用去空白后的值；查重、更新的参数一律装进对象用 查一值表 / 写库表 传，不得按位置 kanji={…} 传
   伪代码 按 id=word_id 和 subject_id 查 vocab_word，查不到（包括属于别的科目）报错 404 没有这个单词
-  伪代码 kana 为空，报错 400 假名不能为空
+  伪代码 kana 为空（去空白后），报错 400 假名不能为空
   伪代码 在本科目内按 kanji + kana 查 vocab_word，若存在且 id 不等于 word_id，报错 400 单词已存在
   伪代码 point_code 不为空时，调用 kg.取知识点 code=point_code subject=subject_id，取不到（包括属于别的科目）报错 404 没有这个知识点
   伪代码 更新该行的 kanji、kana、meaning、point_code；更新语句的 SQL 条件同时写 id=word_id 和 subject_id=本科目（属于当前科目才改，纵深防御，不只靠上面的查询）
@@ -142,6 +146,7 @@
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 用 doc 包「读文档」读 file_path 取文本，按行拆开；空行和以 # 开头的行忽略
   伪代码 每行格式「汉字|假名|中文意思|知识点编号」，用 | 分隔；后两项可以省略或为空（缺的尾部字段当空），汉字可以为空；少于 2 项或假名为空，报错 400 导入文件有错（整批不写）
+  伪代码 传参（K170）：按 | 拆开后各项（汉字、假名、中文意思、知识点编号）先各自去首尾空白再用（「猫 | ねこ | 小猫 | P1」等同「猫|ねこ|小猫|P1」；假名去空白后为空也算假名为空），核对知识点、查重、插入、更新都用去空白后的值；查重、插入、更新的参数一律装进对象用 查一值表 / 写库表 传，不得按位置 kanji={…} 传（正则切出来的组会带着 | 两边的空格，按位置传引擎直接报错，整批导入 500）
   伪代码 对每个非空的知识点编号，调用 kg.取知识点 code=编号 subject=subject_id，取不到（包括属于别的科目）报错 400 知识点对不上（整批不写）
   伪代码 在一个事务里：逐行在本科目内按 汉字+假名 查 vocab_word，没有则插入 (kanji, kana, meaning, point_code, subject_id) 并 created+1，有则更新 meaning、point_code 并 updated+1（更新语句的 SQL 条件同时写 id=该行 id 和 subject_id=本科目，纵深防御，同 修改单词/删除单词）
   伪代码 同一文件里重复的 汉字+假名，后一行覆盖前一行（按已存在算更新）
@@ -297,6 +302,28 @@ POST /vocab/import -> 导入单词 上传 file 类型 md,txt 上限 20MB 角色 
   调用 导入单词 file_path=words.md
   得 ok=1 total=1 created=1 updated=0
   库 vocab_word 含 kana=あ
+
+用例 导入单词_各项首尾有空格
+  先 数据 kg_point code=P1 title=一次函数
+  先 文件 words.md 内容=食べる | たべる | 吃 | P1
+  调用 导入单词 file_path=words.md
+  得 ok=1 total=1 created=1 updated=0
+  库 vocab_word 共 1 行
+  库 vocab_word 含 kanji=食べる kana=たべる meaning=吃 point_code=P1
+
+用例 导入单词_带空格的行更新已有词
+  先 数据 vocab_word kanji=猫 kana=ねこ meaning=旧意思
+  先 文件 words.md 内容=猫 | ねこ | 小猫
+  调用 导入单词 file_path=words.md
+  得 ok=1 total=1 created=0 updated=1
+  库 vocab_word 共 1 行
+  库 vocab_word 含 kanji=猫 kana=ねこ meaning=小猫
+
+用例 导入单词_假名只有空格算缺假名
+  先 文件 words.md 内容=猫 |   | 小猫
+  调用 导入单词 file_path=words.md
+  报错 400
+  库 vocab_word 共 0 行
 
 用例 导入单词_缺假名
   先 文件 words.md 内容=食べる||吃|P1

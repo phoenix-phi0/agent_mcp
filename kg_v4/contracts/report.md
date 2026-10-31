@@ -44,8 +44,8 @@
   伪代码 调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=need，原样返回它的 subject_id（四个入参都是空串时得 1；显式 subject 无权时 解析科目 报 403/404、不是数字报 400，原样抛出）；本模块只有 写学情总结、写学情总结页面 传 need=write（往 report_summary 写一行带科目、别的教师会读的总结，属于写科目数据，只有负责/协作教师可写），其余函数按读
 
 函数 学生范围 subject_id
-  返回 [{username, display_name, status, last_at}]；本科目的学生范围，按 account.列学生 的顺序
-  伪代码 调用 account.列学生，得全部学生（含停用），带出 username、display_name、status、last_at
+  返回 [{username, display_name, status, last_at}]；本科目的学生范围，按 account.列学生 的顺序；last_at 是该生在本科目的最近学习时间（本科目没有作答为空串）
+  伪代码 调用 account.列学生 subject=subject_id（K170：按本科目取 last_at；不传 subject 时 列学生 只算日语科目，学生只在 Python 科目作答时 Python 学情里「最近学习」为空），得全部学生（含停用），带出 username、display_name、status、last_at
   伪代码 所有科目（含 1 号日语）统一：调用 subject.列科目学生 subject_id=subject_id，得 students；只留 username 在 students 各项 learner 里的学生（科目里登记且 active 的学生；没有登记或已撤销的学生不出现），顺序不变。不再有「1 号=全部学生」的特例，也不按 id=1 判断：新建的学生由 account.建学生 自动登记进日语科目（jp_grammar），已有学生由 migrate_subject.py 补登记
 
 函数 取点等级 point_code subject_id

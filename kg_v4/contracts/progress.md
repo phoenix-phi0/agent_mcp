@@ -79,6 +79,7 @@
   伪代码 调用 核对分数线 pass_line=pass_line fall_line=fall_line，得到两条线
   伪代码 在一个事务里（中途出错全部不算）：
   伪代码 往 progress_answer 插入 (learner, point_code, question_no, correct, answer, at=当前时间, subject_id=subject_id)
+  伪代码 传参（K170）：answer 是学生作答原文（POST /progress/answer 直接传进来的未去空白，填空答案可能首尾带空格、换行），原样存、不去空白；插入 progress_answer 的参数一律装进对象用 写库表 传，不得按位置 answer={…} 传（首尾有空白按位置传引擎直接报错）
   伪代码 按 learner + point_code + subject_id（等于本科目）查 progress_mastery：没有则插入 (right_count=correct, total_count=1, mastered=0, updated_at=当前时间, subject_id=subject_id)；有则 total_count+1、right_count+correct、updated_at=当前时间
   伪代码 调用 重算点 learner point_code 两条线 subject_id，得到 score、mastered、changed
   伪代码 事务结束后读 progress_mastery 该行（learner + point_code + subject_id 等于本科目）的 right_count、total_count

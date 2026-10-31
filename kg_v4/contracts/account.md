@@ -51,17 +51,27 @@
   伪代码 按 username 查 account_user，查不到则返回空
   伪代码 返回 {"username": 该行 username, "display_name": 该行 display_name, "role": 该行 role, "disabled": 该行 disabled, "created_at": 该行 created_at}
 
-公开 函数 列学生
-  返回 {total, students}；students 是 [{username, display_name, status, answer_count, last_at}]，只含 role 为 student 的账号，按 id 升序；status 为「启用」或「停用」；answer_count 是作答数，没有作答为 0；last_at 是最近学习时间，没有作答为空串
+公开 函数 列学生 learner? current_role? auth_mode? subject?
+  返回 {total, students}；students 是 [{username, display_name, status, answer_count, last_at}]，只含 role 为 student 的账号（全部学生账号，不按科目筛），按 id 升序；status 为「启用」或「停用」；answer_count 是该生在本科目的作答数，本科目没有作答为 0；last_at 是该生在本科目的最近学习时间，本科目没有作答为空串（K170：按科目取，学生只在 Python 科目作答时，在 Python 科目下有值、在日语科目下为空）
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目（K170）：调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时只传 subject=已解析的科目编号），四个都不传得 1，行为与改前一样（日语科目）；登录模式下路由注入了老师身份但没带 subject 时，取老师的当前科目（偏好 → 第一个已分配 → 1，同 解析科目）；报错原样抛出
   伪代码 查 account_user 中 role 等于 student 的全部行，按 id 升序
-  伪代码 调用 progress.统计作答，得到 learners 列表
+  伪代码 调用 progress.统计作答 subject=subject_id（只传 subject，不传 learner、current_role、auth_mode：科目已解析，统计作答 走非登录口径、不按调用者筛选），得到本科目的 learners 列表
   伪代码 对每个学生，在 learners 里按 learner 等于 username 找到则取 answer_count 和 last_at，找不到则 answer_count 为 0、last_at 为空串
   伪代码 disabled 等于 1 则 status 为「停用」，否则为「启用」
   伪代码 返回 {"total": 学生数, "students": 列表}
 
-公开 函数 列学生页面
-  返回 [{username, display_name, account_state, attempt_n, last_active}]（数组，不是对象）；学生管理页一列一行，行键与页面列一字不差：account_state 为「正常」或「已停用」，attempt_n 是作答数（做题加默写），没有作答为 0；last_active 是最近学习时间，没有为空串；只含 role 为 student 的账号，按 id 升序
-  伪代码 口径与 列学生 相同：查 account_user 中 role 等于 student 的全部行（按 id 升序），调用 progress.统计作答 取每人的 answer_count 和 last_at，找不到则 attempt_n 为 0、last_active 为空串
+公开 函数 列学生页面 learner? current_role? auth_mode? subject?
+  返回 [{username, display_name, account_state, attempt_n, last_active}]（数组，不是对象）；学生管理页一列一行，行键与页面列一字不差：account_state 为「正常」或「已停用」，attempt_n 是本科目作答数，没有作答为 0；last_active 是本科目最近学习时间，没有为空串；只含 role 为 student 的账号（全部学生账号），按 id 升序
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目（K170）：调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id，同 列学生（登录模式下老师没带 subject 时取老师的当前科目；四个都不传得 1，与改前一样）；报错原样抛出
+  伪代码 口径与 列学生 相同（同样按本科目取）：查 account_user 中 role 等于 student 的全部行（按 id 升序），调用 progress.统计作答 subject=subject_id 取每人的 answer_count 和 last_at，找不到则 attempt_n 为 0、last_active 为空串
   伪代码 行键按页面口径输出：disabled 等于 1 则 account_state 为「已停用」，否则为「正常」；answer_count 写成 attempt_n；last_at 写成 last_active
   伪代码 返回数组本身（前端按 lists.students 直接喂列表，不带 total 包装）
 
@@ -123,12 +133,17 @@
   伪代码 用 auth 包的哈希密码 算 new_password 的哈希，更新该行 password_hash
   伪代码 返回 {"ok": 1}
 
-公开 函数 建学生 username password display_name
+公开 函数 建学生 username password display_name learner? current_role? auth_mode? subject?
   返回 刷新后的学生列表（「列学生页面」的口径，数组），建完号页面直接用它刷新表格
   报错 400 用户名和密码不能为空
   报错 400 用户名只能用字母、数字、汉字和 _ . @ -，不能有空格，最长 40
   报错 409 用户名已存在
   报错 400 密码至少 6 位
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目（K170，只给刷新列表用）：函数开头（任何校验和写库之前）调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；四个都可选，都不传得 1；报错原样抛出（这时一行都没写）
   伪代码 username 或 password 为空，报错 400 用户名和密码不能为空
   伪代码 username 不符合用户名字符集（字母、数字、汉字和 _ . @ -，不能有空格，最长 40；口径同原 kg tools/auth.py 的 USERNAME_RE），报错 400 用户名只能用字母、数字、汉字和 _ . @ -，不能有空格，最长 40
   伪代码 account_user 已有该 username，报错 409 用户名已存在
@@ -137,7 +152,7 @@
   伪代码 用 auth 包的哈希密码 算 password 的哈希
   伪代码 往 account_user 插入 (username, password_hash, display_name, role=student, disabled=0, created_at=当前时间)
   伪代码 调用 subject.登记学生 learner=username code=jp_grammar，把新学生自动登记进日语科目（subject_student，status=active；account 不直接写 subject 的表；按 code 找科目，不写死 id=1；库里没有该科目时 subject 返回 registered=0，建学生照常成功）。这样 report / teacher_assist 统一用 subject.列科目学生 取学生范围，不再有「1 号=全部学生」的特例
-  伪代码 调用 列学生页面，返回刷新后的学生列表（数组）
+  伪代码 调用 列学生页面 subject=subject_id（只传已解析的科目），返回刷新后的学生列表（数组）
 
 公开 函数 重置学生密码 username new_password
   返回 {ok}
@@ -151,16 +166,21 @@
   伪代码 把 account_login_fail 该 username 行（若有）的 fail_count 设为 0、locked_until 置空
   伪代码 返回 {"ok": 1}
 
-公开 函数 设置学生停用 username disabled
+公开 函数 设置学生停用 username disabled learner? current_role? auth_mode? subject?
   返回 刷新后的学生列表（「列学生页面」的口径，数组），停用/启用后页面直接用它刷新表格
   报错 400 disabled 只能是 0 或 1
   报错 404 没有这个账号
   报错 403 只能操作学生账号
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目（K170，只给刷新列表用）：函数开头（任何校验和写库之前）调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；四个都可选，都不传得 1；报错原样抛出（这时一行都没写）
   伪代码 disabled 不是 0 也不是 1，报错 400 disabled 只能是 0 或 1
   伪代码 按 username 查 account_user，查不到报错 404 没有这个账号
   伪代码 该行 role 不等于 student，报错 403 只能操作学生账号
   伪代码 更新该行 disabled=disabled
-  伪代码 调用 列学生页面，返回刷新后的学生列表（数组）
+  伪代码 调用 列学生页面 subject=subject_id（只传已解析的科目），返回刷新后的学生列表（数组）
 
 公开 函数 列可分配学生 subject_id
   返回 {total, students}；students 是 [{username, display_name}]：可以分配进该科目的学生——account_user 中 role 等于 student 且 disabled 等于 0、并且不在 subject.列科目学生（该科目在册）里的账号，按 id 升序；被撤销过的学生算「可分配」（再分配即恢复），停用的账号不列
@@ -309,6 +329,35 @@ POST /account/subject/teacher-remove -> 移除科目教师页面 动作 subject_
   先 数据 progress_answer learner=s1 point_code=P1 question_no=Q1 correct=1 answer=A at=2026-01-01_08:00:00
   调用 列学生
   得 total=2
+
+用例 列学生_按科目取_只在科目2作答
+  先 数据 account_user username=s1 password_hash=x display_name=小明 role=student disabled=0 created_at=2026-01-01
+  先 数据 account_user username=s2 password_hash=x display_name=小红 role=student disabled=0 created_at=2026-01-01
+  先 数据 progress_answer learner=s1 point_code=py.a question_no=py.q1 correct=1 answer=A at=2026-01-02_10:00:00 subject_id=2
+  调用 列学生 subject=2
+  得 total=2
+
+用例 列学生_按科目取_科目不对
+  先 数据 account_user username=s1 password_hash=x display_name=小明 role=student disabled=0 created_at=2026-01-01
+  调用 列学生 subject=abc
+  报错 400
+
+用例 列学生页面_按科目取_只在科目2作答
+  先 数据 account_user username=s1 password_hash=x display_name=小明 role=student disabled=0 created_at=2026-01-01
+  先 数据 progress_answer learner=s1 point_code=py.a question_no=py.q1 correct=1 answer=A at=2026-01-02_10:00:00 subject_id=2
+  调用 列学生页面 subject=2
+  得 有返回
+
+用例 建学生_科目不对不写库
+  调用 建学生 username=s1 password=pw123456 display_name=小明 subject=abc
+  报错 400
+  库 account_user 共 0 行
+
+用例 设置学生停用_科目不对不写库
+  先 数据 account_user username=s1 password_hash=x display_name=小明 role=student disabled=0 created_at=2026-01-01
+  调用 设置学生停用 username=s1 disabled=1 subject=abc
+  报错 400
+  库 account_user 含 username=s1 disabled=0
 
 用例 列学生_没有学生
   先 数据 account_user username=t1 password_hash=x display_name=王老师 role=teacher disabled=0 created_at=2026-01-01

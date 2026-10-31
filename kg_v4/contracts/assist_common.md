@@ -7,13 +7,13 @@
   伪代码 调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=need，原样返回它的 subject_id（四个入参都是空串时得 1；显式 subject 无权时 解析科目 报 403/404、不是数字报 400，need=write 且没有写权限报 403 没有权限修改该科目，原样抛出）。本模块只读，不传 need
 
 公开 函数 学生范围 learner? current_role? auth_mode? subject?
-  返回 {total, students}；students 是 [{username, display_name, status, last_at}]：本科目的学生范围，按 account.列学生 的顺序（与 report 的学生范围同一规则，report 的该函数是私有的，这里按同样规则做一份）；M4 拆模块后由 teacher_assist（取上轮聚焦、知识点上下文、取助手上下文）调用，原是 teacher_assist 的私有函数
+  返回 {total, students}；students 是 [{username, display_name, status, last_at}]：本科目的学生范围，按 account.列学生 的顺序，last_at 是该生在本科目的最近学习时间（本科目没有作答为空串）（与 report 的学生范围同一规则，report 的该函数是私有的，这里按同样规则做一份）；M4 拆模块后由 teacher_assist（取上轮聚焦、知识点上下文、取助手上下文）调用，原是 teacher_assist 的私有函数
   报错 400 subject 不对
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；四个都不传得 1；别的模块调用时传 subject=已解析的科目编号
-  伪代码 调用 account.列学生，得全部学生（含停用），带出 username、display_name、status、last_at
+  伪代码 调用 account.列学生 subject=subject_id（K170：按本科目取 last_at，同 report 的 学生范围；教师助手班级上下文的「最近学习」由此而来），得全部学生（含停用），带出 username、display_name、status、last_at
   伪代码 所有科目（含 1 号日语）统一：调用 subject.列科目学生 subject_id=subject_id，得 enrolled；只留 username 在 enrolled 各项 learner 里的学生（科目里登记且 active 的学生；没有登记或已撤销的不出现），顺序不变。不再有「1 号=全部学生」的特例，也不按 id=1 判断；学生范围的规则只在 subject.列科目学生 一处（本函数与 report 的同名私有函数都只是它加 account.列学生 的过滤）
   伪代码 返回 {"total": 人数, "students": 列表}
 
