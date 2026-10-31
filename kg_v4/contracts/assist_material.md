@@ -18,6 +18,7 @@
 # 依赖说明：assist_common（匹配学生 / 匹配知识点）、report（学情报告的数据段：取全班学情 / 取学生学情）、kg（按知识点列条目）、lesson（取知识点等级、按知识点列课文）、assist_draft（练习转出题草稿 调 生成草稿）、subject（解析科目）。方向 teacher_assist → assist_material → assist_draft，不成环；本模块不依赖 assist_file（附件文本由 teacher_assist 取好作为 ref_text 交过来，file_id 只记个编号）。
 
 ## 表
+# 约定检查豁免 表名前缀：表名沿用 M4 从 teacher_assist 拆出本模块前的 teacher_assist_ 前缀：库里已有数据，改名要迁移库并改查询；表名不重复由全局检查保证
 表 teacher_assist_material 学习记录
   teacher 文本 教师用户名（材料归谁；只有本人能看、改、删、导出）
   subject_id 整数 所属科目，默认 1；别的科目的材料一律当没有（404 没有这份材料）

@@ -902,6 +902,7 @@ POST /subject/manage/disable -> 设科目状态页面 动作 subject_disable 模
   报错 400
 
 用例 建科目_单人模式
+  # 约定检查豁免 可选传空 current_role：单人模式（auth_mode=off）不看 current_role，传空与不传相同，用例期望与不传一致
   调用 建科目 learner=me current_role=空 auth_mode=off code=math name=数学
   得 code=math
   库 subject_info 含 code=math owner=me status=draft
@@ -914,6 +915,7 @@ POST /subject/manage/disable -> 设科目状态页面 动作 subject_disable 模
 
 用例 改科目_名称为空不改名
   先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  # 约定检查豁免 可选传空 name：伪代码规定 name 去首尾空白后为空就不改名，不传也是空串、同样不改名，用例期望与不传一致
   调用 改科目 learner=t1 current_role=teacher auth_mode=on subject_id=1 name=空 intro=说明
   得 ok=1
   库 subject_info 含 name=甲 intro=说明
@@ -946,6 +948,7 @@ POST /subject/manage/disable -> 设科目状态页面 动作 subject_disable 模
 
 用例 改科目_单人模式不校验权限
   先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  # 约定检查豁免 可选传空 current_role：单人模式（auth_mode=off）不看 current_role，传空与不传相同，用例期望与不传一致
   调用 改科目 learner=me current_role=空 auth_mode=off subject_id=1 name=乙
   得 ok=1
   库 subject_info 含 name=乙
@@ -1025,6 +1028,7 @@ POST /subject/manage/disable -> 设科目状态页面 动作 subject_disable 模
 
 用例 设科目状态_日语科目单人模式也不能停用
   先 数据 subject_info code=jp_grammar name=日语语法 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  # 约定检查豁免 可选传空 current_role：单人模式（auth_mode=off）不看 current_role，传空与不传相同，用例期望与不传一致
   调用 设科目状态 learner=me current_role=空 auth_mode=off subject_id=1 status=disabled
   报错 409
 
@@ -1065,6 +1069,7 @@ POST /subject/manage/disable -> 设科目状态页面 动作 subject_disable 模
 用例 列可管理科目_单人模式列全部
   先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 subject_info code=b name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t9 status=draft created_at=2026-01-01 updated_at=2026-01-01
+  # 约定检查豁免 可选传空 current_role：单人模式（auth_mode=off）不看 current_role，传空与不传相同，用例期望与不传一致
   调用 列可管理科目 learner=me current_role=空 auth_mode=off
   得 total=2
 
@@ -1345,6 +1350,7 @@ POST /subject/manage/disable -> 设科目状态页面 动作 subject_disable 模
 
 用例 分配学生_单人模式
   先 数据 subject_info code=a name=甲 kind=general caps=x levels=空 qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  # 约定检查豁免 可选传空 current_role：单人模式（auth_mode=off）不看 current_role，传空与不传相同，用例期望与不传一致
   调用 分配学生 learner=me current_role=空 auth_mode=off subject_id=1 learners=s1
   得 assigned=1
   库 subject_student 含 learner=s1 assigned_by=me
@@ -1648,6 +1654,7 @@ POST /subject/manage/disable -> 设科目状态页面 动作 subject_disable 模
 
 用例 保存科目页面_从行编辑不改说明直接保存说明不变
   先 数据 subject_info code=py name=编程 intro=原来的说明 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  # 约定检查豁免 可选传空 subj_persona：伪代码规定编辑时 subj_persona 为空即回到默认人设（不传也是空串、同样处理），本用例原来就没有自定义设定，期望与不传一致
   调用 保存科目页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 subj_name=编程 subj_intro=原来的说明 subj_levels=入门,基础,进阶 subj_persona=空
   得 manage_head=我能管理的科目共1个
   库 subject_info 含 code=py intro=原来的说明 levels=入门,基础,进阶
@@ -1682,6 +1689,7 @@ POST /subject/manage/disable -> 设科目状态页面 动作 subject_disable 模
 用例 保存科目页面_清空AI老师设定回到默认
   先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 subject_ai subject_id=1 persona=旧设定
+  # 约定检查豁免 可选传空 subj_persona：伪代码规定编辑时 subj_persona 为空即清掉自定义、回到默认人设，不传也是空串、同样清掉（编辑表单总会提交这个字段），期望与不传一致
   调用 保存科目页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 subj_name=编程 subj_persona=空
   得 manage_head=我能管理的科目共1个
   库 subject_ai 含 subject_id=1 persona=空

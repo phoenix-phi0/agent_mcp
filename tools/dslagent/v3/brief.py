@@ -3,7 +3,9 @@
     python -m tools.dslagent v3 brief --project DIR [--modules a,b] [--out DIR]
 
   骨架      函数头、入参（必填 / 可选）、返回、报错、接口与路由（scaffold.route_text 渲染，和骨架、比对约定同一份）、公开 / 角色
-  依赖接口  伪代码「调用 模块.函数」点到的别模块公开函数：函数头、返回、返回字段；本函数读写的表与列（标出可空列）
+  依赖接口  伪代码「调用 模块.函数」点到的别模块公开函数：函数头、返回、返回字段；本函数读写的表与列（标出可空列）；
+            K174 起另附被调函数的伪代码节选（每个最多 DEP_BODY_CHARS 字，超了截断并注明），模块里同一个上游函数只附一次
+            （K171 实验 A：Haiku 缺 vocab.挑默写词 的语义、不肯猜）
   实现要点  只留抽样准的三条（K169）：
             R1 读可空列：现有代码 查一值/查一行 的 SQL 直接 SELECT 可空列（没 COALESCE）；或伪代码在「读」的分句里提到可空列 / 写了 NULL。
                写入的分句、函数入参都不算；函数伪代码已写 COALESCE/IFNULL 就不出
@@ -13,6 +15,11 @@
   影响面    契约 diff（git HEAD vs 工作区）：改动函数（new / yes / unknown / no + 伪代码变 / deleted）；建议 --modules = 改动函数所在模块 ∪
             签名变（new/yes/unknown/deleted）函数的直接调用方所在模块；只改伪代码的函数的调用方列为「参考」；直接调用方里契约没改的模块提示「可能漏改契约」
   只读检查  v3/contracts.check 的结果；伪代码提到别模块公开函数名却没写「调用 模块.函数」
+  写死盘点  给了设计声明（--declare 文件，见 load_declare）时：在约定（函数的「返回」和伪代码）、services/*.zs、ui/*.ui 里找还写死旧值的行
+            （新来源函数自己的块、提到新来源函数名的行不算；人设类正则排除「你是想…」这类问句）。只提示，不降级、不改 --modules（K168 §6 ②）
+  值域检查  用例「先 数据」行的字段值、「先 调用 / 调用」的参数（含 rows_json 这类 JSON 参数里的对象）：能确定值域的字段
+            （level 必须在该用例造的 subject_info.levels 里，没有这行或 levels 为空按 N5..N1；设计声明可加字段）和值对不上 → 提醒
+            （K161：quiz 7 条、assist_draft 6 条旧用例的数学科目 levels 为空、题目 level=初一，fix2 白跑 $2.77）
 v3 fix2 / change2 --brief 只把本模块那一节（只列本轮要改的函数）交给 modify_module（packs/dslproj materials() / fix_input()），不给 audit2 核查员。
 """
 import json
@@ -349,6 +356,24 @@ def skeleton(module, c, fn, cs):
             "报错": [f"{e['码']} {e['文字']}".strip() for e in fn["报错"]], "接口": routes}
 
 
+DEP_BODY_CHARS = 1500       # 每个上游函数伪代码节选的字数上限（整行放，放不下的那行截断、后面的不放，并注明）
+
+
+def dep_body(uf, limit=DEP_BODY_CHARS):
+    """被调函数的伪代码节选 → {"行": [文字…], "共": 总行数, "截断": 是否}。"""
+    lines = [p["文字"] for p in uf["伪代码"]]
+    out, n, cut = [], 0, False
+    for t in lines:
+        if n + len(t) > limit:
+            cut = True
+            if limit - n >= 80:
+                out.append(t[:limit - n] + "…")
+            break
+        out.append(t)
+        n += len(t)
+    return {"行": out, "共": len(lines), "截断": cut}
+
+
 def deps_of(module, fn, cs, cols, cf):
     ups = []
     for m, name in calls_of(fn, module):
@@ -357,7 +382,8 @@ def deps_of(module, fn, cs, cols, cf):
         if uf is None:
             ups.append({"函数": f"{m}.{name}", "问题": f"{m} 的约定里没有这个函数"})
             continue
-        ups.append({"函数": f"{m}.{name}", "函数头": C.head_text(uf), "公开": uf["公开"], "返回": uf["返回"], "返回字段": ret_fields(uf["返回"])})
+        ups.append({"函数": f"{m}.{name}", "函数头": C.head_text(uf), "公开": uf["公开"], "返回": uf["返回"], "返回字段": ret_fields(uf["返回"]),
+                    "伪代码": dep_body(uf), "位置": f"contracts/{m}.md:{uf['行']}"})
     reads, writes = set(), set((cf or {}).get("writes") or [])
     for p in fn["伪代码"]:
         t = p["文字"]
@@ -487,6 +513,225 @@ def lint_mentions(cs):
     return out
 
 
+# ---------------------------------------------------------------- 设计声明 / 写死盘点 / 用例值域（K174）
+LEVELS_DEFAULT = ["N5", "N4", "N3", "N2", "N1"]   # subject_info 没有这行或 levels 为空串时的等级（K161 兼容规则）
+SUBJ_LEVELS = "科目等级"                            # 值域来源：该用例里对应科目的 levels
+DOMAIN_ANY = ("全部", "all", "不限")                   # 「不按这个字段筛」的哨兵值（dictation 载入页面 level=全部），不查
+DOMAIN_WORDS = {"level": ("等级", "level")}        # 用例名里提到这个概念 = 故意测非法值（等级非法 / 等级不在本科目里400…），不查；声明的字段看字段名
+ENUM_RE = re.compile(r"N5\s*[,，、/ ]\s*N4\s*[,，、/ ]\s*N3|N5\s*[–—\-~～到至.]+\s*N1|N1\s*[–—\-~～到至.]+\s*N5")
+# 人设句：「你是…老师 / 助手」；排除问句（K168 §5.2：teacher_assist 的「你是想让我出题、…改 AI 老师…」不是人设）
+PERSONA_RE = r"你是(?!想|不是|否|要不要|在问|说|指)[^，。,；;」\"？?！!]{{0,30}}?{role}(?![吗呢？?])"
+DECL_ARROW_RE = re.compile(r"\s*(?:→|->|=>)\s*")
+
+
+def label_re(label):
+    """旧值标签 → 正则：enum:N5..N1（N5–N1 这类枚举 / 区间）、persona:老师 / persona:助手（「你是…老师」人设句，不含问句）、
+    lit:字面量、re:正则；其它当字面量。正则写坏了抛 ValueError。"""
+    kind, _, val = label.partition(":")
+    if kind == "enum" and val.replace(" ", "") in ("N5..N1", "N5-N1", "N5–N1"):
+        return ENUM_RE
+    if kind == "persona" and val:
+        return re.compile(PERSONA_RE.format(role=re.escape(val)))
+    if kind == "re" and val:
+        try:
+            return re.compile(val)
+        except re.error as e:
+            raise ValueError(f"正则写错了：{val}（{e}）") from None
+    if kind == "lit" and val:
+        return re.compile(re.escape(val))
+    return re.compile(re.escape(label))
+
+
+def load_declare(path):
+    """设计声明文件 → {"写死": [{旧值, 新来源, 行}], "值域": {字段: 来源}, "问题": [..]}。每行一条，# 开头和空行跳过：
+      旧值<Tab>新来源函数[<Tab>说明]   或  旧值 → 新来源函数 [说明]
+          旧值是标签（enum:N5..N1 / persona:老师 / lit:日语学习系统 / re:正则），新来源写 模块.函数（可带 fn: 前缀）
+      改动<Tab>fn:模块.函数<Tab>旧值<Tab>新值域<Tab>依据    （K168 /tmp/k168/domain.tsv 的 5 列格式，照样认）
+      值域<Tab>字段<Tab>来源                    （来源 = 科目等级，或逗号隔开的合法值；给用例值域检查加字段）"""
+    out = {"写死": [], "值域": {}, "问题": []}
+    for no, raw in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
+        s = raw.strip()
+        if not s or s.startswith("#"):
+            continue
+        cols = [x.strip() for x in raw.split("\t")] if "\t" in raw else DECL_ARROW_RE.split(s, 1)
+        if len(cols) == 1 and s.startswith("值域"):
+            cols = s.split(None, 2)
+        if cols[0] == "值域":
+            if len(cols) < 3 or not cols[1] or not cols[2]:
+                out["问题"].append(f"第 {no} 行：值域写法是「值域<Tab>字段<Tab>来源」")
+            else:
+                out["值域"][cols[1]] = cols[2]
+            continue
+        if len(cols) >= 5 and cols[1].startswith("fn:"):
+            old, new = cols[2], cols[1]
+        elif len(cols) >= 2:
+            old, new = cols[0], cols[1].split()[0] if cols[1].split() else ""
+        else:
+            out["问题"].append(f"第 {no} 行：看不懂「{s[:40]}」（写法是「旧值<Tab>新来源函数」或「旧值 → 新来源函数」）")
+            continue
+        new = new[3:] if new.startswith("fn:") else new
+        try:
+            label_re(old)
+        except ValueError as e:
+            out["问题"].append(f"第 {no} 行：{e}")
+            continue
+        if not old or "." not in new:
+            out["问题"].append(f"第 {no} 行：新来源要写成「模块.函数」，现在是「{new}」")
+            continue
+        out["写死"].append({"旧值": old, "新来源": new, "行": no})
+    return out
+
+
+FN_HEAD_RE = re.compile(r"^(?:公开\s+)?函数\s+(\S+)")
+
+
+def _contract_text_lines(text):
+    """约定原文 → [(行号, 所在函数, 文字)]：只取「## 函数」节里函数的「返回」和「伪代码」行。"""
+    out, sec, fn = [], None, None
+    for no, raw in enumerate(text.replace("\r", "").splitlines(), 1):
+        s = raw.strip()
+        if s.startswith("##"):
+            sec, fn = s.lstrip("#").strip(), None
+            continue
+        if sec != "函数":
+            continue
+        m = FN_HEAD_RE.match(s)
+        if m and not raw.startswith(" "):
+            fn = m.group(1)
+            continue
+        if fn and (s.startswith("返回") or s.startswith("伪代码")):
+            out.append((no, fn, s))
+    return out
+
+
+def scan_hardcodes(project, decl, texts=None):
+    """设计声明的每条「旧值 → 新来源」→ [{旧值, 新来源, 位置: [{文件, 行, 模块, 注释, 原文}]}]。
+    扫约定的「返回」+ 伪代码、services/*.zs、ui/*.ui；新来源函数自己的块、提到新来源函数名的行不算（那是定义 / 已经改用了）。"""
+    project = Path(project)
+    if texts is None:
+        texts = load_contracts(project)[1]
+    res = []
+    for d in decl.get("写死", []):
+        rx, (nm, nf) = label_re(d["旧值"]), d["新来源"].split(".", 1)
+        sites = []
+        for m, t in sorted(texts.items()):
+            for no, fn, s in _contract_text_lines(t):
+                if (m == nm and fn == nf) or nf in s or not rx.search(s):
+                    continue
+                sites.append({"文件": f"contracts/{m}.md", "行": no, "模块": m, "注释": False, "原文": s[:80]})
+        for f in sorted((project / "services").glob("*.zs")):
+            m = f.stem
+            own = code_blocks(f.read_text(encoding="utf-8")).get(nf) if m == nm else None
+            skip = {no for no, _ in own["lines"]} | {own["at"]} if own else set()
+            for no, ln in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+                if no in skip or nf in ln or not rx.search(ln):
+                    continue
+                sites.append({"文件": f"services/{f.name}", "行": no, "模块": m, "注释": ln.strip().startswith("#"), "原文": ln.strip()[:80]})
+        for f in sorted((project / "ui").glob("*.ui")):
+            for no, ln in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+                if nf in ln or not rx.search(ln):
+                    continue
+                sites.append({"文件": f"ui/{f.name}", "行": no, "模块": f.stem, "注释": ln.strip().startswith("#"), "原文": ln.strip()[:80]})
+        res.append({"旧值": d["旧值"], "新来源": d["新来源"], "位置": sites})
+    return res
+
+
+def _levels(v):
+    return [x for x in re.split(r"[,，、\s]+", v or "") if x and x != "空"]
+
+
+def _json_objs(v):
+    """参数值是 JSON（rows_json 这类）→ 里面所有对象（递归）；不是 → []。"""
+    if not isinstance(v, str) or not v or v[0] not in "[{":
+        return []
+    try:
+        d = json.loads(v)
+    except ValueError:
+        return []
+    out, todo = [], [d]
+    while todo:
+        x = todo.pop()
+        if isinstance(x, dict):
+            out.append(x)
+            todo += list(x.values())
+        elif isinstance(x, list):
+            todo += x
+    return out
+
+
+def case_domain_issues(cs, domains=None, modules=None):
+    """用例数据值域检查 → [{模块, 用例, 行, 字段, 值, 科目, 值域, 说明}]（一处一条）。
+    domains：{字段: 来源}（设计声明的「值域」行），和内置的 level=科目等级 合并。科目：数据行取 subject_id，调用取参数
+    subject / subject_id / subj_id（科目编码也认），都没有算 1；用例里「先 数据 subject_info」按出现顺序就是科目 1、2…
+    （写了 id= 的按 id）；没有这行或 levels 为空 → N5..N1。用例里有「先 调用 …建科目 / 保存科目页面」时算不准科目，只查已知科目。
+    值为空、是「全部」这类哨兵值不查；用例名里提到这个概念（level：「等级」）的用例是故意测非法值，不查该字段。"""
+    doms = {"level": SUBJ_LEVELS, **(domains or {})}
+    out = []
+    for m, c in sorted(cs.items()):
+        if modules and m not in modules:
+            continue
+        for u in c["用例"]:
+            subj, codes, n = {}, {}, 0
+            for p in u["先"]:
+                if p["种类"] == "数据" and p["表"] == "subject_info":
+                    n += 1
+                    sid = int(p["值"]["id"]) if str(p["值"].get("id", "")).isdigit() else n
+                    subj[sid] = _levels(p["值"].get("levels"))
+                    if p["值"].get("code"):
+                        codes[p["值"]["code"]] = sid
+            made = any(p["种类"] == "调用" and re.search(r"建科目|保存科目页面", p["目标"]) for p in u["先"])
+
+            def sid_of(vals, fallback=1):
+                """科目编号；写了科目编码但本用例没造这个科目 → None（不查）。"""
+                for k in ("subject_id", "subject", "subj_id"):
+                    v = str(vals.get(k, "") or "")
+                    if v and v != "空":
+                        return int(v) if v.isdigit() else codes.get(v)
+                return fallback
+
+            def check(no, field, val, sid, where):
+                if val in (None, "", "空") + DOMAIN_ANY or not isinstance(val, (str, int)):
+                    return
+                if any(w in u["名"] for w in DOMAIN_WORDS.get(field, (field,))):
+                    return
+                val, src = str(val), doms[field]
+                if src == SUBJ_LEVELS:
+                    if sid is None or (sid not in subj and made):
+                        return
+                    allowed = subj.get(sid) or LEVELS_DEFAULT
+                    why = (f"科目 {sid} 的 levels" if subj.get(sid) else
+                           f"科目 {sid} {'的 levels 为空' if sid in subj else '没有 subject_info 行'}，按 N5..N1")
+                else:
+                    allowed, why = _levels(src), f"设计声明的值域 {field}"
+                if val not in allowed:
+                    out.append({"模块": m, "用例": u["名"], "行": no, "字段": field, "值": val, "科目": sid if src == SUBJ_LEVELS else None,
+                                "值域": allowed, "说明": f"{where} {field}={val} 不在{why}（{','.join(allowed)}）里"})
+
+            calls = [(p, "先 调用") for p in u["先"] if p["种类"] == "调用"] + ([(u["调用"], "调用")] if u["调用"] else [])
+            for p in u["先"]:
+                if p["种类"] != "数据" or p["表"] == "subject_info":
+                    continue
+                rsid = sid_of(p["值"])
+                for field in doms:
+                    if field in p["值"]:
+                        check(p["行"], field, p["值"][field], rsid, f"先 数据 {p['表']}")
+                for k, v in p["值"].items():
+                    for o in _json_objs(v):
+                        for field in doms:
+                            if field in o:
+                                check(p["行"], field, o[field], sid_of(o, rsid), f"先 数据 {p['表']} 的 {k}")
+            for p, where in calls:
+                sid = sid_of(p["参数"])
+                for k, v in p["参数"].items():
+                    if k in doms:
+                        check(p["行"], k, v, sid, f"{where} {p['目标']}")
+                    for o in _json_objs(v):
+                        for field in doms:
+                            if field in o:
+                                check(p["行"], field, o[field], sid_of(o, sid), f"{where} {p['目标']} 的 {k}")
+    return out
+
+
 def contract_checks(project, modules, texts):
     tf = Path(project) / "plan" / "top.zs"
     if not tf.is_file():
@@ -534,10 +779,11 @@ def module_brief(project, module, functions=None, cs=None, cols=None, ui=None):
     return {"模块": module, "函数": out}
 
 
-def build(project, modules=None, base_texts=None, functions=None):
-    """整份简报：{影响面, 模块: [module_brief], 约定检查, 调用lint}。
+def build(project, modules=None, base_texts=None, functions=None, declare=None):
+    """整份简报：{影响面, 模块: [module_brief], 约定检查, 调用lint, 写死盘点, 值域检查}。
     modules 为 None → 影响面的改动函数所在模块（函数只列改了的）；base_texts 为 None → git HEAD 的契约（取不到就没有影响面）。
-    functions：{模块: [函数名]}，给了就按它列函数。"""
+    functions：{模块: [函数名]}，给了就按它列函数。declare：load_declare 的结果（没有 = 不做写死盘点，值域只查内置的 level）。
+    写死盘点和值域检查看全项目，不受 modules 限制。"""
     project = Path(project)
     cs, texts, broken = load_contracts(project)
     cols, ui = table_columns(project, cs), parse_ui(project)
@@ -558,7 +804,10 @@ def build(project, modules=None, base_texts=None, functions=None):
         briefs.append(module_brief(project, m, fl, cs, cols, ui))
     lint = [x for x in lint_mentions(cs) if not mods or x["模块"] in mods]
     return {"项目": str(project), "影响面": imp, "模块": briefs, "约定检查": contract_checks(project, mods, texts),
-            "调用lint": lint, "约定解析问题": broken}
+            "调用lint": lint, "约定解析问题": broken,
+            "写死盘点": scan_hardcodes(project, declare, texts) if declare else None,
+            "值域检查": case_domain_issues(cs, (declare or {}).get("值域")),
+            "设计声明问题": (declare or {}).get("问题", [])}
 
 
 def _fn_md(item, full=True):
@@ -587,11 +836,33 @@ def _fn_md(item, full=True):
     return "\n".join(L)
 
 
+def deps_md(mb):
+    """模块里各函数调到的上游函数的伪代码节选（同一个上游函数只列一次）；没有 → 空串。"""
+    seen, L = set(), []
+    for item in mb["函数"]:
+        for u in item["依赖"]["调用"]:
+            body = u.get("伪代码")
+            if "问题" in u or u["函数"] in seen or not body or not body["行"]:
+                continue
+            seen.add(u["函数"])
+            note = f"（共 {body['共']} 行，超长截断了；全文见 {u['位置']}）" if body["截断"] else f"（{u['位置']}）"
+            L.append(f"#### {u['函数']} 的伪代码{note}")
+            L += [f"- {t}" for t in body["行"]]
+    if not L:
+        return ""
+    return "### 被调函数的伪代码（上游语义，只读；以对方约定为准）\n" + "\n".join(L)
+
+
 def module_md(mb, full=True):
     """一个模块的简报 → markdown（给 modify_module 的那一节就是它）。"""
     if not mb["函数"]:
         return f"（{mb.get('问题') or '没有要列的函数'}）"
-    return "\n\n".join(_fn_md(x, full) for x in mb["函数"])
+    parts = [_fn_md(x, full) for x in mb["函数"]]
+    if full:
+        d = deps_md(mb)
+        if d:
+            parts.append(d)
+    return "\n\n".join(parts)
 
 
 def impact_md(imp):
@@ -610,8 +881,41 @@ def impact_md(imp):
     return "\n".join(L)
 
 
+HARD_MD_MAX = 40       # 写死盘点每条声明在 md 里最多列几处（json 里全有）
+
+
+def hardcode_md(res, module=None):
+    """写死盘点 → markdown 行列表；module 给了只列这个模块的约定和 services（ui 不归模块，不列）。"""
+    L = []
+    for d in res or []:
+        sites = [s for s in d["位置"] if module is None or (s["模块"] == module and not s["文件"].startswith("ui/"))]
+        if not sites:
+            if module is None:
+                L.append(f"- 旧值 {d['旧值']} → 新来源 {d['新来源']}：没找到还写死旧值的地方")
+            continue
+        shown = "、".join(f"{s['文件']}:{s['行']}" + ("（注释）" if s["注释"] else "") for s in sites[:HARD_MD_MAX])
+        more = f" …另 {len(sites) - HARD_MD_MAX} 处" if len(sites) > HARD_MD_MAX else ""
+        L.append(f"- 旧值 {d['旧值']} → 新来源 {d['新来源']}：这些位置还写死旧值：{shown}{more}")
+    return L
+
+
+def domain_md(issues, module=None):
+    """用例值域检查 → markdown 行列表（一个用例一行）。"""
+    per = defaultdict(list)
+    for x in issues or []:
+        if module is None or x["模块"] == module:
+            per[(x["模块"], x["用例"])].append(x)
+    return [f"- contracts/{m}.md:{xs[0]['行']} 用例 {u}：" + "；".join(dict.fromkeys(x["说明"] for x in xs))
+            for (m, u), xs in per.items()]
+
+
 def to_md(b):
     L = ["# 实现简报（自动推出，只是提醒；以约定为准）", "", "## 影响面", impact_md(b["影响面"])]
+    if b.get("写死盘点") is not None or b.get("设计声明问题"):
+        L += ["", "## 写死盘点（设计声明；只是提示，不改 --modules）"] + hardcode_md(b.get("写死盘点"))
+        L += [f"- 设计声明{p}" for p in b.get("设计声明问题") or []]
+    dm = domain_md(b.get("值域检查"))
+    L += ["", "## 用例数据值域检查（提醒：用例造的数据和字段值域对不上，可能是约定漏改）"] + (dm or ["- 没有冲突"])
     for mb in b["模块"]:
         L += ["", f"## 模块 {mb['模块']}", module_md(mb)]
     probs = {m: p for m, p in b["约定检查"].items() if p}
@@ -649,14 +953,29 @@ def unimplemented(project, module, c):
             or any(ln.strip() == "报错 未实现" for _, ln in blocks[f["名"]]["lines"])]
 
 
-def section_for(project, module, task="", base_texts=None):
+def section_for(project, module, task="", base_texts=None, declare=None):
     """给 modify_module 的「本模块实现简报」一节的正文：只列本轮要改的函数（任务里点名的 ∪ 契约 diff 里本模块改了的 ∪ 还没实现的）；
-    都没有 → 只列出了要点的函数（不带骨架）；还是没有 → 空串（不加这一节）。"""
+    都没有 → 只列出了要点的函数（不带骨架）；还是没有 → 空串（不加这一节）。
+    末尾另附本模块的用例值域冲突、以及（给了设计声明时）本模块约定 / services 里还写死旧值的位置（有才加）。"""
     project = Path(project)
     cs, texts, _ = load_contracts(project)
     c = cs.get(module)
     if c is None:
         return ""
+    body = _section_body(project, module, task, base_texts, cs, texts, c)
+    extra = []
+    dm = domain_md(case_domain_issues(cs, (declare or {}).get("值域"), modules={module}))
+    if dm:
+        extra.append("### 本模块用例的数据和字段值域对不上（可能是约定漏改；约定不能改，实现满足不了时如实说明）\n" + "\n".join(dm))
+    if declare:
+        hm = hardcode_md(scan_hardcodes(project, declare, texts), module=module)
+        if hm:
+            extra.append("### 本模块还写死旧值的地方（设计声明：旧值要改为调用新来源函数；只是提示）\n" + "\n".join(hm))
+    return "\n\n".join(x for x in [body] + extra if x)
+
+
+def _section_body(project, module, task, base_texts, cs, texts, c):
+    """section_for 的主体（函数部分，K171 的口径）。"""
     if base_texts is None:
         base_texts = git_base_texts(project)
     names = functions_in_task(task, c)
@@ -685,9 +1004,9 @@ def read_section(module):
     return d.get("正文", "") if d.get("模块") == module else ""
 
 
-def main(project, modules=None, out=None):
-    """CLI：python -m tools.dslagent v3 brief。写 out/brief.json、brief.md（没给 out 就打印 md），返回简报 dict。"""
-    b = build(project, modules=modules)
+def main(project, modules=None, out=None, declare=None):
+    """CLI：python -m tools.dslagent v3 brief。写 out/brief.json、brief.md（没给 out 就打印 md），返回简报 dict。declare：设计声明文件路径。"""
+    b = build(project, modules=modules, declare=load_declare(declare) if declare else None)
     md = to_md(b)
     if out:
         o = Path(out)

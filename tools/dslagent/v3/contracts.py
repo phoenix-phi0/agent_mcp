@@ -2,7 +2,16 @@
 每个公开函数有用例、多余依赖……）+ v3 另加：约定的「依赖」必须是 plan/top.zs 里的模块且不成环（不要求与 top.zs 逐字一致，
 全部约定过后用「同步顶层依赖」动词同步）、表名以「模块名」或「模块名_」开头（各模块的表不重名）。
 确定性，不调模型。
+
+豁免（K174）：两条规则在约定里显式标注后不报——在被报的那一行（「表 …」行 / 用例的「调用 …」行）正上方写一行注释：
+    # 约定检查豁免 表名前缀：<理由>
+    # 约定检查豁免 可选传空 <入参> [<入参>…]：<理由>
+  可选传空 只该在「传空和不传本来就是同一件事、用例期望与不传时一致」时用（如单人模式 current_role 传空、「名称为空不改名」）；
+  「传空=清空、不传=不改」这种真矛盾不该豁免（K148 assist_material.改材料_标题为空）。注释行解析时本来就跳过，不影响代码与用例。
+  理由不能空；豁免没对上下一行的违约（规则 / 入参对不上、下一行已经不违约）也作为问题报出，免得豁免过期了还留着。
+  豁免是给人审过之后写的：问题文字里不提示这个写法（免得规划模型为了过检查自己加豁免）。
 """
+import re
 from pathlib import Path
 
 from ..packs.dslproj import contract as C
@@ -102,10 +111,7 @@ def check(text, name, top, project):
     cyc = cycle_with(project, name, c["依赖"], mods)
     if cyc:
         probs.append("约定的「依赖」会和已有约定一起成环：" + " → ".join(cyc))
-    for t in c["表"]:
-        if t["名"] != name and not t["名"].startswith(name + "_"):
-            probs.append(f"第 {t['行']} 行：表名「{t['名']}」要以「{name}_」开头（各模块的表不重名）")
-    probs += optional_empty(c)
+    probs += exempted(text, table_prefix(c, name) + optional_empty_hits(c))
     probs += provides_missing(c, name, top)
     probs += ui_action_problems(project, name, c, list(mods))
     seen = set()
@@ -125,11 +131,17 @@ def provides_missing(c, name, top):
     return probs
 
 
-def optional_empty(c):
+def table_prefix(c, name):
+    """表名没以「模块名」或「模块名_」开头 → [(行, 规则, 入参, 问题)]。"""
+    return [(t["行"], "表名前缀", "", f"第 {t['行']} 行：表名「{t['名']}」要以「{name}_」开头（各模块的表不重名）")
+            for t in c["表"] if t["名"] != name and not t["名"].startswith(name + "_")]
+
+
+def optional_empty_hits(c):
     """用例里给「可选入参」传「空」：可选入参不传和传空串都是空串，函数里分不出来，这样的用例没法由实现满足
-    （常见错法：'传空表示清空、不传表示不改'）。→ 问题列表。"""
+    （常见错法：'传空表示清空、不传表示不改'）。→ [(行, 规则, 入参, 问题)]。"""
     fns = {f["名"]: f for f in c["函数"]}
-    probs = []
+    hits = []
     for u in c["用例"]:
         call = u["调用"]
         f = fns.get(call["目标"]) if call else None
@@ -138,9 +150,76 @@ def optional_empty(c):
         opt = set(C.params(f)[1])
         for k, v in call["参数"].items():
             if k in opt and v in ("空", ""):
-                probs.append(f"第 {call['行']} 行：用例 {u['名']} 给可选入参 {k} 传了「空」，可选入参不传和传空串都是空串，函数分不出来，"
-                             f"这样的用例实现没法满足（想表达清空 / 置空，请把它改成必填入参或另做一个函数）")
-    return probs
+                hits.append((call["行"], "可选传空", k,
+                             f"第 {call['行']} 行：用例 {u['名']} 给可选入参 {k} 传了「空」，可选入参不传和传空串都是空串，函数分不出来，"
+                             f"这样的用例实现没法满足（想表达清空 / 置空，请把它改成必填入参或另做一个函数）"))
+    return hits
+
+
+def optional_empty(c):
+    """→ 问题列表（不看豁免）。"""
+    return [h[3] for h in optional_empty_hits(c)]
+
+
+EXEMPT_RE = re.compile(r"^\s*#\s*约定检查豁免\s*([^\s：:]*)((?:\s+[A-Za-z_][A-Za-z0-9_]*)*)\s*(?:[：:]\s*(.*))?$")
+EXEMPT_RULES = ("表名前缀", "可选传空")
+
+
+def exemptions(text):
+    """约定里的豁免注释 → ({目标行: [{行, 规则, 入参, 理由}]}, 问题)。目标行 = 注释下面第一个不是注释、不是空行的行。"""
+    lines = text.replace("\r", "").splitlines()
+    out, probs = {}, []
+    for i, raw in enumerate(lines):
+        m = EXEMPT_RE.match(raw)
+        if not m:
+            continue
+        no, rule, params, why = i + 1, m.group(1), m.group(2).split(), (m.group(3) or "").strip()
+        if rule not in EXEMPT_RULES:
+            probs.append(f"第 {no} 行：约定检查豁免只认 {' / '.join(EXEMPT_RULES)}，现在是「{rule}」")
+            continue
+        if not why:
+            probs.append(f"第 {no} 行：约定检查豁免要写理由（「# 约定检查豁免 {rule}{''.join(' ' + p for p in params)}：理由」）")
+            continue
+        if rule == "可选传空" and not params:
+            probs.append(f"第 {no} 行：可选传空 的豁免要写明豁免哪个入参（「# 约定检查豁免 可选传空 <入参>：理由」）")
+            continue
+        j = i + 1
+        while j < len(lines) and (not lines[j].strip() or lines[j].strip().startswith("#")):
+            j += 1
+        out.setdefault(j + 1, []).append({"行": no, "规则": rule, "入参": params if rule == "可选传空" else [""], "理由": why})
+    return out, probs
+
+
+def exempted(text, hits):
+    """hits：[(行, 规则, 入参, 问题)] → 去掉被豁免的之后的问题列表，加上豁免本身的问题（写法不对、没对上违约）。"""
+    ex, probs = exemptions(text)
+    used, out = set(), []
+    for no, rule, param, msg in hits:
+        k = next((k for k, e in enumerate(ex.get(no, [])) if e["规则"] == rule and param in e["入参"]), None)
+        if k is None:
+            out.append(msg)
+        else:
+            used.add((no, k, param))
+    for no, es in sorted(ex.items()):
+        for k, e in enumerate(es):
+            idle = [p for p in e["入参"] if (no, k, p) not in used]
+            if idle:
+                what = e["规则"] + "".join(" " + p for p in idle if p)
+                probs.append(f"第 {e['行']} 行：约定检查豁免（{what}）没有对上第 {no} 行的违约，删掉或改对")
+    return out + probs
+
+
+def check_project(project, top):
+    """plan/top.zs 里每个有 contracts/<模块>.md 的模块逐个 check → [{issue, modules, basis}]（audit2 开头的约定闸用，不调模型）。
+    还没有约定文件的模块不查（那是规划没做完，不是约定写错）。"""
+    items = []
+    for m in top["模块"]:
+        f = path_of(project, m["名"])
+        if not f.is_file():
+            continue
+        for p in check(f.read_text(encoding="utf-8"), m["名"], top, project):
+            items.append({"issue": p, "modules": m["名"], "basis": f"约定检查 contracts/{m['名']}.md"})
+    return items
 
 
 def load(project, name):

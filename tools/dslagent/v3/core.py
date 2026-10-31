@@ -40,12 +40,13 @@ def syntax_text(ctx=None):
 
 class Ctx:
     def __init__(self, project, out, req, M, cost_cap=None, module_cmd=None, module_wall=1800, module_calls=None,
-                 impl_model=None, brief=False):
+                 impl_model=None, brief=False, declare=None):
         self.project, self.out, self.req, self.M = Path(project), Path(out), req, M
         self.cost_cap, self.module_cmd, self.module_wall = cost_cap, module_cmd, module_wall
         self.module_calls = module_calls       # 派代理（执行方式=v2 的角色）的「预算 调用 N」下限；None = 不干预（change2 的 --max-turns）
         self.impl_model = impl_model           # modify_module 用的模型串（change2 / fix2 --impl-model）；None = 角色登记表的默认模型
         self.brief = brief                     # 给 modify_module 附本模块实现简报（--brief，v3/brief.py）；核查员不给
+        self.declare = declare                 # 设计声明（--declare 文件经 brief.load_declare 读出的 dict）；只在 --brief 时用
         self.usage = None                      # 引擎的 Usage（run() 里挂上）：预算按它算
         self.lock = threading.RLock()
         self.module_cost = 0.0
@@ -214,21 +215,38 @@ def brief_impact(ctx):
         ctx.log("简报影响面", 状态="出错", 原因=f"{type(e).__name__}: {e}"[:300])
         return None
     md = B.impact_md(imp)
+    try:   # K174：用例值域检查（总是做）、写死盘点（给了 --declare 才做），只是提醒
+        cs, texts, _ = B.load_contracts(ctx.project)
+        dom = B.case_domain_issues(cs, (ctx.declare or {}).get("值域"))
+        hard = B.scan_hardcodes(ctx.project, ctx.declare, texts) if ctx.declare else None
+    except Exception as e:  # noqa: BLE001
+        ctx.log("简报影响面", 状态="值域 / 写死盘点出错", 原因=f"{type(e).__name__}: {e}"[:300])
+        dom, hard = [], None
+    if dom:
+        md += "\n用例数据值域提醒（可能是约定漏改）：\n" + "\n".join(B.domain_md(dom))
+    if hard is not None:
+        md += "\n写死盘点（设计声明）：\n" + "\n".join(B.hardcode_md(hard) + [f"- 设计声明{p}" for p in ctx.declare.get("问题", [])])
+    if dom or hard is not None:
+        imp = dict(imp or {}, 值域检查=dom, 写死盘点=hard) if imp is not None else {"值域检查": dom, "写死盘点": hard}
     (ctx.out / "brief_impact.json").write_text(json.dumps(imp, ensure_ascii=False, indent=1), encoding="utf-8")
     (ctx.out / "brief_impact.md").write_text(md + "\n", encoding="utf-8")
-    if imp is None:
-        ctx.log("简报影响面", 状态="没有", 原因=md)
+    if imp is None or "建议模块" not in imp:
+        ctx.log("简报影响面", 状态="没有", 原因=B.impact_md(None))
     else:
         ctx.log("简报影响面", 建议模块=imp["建议模块"], 参考模块=sorted(imp["参考模块"]), 可能漏改契约=imp["可能漏改契约"],
                 改动函数数=len(imp["改动函数"]))
+    if imp is not None and ("值域检查" in imp or "写死盘点" in imp):
+        ctx.log("简报提醒", 值域冲突用例=len({(x["模块"], x["用例"]) for x in dom}),
+                写死位置=None if hard is None else sum(len(d["位置"]) for d in hard))
     print("[实现简报·影响面（只是建议，没有改 --modules）]\n" + md, file=sys.stderr, flush=True)
     return imp
 
 
 def run_entry(script, project, out, req, extra_vars=None, backend=None, cost_cap=None, wall=WALL,
-              module_cmd=None, module_wall=1800, module_calls=None, impl_model=None, brief=False):
+              module_cmd=None, module_wall=1800, module_calls=None, impl_model=None, brief=False, declare=None):
     """跑 v3/ 下的顶层脚本（核查.zs / 修改.zs，script 不带 .zs）：req 是需求全文。
     impl_model / brief：change2 / fix2 的 --impl-model / --brief（只作用于 modify_module，见 verbs/v3/defs/派代理.py）；brief 时开始前还写影响面（brief_impact）。
+    declare：--declare 的设计声明（brief.load_declare 的结果），只在 brief 时用（写死盘点、值域字段）。
     → {status, reason, at, 花费, 用时, 模型调用[, returned]}，同时写 out/<script>_result.json。"""
     project, out = Path(project), Path(out)
     project.mkdir(parents=True, exist_ok=True)
@@ -236,7 +254,7 @@ def run_entry(script, project, out, req, extra_vars=None, backend=None, cost_cap
     M = V2.Model(out, backend=backend, max_calls=MAX_CALLS, deadline=time.time() + wall)
     prev_calls = _load_json(out / "calls.json", [])
     ctx = Ctx(project, out, req, M, cost_cap=cost_cap, module_cmd=module_cmd, module_wall=module_wall,
-              module_calls=module_calls, impl_model=impl_model, brief=brief)
+              module_calls=module_calls, impl_model=impl_model, brief=brief, declare=declare)
     eng = V3Engine(client=GuardedClient(M, ctx), workdir=project, verbose=False, verbs_root=C.VERBS)
     eng.v3, ctx.usage = ctx, eng.usage
     if impl_model or brief:
@@ -244,7 +262,8 @@ def run_entry(script, project, out, req, extra_vars=None, backend=None, cost_cap
     if brief:
         brief_impact(ctx)
     syntax = syntax_text(ctx)
-    eng.vars.update({"req": req, "syntax": syntax, "scope": "", "modules": "", **(extra_vars or {})})   # scope / modules：audit2 / fix2 的模块范围，缺省空 = 全部
+    eng.vars.update({"req": req, "syntax": syntax, "scope": "", "modules": "", "contract_check": "",
+                     **(extra_vars or {})})   # scope / modules：audit2 / fix2 的模块范围，缺省空 = 全部；contract_check：约定闸模式，缺省空 = 拦截
     res, err = {"status": "成功", "reason": "", "at": ""}, None
     try:
         eng.run_file(HERE / f"{script}.zs")

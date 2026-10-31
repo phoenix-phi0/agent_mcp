@@ -2,6 +2,7 @@
 依赖 assist_common assist_setting assist_kg quiz teacher_rules kg lesson subject
 
 ## 表
+# 约定检查豁免 表名前缀：表名沿用 M4 从 teacher_assist 拆出本模块前的 teacher_assist_ 前缀：库里已有数据，改名要迁移库并改查询；表名不重复由全局检查保证
 表 teacher_assist_draft 学习记录
   teacher 文本 教师用户名（草稿归谁；只有本人能看、确认、放弃、撤销）
   subject_id 整数 所属科目，默认 1

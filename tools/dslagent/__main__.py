@@ -62,12 +62,19 @@ def main(argv=None):
     v.add_argument("--issues", default="latest", help="（change）读哪份问题清单：路径或 latest（默认最新一份）")
     v.add_argument("--llm", default="sonnet", help="（audit / change / audit2 / fix2）调模型用的模型名")
     v.add_argument("--modules", default=None, help="（audit2 / fix2）只审这些模块，逗号隔开（如 lesson,quiz；必须是有 contracts/<名>.md 的模块）：plan/audit2.json 只含它们的问题，范围外模块的全量回归不过、以及核查员指出「问题出在范围外模块」的 contract_issue / module_issue 不终止，记进 skipped_issues 后继续审；范围内模块自己的 contract_issue 照旧；缺省 = 审全部模块")
+    v.add_argument("--contract-check", choices=("拦截", "提醒", "关"), default=None,
+                   help="（audit2 / fix2）核查开头的约定闸（逐模块 v3/contracts.check，不调模型）：拦截（缺省）= 范围内有违约就报 contract_issue、"
+                        "不跑回归不派核查员；提醒 = 照常核查，违约放进 audit2.json 的 contract_warnings；关 = 不查（同 K174 之前）。"
+                        "约定里的豁免标注见 v3/contracts.py")
     v.add_argument("--rounds", type=int, default=5, help="（fix2）核查→修改最多几轮")
     v.add_argument("--impl-model", default=None, help="（change2 / fix2）modify_module（改代码的 v2 子进程）用的模型串，如 haiku；顶替 roles.zs 里它的默认模型（回退模型照旧）。"
                                                           "核查员（audit2）的模型仍是 --llm；不传 = 同旧")
     v.add_argument("--brief", action="store_true", help="（change2 / fix2）给 modify_module 附「本模块实现简报（自动推出，只是提醒）」一节"
                                                        "（v3/brief.py：骨架、依赖接口、实现要点 R1/R2/R6，只列本轮要改的函数），不给 audit2 核查员；"
                                                        "开始前把影响面建议（--modules 建议、可能漏改契约）写进日志和记录目录 brief_impact.*，不自动改 --modules")
+    v.add_argument("--declare", default=None, help="（brief；change2 / fix2 要和 --brief 一起）设计声明文件：每行「旧值<Tab>新来源函数」（旧值如 enum:N5..N1、persona:老师、"
+                                                       "lit:日语学习系统、re:正则；K168 domain.tsv 的 5 列格式也认）或「值域<Tab>字段<Tab>来源」。"
+                                                       "给了就在约定 / services / .ui 里盘点还写死旧值的位置，并把声明的字段加进用例值域检查；只提示，不改 --modules")
     v.add_argument("--max-turns", type=int, default=8, help="（change2）每个 modify_module 代理（v2 子进程）里计划「预算 调用 N」的下限：规划写的 N 小于它就被提到它，只放宽不收紧；缺省 8，传 0 = 不干预（规划自己定）。背景：K29b 两轮 modify_module 都只用了 2 次模型调用（1 规划 + 1 派任务）就收尾，quiz 要新增 9 个函数装不下；agents.jsonl 每条记 v2_calls（上限）和 num_turns（实际）。只对 change2 生效，audit2 / fix2 / build2 / 修改 不受影响")
     ag = sp.add_parser("agents", help="子 agent 管理：角色登记表、调度层账本")
     agsp = ag.add_subparsers(dest="agents_cmd", required=True)
@@ -84,6 +91,18 @@ def main(argv=None):
         from . import engines as EG
         if (a.impl_model or a.brief) and a.action not in ("change2", "fix2"):
             ap.error("--impl-model / --brief 只对 change2 / fix2 有效")
+        if a.contract_check and a.action not in ("audit2", "fix2"):
+            ap.error("--contract-check 只对 audit2 / fix2 有效")
+        declare = None
+        if a.declare:
+            if a.action not in ("brief", "change2", "fix2") or (a.action != "brief" and not a.brief):
+                ap.error("--declare 只对 brief，以及带 --brief 的 change2 / fix2 有效")
+            if not Path(a.declare).is_file():
+                ap.error(f"--declare 文件不存在：{a.declare}")
+            from .v3 import brief as BR
+            declare = BR.load_declare(a.declare)
+            for p in declare["问题"]:
+                print(f"[设计声明] {p}", file=sys.stderr)
         if a.impl_model:
             try:
                 EG.parse(a.impl_model)
@@ -92,7 +111,7 @@ def main(argv=None):
         if a.action == "brief":
             from .v3 import brief as BR
             names = [m.strip() for m in (a.modules or "").split(",") if m.strip()] or None
-            b = BR.main(a.project, modules=names, out=a.out)
+            b = BR.main(a.project, modules=names, out=a.out, declare=a.declare)
             imp = b["影响面"] or {}
             print(json.dumps({"模块": [m["模块"] for m in b["模块"]], "要点数": sum(len(f["要点"]) for m in b["模块"] for f in m["函数"]),
                               "建议模块": imp.get("建议模块"), "可能漏改契约": imp.get("可能漏改契约"), "out": a.out}, ensure_ascii=False))
@@ -114,12 +133,15 @@ def main(argv=None):
             if miss:
                 ap.error(f"--modules 里的模块没有 contracts/<名>.md：{','.join(miss)}")
             scope = {"scope": "|" + "|".join(names) + "|", "modules": ",".join(names)} if names else {}
+            if a.contract_check:
+                scope["contract_check"] = a.contract_check
             extra = ({"issues": a.issues} if a.action == "change2"
                      else {"llm": a.llm, "rounds": a.rounds, **scope} if a.action == "fix2" else {"llm": a.llm, **scope})
             res = V3.run_entry(a.action, a.project, a.out, req_text, extra_vars=extra,
                                cost_cap=a.cost_cap, **({"wall": a.wall} if a.wall else {}), module_wall=a.module_wall,
                                **({"module_calls": a.max_turns} if a.action == "change2" else {}),
-                               **({"impl_model": a.impl_model} if a.impl_model else {}), **({"brief": True} if a.brief else {}))
+                               **({"impl_model": a.impl_model} if a.impl_model else {}), **({"brief": True} if a.brief else {}),
+                               **({"declare": declare} if declare else {}))
             print(json.dumps({k: res.get(k) for k in ("status", "reason", "at", "花费", "用时", "模型调用", "returned")}, ensure_ascii=False))
             return 0 if res["status"] == "成功" else 1
         if a.action == "audit":

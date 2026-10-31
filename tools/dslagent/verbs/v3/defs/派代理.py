@@ -19,7 +19,7 @@ def _brief_env(c, module, task):
     """--brief：写 out/brief/<模块>_<n>.json（{模块, 正文}）→ {DSLAGENT_BRIEF_FILE: 路径}；没有可附的内容 → None（不加这一节）。"""
     from tools.dslagent.v3 import brief as B
     try:
-        text = B.section_for(c.project, module, task)
+        text = B.section_for(c.project, module, task, declare=getattr(c, "declare", None))
     except Exception as e:  # noqa: BLE001  简报只是提醒：生成出错记日志，照常派
         c.log("实现简报", 模块=module, 状态="出错", 原因=f"{type(e).__name__}: {e}"[:300])
         return None

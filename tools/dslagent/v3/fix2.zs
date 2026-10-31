@@ -3,7 +3,7 @@
 # 终止信息里带轮数和每轮改了哪些模块。
 # 提前停：连续两轮 change2 一个模块都没改成、且没改成的是同一组模块 → 终止 失败。modify_module 失败时改动整个丢弃，
 # 下一轮核查看到的还是同样的文件，再改也是同一个结果（K141：同一个「超出预期」拒改重复了 5 轮）。没改成的原因是模型写的文字、每轮措辞不同，所以只比模块。
-# 参数：req（保留给 CLI）llm=sonnet rounds=5；scope / modules（可省，模块范围，原样传给 audit2.zs，见那里的说明）；syntax 由 run_entry 注入（prompts/project_syntax.md 全文）
+# 参数：req（保留给 CLI）llm=sonnet rounds=5；scope / modules（可省，模块范围，原样传给 audit2.zs，见那里的说明）；contract_check（可省，约定闸模式，原样传给 audit2.zs）；syntax 由 run_entry 注入（prompts/project_syntax.md 全文）
 用包 common v3 text
 设 hist = 解析JSON []
 设 n = 0
@@ -11,7 +11,7 @@
 设 total = 计算 {rounds} + 1
 重复 {total} 次
   设 n = 计算 {n} + 1
-  设 a = 执行 audit2.zs req={req} llm={llm} syntax={syntax} scope={scope} modules={modules}
+  设 a = 执行 audit2.zs req={req} llm={llm} syntax={syntax} scope={scope} modules={modules} contract_check={contract_check}
   如果 {a.result 或} 等于 ok
     终止 成功 第 {n} 轮核查通过；各轮改动：{hist}
   结束

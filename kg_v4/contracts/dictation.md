@@ -923,6 +923,7 @@ GET /dictation/overview -> 取默写概况 角色 student
 用例 判答案页面_答案为空白
   先 数据 vocab_word kanji=学校 kana=がっこう meaning=学校 point_code=P1
   先 调用 开始 learner=me direction=zh2jp
+  # 约定检查豁免 可选传空 dict_answer：答案为空（不传也是空串）一律报 400 答案不能为空，用例期望与不传一致
   调用 判答案页面 learner=me dict_answer=空
   报错 400
   库 dictation_attempt 共 0 行
