@@ -674,23 +674,23 @@ content/lesson/series/{series_code}.withdrawn.jsonl 字段 code,level,title,summ
   库 lesson_pref 含 learner=me series_code=math.s subject_id=2
 
 用例 跨科目_列课文只看本科目
-  先 数据 lesson_text code=L1 level=N5 title=甲 series_code=hanabira seq=1
-  先 数据 lesson_text code=math.L1 level=N5 title=乙 series_code=math.s seq=1 subject_id=2
+  先 数据 lesson_text code=L1 level=N5 title=甲 examples_edited=0 series_code=hanabira seq=1
+  先 数据 lesson_text code=math.L1 level=N5 title=乙 examples_edited=0 series_code=math.s seq=1 subject_id=2
   调用 列课文 subject=2
   得 total=1
 
 用例 跨科目_取课文别的科目当不存在
-  先 数据 lesson_text code=math.L1 level=N5 title=乙 series_code=math.s seq=1 subject_id=2
+  先 数据 lesson_text code=math.L1 level=N5 title=乙 examples_edited=0 series_code=math.s seq=1 subject_id=2
   调用 取课文 code=math.L1
   得 为空
 
 用例 跨科目_取课文本科目
-  先 数据 lesson_text code=math.L1 level=N5 title=乙 series_code=math.s seq=1 subject_id=2
+  先 数据 lesson_text code=math.L1 level=N5 title=乙 examples_edited=0 series_code=math.s seq=1 subject_id=2
   调用 取课文 code=math.L1 subject=2
   得 code=math.L1 title=乙
 
 用例 跨科目_取课文关联条目别的科目404
-  先 数据 lesson_text code=math.L1 level=N5 title=乙 series_code=math.s seq=1 subject_id=2
+  先 数据 lesson_text code=math.L1 level=N5 title=乙 examples_edited=0 series_code=math.s seq=1 subject_id=2
   调用 取课文关联条目 lesson_code=math.L1
   报错 404
 
@@ -739,7 +739,7 @@ content/lesson/series/{series_code}.withdrawn.jsonl 字段 code,level,title,summ
 用例 跨科目_导入课文课号被别的科目占用
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
-  先 数据 lesson_text code=math.L1 level=N5 title=旧 series_code=other seq=1 subject_id=1
+  先 数据 lesson_text code=math.L1 level=N5 title=旧 examples_edited=0 series_code=other seq=1 subject_id=1
   先 文件 imports/m4.md 内容=math.L1|N5|标题一|一句话|讲解|接续|例句A^^中文A|0|原标题|1||
   调用 导入课文 series_code=math.s file_path=imports/m4.md subject=2
   报错 400
@@ -807,15 +807,15 @@ content/lesson/series/{series_code}.withdrawn.jsonl 字段 code,level,title,summ
 
 用例 跨科目_教材页面只见本科目的系列和课文
   先 数据 lesson_series code=hanabira name=Hanabira sort_order=1
-  先 数据 lesson_text code=L1 level=N5 title=甲 series_code=hanabira seq=1
+  先 数据 lesson_text code=L1 level=N5 title=甲 examples_edited=0 series_code=hanabira seq=1
   先 数据 lesson_series code=math.s name=数学教材 sort_order=1 subject_id=2
-  先 数据 lesson_text code=math.L1 level=N5 title=乙 series_code=math.s seq=1 subject_id=2
+  先 数据 lesson_text code=math.L1 level=N5 title=乙 examples_edited=0 series_code=math.s seq=1 subject_id=2
   调用 教材页面 learner=me subject=2
   得 series_head=数学教材 lesson_count=共1课
 
 用例 跨科目_课文页面别的科目的课不报错
   先 数据 lesson_series code=hanabira name=Hanabira sort_order=1
-  先 数据 lesson_text code=L1 level=N5 title=甲 series_code=hanabira seq=1
+  先 数据 lesson_text code=L1 level=N5 title=甲 examples_edited=0 series_code=hanabira seq=1
   调用 课文页面 learner=me lesson=L1 subject=2
   得 有返回
 

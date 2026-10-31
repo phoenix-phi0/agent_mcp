@@ -16,7 +16,7 @@
   字段 explain 长文本 讲解，可空
   字段 connection 长文本 接续，可空
   字段 examples 长文本 例句（日语+中文，整体存取，不拆行），可空
-  字段 examples_edited 整数 必填 默认 0 是否改过例句（1/0）
+  字段 examples_edited 整数 必填 是否改过例句（1/0）
   字段 orig_title 文本 原标题，可空
   字段 series_code 文本 必填 所属系列编号
   字段 seq 整数 必填 课序（线性教材显示第
