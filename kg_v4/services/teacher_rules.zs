@@ -658,7 +658,9 @@
     如果 {ex} 大于 0
       设 ra = 查一值 app.db teacher_rules_recent_asks learner={preview_student} subj={sid}
     结束
-    设 recent_text = 查一值 app.db teacher_rules_text_join a={ra} b={preview_message}
+    设 ja.a = {ra}
+    设 ja.b = {preview_message}
+    设 recent_text = 查一值表 app.db teacher_rules_text_join {ja}
     设 eff = 调用 取生效设定 student={preview_student} recent_text={recent_text} subject={sid}
     设 pend = 调用 取待传达 student={preview_student} subject={sid}
     设 ids = {eff.setting_ids}
@@ -671,8 +673,22 @@
       设 rest_n = 计算 {pend.count} - 1
       设 relay_pick = 查一值 app.db teacher_rules_relay_pick id={first} rest={rest_n}
     结束
-    设 layout = 查一值 app.db teacher_rules_preview_layout memory={eff.memory_text} card={eff.card_text} relay={pend.prompt_text} note={eff.note_text} message={preview_message}
-    设 hits = 查询 app.db teacher_rules_hit_cards student={preview_student} recent={recent_text} subj={sid}
+    设 ts = 调用 subject.科目老师设定 subject_id={sid}
+    设 opener = {ts.persona}
+    如果 {sid} 等于 1 且 {ts.custom 或} 为空
+      设 opener = 你是一位耐心的日语老师
+    结束
+    设 lo.memory = {eff.memory_text}
+    设 lo.card = {eff.card_text}
+    设 lo.relay = {pend.prompt_text}
+    设 lo.note = {eff.note_text}
+    设 lo.message = {preview_message}
+    设 lo.opener = {opener}
+    设 layout = 查一值表 app.db teacher_rules_preview_layout {lo}
+    设 hi.student = {preview_student}
+    设 hi.recent = {recent_text}
+    设 hi.subj = {sid}
+    设 hits = 查询表 app.db teacher_rules_hit_cards {hi}
     设 pv.ids = {ids}
     设 pv.relay_pick = {relay_pick}
     设 pv.layout = {layout}

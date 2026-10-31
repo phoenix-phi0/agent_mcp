@@ -60,11 +60,14 @@
       返回 {"status": "none", "username": "", "display_name": "", "candidates": [], "roster": "{roster}"}
     结束
     设 n = 替换 {n} 同学$
+    设 n = 替换 {n} ^\s+|\s+$
     如果 {n} 为空
       返回 {"status": "none", "username": "", "display_name": "", "candidates": [], "roster": "{roster}"}
     结束
-    设 ln = 查一值 app.db assist_common_lower s={n}
-    设 nlen = 查一值 app.db assist_common_len t={n}
+    设 pa1 = {"s": "{n}"}
+    设 ln = 查一值表 app.db assist_common_lower {pa1}
+    设 pa2 = {"t": "{n}"}
+    设 nlen = 查一值表 app.db assist_common_len {pa2}
     设 n1 = 0
     设 n2 = 0
     设 n3 = 0
@@ -78,8 +81,10 @@
     设 u3 = {blank}
     设 d3 = {blank}
     遍历 s 于 {r.students}
-      设 lu = 查一值 app.db assist_common_lower s={s.username}
-      设 dl = 查一值 app.db assist_common_len t={s.display_name}
+      设 pa3 = {"s": "{s.username}"}
+      设 lu = 查一值表 app.db assist_common_lower {pa3}
+      设 pa4 = {"t": "{s.display_name}"}
+      设 dl = 查一值表 app.db assist_common_len {pa4}
       设 it = {"username": "{s.username}", "display_name": "{s.display_name}", "status": "{s.status}"}
       如果 {lu} 等于 {ln}
         如果 {c1} 为空
@@ -173,11 +178,14 @@
       返回 {"status": "none", "code": "", "title": "", "candidates": [], "total": 0}
     结束
     设 k = 替换 {k} 的用法$
+    设 k = 替换 {k} ^\s+|\s+$
     如果 {k} 为空
       返回 {"status": "none", "code": "", "title": "", "candidates": [], "total": 0}
     结束
-    设 lk = 查一值 app.db assist_common_lower s={k}
-    设 klen = 查一值 app.db assist_common_len t={k}
+    设 pa5 = {"s": "{k}"}
+    设 lk = 查一值表 app.db assist_common_lower {pa5}
+    设 pa6 = {"t": "{k}"}
+    设 klen = 查一值表 app.db assist_common_len {pa6}
     设 r = 调用 kg.列知识点 subject={subject_id}
     设 n1 = 0
     设 n2 = 0
@@ -196,8 +204,10 @@
     设 a4 = {blank}
     设 b4 = {blank}
     遍历 p 于 {r.points}
-      设 lc = 查一值 app.db assist_common_lower s={p.code}
-      设 tl = 查一值 app.db assist_common_len t={p.title}
+      设 pa7 = {"s": "{p.code}"}
+      设 lc = 查一值表 app.db assist_common_lower {pa7}
+      设 pa8 = {"t": "{p.title}"}
+      设 tl = 查一值表 app.db assist_common_len {pa8}
       设 it = {"code": "{p.code}", "title": "{p.title}"}
       如果 {lc} 等于 {lk}
         如果 {c1} 为空
@@ -247,7 +257,8 @@
       设 its = 调用 kg.列条目 subject={subject_id}
       设 seen = ,
       遍历 x 于 {its.items}
-        设 xl = 查一值 app.db assist_common_len t={x.name}
+        设 pa9 = {"t": "{x.name}"}
+        设 xl = 查一值表 app.db assist_common_len {pa9}
         设 hit = 0
         如果 {x.name} 包含 {k}
           设 hit = 1

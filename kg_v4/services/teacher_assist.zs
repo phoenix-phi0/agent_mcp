@@ -103,8 +103,10 @@
       设 lim = 20
     结束
     设 head = 今天：{today}{nl}全班 {r.total} 人，有作答的 {m} 人，还没作答的 {k} 人
-    设 hl = 查一值 app.db teacher_assist_len t={head}
-    设 tl = 查一值 app.db teacher_assist_len t={tail}
+    设 ah.t = {head}
+    设 hl = 查一值表 app.db teacher_assist_len {ah}
+    设 at2.t = {tail}
+    设 tl = 查一值表 app.db teacher_assist_len {at2}
     设 budget = 计算 2500 - {hl} - {tl} - 20
     设 rows = {blank}
     设 shown = 0
@@ -123,10 +125,14 @@
           结束
           设 wn = 计算 {wn} + 1
         结束
-        设 l10 = 查一值 app.db teacher_assist_substr t={s.last_at} n=10
+        设 al.t = {s.last_at}
+        设 al.n = 10
+        设 l10 = 查一值表 app.db teacher_assist_substr {al}
         设 row = {s.display_name}（{s.username}）｜作答 {s.answer_total}｜近期正确率 {s.recent_accuracy}%｜平均分 {s.avg_score}｜已掌握 {s.mastered_count}｜低分点 {s.weak_count} 个（{wt}）｜最近学习 {l10}
-        设 rl = 查一值 app.db teacher_assist_len t={row}
-        设 used = 查一值 app.db teacher_assist_len t={rows}
+        设 ar.t = {row}
+        设 rl = 查一值表 app.db teacher_assist_len {ar}
+        设 au.t = {rows}
+        设 used = 查一值表 app.db teacher_assist_len {au}
         设 newlen = 计算 {used} + {rl} + 1
         如果 {newlen} 大于 {budget}
           设 cut = 1
@@ -161,7 +167,9 @@
     设 r = 调用 report.取学生学情 student={username} subject={subject_id}
     设 la = 没有作答
     如果 {last_at} 不为空
-      设 la = 查一值 app.db teacher_assist_substr t={last_at} n=10
+      设 sa.t = {last_at}
+      设 sa.n = 10
+      设 la = 查一值表 app.db teacher_assist_substr {sa}
     结束
     设 out = 学生：{display_name}（{username}），状态 {r.status}，最近学习 {la}
     如果 {r.answer_total} 等于 0
@@ -187,7 +195,9 @@
     设 i = 0
     遍历 x 于 {r.wrong_answers}
       如果 {i} 小于 5
-        设 d10 = 查一值 app.db teacher_assist_substr t={x.at} n=10
+        设 sd.t = {x.at}
+        设 sd.n = 10
+        设 d10 = 查一值表 app.db teacher_assist_substr {sd}
         设 piece = {x.title} {d10}
         如果 {wa} 为空
           设 wa = {piece}
@@ -216,7 +226,9 @@
     设 i = 0
     遍历 x 于 {r.recent_questions}
       如果 {i} 小于 3 且 {x.content} 不为空
-        设 piece = 查一值 app.db teacher_assist_substr t={x.content} n=40
+        设 sq.t = {x.content}
+        设 sq.n = 40
+        设 piece = 查一值表 app.db teacher_assist_substr {sq}
         如果 {qs} 为空
           设 qs = {piece}
         否则
@@ -234,12 +246,16 @@
     结束
     设 out = {out}{nl}未传达完的传达 {unf} 条
     如果 {r.has_summary} 等于 1
-      设 sm = 查一值 app.db teacher_assist_substr t={r.summary} n=200
+      设 ss.t = {r.summary}
+      设 ss.n = 200
+      设 sm = 查一值表 app.db teacher_assist_substr {ss}
       设 out = {out}{nl}最近的 AI 学情总结（{r.summary_at}，{r.summary_author}）：{sm}
     结束
-    设 ol = 查一值 app.db teacher_assist_len t={out}
+    设 so.t = {out}
+    设 ol = 查一值表 app.db teacher_assist_len {so}
     如果 {ol} 大于 1500
-      设 out = 查一值 app.db teacher_assist_substr t={out} n=1500
+      设 so.n = 1500
+      设 out = 查一值表 app.db teacher_assist_substr {so}
     结束
     返回 {out}
   结束
@@ -512,9 +528,11 @@
           设 ptitle = {m2.title}
         结束
       结束
-      设 cl = 查一值 app.db teacher_assist_len t={ctx}
+      设 sx.t = {ctx}
+      设 cl = 查一值表 app.db teacher_assist_len {sx}
       如果 {cl} 大于 4500
-        设 ctx = 查一值 app.db teacher_assist_substr t={ctx} n=4500
+        设 sx.n = 4500
+        设 ctx = 查一值表 app.db teacher_assist_substr {sx}
       结束
     否则
       设 ctx = 系统功能说明：{nl}教师端的页面有：学情（看全班和单个学生的学习情况，可生成AI学情总结）；教师助手（就是现在这个对话页，按数据回答老师的问题，也能按老师的话生成出题、给学生发传达、改AI老师设定、加知识点/条目/前置边的草稿）；学生管理（建学生账号、重置密码、停用或启用）；科目管理（管理科目、协作教师和学生的分配）；图谱管理（管理本科目的知识点、条目、前置边和对照，可批量导入导出）；AI老师设定（设定学生端问老师的说话方式和规则）；教材导入（导入课文教材）；教学材料（助手生成的教案、课堂练习、讲义、学情报告在这里列出、编辑、导出、删除，课堂练习可以做成出题草稿）。{nl}学生端共有6个页面：问老师（向AI老师提问）；做题（按知识点做题）；默写（单词默写）；教材（阅读课文）；学习进度（看进度和得分）；知识图谱（看知识点之间的前置关系）。{nl}助手页底栏可以传附件：支持 txt、md、csv、pdf、docx，单个 10MB，每个科目最多存 20 个；xlsx 要另存为 csv，暂不支持图片。挂着的附件接下来几轮都带上，可以就附件提问、总结、分析成绩表（统计由系统算好），也可以「按附件出题」；点「移除附件」后不再带。{nl}助手能按老师的话生成「出题」「给学生发传达」「改 AI 老师设定」「加知识点/条目/前置边」四种草稿，草稿要老师在对话里或右边「待确认」列表里点「确认」才写入，7 天内可以撤销（设定在确认后被别人改过的不撤、知识点和条目已被引用的不撤）；助手能按老师的话写教案、课堂练习、讲义、学情报告（先存成未保存，点「保存」才留下，7 天不保存自动清掉；只读老师不能生成）；助手能做深度学情：最近几周的正确率和作答量趋势、错题归因到知识点和条目、2 到 5 位学生对比、掉队名单（规则：全班近 7 天有作答而这位学生 7 天以上没作答，或近 14 天正确率比之前 14 天低 15 个百分点以上），数字和字符图都由系统算好；可以说「给掉队的学生发传达」，助手按掉队名单出传达草稿；助手不能直接改数据，只能改本科目的设定，「全部科目」的设定、科目设置和成员它做不了；只读老师只能提问不能生成草稿。
@@ -844,7 +862,9 @@
           否则
             设 status = ok
             设 did = {g.draft_id}
-            设 pv = 查一值 app.db teacher_assist_substr t={g.preview} n=300
+            设 sg.t = {g.preview}
+            设 sg.n = 300
+            设 pv = 查一值表 app.db teacher_assist_substr {sg}
             设 pre = 已生成草稿
             设 reply = {pre} #{g.draft_id}：{g.title}{nl}{pv}{nl}点「确认」才会写入；不要就点「放弃」。也可以直接说哪里要改，我出一份修订稿。{more30}
           结束
@@ -1152,7 +1172,9 @@
     设 sent = {r.hint}
     设 did = {blank}
     如果 {r.status} 等于 ok
-      设 pv = 查一值 app.db teacher_assist_substr t={r.preview} n=300
+      设 sp.t = {r.preview}
+      设 sp.n = 300
+      设 pv = 查一值表 app.db teacher_assist_substr {sp}
       设 pre = 已把课堂练习
       设 sent = {pre} #{mat_id} 做成出题草稿 #{r.draft_id}：{r.title}{nl}{pv}{nl}点「确认」才会写入题库；不要就点「放弃」。
       设 did = {r.draft_id}
