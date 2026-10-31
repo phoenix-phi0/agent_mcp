@@ -8,7 +8,7 @@
   结束
 
   函数 学生范围 subject_id
-    设 al = 调用 account.列学生
+    设 al = 调用 account.列学生 subject={subject_id}
     设 ss = 调用 subject.列科目学生 subject_id={subject_id}
     设 res = 解析JSON []
     遍历 a0 于 {al.students}

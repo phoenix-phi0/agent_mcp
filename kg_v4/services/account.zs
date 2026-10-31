@@ -26,14 +26,15 @@
     返回 {"username": "{u.username}", "display_name": "{u.display_name}", "role": "{u.role}", "disabled": {u.disabled}, "created_at": "{u.created_at}"}
   结束
 
-  公开 函数 列学生
+  公开 函数 列学生 learner? current_role? auth_mode? subject?
+    设 sj = 调用 subject.解析科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     # 返回 {total, students}；students 是 [{username, display_name, status, answer_count, last_at}]，只含 role 为 student 的账号，按 id 升序；status 为「启用」或「停用」；answer_count 是作答数，没有作答为 0；last_at 是最近学习时间，没有作答为空串
     # 查 account_user 中 role 等于 student 的全部行，按 id 升序
     # 调用 progress.统计作答，得到 learners 列表
     # 对每个学生，在 learners 里按 learner 等于 username 找到则取 answer_count 和 last_at，找不到则 answer_count 为 0、last_at 为空串
     # disabled 等于 1 则 status 为「停用」，否则为「启用」
     设 rows = 查询 app.db account_students
-    设 pr = 调用 progress.统计作答
+    设 pr = 调用 progress.统计作答 subject={sj.subject_id}
     设 list = 解析JSON []
     遍历 s 于 {rows}
       设 cnt = 0
@@ -59,11 +60,12 @@
     返回 {"total": {total}, "students": {list}}
   结束
 
-  公开 函数 列学生页面
+  公开 函数 列学生页面 learner? current_role? auth_mode? subject?
+    设 sj = 调用 subject.解析科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     # 返回 [{username, display_name, account_state, attempt_n, last_active}]（数组）
     # 口径与 列学生 相同，行键按页面口径输出
     设 rows = 查询 app.db account_students
-    设 pr = 调用 progress.统计作答
+    设 pr = 调用 progress.统计作答 subject={sj.subject_id}
     设 list = 解析JSON []
     遍历 s 于 {rows}
       设 cnt = 0
@@ -240,7 +242,8 @@
     返回 {"ok": 1}
   结束
 
-  公开 函数 建学生 username password display_name
+  公开 函数 建学生 username password display_name learner? current_role? auth_mode? subject?
+    设 sj = 调用 subject.解析科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     # 返回 {ok, username, display_name, role}；role 固定为 student
     # 报错 400 用户名和密码不能为空
     # 报错 409 用户名已存在
@@ -278,7 +281,7 @@
     设 f.created_at = {ca}
     设 n = 写库表 app.db account_user_insert {f}
     设 rg = 调用 subject.登记学生 learner={username} code=jp_grammar
-    设 out = 调用 列学生页面
+    设 out = 调用 列学生页面 subject={sj.subject_id}
     返回 {out}
   结束
 
@@ -307,7 +310,8 @@
     返回 {"ok": 1}
   结束
 
-  公开 函数 设置学生停用 username disabled
+  公开 函数 设置学生停用 username disabled learner? current_role? auth_mode? subject?
+    设 sj = 调用 subject.解析科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     # 返回 {ok, username, disabled}
     # 报错 400 disabled 只能是 0 或 1
     # 报错 404 没有这个账号
@@ -327,7 +331,7 @@
       报错 403 只能操作学生账号
     结束
     设 n = 写库 app.db account_user_set_disabled username={username} disabled={disabled}
-    设 out = 调用 列学生页面
+    设 out = 调用 列学生页面 subject={sj.subject_id}
     返回 {out}
   结束
 

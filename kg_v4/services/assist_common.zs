@@ -11,7 +11,7 @@
     设 blank = {zz 或}
     设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 subject_id = {sj.subject_id}
-    设 al = 调用 account.列学生
+    设 al = 调用 account.列学生 subject={subject_id}
     设 ss = 调用 subject.列科目学生 subject_id={subject_id}
     设 cnt = 0
     设 out = {blank}

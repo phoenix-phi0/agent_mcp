@@ -398,7 +398,12 @@
     如果 {sname 或} 为空
       设 sname = 科目{sid}
     结束
-    设 rows = 查询 app.db teacher_rules_note_rows student={student} subj={sid} sname={sname} own={own} wr={wr}
+    设 na.student = {student}
+    设 na.subj = {sid}
+    设 na.sname = {sname}
+    设 na.own = {own}
+    设 na.wr = {wr}
+    设 rows = 查询表 app.db teacher_rules_note_rows {na}
     设 tv = 替换 文本=xtruex 正则=x
     设 fv = 替换 文本=xfalsex 正则=x
     设 items = 解析JSON []
@@ -438,7 +443,15 @@
     如果 {sname 或} 为空
       设 sname = 科目{sid}
     结束
-    设 rows = 查询 app.db teacher_rules_relay_rows student={student} today={today} studs={studs} total={total} subj={sid} sname={sname} own={own} wr={wr}
+    设 ra.student = {student}
+    设 ra.today = {today}
+    设 ra.studs = {studs}
+    设 ra.total = {total}
+    设 ra.subj = {sid}
+    设 ra.sname = {sname}
+    设 ra.own = {own}
+    设 ra.wr = {wr}
+    设 rows = 查询表 app.db teacher_rules_relay_rows {ra}
     返回 {rows}
   结束
 
@@ -462,7 +475,11 @@
           如果 {a.display_name 或} 不为空
             设 label = {a.display_name}（{nm.username}）
           结束
-          设 p = 查一行 app.db teacher_rules_relay_pair relay_id={rel.id} student={nm.username} today={today} label={label}
+          设 pa.relay_id = {rel.id}
+          设 pa.student = {nm.username}
+          设 pa.today = {today}
+          设 pa.label = {label}
+          设 p = 查一行表 app.db teacher_rules_relay_pair {pa}
           设 out = 列表加项 {out} {p}
         结束
       结束
@@ -505,7 +522,9 @@
       如果 {a.display_name 或} 不为空
         设 label = {a.display_name}（{nm.username}）
       结束
-      设 o = 查一行 app.db teacher_rules_student_option username={nm.username} label={label}
+      设 oa.username = {nm.username}
+      设 oa.label = {label}
+      设 o = 查一行表 app.db teacher_rules_student_option {oa}
       设 opts = 列表加项 {opts} {o}
     结束
     设 out.class_notes = {notes}

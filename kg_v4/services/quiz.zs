@@ -1143,7 +1143,10 @@
         结束
       结束
     结束
-    设 ex2 = 查一值 app.db quiz_explain_tail expl={res.explain} name={nm} lt={ltail}
+    设 tailp.expl = {res.explain}
+    设 tailp.name = {nm}
+    设 tailp.lt = {ltail}
+    设 ex2 = 查一值表 app.db quiz_explain_tail {tailp}
     设 card.code = {tc.card.code}
     设 card.head = {tc.card.head}
     设 card.stem = {tc.card.stem}

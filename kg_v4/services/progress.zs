@@ -108,7 +108,8 @@
     设 lines = 调用 核对分数线 pass_line={pass_line} fall_line={fall_line}
     设 now = 当前时间
     事务 app.db
-      设 w1 = 写库 app.db progress_answer_insert learner={learner} point_code={point_code} question_no={question_no} correct={correct} answer={answer} at={now} subject_id={sid}
+      设 arec = {"learner": "{learner}", "point_code": "{point_code}", "question_no": "{question_no}", "correct": "{correct}", "answer": "{answer}", "at": "{now}", "subject_id": "{sid}"}
+      设 w1 = 写库表 app.db progress_answer_insert {arec}
       设 mrow = 查一行 app.db progress_mastery_get learner={learner} point_code={point_code} subject_id={sid}
       如果 {mrow} 为空
         设 w2 = 写库 app.db progress_mastery_insert learner={learner} point_code={point_code} right_count={correct} total_count=1 at={now} subject_id={sid}
@@ -219,8 +220,7 @@
     如果 {at_} 大于 0
       设 acc = 计算 四舍五入({rt} * 100 / {at_})
       设 empty = 0
-      设 hint = {hint 或}
-      设 hint = 替换 {hint} .+ 
+      设 hint = {zz 或}
     结束
     返回 {"learner": "{learner}", "point_total": {lst.total}, "mastered_count": {mcnt}, "answer_total": {at_}, "right_total": {rt}, "accuracy": {acc}, "is_empty": {empty}, "hint": "{hint}"}
   结束

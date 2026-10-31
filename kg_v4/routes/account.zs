@@ -31,17 +31,17 @@
 结束
 
 接口 GET /account/students 角色 teacher
-  设 r = 调用 account.列学生
+  设 r = 调用 account.列学生 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   返回 {r}
 结束
 
 接口 POST /account/students 动作 student_home 角色 teacher
-  设 r = 调用 account.列学生页面
+  设 r = 调用 account.列学生页面 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   表格 students {r}
 结束
 
 接口 POST /account/students/create 动作 student_create 角色 teacher
-  设 r = 调用 account.建学生 username={username} password={password} display_name={display_name}
+  设 r = 调用 account.建学生 username={username} password={password} display_name={display_name} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   设 _msg = 建好了学生账号：{username}
   表格 students {r}
   消息 系统 {_msg} ok
@@ -54,14 +54,14 @@
 结束
 
 接口 POST /account/students/disable 动作 student_disable 角色 teacher
-  设 r = 调用 account.设置学生停用 username={username} disabled=1
+  设 r = 调用 account.设置学生停用 username={username} disabled=1 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   设 _msg = 已停用
   表格 students {r}
   消息 系统 {_msg} ok
 结束
 
 接口 POST /account/students/enable 动作 student_enable 角色 teacher
-  设 r = 调用 account.设置学生停用 username={username} disabled=0
+  设 r = 调用 account.设置学生停用 username={username} disabled=0 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   设 _msg = 已启用
   表格 students {r}
   消息 系统 {_msg} ok

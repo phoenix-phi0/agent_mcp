@@ -8,7 +8,11 @@
     # keyword 不为空时，只留下 kanji、kana、meaning 任一字段包含 keyword 的行
     # point_code 不为空时，只留下 point_code 等于该值的行
     设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
-    设 rows = 查询 app.db vocab_list keyword={keyword} point_code={point_code} subject_id={sb.subject_id}
+    设 kw = 替换 {keyword} ^\s+|\s+$
+    设 q.keyword = {kw}
+    设 q.point_code = {point_code}
+    设 q.subject_id = {sb.subject_id}
+    设 rows = 查询表 app.db vocab_list {q}
     设 n = 列表长度 {rows}
     设 out.total = {n}
     设 out.words = {rows}
@@ -29,7 +33,12 @@
     如果 {word_id} 不为空
       设 w = 查一行 app.db vocab_by_id word_id={word_id} subject_id={sb.subject_id}
     否则
-      设 w = 查一行 app.db vocab_by_key kanji={kanji} kana={kana} subject_id={sb.subject_id}
+      设 tk = 替换 {kanji} ^\s+|\s+$
+      设 ta = 替换 {kana} ^\s+|\s+$
+      设 kq.kanji = {tk}
+      设 kq.kana = {ta}
+      设 kq.subject_id = {sb.subject_id}
+      设 w = 查一行表 app.db vocab_by_key {kq}
     结束
     返回 {w}
   结束
@@ -107,23 +116,35 @@
     # 按 kanji + kana 查 vocab_word，已有则报错 400 单词已存在
     # 往 vocab_word 插入一行 (kanji, kana, meaning, point_code)
     设 sb = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
-    如果 {kana} 为空
+    设 tk = 替换 {kanji} ^\s+|\s+$
+    设 ta = 替换 {kana} ^\s+|\s+$
+    设 tm = 替换 {meaning} ^\s+|\s+$
+    设 tp = 替换 {point_code} ^\s+|\s+$
+    如果 {ta} 为空
       报错 400 假名不能为空
     结束
-    如果 {point_code} 不为空
-      设 p = 调用 kg.取知识点 code={point_code} subject={sb.subject_id}
+    如果 {tp} 不为空
+      设 p = 调用 kg.取知识点 code={tp} subject={sb.subject_id}
       如果 {p} 为空
         报错 404 没有这个知识点
       结束
     结束
-    设 ex = 查一值 app.db vocab_id_by_key kanji={kanji} kana={kana} subject_id={sb.subject_id}
+    设 kq.kanji = {tk}
+    设 kq.kana = {ta}
+    设 kq.subject_id = {sb.subject_id}
+    设 ex = 查一值表 app.db vocab_id_by_key {kq}
     如果 {ex} 不为空
       报错 400 单词已存在
     结束
+    设 iq.kanji = {tk}
+    设 iq.kana = {ta}
+    设 iq.meaning = {tm}
+    设 iq.point_code = {tp}
+    设 iq.subject_id = {sb.subject_id}
     事务 app.db
-      设 n = 写库 app.db vocab_insert kanji={kanji} kana={kana} meaning={meaning} point_code={point_code} subject_id={sb.subject_id}
+      设 n = 写库表 app.db vocab_insert {iq}
     结束
-    设 nid = 查一值 app.db vocab_id_by_key kanji={kanji} kana={kana} subject_id={sb.subject_id}
+    设 nid = 查一值表 app.db vocab_id_by_key {kq}
     返回 {"ok": 1, "id": {nid}}
   结束
 
@@ -143,21 +164,35 @@
     如果 {w} 为空
       报错 404 没有这个单词
     结束
-    如果 {kana} 为空
+    设 tk = 替换 {kanji} ^\s+|\s+$
+    设 ta = 替换 {kana} ^\s+|\s+$
+    设 tm = 替换 {meaning} ^\s+|\s+$
+    设 tp = 替换 {point_code} ^\s+|\s+$
+    如果 {ta} 为空
       报错 400 假名不能为空
     结束
-    设 dup = 查一值 app.db vocab_dup_other kanji={kanji} kana={kana} word_id={word_id} subject_id={sb.subject_id}
+    设 dq.kanji = {tk}
+    设 dq.kana = {ta}
+    设 dq.word_id = {word_id}
+    设 dq.subject_id = {sb.subject_id}
+    设 dup = 查一值表 app.db vocab_dup_other {dq}
     如果 {dup} 不为空
       报错 400 单词已存在
     结束
-    如果 {point_code} 不为空
-      设 p = 调用 kg.取知识点 code={point_code} subject={sb.subject_id}
+    如果 {tp} 不为空
+      设 p = 调用 kg.取知识点 code={tp} subject={sb.subject_id}
       如果 {p} 为空
         报错 404 没有这个知识点
       结束
     结束
+    设 uq.word_id = {word_id}
+    设 uq.kanji = {tk}
+    设 uq.kana = {ta}
+    设 uq.meaning = {tm}
+    设 uq.point_code = {tp}
+    设 uq.subject_id = {sb.subject_id}
     事务 app.db
-      设 n = 写库 app.db vocab_update_full word_id={word_id} kanji={kanji} kana={kana} meaning={meaning} point_code={point_code} subject_id={sb.subject_id}
+      设 n = 写库表 app.db vocab_update_full {uq}
     结束
     返回 {"ok": 1, "id": {word_id}}
   结束
@@ -209,11 +244,13 @@
       如果 {m.matched} 不等于 是
         报错 400 导入文件有错
       结束
-      如果 {m.named.kana} 为空
+      设 ika = 替换 {m.named.kana} ^\s+|\s+$
+      设 icode = 替换 {m.named.code} ^\s+|\s+$
+      如果 {ika} 为空
         报错 400 导入文件有错
       结束
-      如果 {m.named.code} 不为空
-        设 p = 调用 kg.取知识点 code={m.named.code} subject={sb.subject_id}
+      如果 {icode} 不为空
+        设 p = 调用 kg.取知识点 code={icode} subject={sb.subject_id}
         如果 {p} 为空
           报错 400 知识点对不上
         结束
@@ -226,12 +263,22 @@
     事务 app.db
       遍历 full 于 {valid}
         设 m = 匹配 {full} {pat}
-        设 ex = 查一值 app.db vocab_id_by_key kanji={m.named.kanji} kana={m.named.kana} subject_id={sb.subject_id}
+        设 ik = 替换 {m.named.kanji} ^\s+|\s+$
+        设 ia = 替换 {m.named.kana} ^\s+|\s+$
+        设 im = 替换 {m.named.meaning} ^\s+|\s+$
+        设 ic = 替换 {m.named.code} ^\s+|\s+$
+        设 jq.kanji = {ik}
+        设 jq.kana = {ia}
+        设 jq.meaning = {im}
+        设 jq.point_code = {ic}
+        设 jq.subject_id = {sb.subject_id}
+        设 ex = 查一值表 app.db vocab_id_by_key {jq}
         如果 {ex} 为空
-          设 n = 写库 app.db vocab_insert kanji={m.named.kanji} kana={m.named.kana} meaning={m.named.meaning} point_code={m.named.code} subject_id={sb.subject_id}
+          设 n = 写库表 app.db vocab_insert {jq}
           设 created = 计算 {created} + 1
         否则
-          设 n = 写库 app.db vocab_update_meaning word_id={ex} meaning={m.named.meaning} point_code={m.named.code} subject_id={sb.subject_id}
+          设 jq.word_id = {ex}
+          设 n = 写库表 app.db vocab_update_meaning {jq}
           设 updated = 计算 {updated} + 1
         结束
         设 total = 计算 {total} + 1
