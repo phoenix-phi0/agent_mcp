@@ -29,7 +29,8 @@
       状态「已执行」→ 撤销 →「已撤销」；发传达草稿 → 放弃 →「已放弃」（假模型走 DSL_MOCK_SCRIPT）
       （M4-P1b）设定草稿确认 → 列表「已执行」→ AI老师设定页可见新值；知识点草稿确认 → 列表「已执行」
   4.  导航分组：学生端右侧「看看」、教师端右侧「管理」
-  5.* 科目管理流程：t1 建科目（私有草稿）→ 成员浮层加 t2 协作 → 分配 s1 →
+  5.* 科目管理流程：t1 建科目（私有草稿，带说明和 AI 老师设定）→ 从行上点「编辑」：等级、说明、
+      AI 老师设定都回填，不改直接保存后三者不变（K161/K163）→ 成员浮层加 t2 协作 → 分配 s1 →
       启用 → s1 顶栏可切到新科目 → t2 在该科目行只见「成员」→ t1 停用后
       s1 回落日语 → 停用日语提示 409 原文（先打接口取原文，再点按钮对文字）
   6.  390px 视口：学生端首页与科目管理页*、图谱管理页** 不横向溢出
@@ -62,6 +63,8 @@ REPO_PY = REPO / ".venv" / "bin" / "python"
 IGNORE_CONSOLE = ("production is not defined",)   # unpkg vue-flow 的兼容告警，见 README
 
 STUDENT_PAGES = ["问老师", "做题", "默写", "教材", "知识图谱", "学习进度"]
+SUBJ_INTRO = "走查用的科目说明\n第二行"
+SUBJ_PERSONA = "你是走查科目的老师，说话简洁。"
 TEACHER_PAGES = ["学情", "教师助手", "学生管理", "科目管理", "AI老师设定", "教材导入", "教学材料"]
 TEACHER_USER = "t1"
 STUDENT_NAME = "s1"
@@ -737,6 +740,8 @@ def subject_flow(t1, base, ck, marks):
     t1.locator('.overlay label.field:has-text("编码") input').first.fill(SUBJ_CODE)
     t1.locator('.overlay label.field:has-text("名称") input').first.fill(SUBJ_NAME)
     t1.locator(".overlay label.opt", has_text="通用").first.click()
+    t1.locator('.overlay label.field:has-text("说明") textarea').first.fill(SUBJ_INTRO)
+    t1.locator('.overlay label.field:has-text("AI老师设定") textarea').first.fill(SUBJ_PERSONA)
     t1.locator('.overlay button:has-text("保存")').first.click()
     t1.wait_for_selector(".overlay", state="detached", timeout=10000)
     ck(toast(t1) == "科目已保存", "t1 建科目：保存成功有提示")
@@ -771,8 +776,32 @@ def subject_flow(t1, base, ck, marks):
     }""")
     ck(got == "入门,基础,进阶", "新建通用科目默认三档：编辑浮层等级是 入门,基础,进阶",
        f"等级框={got!r}；浮层各框={vals}；地址={hash_of(t1)}；载入请求{len(hits)}次；接口={api}")
-    t1.locator('.overlay button:has-text("取消")').first.click()
-    t1.wait_for_selector(".overlay", state="detached", timeout=8000)
+    # K163：从行上点「编辑」不发载入，说明和 AI 老师设定也得在行里——框里是原值，不改直接保存不丢
+    intro_box = t1.locator('.overlay label.field:has-text("说明") textarea').first
+    persona_box = t1.locator('.overlay label.field:has-text("AI老师设定") textarea').first
+    got_intro = intro_box.input_value() if intro_box.count() else None
+    got_persona = persona_box.input_value() if persona_box.count() else None
+    ck(got_intro == SUBJ_INTRO, "从行上编辑：说明框是原来的说明", f"说明框={got_intro!r}；浮层各框={vals}")
+    ck(got_persona == SUBJ_PERSONA, "从行上编辑：AI 老师设定框回填原值", f"设定框={got_persona!r}；浮层各框={vals}")
+    clear_toast(t1)
+    t1.locator('.overlay button:has-text("保存")').first.click()
+    t1.wait_for_selector(".overlay", state="detached", timeout=10000)
+    ck(toast(t1) == "科目已保存", "从行上编辑不改直接保存：有提示")
+    opened = t1.evaluate("""async (code) => {
+      const r = await fetch('/subject/manage/home', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: 'subject_manage_home', form: {}})});
+      const j = await r.json();
+      const rows = ((j.state || {}).subjects || []).filter(x => x.subj_code === code);
+      if (!rows.length) return {};
+      const r2 = await fetch('/subject/manage/open', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: 'subject_open', form: {subj_id: String(rows[0].subj_id)}})});
+      return (await r2.json()).form || {};
+    }""", SUBJ_CODE)
+    ck(opened.get("subj_intro") == SUBJ_INTRO and opened.get("subj_persona") == SUBJ_PERSONA
+       and opened.get("subj_levels") == "入门,基础,进阶",
+       "从行上编辑不改直接保存：库里说明、AI 老师设定、等级都没变", opened)
 
     # 2) 成员浮层：加 t2 协作、批量分配 s1
     # K112：科目管理有界面级「触发 subject_members」，原先 runTrigger 把浮层参数从
