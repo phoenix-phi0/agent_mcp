@@ -209,12 +209,14 @@ def _reply_ok(fmt, text):
 
 def dispatch_agent(role_name, task="", inputs=None, fmt=None, *, out_dir, backend=None, parent_id=None,
                     ledger=None, roles_map=None, budget=None, project=None, module_cmd=None, v2_backend=None, mlog=None,
-                    v2_calls=None):
+                    v2_calls=None, model=None, env=None):
     """`派代理 角色 任务 入参? 格式?` 的 Python 实现。返回 {result, status, reason, role, model, cost, calls, secs}。
     mlog：v2.Model（v3 流程把 ctx.M 传进来）——按角色回退时补一条进 calls.json（不传就不补）。
     status：ok（成功）/ fail（角色不存在、入参越范围、两次都没拿到合格回复）/ over（预算超了，没调模型）。
     角色「执行方式: v2」时不调一次模型，而是在 project 的拷贝里起一次完整 v2 运行（_dispatch_v2；project / module_cmd /
-    v2_backend 只给这种角色用，v2_backend 测试注入，缺省起子进程）。"""
+    v2_backend 只给这种角色用，v2_backend 测试注入，缺省起子进程）。
+    model：这次用的模型串，顶替「默认模型」（含 DSLAGENT_MODELS 按角色的覆盖；v3 change2 / fix2 --impl-model 给 modify_module 用），回退模型照旧；
+    env：只给执行方式 v2 的子进程加的环境变量（v3 --brief 用它把本模块实现简报的文件交给 packs/dslproj）。都不传 = 行为同旧。"""
     rm = roles_map if roles_map is not None else roles()
     led = ledger or LG.Ledger(Path(out_dir) / LG.LEDGER_NAME)
     if role_name not in rm:
@@ -241,13 +243,13 @@ def dispatch_agent(role_name, task="", inputs=None, fmt=None, *, out_dir, backen
     timeout = float(role.get("单次超时") or 300)
     if role.get("执行方式") == "v2":
         return _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, module_cmd, v2_backend, timeout,
-                            out_dir, mlog=mlog, v2_calls=v2_calls)
+                            out_dir, mlog=mlog, v2_calls=v2_calls, model=model, env=env)
     system = _prompt_text(role.get("提示词文件"))
     user = _user_text(task, inputs)
     call = backend or (lambda spec, s, u, tmo: EG.call(spec, s, u, tmo))
 
     def _attempt(field):
-        spec = resolve_model(role_name, field, rm)
+        spec = EG.parse(model) if (model and field == "默认模型") else resolve_model(role_name, field, rm)
         t0 = time.time()
         r = call(spec, system, user, timeout)
         if not isinstance(r, dict):
@@ -314,6 +316,7 @@ def _run_v2_subprocess(spec, req):
     if req.get("v2_calls"):       # 修改代理的「预算 调用 N」下限（v3 change2 --max-turns）：规划写小了会被子进程提到它
         cmd += ["--budget-calls", str(req["v2_calls"])]
     env = dict(os.environ)
+    env.update(req.get("env") or {})
     env["DSLAGENT_MODELS"] = json.dumps({s: spec for s in EG.STEPS})
     t0 = time.time()
     try:
@@ -344,8 +347,9 @@ def _run_v2_subprocess(spec, req):
 
 
 def _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, module_cmd, v2_backend, timeout, out_dir, mlog=None,
-                 v2_calls=None):
-    """v2_calls：给子进程的「预算 调用 N」下限（--budget-calls；None = 不干预）；agents.jsonl 记 v2_calls（上限）+ num_turns（实际调用数）。"""
+                 v2_calls=None, model=None, env=None):
+    """v2_calls：给子进程的「预算 调用 N」下限（--budget-calls；None = 不干预）；agents.jsonl 记 v2_calls（上限）+ num_turns（实际调用数）。
+    model：顶替默认模型（回退模型照旧）；env：子进程加的环境变量（进 req["env"]，只在给了时才有这个键）。"""
     def _fail(reason, spec=None):
         led.record(role=role_name, status="fail", reason=reason, parent_id=parent_id, model=spec)
         return {"result": "", "status": "fail", "reason": reason, "role": role_name, "model": spec,
@@ -359,11 +363,13 @@ def _dispatch_v2(role_name, role, rm, task, inputs, led, parent_id, project, mod
     scope = _v2_scope(role) + (P.scope_globs(module, project) if "本模块路径" in _list_field(role, "可写范围") else [])
     req = {"role": role_name, "module": module, "task": f"模块 {module}\n{(task or '').strip()}\n", "scope": scope,
            "project": project, "module_cmd": module_cmd, "timeout": timeout, "out_dir": str(out_dir), "v2_calls": v2_calls}
+    if env:
+        req["env"] = dict(env)
     run = v2_backend or _run_v2_subprocess
     cost = secs = 0.0
     calls = 0
     used_fallback = False
-    spec = resolve_model(role_name, "默认模型", rm)
+    spec = EG.parse(model) if model else resolve_model(role_name, "默认模型", rm)
     r = run(spec["spec"], req)
     cost, secs, calls = cost + (r.get("cost") or 0.0), secs + (r.get("sec") or 0.0), calls + (r.get("calls") or 0)
     if not r.get("started", True) and role.get("回退模型"):       # 没跑起来 / 引擎错误（不是验收失败）：回退模型再起一次

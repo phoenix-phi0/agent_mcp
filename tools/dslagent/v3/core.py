@@ -39,10 +39,13 @@ def syntax_text(ctx=None):
 
 
 class Ctx:
-    def __init__(self, project, out, req, M, cost_cap=None, module_cmd=None, module_wall=1800, module_calls=None):
+    def __init__(self, project, out, req, M, cost_cap=None, module_cmd=None, module_wall=1800, module_calls=None,
+                 impl_model=None, brief=False):
         self.project, self.out, self.req, self.M = Path(project), Path(out), req, M
         self.cost_cap, self.module_cmd, self.module_wall = cost_cap, module_cmd, module_wall
         self.module_calls = module_calls       # 派代理（执行方式=v2 的角色）的「预算 调用 N」下限；None = 不干预（change2 的 --max-turns）
+        self.impl_model = impl_model           # modify_module 用的模型串（change2 / fix2 --impl-model）；None = 角色登记表的默认模型
+        self.brief = brief                     # 给 modify_module 附本模块实现简报（--brief，v3/brief.py）；核查员不给
         self.usage = None                      # 引擎的 Usage（run() 里挂上）：预算按它算
         self.lock = threading.RLock()
         self.module_cost = 0.0
@@ -199,9 +202,33 @@ def run(req, project, out, stop_after=None, backend=None, cost_cap=None, wall=WA
     return res
 
 
+def brief_impact(ctx):
+    """--brief 时开始前先算影响面（契约 git HEAD vs 工作区）：写 out/brief_impact.json、brief_impact.md，记一行日志、打印到 stderr。
+    只是建议：不改 --modules，出错也不挡流程。"""
+    import sys
+    from . import brief as B
+    try:
+        base = B.git_base_texts(ctx.project)
+        imp = B.impact(base, B.load_contracts(ctx.project)[1]) if base is not None else None
+    except Exception as e:  # noqa: BLE001
+        ctx.log("简报影响面", 状态="出错", 原因=f"{type(e).__name__}: {e}"[:300])
+        return None
+    md = B.impact_md(imp)
+    (ctx.out / "brief_impact.json").write_text(json.dumps(imp, ensure_ascii=False, indent=1), encoding="utf-8")
+    (ctx.out / "brief_impact.md").write_text(md + "\n", encoding="utf-8")
+    if imp is None:
+        ctx.log("简报影响面", 状态="没有", 原因=md)
+    else:
+        ctx.log("简报影响面", 建议模块=imp["建议模块"], 参考模块=sorted(imp["参考模块"]), 可能漏改契约=imp["可能漏改契约"],
+                改动函数数=len(imp["改动函数"]))
+    print("[实现简报·影响面（只是建议，没有改 --modules）]\n" + md, file=sys.stderr, flush=True)
+    return imp
+
+
 def run_entry(script, project, out, req, extra_vars=None, backend=None, cost_cap=None, wall=WALL,
-              module_cmd=None, module_wall=1800, module_calls=None):
+              module_cmd=None, module_wall=1800, module_calls=None, impl_model=None, brief=False):
     """跑 v3/ 下的顶层脚本（核查.zs / 修改.zs，script 不带 .zs）：req 是需求全文。
+    impl_model / brief：change2 / fix2 的 --impl-model / --brief（只作用于 modify_module，见 verbs/v3/defs/派代理.py）；brief 时开始前还写影响面（brief_impact）。
     → {status, reason, at, 花费, 用时, 模型调用[, returned]}，同时写 out/<script>_result.json。"""
     project, out = Path(project), Path(out)
     project.mkdir(parents=True, exist_ok=True)
@@ -209,9 +236,13 @@ def run_entry(script, project, out, req, extra_vars=None, backend=None, cost_cap
     M = V2.Model(out, backend=backend, max_calls=MAX_CALLS, deadline=time.time() + wall)
     prev_calls = _load_json(out / "calls.json", [])
     ctx = Ctx(project, out, req, M, cost_cap=cost_cap, module_cmd=module_cmd, module_wall=module_wall,
-              module_calls=module_calls)
+              module_calls=module_calls, impl_model=impl_model, brief=brief)
     eng = V3Engine(client=GuardedClient(M, ctx), workdir=project, verbose=False, verbs_root=C.VERBS)
     eng.v3, ctx.usage = ctx, eng.usage
+    if impl_model or brief:
+        ctx.log("实现设置", impl_model=impl_model or "", brief=bool(brief))
+    if brief:
+        brief_impact(ctx)
     syntax = syntax_text(ctx)
     eng.vars.update({"req": req, "syntax": syntax, "scope": "", "modules": "", **(extra_vars or {})})   # scope / modules：audit2 / fix2 的模块范围，缺省空 = 全部
     res, err = {"status": "成功", "reason": "", "at": ""}, None

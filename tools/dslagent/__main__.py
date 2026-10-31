@@ -49,10 +49,10 @@ def main(argv=None):
     n.add_argument("--from-plan", default=None, metavar="旧输出目录", help="（只对 --modular）读回旧运行的顶层规划与层次×模块（plan/top.zs、plan/layers.zs；旧版 JSON 目录也读，转成 DSL 规划文件；再不行从 result.json 与 calls/ 还原），跳过这两步，在新的 project / --out 里从数据层做起")
     v = sp.add_parser("v3", help="v3 流程（v3/v3.zs）：顶层规划 → 约定 → 骨架 → 分配 → 按层做模块；断了重跑同一命令即续跑；"
                        "action=build2 是最小主干新建流程（build2.zs，刻意不含接口冒烟）；action=audit/change 改走 核查.zs / 修改.zs（核查出问题清单 / 按问题清单改代码），缺省 build 是原来的新建流程")
-    v.add_argument("action", nargs="?", choices=("build", "build2", "audit", "change", "audit2", "change2", "fix2"), default="build")
-    v.add_argument("--req", required=True, help="需求文件")
+    v.add_argument("action", nargs="?", choices=("build", "build2", "audit", "change", "audit2", "change2", "fix2", "brief"), default="build")
+    v.add_argument("--req", help="需求文件（brief 以外都要）")
     v.add_argument("--project", required=True, help="项目目录（不存在就建）")
-    v.add_argument("--out", required=True, help="记录目录：每步产物、检查结果、重写次数、每个模块的 v2 记录目录、花费")
+    v.add_argument("--out", help="记录目录：每步产物、检查结果、重写次数、每个模块的 v2 记录目录、花费（brief 以外都要；brief 给了就写 brief.json / brief.md，不给打印 md）")
     v.add_argument("--stop-after", choices=("top", "contract", "build"), default=None, help="跑到这一步的产物写出并通过检查就停（只对 build 有效）")
     v.add_argument("--cost-cap", type=float, default=None, help="花费上限（美元）：每次调模型之前先查，已花费达到上限就不再调、以「超出预期」结束（原因里写已花费）；最后一次调用可能略超")
     v.add_argument("--wall", type=int, default=None, help="整个流程的墙钟秒数（缺省 36000）")
@@ -63,6 +63,11 @@ def main(argv=None):
     v.add_argument("--llm", default="sonnet", help="（audit / change / audit2 / fix2）调模型用的模型名")
     v.add_argument("--modules", default=None, help="（audit2 / fix2）只审这些模块，逗号隔开（如 lesson,quiz；必须是有 contracts/<名>.md 的模块）：plan/audit2.json 只含它们的问题，范围外模块的全量回归不过、以及核查员指出「问题出在范围外模块」的 contract_issue / module_issue 不终止，记进 skipped_issues 后继续审；范围内模块自己的 contract_issue 照旧；缺省 = 审全部模块")
     v.add_argument("--rounds", type=int, default=5, help="（fix2）核查→修改最多几轮")
+    v.add_argument("--impl-model", default=None, help="（change2 / fix2）modify_module（改代码的 v2 子进程）用的模型串，如 haiku；顶替 roles.zs 里它的默认模型（回退模型照旧）。"
+                                                          "核查员（audit2）的模型仍是 --llm；不传 = 同旧")
+    v.add_argument("--brief", action="store_true", help="（change2 / fix2）给 modify_module 附「本模块实现简报（自动推出，只是提醒）」一节"
+                                                       "（v3/brief.py：骨架、依赖接口、实现要点 R1/R2/R6，只列本轮要改的函数），不给 audit2 核查员；"
+                                                       "开始前把影响面建议（--modules 建议、可能漏改契约）写进日志和记录目录 brief_impact.*，不自动改 --modules")
     v.add_argument("--max-turns", type=int, default=8, help="（change2）每个 modify_module 代理（v2 子进程）里计划「预算 调用 N」的下限：规划写的 N 小于它就被提到它，只放宽不收紧；缺省 8，传 0 = 不干预（规划自己定）。背景：K29b 两轮 modify_module 都只用了 2 次模型调用（1 规划 + 1 派任务）就收尾，quiz 要新增 9 个函数装不下；agents.jsonl 每条记 v2_calls（上限）和 num_turns（实际）。只对 change2 生效，audit2 / fix2 / build2 / 修改 不受影响")
     ag = sp.add_parser("agents", help="子 agent 管理：角色登记表、调度层账本")
     agsp = ag.add_subparsers(dest="agents_cmd", required=True)
@@ -77,6 +82,23 @@ def main(argv=None):
     if a.cmd == "v3":
         from .v3 import core as V3
         from . import engines as EG
+        if (a.impl_model or a.brief) and a.action not in ("change2", "fix2"):
+            ap.error("--impl-model / --brief 只对 change2 / fix2 有效")
+        if a.impl_model:
+            try:
+                EG.parse(a.impl_model)
+            except ValueError as e:
+                ap.error(f"--impl-model：{e}")
+        if a.action == "brief":
+            from .v3 import brief as BR
+            names = [m.strip() for m in (a.modules or "").split(",") if m.strip()] or None
+            b = BR.main(a.project, modules=names, out=a.out)
+            imp = b["影响面"] or {}
+            print(json.dumps({"模块": [m["模块"] for m in b["模块"]], "要点数": sum(len(f["要点"]) for m in b["模块"] for f in m["函数"]),
+                              "建议模块": imp.get("建议模块"), "可能漏改契约": imp.get("可能漏改契约"), "out": a.out}, ensure_ascii=False))
+            return 0
+        if not a.req or not a.out:
+            ap.error("v3 除 brief 外都要 --req 和 --out")
         def on_term(*_):
             EG.kill_all()
             raise SystemExit(143)
@@ -96,7 +118,8 @@ def main(argv=None):
                      else {"llm": a.llm, "rounds": a.rounds, **scope} if a.action == "fix2" else {"llm": a.llm, **scope})
             res = V3.run_entry(a.action, a.project, a.out, req_text, extra_vars=extra,
                                cost_cap=a.cost_cap, **({"wall": a.wall} if a.wall else {}), module_wall=a.module_wall,
-                               **({"module_calls": a.max_turns} if a.action == "change2" else {}))
+                               **({"module_calls": a.max_turns} if a.action == "change2" else {}),
+                               **({"impl_model": a.impl_model} if a.impl_model else {}), **({"brief": True} if a.brief else {}))
             print(json.dumps({k: res.get(k) for k in ("status", "reason", "at", "花费", "用时", "模型调用", "returned")}, ensure_ascii=False))
             return 0 if res["status"] == "成功" else 1
         if a.action == "audit":

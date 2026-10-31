@@ -37,6 +37,9 @@
            change2 只读 result / issues，对新增字段不受影响；fix2 把 --modules 原样传给每次核查。
   --cost-cap  每次调模型之前先查（GuardedClient.chat_messages / run_tool、派代理 前后），已花费 ≥ 上限就不再调、以「超出预期」结束并写明已花费；
               上限是调用前检查，最后一次已发出的调用可能让总花费略超上限。
+  --impl-model / --brief（change2 / fix2，K171，说明见 kg_v4/plan/dslagent_brief.md）：modify_module 换模型（如 haiku），
+              给它附「本模块实现简报」（brief.py：骨架、依赖接口、实现要点 R1/R2/R6，只列本轮要改的函数），核查员不给；
+              --brief 时开始前把影响面建议写进记录目录 brief_impact.*。都不加 = 同旧。只看简报：v3 brief --project DIR [--modules a,b] [--out DIR]
 
 续跑规则：断了重跑同一命令。已存在且检查通过的规划（top / 约定）不重写；骨架已有的文件不覆盖；build.zs 每次按 top 重新生成；
 模块在 plan/state.json 记了通过且约定 hash 没变才跳过，约定改了就重做；做模块在上一轮留下的文件上接着改。

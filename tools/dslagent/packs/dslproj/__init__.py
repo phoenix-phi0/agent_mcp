@@ -190,11 +190,24 @@ def service_verbs(project, module):
             f"已加载的包：{'、'.join(packs)}\n{body}")
 
 
+def brief_section(module):
+    """v3 change2 / fix2 --brief 交来的本模块实现简报（环境变量 DSLAGENT_BRIEF_FILE，见 v3/brief.py）；没有 / 不是本模块的 → 空串（不加这一节）。"""
+    from ...v3 import brief as BR
+    return BR.read_section(module).strip()
+
+
+BRIEF_HEAD = ("本模块实现简报（自动推出，只是提醒）：只列本轮要改的函数；从约定、现有代码、实体、.ui 用规则推出来，"
+              "和「本模块约定」不一致时以约定为准；实现要点是写代码时容易踩的坑")
+
+
 def materials(task, project, scope):
     module = P.require_module(task)
     c, text = P.load_contract(project, module)
     parts = [f"## 本次要做的模块：{module}\n允许写 / 删的路径：{'、'.join(scope or P.scope_globs(module, project))}",
              f"## 本模块约定（contracts/{module}.md，冻结，不能改）\n```\n{text.strip()}\n```"]
+    brief = brief_section(module)
+    if brief:
+        parts.append(f"## {BRIEF_HEAD}\n{brief}")
     ups = []
     for d in c["依赖"]:
         uc, _ = C.parse(P.contract_path(project, d).read_text(encoding="utf-8"))
@@ -211,8 +224,10 @@ def materials(task, project, scope):
     cat = catalog_section(project)
     if cat:
         parts.append(cat)
-    return {"text": "\n\n".join(parts), "记录": {"模块": module, "约定函数": [f["名"] for f in c["函数"]], "依赖": c["依赖"],
-                                              "现有文件": [r for r, _ in cur]}}
+    rec = {"模块": module, "约定函数": [f["名"] for f in c["函数"]], "依赖": c["依赖"], "现有文件": [r for r, _ in cur]}
+    if brief:
+        rec["实现简报字数"] = len(brief)
+    return {"text": "\n\n".join(parts), "记录": rec}
 
 
 def accept(project, ctx):
@@ -247,8 +262,11 @@ def fix_input(project, ctx, probs):
     c, text = P.load_contract(project, module)
     ups = [f"### {d}\n{C.public_heads(C.parse(P.contract_path(project, d).read_text(encoding='utf-8'))[0])}" for d in c["依赖"]]
     cur = fix_files_text(project, module, probs)
-    parts = [f"【任务原文】\n{ctx['task']}", f"【本模块约定（不能改）】\n{text.strip()}",
-             "【上游模块公开函数】\n" + ("\n\n".join(ups) or "（无）"),
+    parts = [f"【任务原文】\n{ctx['task']}", f"【本模块约定（不能改）】\n{text.strip()}"]
+    brief = brief_section(module)
+    if brief:
+        parts.append(f"【{BRIEF_HEAD}】\n{brief}")
+    parts += ["【上游模块公开函数】\n" + ("\n\n".join(ups) or "（无）"),
              "【本模块与全部上游的 entities 原文】\n" + entities_text(project, module),
              "【验收发现的问题】\n" + "\n".join(f"{i}. {p}" for i, p in enumerate(probs, 1)),
              f"【本模块现有文件的完整当前内容（行号前缀不是内容）】\n{cur}", SYNTAX, service_verbs(project, module)]
