@@ -6,15 +6,15 @@
 - 建立：K172（2026-11-01），汇总 data/reports/kg_K155_glm.md、kg_K156.md～kg_K171.md 里「没改 / 不改 / 已知问题 / 待用户决策 / 建议另开任务 / 遗留 / 风险」条目。
 - 核对基准：origin/master `5f9c34e`（只读核对代码，未改业务代码）。行号是这个提交上的行号。
 - K170（「最近学习」按科目 + 剩余按位置传参）在建清单期间完成（提交 c2d6d06、64adc4d、5f9c34e，已上线、实测 17/17），按最终报告记；K171（dslagent 实现简报 / Haiku 实现）建清单时**仍在进行**，相关条目标「进行中」。
-- 状态取值：已修 / 未修 / 部分修 / 决定保留 / 待决策 / 进行中。规模：小（半天内、单模块）/ 中（要跑 fix2 或停服窗口）/ 大（跨多模块或需设计）。
+- 状态取值：已修 / 未修 / 部分修 / 决定保留 / 待决策 / 进行中 / 核实不成立（实测证明不是问题，写明证据）。规模：小（半天内、单模块）/ 中（要跑 fix2 或停服窗口）/ 大（跨多模块或需设计）。
 
 ## 最该先做的 5 条
 
-1. **O1 部署脚本里看门狗子 shell 挂住**：K159、K162、K163、K164、K166 每次上线都要手动 `kill -TERM` 一个 PID，迟早误杀。
-2. **A1 选项 / 解析拼进 JSON 字面量**：内容侧靠「不用英文双引号」规避，任何老师录一道带 `"` 的题就可能坏题卡；先实测，坏了就改。
+1. **O1 部署脚本里看门狗子 shell 挂住**：K159、K162、K163、K164、K166 每次上线都要手动 `kill -TERM` 一个 PID，迟早误杀。→ **已修（K173）**，见 O1。
+2. **A1 选项 / 解析拼进 JSON 字面量**：内容侧靠「不用英文双引号」规避，任何老师录一道带 `"` 的题就可能坏题卡；先实测，坏了就改。→ **核实不成立（K173）**，见 A1。
 3. **G1 audit2 开头调用 v3/contracts.check 并清掉现存 12 条约定违约**：零成本，能拦 K148 那类契约自相矛盾。
-4. **B1 lesson_text.examples_edited 迁移警告**：K119 起每次启动都报，噪声会盖住真警告；停服窗口顺手对齐。
-5. **T1 规则对照组 `no such table: question`**：全量回归每次固定红一组，靠人工判「环境问题」，迟早漏掉真失败。
+4. **B1 lesson_text.examples_edited 迁移警告**：K119 起每次启动都报，噪声会盖住真警告；停服窗口顺手对齐。→ **已修（K173）**，见 B1。
+5. **T1 规则对照组 `no such table: question`**：全量回归每次固定红一组，靠人工判「环境问题」，迟早漏掉真失败。→ **已修（K173）**，见 T1。
 
 ---
 
@@ -22,8 +22,8 @@
 
 | 编号 | 标题 | 现象 | 位置 | 出处 | 状态 | 建议处理 | 规模 |
 |---|---|---|---|---|---|---|---|
-| A1 | 选项、判题回显把文本拼进 JSON 字面量 | 组题面 `{"letter": …, "text": "{tx}"}`，选项 / 解析 / 条目名含英文双引号或反斜杠可能出错；Python 题库靠「统一用单引号」规避 | kg_v4/services/quiz.zs:165、991、1123 | K157 §1 约定确认 | 未修（是否真坏取决于引擎插值是否转义，未实测） | 用一道带 `"` 和 `\` 的题实测；坏了改成对象构造或先转义 | 小 |
-| A2 | 科目老师设定 / 科目助手设定 的 custom 原样拼进返回对象 | persona、assist_prompt 含英文双引号时返回对象可能坏 | kg_v4/services/subject.zs:700（科目老师设定），科目助手设定 同写法 | K164 与任务书的差异 3（审查指出） | 未修（未实测） | 与 A1 一起实测、一起改 | 小 |
+| A1 | 选项、判题回显把文本拼进 JSON 字面量 | 组题面 `{"letter": …, "text": "{tx}"}`，选项 / 解析 / 条目名含英文双引号或反斜杠可能出错；Python 题库靠「统一用单引号」规避 | kg_v4/services/quiz.zs:165、991、1123 | K157 §1 约定确认 | 核实不成立（K173：引擎对 JSON 字符串引号内的 {变量} 按 json.dumps 转义；tests/kg_v4/test_k173_json_literal.py 在改前代码 123e3ca 上用含 `"`、`\`、换行、花括号的选项与解析调 组题面 / 拼题卡 / 判答案页面 / 提交答案，13/13 逐字一致；代码不改，测试留作回归，提交 07b1cd0） | — | — |
+| A2 | 科目老师设定 / 科目助手设定 的 custom 原样拼进返回对象 | persona、assist_prompt 含英文双引号时返回对象可能坏 | kg_v4/services/subject.zs:700（科目老师设定），科目助手设定 同写法 | K164 与任务书的差异 3（审查指出） | 核实不成立（K173：同 A1，科目老师设定 / 科目助手设定 的 custom、persona、intro 含 `"`、`\`、换行、花括号时逐字一致，见 test_k173_json_literal.py，提交 07b1cd0） | — | — |
 | A3 | 教师端「打开学生端」对已登录教师永远被弹回 | 学生端认出教师身份就 leaveTo('/teacher')；K159 加了「退出」按钮，但这个链接语义没变 | templates/frontend/app.js.j2:551、1400 | K158 §5（可选建议） | 待决策 | 文案改「退出并打开学生端」，或学生端跳走前提示「当前登录的是教师账号」，由用户选 | 小 |
 | A4 | 校验草稿 relay_add 的 keywords 为列表时不连接 | 模型把 keywords 给成列表时原样插进字符串，没用逗号连 | kg_v4/services/assist_draft.zs:553-555 | K169 §4 第 4 次核查 | 未修 | 列表时按「，」连接，补一条约定用例 | 小 |
 | A5 | 调模型后只校验报错和空、不校验内容 | 推理机 warning「调了模型没处理坏输出」；核对：teacher_assist 答一轮、tutor.总结本轮 已在报错或空回答时报 400，但对乱码 / 格式不对的回答不做检查（tutor.总结页面 本身不调模型） | teacher_assist.zs:706-709；tutor.zs:568-574 | K165 §1 关键事实 | 未修（低优先，可不做） | 有真实坏输出案例再加兜底，不必为 warning 单独改 | 小 |
@@ -44,7 +44,7 @@
 
 | 编号 | 标题 | 现象 | 位置 | 出处 | 状态 | 建议处理 | 规模 |
 |---|---|---|---|---|---|---|---|
-| B1 | lesson_text.examples_edited 迁移警告 | 库里 INTEGER NOT NULL，实体 INTEGER NOT NULL DEFAULT 0，每次启动都打 `[迁移警告]` | kg_v4/entities/lesson.entity:19 | K162、K163、K164、K170 上线（K119 起） | 未修 | 停服窗口备份后对齐表结构，或在上线手册里登记为可忽略 | 中 |
+| B1 | lesson_text.examples_edited 迁移警告 | 库里 INTEGER NOT NULL，实体 INTEGER NOT NULL DEFAULT 0，每次启动都打 `[迁移警告]` | kg_v4/entities/lesson.entity:19 | K162、K163、K164、K170 上线（K119 起） | 已修（4d401d8，K173：实体去掉「默认 0」与库一致，库不动；所有写入 lesson_text_insert.sql 都显式传值，默认值从不生效；lesson 契约 9 条用例数据补 examples_edited=0；正式库快照迁移比对 0 警告） | — | — |
 | B2 | 正式库验证残留 | subject_pref 多 2 行（K156）；student 在科目 2 的作答 / quiz_progress / tutor_message（K157）；tutor_message 2→4→6（K159、K162）；uploads 多 4 个 csv、1 个 txt（K157） | 正式库 /workspace/dslagent_exp/kg_v4_data | K156 副作用、K157 §5、K159 §4、K162 库对比 | 待决策 | 用户定是否清理；要清就在停服窗口备份后一次清 | 小 |
 | B3 | Python 题库源文件不在任何 git 仓库 | content/python_v1/ 只在本机；K162 改 README 时改前无备份 | /workspace/dslagent_exp/content/python_v1/ | K157 §6、K162 第 4 步 | 未修 | 纳入仓库（或单独建仓）并记录当前在用的 quiz_v2.txt | 小 |
 | B4 | 科目 2 quiz_progress 残留 level=N5 | — | 正式库 quiz_progress | K160 实施计划 | 已修（K162 停服窗口按手册 SQL 改为「入门」） | — | — |
@@ -82,7 +82,7 @@
 
 | 编号 | 标题 | 现象 | 位置 | 出处 | 状态 | 建议处理 | 规模 |
 |---|---|---|---|---|---|---|---|
-| T1 | 规则对照组固定失败 | 工作区报 `no such table: question`（本机 kg/app.db 缺表），干净 worktree 报 `unable to open database file` | tests/run_all.sh「规则对照」组，kg/app.db | K159、K161、K163、K164、K166、K170 | 未修 | 让该组自带建库或在缺表时明确跳过，别再每次人工判 | 小 |
+| T1 | 规则对照组固定失败 | 工作区报 `no such table: question`（本机 kg/app.db 缺表），干净 worktree 报 `unable to open database file` | tests/run_all.sh「规则对照」组，kg/app.db | K159、K161、K163、K164、K166、K170 | 已修（07b1cd0，K173：本机 kg/app.db 是 0 字节空文件；测试改为照 kg 搭临时库、经导入接口导题和词（tests/kg/helpers），不再读 kg/app.db，run_all 去掉写进 kg/ 的 `kg setup`；4/4 通过） | — | — |
 | T2 | 命名约定组 62 处失败 | 全在他人未跟踪的 dsl/sandbox/，kg_v4 下 0 处 | test_naming.py --全部 | K159、K161、K163、K164、K166、K170 | 未修 | 找 dsl/sandbox/ 的主人处理，或让测试只扫已跟踪文件 | 小 |
 | T3 | 教材导入E2E「确认后撤下了」已知失败 | 旧 kg 项目撤下后重新载入盖掉提示 | tests/run_all.sh:24-29 KNOWN | K159、K161、K163、K164、K166、K170 | 决定保留（用户决定旧 kg 不修，kg_v4 已修于 6863960；见 kg_K116、kg_K117） | — | — |
 | T4 | gsb verify 跑不了本仓库全量回归 | 沙箱 /tmp 与仓库只读，115 组全报 `No usable temporary directory` | gsb_tools verify | K161、K163 | 未修 | 回归仍自己跑；或给 verify 沙箱可写临时目录 | 小 |
@@ -96,7 +96,7 @@
 
 | 编号 | 标题 | 现象 | 位置 | 出处 | 状态 | 建议处理 | 规模 |
 |---|---|---|---|---|---|---|---|
-| O1 | 部署脚本起看门狗的子 shell 握着 tee 管道挂住 | 每次上线都要按 PID `kill -TERM`（771842、940475、1031072、1159911、1252006、1342315） | /tmp/k1xx_tools/deploy.sh（不在仓库） | K159、K162、K163、K164、K166、K170 | 未修 | 部署脚本进仓库，看门狗用 setsid + 重定向到文件启动，不经 tee | 小 |
+| O1 | 部署脚本起看门狗的子 shell 握着 tee 管道挂住 | 每次上线都要按 PID `kill -TERM`（771842、940475、1031072、1159911、1252006、1342315） | /tmp/k1xx_tools/deploy.sh（不在仓库） | K159、K162、K163、K164、K166、K170 | 已修（K173：标准脚本 /workspace/dslagent_exp/kg_v4_run/deploy.sh，带 --dry-run，README「上线」一节；看门狗 setsid -f + 全部重定向 + 关 3–255 号描述符；全文见 data/reports/kg_K173.md；dslagent_exp 不是 git 仓库，脚本不进 agent_mcp） | — | — |
 | O2 | 实测账号口令不在环境里 | s1、t1、root、student 口令都没有；root 不是日语科目负责人，实测只能建临时账号再删 | 正式库账号 | K158 §2、K163 已知问题 | 未修 | 用户决定是否给专用实测账号（口令放环境变量，不进仓库） | 小 |
 | O3 | /tmp 下历任务临时物与旧 worktree 堆积 | /tmp/k157～k169、k1xx_src / _tools、/tmp/k138_wt、/tmp/k147_wt 等 | /tmp | K159、K165 等 | 未修 | 确认无用后统一清理，旧 worktree 用 `git worktree remove` | 小 |
 | O4 | 推理机依赖本机手搭 | JDK / Maven 在 ~/opt，clingo 在 ~/opt/logic-venv，不在仓库、不在 CI | /workspace/drools-engine | K165 §1 | 未修 | 若要接入流程，先写安装脚本 | 中 |
@@ -139,5 +139,7 @@
 | 待决策 | 5 |
 | 进行中 | 1 |
 | 合计 | 61 |
+
+K173 后：未修 23、已修 18（+O1、B1、T1）、核实不成立 2（A1、A2），其余不变，合计 61。
 
 按类别：功能缺陷 15、数据/迁移 5、按位置传参 4、日语写死/多科目化 7、界面文案 2、测试/环境 9、运维 4、dslagent/工具 11、文档旧口径 4。
