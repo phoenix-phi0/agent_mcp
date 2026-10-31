@@ -103,6 +103,7 @@ run 问老师人设   $PY tests/kg_v4/test_tutor_persona.py
 run 教师助手人设 $PY tests/kg_v4/test_assist_persona.py
 run 空白传参与设定预览 $PY tests/kg_v4/test_k166_whitespace_preview.py
 run 最近学习按科目与对象传参 $PY tests/kg_v4/test_k170_subject_last_and_params.py
+run 选项解析拼JSON $PY tests/kg_v4/test_k173_json_literal.py
 # 浏览器走查（K97）：起服务 + playwright + 系统 Chrome，比别的组慢，时限给 300 秒。
 # 没 playwright 的机器上打「跳过」退出码 2——run() 里单独按「跳过」处理，详见脚本头部。
 # 解释器由 PW_PYTHON 指定（如 /tmp/k97_pw_venv/bin/python），不往 .venv 装 playwright。
@@ -132,8 +133,8 @@ run 做题        $PY tests/kg/test_quiz.py
 run 做题总结    $PY tests/kg/test_quiz_summary.py
 run 复习薄弱点  $PY tests/kg/test_quiz_review.py
 run 单词默写    $PY tests/kg/test_dictation.py
-# 规则对照读真库 kg/app.db（*.db 不进 git，新 clone / 新 worktree 里没有）：缺了先 setup 建一份
-[ -f "$M/kg/app.db" ] || { echo "建 kg/app.db（py -m kg setup）…"; $PY -m kg setup >/dev/null 2>&1; }
+# 规则对照自己照 kg 搭临时库导入题和词，不再读 kg/app.db（K173 T1：本机那份是 0 字节
+# 空文件、新 worktree 里没有，这组每次固定报 no such table / unable to open）
 run 规则对照    $PY tests/kg/test_rules_equiv.py
 run 老师讲语法  $PY tests/kg/test_teacher_bunpou.py
 run 问老师      $PY tests/kg/test_teacher_chat.py

@@ -8,7 +8,10 @@
 verbs/quiz/defs/判作答.zs、判对错.zs、拆选项.zs 和 verbs/japanese/defs/判默写.zs，
 经引擎调（invoke_verb，跟接口里「设 x = 判对错 {judge_args}」同一条路）。
 
-数据是真的：kg/app.db 只读打开（uri mode=ro），一行不写。
+数据是真的：题和词来自 kg 的源文件（kg/content、workspace/japanese 的语法题库），
+测试自己照 kg 搭临时工作区、经导入接口导进去（tests/kg/helpers，跟 py -m kg setup
+同一条路），再只读打开（uri mode=ro）。早先读 kg/app.db：新 worktree 里没有，
+本机的又是 0 字节空文件（no such table: question），这组每次固定红（K173 T1）。
 
   一、判对错：question 表每道题 × 各种作答（对的、错的、大小写全角、带句号、
       空、选项原文……），可接受按库里原样传（NULL 时传接口实际会传的那个
@@ -24,7 +27,9 @@ verbs/quiz/defs/判作答.zs、判对错.zs、拆选项.zs 和 verbs/japanese/de
 结果要求逐条一致，不一致的列出来（最多 20 条）。
 """
 
+import atexit
 import json
+import shutil
 import sqlite3
 import sys
 import time
@@ -131,8 +136,30 @@ def answers_for(qtype: str, answer: str, accept: list, stem: str) -> list:
     return out
 
 
+def build_db() -> Path:
+    """照 kg 搭临时工作区，导入图、课文、语法题库、单词（同 kg/__main__.run_import 的顺序）。"""
+    import tempfile
+    from kg.__main__ import BANK, read_bank
+    from tests.kg.helpers import client, import_graph, import_words, make_ws
+
+    tmp = Path(tempfile.mkdtemp(prefix="rules_equiv_"))
+    atexit.register(shutil.rmtree, tmp, True)   # 中途断言失败、抛错也删
+    ws = make_ws(tmp)
+    import_graph(ws)
+    c = client(ws)
+    c.post("/lesson/import", json={"form": {}})
+    r = c.post("/quiz/import", json={"form": {"rows": read_bank(BANK)}})
+    assert r.status_code == 200, r.get_json()
+    for f in sorted((ws / "content").glob("words*.jsonl")):
+        import_words(ws, f"content/{f.name}")
+    return ws / "app.db"
+
+
 def main():
-    con = sqlite3.connect(f"file:{ROOT / 'kg' / 'app.db'}?mode=ro", uri=True)
+    t0 = time.time()
+    db = build_db()
+    print(f"临时库 {db}（建库导入 {time.time() - t0:.0f} 秒）")
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
     t0 = time.time()
 
