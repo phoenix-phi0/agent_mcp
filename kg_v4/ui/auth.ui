@@ -19,6 +19,7 @@
   分组 底栏 横排 底栏
     动作 auth_login 提交 远程 登录
     动作 subject_switch 远程 隐藏
+    动作 auth_logout 远程 隐藏
   结束
 结束
 

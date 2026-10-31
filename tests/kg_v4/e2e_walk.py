@@ -826,6 +826,49 @@ def pick_label(page, sel, needle):
     return hit[0] if hit else labels[-1]
 
 
+def logout_flow(browser, base, ck, marks, new_page):
+    """K159：教师登录→点顶栏「退出」→打开 / 是学生登录页（不再被弹去 /teacher）→学生登录进学生端；
+    另验 checkEnd 的「登错端即退出」：在 /teacher 用学生号登录后，会话真的被退掉。"""
+    lt = new_page(browser.new_context(), "logout-t1")
+    login(lt, base, TEACHER_USER, end="/teacher")
+    snapshot(marks)   # 登录前的 401 不计
+    btn = lt.locator("button.nav-logout")
+    ck(btn.count() == 1, "教师端顶栏有「退出」按钮", f"个数 {btn.count()}")
+    btn.first.click()
+    wait_screen(lt, "登录")
+    lt.wait_for_selector('form.screen input[type="password"]', timeout=15000)
+    me = lt.evaluate("fetch('/auth/me',{method:'POST',headers:{'Content-Type':'application/json'},"
+                     "body:'{}'}).then(r => r.json())")
+    ck(not me.get("user"), "点「退出」后 /auth/me 没有登录者", str(me))
+    lt.goto(base + "/", wait_until="domcontentloaded")
+    lt.wait_for_selector('form.screen input[type="password"]', timeout=20000)
+    lt.wait_for_timeout(800)
+    path = lt.evaluate("location.pathname")
+    ck(path == "/", "退出后打开 / 停在学生端登录页（没被送去 /teacher）", path)
+    login(lt, base, STUDENT_NAME)
+    lt.wait_for_timeout(800)
+    path = lt.evaluate("location.pathname")
+    ck(path == "/" and lt.locator("button.nav-logout").count() == 1,
+       "退出后学生登录进学生端，顶栏有「退出」", path)
+
+    # checkEnd fresh 分支：学生在 /teacher 登录 → 被拒，并且真的退出
+    ws = new_page(browser.new_context(), "wrongend-s1")
+    ws.goto(base + "/teacher", wait_until="domcontentloaded")
+    ws.wait_for_selector('form.screen input[type="password"]', timeout=20000)
+    hits, stop = track_posts(ws, "/account/logout")
+    ws.locator('form.screen input:not([type="password"])').first.fill(STUDENT_NAME)
+    ws.locator('form.screen input[type="password"]').first.fill(TEST_PASSWORD)
+    ws.locator('form.screen button:has-text("登录")').first.click()
+    ws.wait_for_selector(".notice-no, .toast-no", timeout=15000)
+    ws.wait_for_timeout(1000)
+    stop()
+    me = ws.evaluate("fetch('/auth/me',{method:'POST',headers:{'Content-Type':'application/json'},"
+                     "body:'{}'}).then(r => r.json())")
+    ck(hits and not me.get("user"), "学生在教师端登录被拒后会话真的退出（checkEnd 调到 auth_logout）",
+       f"logout 请求 {len(hits)} 次，/auth/me={me}")
+    snapshot(marks)
+
+
 def kg_create_point(page, code, title, ck, label):
     """顶栏「新建知识点」浮层建一个点，断言它出现在知识点表里。"""
     clear_toast(page)
@@ -1095,6 +1138,9 @@ def main(argv=None):
                     kg_mgmt_flow(t1, t2k, t3, ck, marks, tmp)
                     err = drain_errors(marks)
                     ck(not err, "图谱管理流程无 JS 错误", err)
+
+                # ---- 退出（K159）----
+                logout_flow(browser, base, ck, marks, new_page)
 
                 # ---- 390px 视口 ----
                 m = new_page(browser.new_context(viewport={"width": 390, "height": 844}),

@@ -12,9 +12,11 @@
   响应 go @来处
 结束
 
-接口 POST /account/logout
+接口 POST /account/logout 动作 auth_logout 公开
   设 r = 调用 account.退出 learner={learner}
-  返回 {r}
+  设 _msg = 已退出
+  消息 系统 {_msg} ok
+  响应 go 登录
 结束
 
 接口 GET /account/me

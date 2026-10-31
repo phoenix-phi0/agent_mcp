@@ -259,7 +259,7 @@
 
 ## 接口
 POST /account/login -> 登录 动作 auth_login 模板 提交跳转 消息=已登录 跳转=@来处 公开
-POST /account/logout -> 退出
+POST /account/logout -> 退出 动作 auth_logout 模板 提交跳转 消息=已退出 跳转=登录 公开
 GET /account/me -> 我是谁
 POST /account/password -> 改密码 动作 auth_password 模板 提交消息 消息=密码改好了，下次用新密码登录
 GET /account/students -> 列学生 角色 teacher
