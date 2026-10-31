@@ -661,6 +661,65 @@
     返回 {"ok": 1}
   结束
 
+  公开 函数 科目老师设定 subject_id
+    设 sid = {subject_id 或}
+    设 mm = 匹配 {sid} ^[0-9]+$
+    如果 {mm.matched} 不等于 是
+      设 sid = 1
+    结束
+    设 si = 查一行 app.db subject_info_full id={sid}
+    设 raw = 查一值 app.db subject_ai_persona subject_id={sid}
+    设 custom = {raw 或}
+    如果 {custom} 不为空
+      设 custom = 替换 {custom} ^\s+|\s+$
+    结束
+    设 jp = 0
+    如果 {sid} 等于 1 或 {si} 为空
+      设 jp = 1
+    结束
+    设 nm = 日语语法
+    如果 {si} 不为空
+      设 nm = {si.name}
+    结束
+    如果 {custom} 不为空
+      设 ps = 替换 {custom} [。！；，.!;,\s]+$
+    否则如果 {jp} 等于 1
+      设 ps = 你是一位中文老师，教中文学习者日语语法
+    否则
+      设 ps = 你是一位{nm}老师，用中文给学生讲解{nm}
+    结束
+    如果 {jp} 等于 1
+      设 ot = 学生闲聊、与日语学习无关时，简短自然地回应，不要强行讲语法
+      设 pw = 语法点
+      设 ew = 语法讲解
+    否则
+      设 ot = 学生闲聊、与{nm}无关时，简短自然地回应，不要硬拉回{nm}；学生问的是别的科目的内容时，不要拒答，简短回答要点，并提醒可以在顶栏切换到对应科目再细问
+      设 pw = 知识点
+      设 ew = 讲解
+    结束
+    返回 {"name": "{nm}", "custom": "{custom}", "persona": "{ps}", "offtopic": "{ot}", "point_word": "{pw}", "explain_word": "{ew}"}
+  结束
+
+  函数 存科目人设 learner subject_id persona
+    设 np = {persona 或}
+    如果 {np} 不为空
+      设 np = 替换 {np} ^\s+|\s+$
+    结束
+    设 cur = 查一值 app.db subject_ai_persona subject_id={subject_id}
+    设 cp = {cur 或}
+    如果 {cp} 不为空
+      设 cp = 替换 {cp} ^\s+|\s+$
+    结束
+    设 same = 相等 {np} {cp}
+    如果 {same} 等于 是
+      返回 {"changed": 0}
+    结束
+    设 now = 当前时间
+    设 row = {"subject_id": "{subject_id}", "persona": "{np}", "learner": "{learner}", "now": "{now}"}
+    设 n = 写库表 app.db subject_ai_upsert {row}
+    返回 {"changed": 1}
+  结束
+
   公开 函数 科目管理页面 learner current_role? auth_mode?
     设 lm = 调用 列可管理科目 learner={learner} current_role={current_role} auth_mode={auth_mode}
     如果 {auth_mode} 等于 on
@@ -673,7 +732,7 @@
 
   公开 函数 载入科目页面 learner subj_id? current_role? auth_mode?
     如果 {subj_id} 为空
-      返回 {"subj_id": "", "subj_code": "", "subj_name": "", "subj_intro": "", "subj_kind": "通用", "subj_levels": ""}
+      返回 {"subj_id": "", "subj_code": "", "subj_name": "", "subj_intro": "", "subj_kind": "通用", "subj_levels": "", "subj_persona": ""}
     结束
     设 v = 调用 管理校验 learner={learner} subject_id={subj_id} need=settings current_role={current_role} auth_mode={auth_mode}
     设 si = 查一行 app.db subject_info_full id={subj_id}
@@ -682,12 +741,21 @@
       设 kd = 语言
     结束
     设 lvs = 调用 科目等级 subject_id={subj_id}
-    返回 {"subj_id": {si.id}, "subj_code": "{si.code}", "subj_name": "{si.name}", "subj_intro": "{si.intro 或}", "subj_kind": "{kd}", "subj_levels": "{lvs.text}"}
+    设 pr = 查一值 app.db subject_ai_persona subject_id={subj_id}
+    返回 {"subj_id": {si.id}, "subj_code": "{si.code}", "subj_name": "{si.name}", "subj_intro": "{si.intro 或}", "subj_kind": "{kd}", "subj_levels": "{lvs.text}", "subj_persona": "{pr 或}"}
   结束
 
-  公开 函数 保存科目页面 learner subj_name subj_id? subj_code? subj_intro? subj_kind? subj_levels? current_role? auth_mode?
+  公开 函数 保存科目页面 learner subj_name subj_id? subj_code? subj_intro? subj_kind? subj_levels? subj_persona? current_role? auth_mode?
     如果 {learner} 为空
       报错 400 learner 不能为空
+    结束
+    设 pp = {subj_persona 或}
+    如果 {pp} 不为空
+      设 pp = 替换 {pp} ^\s+|\s+$
+    结束
+    设 ptail = 截取 {pp} 2001
+    如果 {ptail} 不为空
+      报错 400 AI老师设定最长2000字
     结束
     设 kd = {subj_kind 或}
     如果 {kd} 为空 或 {kd} 等于 通用
@@ -697,8 +765,10 @@
     结束
     如果 {subj_id} 为空
       设 cr = 调用 建科目 learner={learner} code={subj_code} name={subj_name} intro={subj_intro} kind={kd} levels={subj_levels} current_role={current_role} auth_mode={auth_mode}
+      设 sp = 调用 存科目人设 learner={learner} subject_id={cr.id} persona={pp}
     否则
       设 ed = 调用 改科目 learner={learner} subject_id={subj_id} name={subj_name} intro={subj_intro} levels={subj_levels} current_role={current_role} auth_mode={auth_mode}
+      设 sp = 调用 存科目人设 learner={learner} subject_id={subj_id} persona={pp}
     结束
     设 pg = 调用 科目管理页面 learner={learner} current_role={current_role} auth_mode={auth_mode}
     返回 {pg}

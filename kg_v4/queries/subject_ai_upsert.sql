@@ -1,0 +1,1 @@
+INSERT INTO subject_ai (subject_id, persona, updated_by, updated_at) VALUES (CAST(:subject_id AS INTEGER), :persona, :learner, :now) ON CONFLICT(subject_id) DO UPDATE SET persona = excluded.persona, updated_by = excluded.updated_by, updated_at = excluded.updated_at

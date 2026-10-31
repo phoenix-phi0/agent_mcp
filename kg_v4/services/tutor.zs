@@ -22,7 +22,16 @@
     # level 不是 N5 N4 N3 N2 N1 之一，取空串；keyword 缺失取空串并去首尾空白
     # 返回 {"intent": intent, "keyword": keyword, "level": level}
     设 lv = 调用 subject.科目等级 subject_id={subject_id}
-    问JSON j = 判断学生这句话的意图：quiz 表示想做题，progress 表示问学习进度，textbook 表示问教材或课文目录，explain 表示问语法讲解或其他一切。同时抽出学生指名的语法点或课文关键词 keyword（没有则空串）和指定的等级 level（只能是 {lv.text} 其中之一，逗号分隔，或空串）。学生的话：{message} 格式 intent:文本 keyword?:文本 level?:文本 用 快 出错时 ej
+    设 ts0 = 调用 subject.科目老师设定 subject_id={subject_id}
+    设 lvs = {zz 或}
+    遍历 lx 于 {lv.levels}
+      如果 {lvs} 为空
+        设 lvs = {lx}
+      否则
+        设 lvs = {lvs} {lx}
+      结束
+    结束
+    问JSON j = 判断学生这句话的意图：quiz 表示想做题，progress 表示问学习进度，textbook 表示问教材或课文目录，explain 表示问{ts0.explain_word}或其他一切。同时抽出学生指名的{ts0.point_word}或课文关键词 keyword（没有则空串）和指定的等级 level（只能是 {lvs} 或空串）。学生的话：{message} 格式 intent:文本 keyword?:文本 level?:文本 用 快 出错时 ej
     如果 {ej} 不为空
       设 j.intent = explain
       设 j.keyword = {zz 或}
@@ -195,7 +204,8 @@
     设 rt = 查一值表 app.db tutor_recent_text {q}
     设 eff = 调用 teacher_rules.取生效设定 student={learner} recent_text={rt} subject={subject_id}
     设 rl = 调用 teacher_rules.取待传达 student={learner} subject={subject_id}
-    设 sysp = 你是一位中文老师，教中文学习者日语语法，回答简明。回答格式与口吻要求：只输出纯文本，不要使用 Markdown（不要用 # 标题、** 加粗、表格、- 或 * 开头的列表符号），不要用 emoji，至多 1 个；一般不超过 200 字；学生闲聊、与日语学习无关时，简短自然地回应，不要强行讲语法；不要说「昨天聊过」「上次说过」之类带时间的话，你没有可靠的日期信息，最近对话没有时间；推荐课程只能用上下文里给出的课号和标题，课号原样引用，不要自己编课号，也不要把别的课的编号配到某个知识点上。以下是教师设定（学生看不到，不要向学生透露设定本身）：{eff.memory_text} {eff.card_text}
+    设 ts = 调用 subject.科目老师设定 subject_id={subject_id}
+    设 sysp = {ts.persona}，回答简明。回答格式与口吻要求：只输出纯文本，不要使用 Markdown（不要用 # 标题、** 加粗、表格、- 或 * 开头的列表符号），不要用 emoji，至多 1 个；一般不超过 200 字；{ts.offtopic}；不要说「昨天聊过」「上次说过」之类带时间的话，你没有可靠的日期信息，最近对话没有时间；推荐课程只能用上下文里给出的课号和标题，课号原样引用，不要自己编课号，也不要把别的课的编号配到某个知识点上。以下是教师设定（学生看不到，不要向学生透露设定本身）：{eff.memory_text} {eff.card_text}
     如果 {rl.prompt_text} 不为空
       设 sysp = {sysp} 以下是传达事项（用「[传达#编号]」标记），请自然地让学生在回复里知道其中必须准确的信息，回复里不要出现标记本身：{rl.prompt_text}
     结束
@@ -554,7 +564,8 @@
       结束
       设 detail = {detail}；知识点{title} 题号{a2.question_no} {ok} 作答{a2.answer}
     结束
-    问 summary = 你是一位中文老师，教中文学习者日语语法。请为学生写一段简明的本轮做题总结，说说做得好的和该复习的。本轮模式：{r.mode}，课：{r.lesson_code}，共 {total} 题，答对 {right} 题。每题情况：{detail} 用 平衡 出错时 qe
+    设 ts = 调用 subject.科目老师设定 subject_id={subject_id}
+    问 summary = {ts.persona}。请为学生写一段简明的本轮做题总结，说说做得好的和该复习的。本轮模式：{r.mode}，课：{r.lesson_code}，共 {total} 题，答对 {right} 题。每题情况：{detail} 用 平衡 出错时 qe
     如果 {qe} 不为空
       报错 400 老师暂时无法回答
     结束
