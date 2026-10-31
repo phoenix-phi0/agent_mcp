@@ -1,0 +1,1 @@
+SELECT DISTINCT q.level AS level FROM quiz_question q JOIN kg_item i ON q.item_code = i.code WHERE i.point_code = :point_code AND q.subject_id = CAST(:subject_id AS INTEGER) AND i.subject_id = CAST(:subject_id AS INTEGER)

@@ -1,0 +1,1 @@
+SELECT COUNT(*) AS cnt FROM lesson_text WHERE subject_id = CAST(:subject_id AS INTEGER) AND code IN (SELECT lesson_code FROM lesson_point_link WHERE point_code = :point_code AND subject_id = CAST(:subject_id AS INTEGER) UNION SELECT lesson_code FROM lesson_item_link WHERE subject_id = CAST(:subject_id AS INTEGER) AND instr(',' || :items, ',' || item_code || ',') > 0)

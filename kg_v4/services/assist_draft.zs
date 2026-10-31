@@ -388,6 +388,19 @@
             结束
             设 ic = {q.item_code 或}
             设 lv = {q.level 或}
+            设 lvs = 调用 subject.科目等级 subject_id={subject_id}
+            如果 {lv} 不为空
+              设 lv = 替换 {lv} ^\s+|\s+$
+            结束
+            设 lvok = 0
+            遍历 y 于 {lvs.levels}
+              如果 {y} 等于 {lv}
+                设 lvok = 1
+              结束
+            结束
+            如果 {lvok} 等于 0
+              设 lv = {blank}
+            结束
             设 cat = {q.category 或}
             如果 {cat} 为空
               设 cat = 助手出题
@@ -401,9 +414,15 @@
               设 errs = 列表加项 {errs} {msg}
             否则如果 {lv} 为空
               设 lq = 调用 lesson.取知识点等级 point_code={itm.point_code} subject={subject_id} 出错时 le
-              设 lv = {lq.level 或}
+              设 lv2 = {lq.level 或}
+              设 lv = {blank}
+              遍历 y 于 {lvs.levels}
+                如果 {lv2} 不为空 且 {y} 等于 {lv2}
+                  设 lv = {lv2}
+                结束
+              结束
               如果 {lv} 为空
-                设 lv = {blank}-
+                设 lv = {lvs.first}
               结束
             结束
             设 it = {"stem": "{stem}", "options": {ol}, "answer": "{letter}", "accepted": {acc}, "explain": "{ex}", "item_code": "{ic}", "level": "{lv}", "category": "{cat}"}
@@ -611,7 +630,16 @@
           设 cl = {cl}{nl}{line}
         结束
       结束
-      设 base = {sysp}{nl}任务：出题，题目数量{cnt}。输出JSON对象，含title（标题）和questions（列表）。每题含stem（题干，不超过300字）、options（2到6个选项文字，选择题才有）、answer（选项文字或字母）、accepted（可选，其他可接受答案的列表）、explain（解析，不超过500字，可选）、item_code（只能从候选条目里选）、level、category。不要写题号。{nl}候选条目（编号｜名字｜所属知识点｜等级）：{nl}{cl}{nl}老师的话：{msg}
+      设 lvq = 调用 subject.科目等级 subject_id={subject_id}
+      设 lvt = {blank}
+      遍历 y 于 {lvq.levels}
+        如果 {lvt} 为空
+          设 lvt = {y}
+        否则
+          设 lvt = {lvt}、{y}
+        结束
+      结束
+      设 base = {sysp}{nl}任务：出题，题目数量{cnt}。输出JSON对象，含title（标题）和questions（列表）。每题含stem（题干，不超过300字）、options（2到6个选项文字，选择题才有）、answer（选项文字或字母）、accepted（可选，其他可接受答案的列表）、explain（解析，不超过500字，可选）、item_code（只能从候选条目里选）、level、category。不要写题号。{nl}level 只能是：{lvt}（不确定可以不写 level）。{nl}候选条目（编号｜名字｜所属知识点｜等级）：{nl}{cl}{nl}老师的话：{msg}
       设 rt = {ref_text}
       如果 {rt} 不为空
         设 rt = 替换 {rt} ^\s+|\s+$

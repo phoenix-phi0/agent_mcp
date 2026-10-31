@@ -245,7 +245,119 @@
     返回 {"n": {n}}
   结束
 
-  公开 函数 建科目 learner code name intro? kind? current_role? auth_mode?
+  公开 函数 科目等级 subject_id
+    设 sid = {subject_id 或}
+    设 mm = 匹配 {sid} ^[0-9]+$
+    如果 {mm.matched} 不等于 是
+      设 sid = 1
+    结束
+    设 si = 查一行 app.db subject_levels_by_id id={sid}
+    设 raw = {si.levels 或}
+    设 parts = 按正则切分 {raw} ,
+    设 items = 解析JSON []
+    设 txt = {zz 或}
+    设 first = {zz 或}
+    遍历 x 于 {parts}
+      如果 {x} 为空
+        继续
+      结束
+      设 s = 替换 {x} ^\s+|\s+$
+      如果 {s} 为空
+        继续
+      结束
+      设 items = 列表加项 {items} {s}
+      如果 {txt} 为空
+        设 txt = {s}
+        设 first = {s}
+      否则
+        设 txt = {txt},{s}
+      结束
+    结束
+    设 n = 列表长度 {items}
+    如果 {n} 等于 0
+      设 items = 解析JSON ["N5","N4","N3","N2","N1"]
+      设 txt = N5,N4,N3,N2,N1
+      设 first = N5
+      设 n = 5
+    结束
+    设 opts = 解析JSON [{"value":"全部","label":"全部"}]
+    遍历 y 于 {items}
+      设 o = {"value": "{y}", "label": "{y}"}
+      设 opts = 列表加项 {opts} {o}
+    结束
+    返回 {"levels": {items}, "first": "{first}", "text": "{txt}", "count": {n}, "options": {opts}}
+  结束
+
+  函数 校验等级 levels
+    设 parts = 按正则切分 {levels 或} ,
+    设 seen = ,
+    设 cnt = 0
+    设 txt = {zz 或}
+    遍历 x 于 {parts}
+      如果 {x} 为空
+        继续
+      结束
+      设 s = 替换 {x} ^\s+|\s+$
+      如果 {s} 为空
+        继续
+      结束
+      设 tl = 截取 {s} 13
+      如果 {tl} 不为空
+        报错 400 等级格式不对
+      结束
+      设 bad = 匹配 {s} [|^\s]
+      如果 {bad.matched} 等于 是
+        报错 400 等级格式不对
+      结束
+      设 key = ,{s},
+      如果 {seen} 包含 {key}
+        报错 400 等级格式不对
+      结束
+      设 seen = {seen}{s},
+      设 cnt = 计算 {cnt} + 1
+      如果 {cnt} 大于 10
+        报错 400 等级格式不对
+      结束
+      如果 {txt} 为空
+        设 txt = {s}
+      否则
+        设 txt = {txt},{s}
+      结束
+    结束
+    如果 {cnt} 等于 0
+      报错 400 等级格式不对
+    结束
+    返回 {"text": "{txt}", "count": {cnt}}
+  结束
+
+  函数 等级在用数 subject_id level
+    设 total = 0
+    设 q = {"subject_id": "{subject_id}", "level": "{level}"}
+    设 e1 = 查一值 app.db subject_table_exists name=quiz_question
+    如果 {e1} 大于 0
+      设 c1 = 查一值表 app.db subject_use_quiz_question {q}
+      设 total = 计算 {total} + {c1}
+    结束
+    设 e2 = 查一值 app.db subject_table_exists name=lesson_text
+    如果 {e2} 大于 0
+      设 c2 = 查一值表 app.db subject_use_lesson_text {q}
+      设 total = 计算 {total} + {c2}
+    结束
+    设 e3 = 查一值 app.db subject_table_exists name=quiz_progress
+    如果 {e3} 大于 0
+      设 c3 = 查一值表 app.db subject_use_quiz_progress {q}
+      设 total = 计算 {total} + {c3}
+    结束
+    设 e4 = 查一值 app.db subject_table_exists name=textbook_import_draft
+    设 e5 = 查一值 app.db subject_table_exists name=textbook_import_task
+    如果 {e4} 大于 0 且 {e5} 大于 0
+      设 c4 = 查一值表 app.db subject_use_textbook_import_draft {q}
+      设 total = 计算 {total} + {c4}
+    结束
+    返回 {"n": {total}}
+  结束
+
+  公开 函数 建科目 learner code name intro? kind? levels? current_role? auth_mode?
     如果 {learner} 为空
       报错 400 learner 不能为空
     结束
@@ -283,8 +395,22 @@
     如果 {kd} 不等于 language 且 {kd} 不等于 general
       报错 400 类型只能是 language 或 general
     结束
+    设 lv = {levels 或}
+    如果 {lv} 不为空
+      设 lv = 替换 {lv} ^\s+|\s+$
+    结束
+    如果 {lv} 为空
+      如果 {kd} 等于 language
+        设 lv = N5,N4,N3,N2,N1
+      否则
+        设 lv = 入门,基础,进阶
+      结束
+    否则
+      设 lc = 调用 校验等级 levels={lv}
+      设 lv = {lc.text}
+    结束
     设 now = 当前时间
-    设 row = {"code": "{cd}", "name": "{nm}", "intro": "{intro 或}", "kind": "{kd}", "owner": "{learner}", "now": "{now}"}
+    设 row = {"code": "{cd}", "name": "{nm}", "intro": "{intro 或}", "kind": "{kd}", "levels": "{lv}", "owner": "{learner}", "now": "{now}"}
     事务 app.db
       如果 {kd} 等于 language
         设 n1 = 写库表 app.db subject_info_insert_language {row}
@@ -297,7 +423,7 @@
     返回 {"id": {sid}, "code": "{cd}"}
   结束
 
-  公开 函数 改科目 learner subject_id name? intro? current_role? auth_mode?
+  公开 函数 改科目 learner subject_id name? intro? levels? current_role? auth_mode?
     设 v = 调用 管理校验 learner={learner} subject_id={subject_id} need=settings current_role={current_role} auth_mode={auth_mode}
     设 si = 查一行 app.db subject_info_full id={subject_id}
     设 nm = {name 或}
@@ -312,8 +438,28 @@
       结束
       设 newname = {nm}
     结束
+    设 newlv = {si.levels 或}
+    设 lv = {levels 或}
+    如果 {lv} 不为空
+      设 lv = 替换 {lv} ^\s+|\s+$
+    结束
+    如果 {lv} 不为空
+      设 lc = 调用 校验等级 levels={lv}
+      设 newlv = {lc.text}
+      设 oldlv = 调用 科目等级 subject_id={subject_id}
+      设 nk = ,{newlv},
+      遍历 x 于 {oldlv.levels}
+        设 key = ,{x},
+        如果 {nk} 不包含 {key}
+          设 u = 调用 等级在用数 subject_id={subject_id} level={x}
+          如果 {u.n} 大于 0
+            报错 400 等级「{x}」还有{u.n}条记录在用，先改掉题目和课文的等级再删
+          结束
+        结束
+      结束
+    结束
     设 now = 当前时间
-    设 row = {"id": "{subject_id}", "name": "{newname}", "intro": "{intro 或}", "now": "{now}"}
+    设 row = {"id": "{subject_id}", "name": "{newname}", "intro": "{intro 或}", "levels": "{newlv}", "now": "{now}"}
     设 n = 写库表 app.db subject_info_update {row}
     返回 {"ok": 1}
   结束
@@ -527,7 +673,7 @@
 
   公开 函数 载入科目页面 learner subj_id? current_role? auth_mode?
     如果 {subj_id} 为空
-      返回 {"subj_id": "", "subj_code": "", "subj_name": "", "subj_intro": "", "subj_kind": "通用"}
+      返回 {"subj_id": "", "subj_code": "", "subj_name": "", "subj_intro": "", "subj_kind": "通用", "subj_levels": ""}
     结束
     设 v = 调用 管理校验 learner={learner} subject_id={subj_id} need=settings current_role={current_role} auth_mode={auth_mode}
     设 si = 查一行 app.db subject_info_full id={subj_id}
@@ -535,10 +681,11 @@
     如果 {si.kind} 等于 language
       设 kd = 语言
     结束
-    返回 {"subj_id": {si.id}, "subj_code": "{si.code}", "subj_name": "{si.name}", "subj_intro": "{si.intro 或}", "subj_kind": "{kd}"}
+    设 lvs = 调用 科目等级 subject_id={subj_id}
+    返回 {"subj_id": {si.id}, "subj_code": "{si.code}", "subj_name": "{si.name}", "subj_intro": "{si.intro 或}", "subj_kind": "{kd}", "subj_levels": "{lvs.text}"}
   结束
 
-  公开 函数 保存科目页面 learner subj_name subj_id? subj_code? subj_intro? subj_kind? current_role? auth_mode?
+  公开 函数 保存科目页面 learner subj_name subj_id? subj_code? subj_intro? subj_kind? subj_levels? current_role? auth_mode?
     如果 {learner} 为空
       报错 400 learner 不能为空
     结束
@@ -549,9 +696,9 @@
       设 kd = language
     结束
     如果 {subj_id} 为空
-      设 cr = 调用 建科目 learner={learner} code={subj_code} name={subj_name} intro={subj_intro} kind={kd} current_role={current_role} auth_mode={auth_mode}
+      设 cr = 调用 建科目 learner={learner} code={subj_code} name={subj_name} intro={subj_intro} kind={kd} levels={subj_levels} current_role={current_role} auth_mode={auth_mode}
     否则
-      设 ed = 调用 改科目 learner={learner} subject_id={subj_id} name={subj_name} intro={subj_intro} current_role={current_role} auth_mode={auth_mode}
+      设 ed = 调用 改科目 learner={learner} subject_id={subj_id} name={subj_name} intro={subj_intro} levels={subj_levels} current_role={current_role} auth_mode={auth_mode}
     结束
     设 pg = 调用 科目管理页面 learner={learner} current_role={current_role} auth_mode={auth_mode}
     返回 {pg}

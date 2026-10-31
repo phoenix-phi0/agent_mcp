@@ -30,7 +30,7 @@
 结束
 
 接口 POST /subject/manage/save 动作 subject_save 角色 teacher
-  设 r = 调用 subject.保存科目页面 learner={learner} subj_name={subj_name} subj_id={subj_id 或} subj_code={subj_code 或} subj_intro={subj_intro 或} subj_kind={subj_kind 或} current_role={current_role 或} auth_mode={auth_mode 或}
+  设 r = 调用 subject.保存科目页面 learner={learner} subj_name={subj_name} subj_id={subj_id 或} subj_code={subj_code 或} subj_intro={subj_intro 或} subj_kind={subj_kind 或} subj_levels={subj_levels 或} current_role={current_role 或} auth_mode={auth_mode 或}
   设 _msg = 科目已保存
   消息 系统 {_msg} ok
   响应 state {r}

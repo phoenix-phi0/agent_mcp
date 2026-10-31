@@ -21,7 +21,8 @@
     # intent 不是 quiz、progress、textbook、explain 之一（含模型出错或返回不合法），取 explain
     # level 不是 N5 N4 N3 N2 N1 之一，取空串；keyword 缺失取空串并去首尾空白
     # 返回 {"intent": intent, "keyword": keyword, "level": level}
-    问JSON j = 判断学生这句话的意图：quiz 表示想做题，progress 表示问学习进度，textbook 表示问教材或课文目录，explain 表示问语法讲解或其他一切。同时抽出学生指名的语法点或课文关键词 keyword（没有则空串）和指定的日语等级 level（只能是 N5 N4 N3 N2 N1 或空串）。学生的话：{message} 格式 intent:文本 keyword?:文本 level?:文本 用 快 出错时 ej
+    设 lv = 调用 subject.科目等级 subject_id={subject_id}
+    问JSON j = 判断学生这句话的意图：quiz 表示想做题，progress 表示问学习进度，textbook 表示问教材或课文目录，explain 表示问语法讲解或其他一切。同时抽出学生指名的语法点或课文关键词 keyword（没有则空串）和指定的等级 level（只能是 {lv.text} 其中之一，逗号分隔，或空串）。学生的话：{message} 格式 intent:文本 keyword?:文本 level?:文本 用 快 出错时 ej
     如果 {ej} 不为空
       设 j.intent = explain
       设 j.keyword = {zz 或}
@@ -33,13 +34,14 @@
     结束
     设 level = {j.level 或}
     如果 {level} 不为空
-      设 lm = 匹配 {level} ^(N5|N4|N3|N2|N1)$
-      如果 {lm.matched} 不等于 是
+      设 level = 替换 {level} ^\s+|\s+$
+    结束
+    如果 {level} 不为空
+      设 hay = ,{lv.text},
+      设 needle = ,{level},
+      如果 {hay} 不包含 {needle}
         设 level = {zz 或}
       结束
-    结束
-    如果 {subject_id} 不等于 1
-      设 level = {zz 或}
     结束
     设 kw = {j.keyword 或}
     设 keyword = {zz 或}
@@ -248,14 +250,12 @@
       设 lj = [{"label": "做题", "url": "/quiz?mode=free&level={level}"}]
     否则如果 {keyword} 为空
       设 ov = 调用 progress.取概览 learner={learner} subject={subject_id}
-      如果 {ov.is_empty} 等于 1 且 {subject_id} 等于 1
-        设 reply = 还没有学习记录，先从N5开始
-        设 link = /quiz?mode=free&level=N5
-        设 lj = [{"label": "做题", "url": "/quiz?mode=free&level=N5"}]
-      否则如果 {ov.is_empty} 等于 1
-        设 reply = 还没有学习记录，先去做题页做几道题吧
-        设 link = /quiz
-        设 lj = [{"label": "做题", "url": "/quiz"}]
+      如果 {ov.is_empty} 等于 1
+        设 lv2 = 调用 subject.科目等级 subject_id={subject_id}
+        设 fl = {lv2.first}
+        设 reply = 还没有学习记录，先从{fl}开始
+        设 link = /quiz?mode=free&level={fl}
+        设 lj = [{"label": "做题", "url": "/quiz?mode=free&level={fl}"}]
       否则
         设 low = 调用 progress.列低分点 learner={learner} limit=1 subject={subject_id}
         设 link = /quiz

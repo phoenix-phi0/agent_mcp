@@ -5,6 +5,13 @@
   公开 函数 新建导入 series_code series_name code_prefix file_path source? license? file_name? file_size? file_ext? lesson_level? rewrite? overwrite? learner? current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
     设 subject_id = {sj.subject_id}
+    如果 {subject_id} 不等于 1
+      设 capsx = 查一值 app.db textbook_import_subject_caps subject_id={subject_id}
+      设 capj = 解析JSON {capsx}
+      如果 {capj.textbook_import 或} 不等于 1
+        报错 403 本科目没开教材导入
+      结束
+    结束
     # 返回 {ok, task_id, duplicate, chunk_count}；duplicate 为 1 表示库里已有内容完全相同的任务（不分系列），直接返回那一个，不再新存
     # 报错 400 series_code 不能为空
     # 报错 400 series_name 不能为空

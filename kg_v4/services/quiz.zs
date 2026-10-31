@@ -48,6 +48,29 @@
     返回 {"is_ta": 0}
   结束
 
+  函数 首个有题等级 pick_kind subject_id
+    设 sl = 调用 subject.科目等级 subject_id={subject_id}
+    设 pk = {pick_kind 或 全部}
+    设 lv = {zz 或}
+    遍历 lx 于 {sl.levels}
+      如果 {lv} 为空
+        如果 {pk} 等于 全部
+          设 rows = 查询 app.db quiz_q_free_all level={lx} subject_id={subject_id}
+        否则
+          设 rows = 查询 app.db quiz_q_free_cat level={lx} category={pk} subject_id={subject_id}
+        结束
+        设 nrows = 列表长度 {rows}
+        如果 {nrows} 大于 0
+          设 lv = {lx}
+        结束
+      结束
+    结束
+    如果 {lv} 为空
+      报错 404 没有可出的题
+    结束
+    返回 {"level": "{lv}"}
+  结束
+
   函数 取轮大小 mode
     # 返回 整数，这一轮的题数
     # mode 等于 lesson 返回 5，否则返回 10
@@ -402,7 +425,12 @@
           设 w0 = 写库 app.db quiz_q_delete_one question_no={aq.question_no} subject_id={sj.subject_id}
         结束
       结束
+      设 sl = 调用 subject.科目等级 subject_id={sj.subject_id}
+      设 lvS = ,{sl.text},
+      设 lvSlash = 替换 {sl.text} , /
+      设 lnno = 0
       遍历 ln 于 {lines}
+        设 lnno = 计算 {lnno} + 1
         设 mb = 匹配 {ln} ^\s*(#.*)?$
         如果 {mb.matched} 不等于 是
           设 total = 计算 {total} + 1
@@ -450,6 +478,10 @@
           结束
           如果 {f1} 为空 或 {f7} 为空
             报错 400 题库有坏题
+          结束
+          设 lvP = ,{f3},
+          如果 {f3} 为空 或 {lvS} 不包含 {lvP}
+            报错 400 题库有坏题：第{lnno}行等级{f3}不在本科目等级（{lvSlash}）里
           结束
           设 pat = ,{f1},
           如果 {seen} 包含 {pat}
@@ -519,6 +551,8 @@
     如果 {nrows} 小于 1 或 {nrows} 大于 20
       报错 400 题目列表不对
     结束
+    设 sl = 调用 subject.科目等级 subject_id={sj.subject_id}
+    设 lvS = ,{sl.text},
     设 seenS = ,
     遍历 r 于 {rows}
       设 qn = 替换 {r.question_no 或} ^\s+|\s+$
@@ -528,6 +562,10 @@
       设 an = 替换 {r.answer 或} ^\s+|\s+$
       设 ic = 替换 {r.item_code 或} ^\s+|\s+$
       如果 {qn} 为空 或 {lv} 为空 或 {cg} 为空 或 {st} 为空 或 {an} 为空 或 {ic} 为空
+        报错 400 题库有坏题
+      结束
+      设 lvP = ,{lv},
+      如果 {lvS} 不包含 {lvP}
         报错 400 题库有坏题
       结束
       设 pt = ,{qn},
@@ -728,6 +766,12 @@
     如果 {m2} 为空
       如果 {level} 为空
         报错 400 等级不能为空
+      结束
+      设 sl = 调用 subject.科目等级 subject_id={sj.subject_id}
+      设 lvS = ,{sl.text},
+      设 lvP = ,{level},
+      如果 {lvS} 不包含 {lvP}
+        报错 400 等级不在本科目里
       结束
     否则如果 {m2} 等于 lesson
       如果 {lesson_code} 为空
@@ -991,10 +1035,16 @@
     如果 {st.started} 等于 1
       设 stat = {lbl} {st.right_count}/{st.asked_count}
     结束
+    设 sl = 调用 subject.科目等级 subject_id={sj.subject_id}
     设 pl = {st.level 或 全部}
     设 pk = {st.category 或 全部}
+    设 lvS = ,{sl.text},
+    设 lvP = ,{pl},
+    如果 {lvS} 不包含 {lvP}
+      设 pl = {zz 或 全部}
+    结束
     设 frm = {"pick_level": "{pl}", "pick_kind": "{pk}"}
-    返回 {"stat": "{stat}", "form": {frm}}
+    返回 {"stat": "{stat}", "form": {frm}, "level_options": {sl.options}}
   结束
 
   公开 函数 开始页面 learner pick_level? pick_kind? current_role? auth_mode? subject?
@@ -1003,25 +1053,12 @@
     设 pl = {pick_level 或 全部}
     设 pk = {pick_kind 或 全部}
     设 lv = {zz 或}
+    设 sl = 调用 subject.科目等级 subject_id={sj.subject_id}
     如果 {pl} 不等于 全部
       设 lv = {pl}
     否则
-      遍历 lx 于 N5，N4，N3，N2，N1
-        如果 {lv} 为空
-          如果 {pk} 等于 全部
-            设 rows = 查询 app.db quiz_q_free_all level={lx} subject_id={sj.subject_id}
-          否则
-            设 rows = 查询 app.db quiz_q_free_cat level={lx} category={pk} subject_id={sj.subject_id}
-          结束
-          设 nrows = 列表长度 {rows}
-          如果 {nrows} 大于 0
-            设 lv = {lx}
-          结束
-        结束
-      结束
-      如果 {lv} 为空
-        报错 404 没有可出的题
-      结束
+      设 fr = 调用 首个有题等级 pick_kind={pk} subject_id={sj.subject_id}
+      设 lv = {fr.level}
     结束
     设 cat = {zz 或}
     如果 {pk} 不等于 全部
@@ -1034,7 +1071,7 @@
     设 card = {tc.card}
     设 rnd = {"text": "", "more": "", "back": "", "explain": ""}
     设 frm = {"pick_level": "{pl}", "pick_kind": "{pk}"}
-    返回 {"phase": "ask", "qtype": "{tc.qtype}", "card": {card}, "scope": "", "stat": "{stat}", "cheer": "", "score_change": "", "round": {rnd}, "summary": "", "form": {frm}}
+    返回 {"phase": "ask", "qtype": "{tc.qtype}", "card": {card}, "scope": "", "stat": "{stat}", "cheer": "", "score_change": "", "round": {rnd}, "summary": "", "form": {frm}, "level_options": {sl.options}}
   结束
 
   公开 函数 判答案页面 learner choice? given? current_role? auth_mode? subject?
@@ -1048,14 +1085,8 @@
     结束
     设 ans = {given 或}
     设 ch0 = {choice 或}
-    如果 {isc} 等于 1 且 {ch0} 不为空
+    如果 {isc} 等于 1
       设 ans = {ch0}
-    结束
-    如果 {ans} 为空 且 {ch0} 不为空
-      设 ans = {ch0}
-    结束
-    如果 {isc} 等于 1 且 {ans} 为空
-      设 ans = {given 或}
     结束
     设 prevs = 0
     如果 {qs} 不为空
@@ -1139,6 +1170,8 @@
     设 out.stat = {stat}
     设 out.cheer = {ch}
     设 out.score_change = {sc}
+    设 sl = 调用 subject.科目等级 subject_id={sj.subject_id}
+    设 out.level_options = {sl.options}
     返回 {out}
   结束
 
@@ -1154,13 +1187,14 @@
       设 scope = 调用 复习薄弱点文案 learner={learner} subject_id={sj.subject_id}
     结束
     设 res = 调用 下一题 learner={learner} subject={sj.subject_id}
+    设 sl = 调用 subject.科目等级 subject_id={sj.subject_id}
     设 stat = {lbl} {res.right_count}/{res.asked_count}
     设 rnd = {"text": "", "more": "", "back": "", "explain": ""}
     如果 {res.finished} 等于 0
       设 qq = {res.question}
       设 tc = 调用 拼题卡 question={qq}
       设 card = {tc.card}
-      返回 {"phase": "ask", "qtype": "{tc.qtype}", "card": {card}, "scope": "{scope}", "stat": "{stat}", "cheer": "", "score_change": "", "round": {rnd}, "summary": ""}
+      返回 {"phase": "ask", "qtype": "{tc.qtype}", "card": {card}, "scope": "{scope}", "stat": "{stat}", "cheer": "", "score_change": "", "round": {rnd}, "summary": "", "level_options": {sl.options}}
     结束
     如果 {ri.mode} 等于 lesson
       设 rt = 调用 按课轮尾 lesson_code={ri.lesson_code} stat={stat} subject_id={sj.subject_id}
@@ -1172,7 +1206,7 @@
       设 txt = 这一轮做完了（{stat}），{res.asked_count}道题各考一个不同的知识点。可以请老师总结这一轮，或者再来一轮。
       设 rnd = {"text": "{txt}", "more": "", "back": "", "explain": ""}
     结束
-    返回 {"phase": "end", "scope": "{scope}", "stat": "{stat}", "round": {rnd}, "cheer": "", "score_change": ""}
+    返回 {"phase": "end", "scope": "{scope}", "stat": "{stat}", "round": {rnd}, "cheer": "", "score_change": "", "level_options": {sl.options}}
   结束
 
   公开 函数 再来一轮页面 learner current_role? auth_mode? subject?
@@ -1187,13 +1221,14 @@
       设 scope = 调用 复习薄弱点文案 learner={learner} subject_id={sj.subject_id}
     结束
     设 res = 调用 再来一轮 learner={learner} subject={sj.subject_id}
+    设 sl = 调用 subject.科目等级 subject_id={sj.subject_id}
     设 stat = {lbl} {res.right_count}/{res.asked_count}
     设 rnd = {"text": "", "more": "", "back": "", "explain": ""}
     如果 {res.finished} 等于 0
       设 qq = {res.question}
       设 tc = 调用 拼题卡 question={qq}
       设 card = {tc.card}
-      返回 {"phase": "ask", "qtype": "{tc.qtype}", "card": {card}, "scope": "{scope}", "stat": "{stat}", "cheer": "", "score_change": "", "round": {rnd}, "summary": ""}
+      返回 {"phase": "ask", "qtype": "{tc.qtype}", "card": {card}, "scope": "{scope}", "stat": "{stat}", "cheer": "", "score_change": "", "round": {rnd}, "summary": "", "level_options": {sl.options}}
     结束
     如果 {ri.mode} 等于 lesson
       设 rt = 调用 按课轮尾 lesson_code={ri.lesson_code} stat={stat} subject_id={sj.subject_id}
@@ -1205,7 +1240,7 @@
       设 txt = 这一轮做完了（{stat}），{res.asked_count}道题各考一个不同的知识点。可以请老师总结这一轮，或者再来一轮。
       设 rnd = {"text": "{txt}", "more": "", "back": "", "explain": ""}
     结束
-    返回 {"phase": "end", "scope": "{scope}", "stat": "{stat}", "round": {rnd}, "cheer": "", "score_change": ""}
+    返回 {"phase": "end", "scope": "{scope}", "stat": "{stat}", "round": {rnd}, "cheer": "", "score_change": "", "level_options": {sl.options}}
   结束
 
   公开 函数 课文页面 learner lesson? mode? level? kind? current_role? auth_mode? subject?
@@ -1217,6 +1252,7 @@
     设 fk = {zz 或 全部}
     设 cm = {zz 或 free}
     设 lcode = {zz 或}
+    设 sl = 调用 subject.科目等级 subject_id={sj.subject_id}
     如果 {lesson} 不为空
       设 res = 调用 开始 learner={learner} mode=lesson lesson_code={lesson} subject={sj.subject_id}
       设 ls = 调用 lesson.取课文 code={lesson} subject={sj.subject_id}
@@ -1230,8 +1266,8 @@
       设 sl0 = 调用 progress.列得分 learner={learner} subject={sj.subject_id}
       设 nsc = 列表长度 {sl0.scores}
       如果 {nsc} 等于 0
-        设 frm0 = {"pick_level": "N5", "pick_kind": "全部"}
-        返回 {"phase": "noreview", "card": "", "scope": "", "cheer": "", "score_change": "", "round": "", "summary": "", "form": {frm0}}
+        设 frm0 = {"pick_level": "{sl.first}", "pick_kind": "全部"}
+        返回 {"phase": "noreview", "card": "", "scope": "", "cheer": "", "score_change": "", "round": "", "summary": "", "form": {frm0}, "level_options": {sl.options}}
       结束
       设 ri = 调用 取当前轮次信息 learner={learner} subject={sj.subject_id}
       如果 {ri.has_round} 等于 1 且 {ri.mode} 等于 review 且 {ri.asked_count} 小于 {ri.round_size}
@@ -1254,22 +1290,8 @@
       如果 {pl} 不等于 全部
         设 lv = {pl}
       否则
-        遍历 lx 于 N5，N4，N3，N2，N1
-          如果 {lv} 为空
-            如果 {pk} 等于 全部
-              设 rows = 查询 app.db quiz_q_free_all level={lx} subject_id={sj.subject_id}
-            否则
-              设 rows = 查询 app.db quiz_q_free_cat level={lx} category={pk} subject_id={sj.subject_id}
-            结束
-            设 nrows = 列表长度 {rows}
-            如果 {nrows} 大于 0
-              设 lv = {lx}
-            结束
-          结束
-        结束
-        如果 {lv} 为空
-          报错 404 没有可出的题
-        结束
+        设 fr = 调用 首个有题等级 pick_kind={pk} subject_id={sj.subject_id}
+        设 lv = {fr.level}
       结束
       设 cat = {zz 或}
       如果 {pk} 不等于 全部
@@ -1286,7 +1308,7 @@
       设 qq = {res.question}
       设 tc = 调用 拼题卡 question={qq}
       设 card = {tc.card}
-      返回 {"phase": "ask", "qtype": "{tc.qtype}", "card": {card}, "scope": "{scope}", "stat": "{stat}", "cheer": "", "score_change": "", "round": {rnd}, "summary": "", "form": {frm}}
+      返回 {"phase": "ask", "qtype": "{tc.qtype}", "card": {card}, "scope": "{scope}", "stat": "{stat}", "cheer": "", "score_change": "", "round": {rnd}, "summary": "", "form": {frm}, "level_options": {sl.options}}
     结束
     如果 {cm} 等于 lesson
       设 rt = 调用 按课轮尾 lesson_code={lcode} stat={stat} subject_id={sj.subject_id}
@@ -1298,7 +1320,7 @@
       设 txt = 这一轮做完了（{stat}），{res.asked_count}道题各考一个不同的知识点。可以请老师总结这一轮，或者再来一轮。
       设 rnd = {"text": "{txt}", "more": "", "back": "", "explain": ""}
     结束
-    返回 {"phase": "end", "scope": "{scope}", "stat": "{stat}", "round": {rnd}, "cheer": "", "score_change": "", "form": {frm}}
+    返回 {"phase": "end", "scope": "{scope}", "stat": "{stat}", "round": {rnd}, "cheer": "", "score_change": "", "form": {frm}, "level_options": {sl.options}}
   结束
 
 结束

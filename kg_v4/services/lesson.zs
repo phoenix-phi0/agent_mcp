@@ -239,16 +239,39 @@
     设 q.point_code = {point_code}
     设 q.subject_id = {sid}
     设 q.items = {s}
-    设 row = 查一行表 app.db lesson_level_by_point {q}
-    如果 {row.cnt} 等于 0
-      设 out.point_code = {point_code}
-      设 out.level = {zz 或}
-      设 out.lesson_count = 0
-      返回 {out}
+    设 lvs = 调用 subject.科目等级 subject_id={sid}
+    设 rows = 查询表 app.db lesson_level_by_point {q}
+    设 cnt = 查一值表 app.db lesson_count_by_point {q}
+    设 best = {zz 或}
+    遍历 lvx 于 {lvs.levels}
+      如果 {best} 为空
+        遍历 rx 于 {rows}
+          如果 {rx.level} 等于 {lvx}
+            设 best = {lvx}
+          结束
+        结束
+      结束
+    结束
+    如果 {best} 为空
+      设 qc = 查一值 app.db lesson_qq_exists
+      如果 {qc} 不等于 0
+        设 q2.point_code = {point_code}
+        设 q2.subject_id = {sid}
+        设 qrows = 查询表 app.db lesson_level_by_point_quiz {q2}
+        遍历 lvx 于 {lvs.levels}
+          如果 {best} 为空
+            遍历 rx 于 {qrows}
+              如果 {rx.level} 等于 {lvx}
+                设 best = {lvx}
+              结束
+            结束
+          结束
+        结束
+      结束
     结束
     设 out.point_code = {point_code}
-    设 out.level = N{row.lv}
-    设 out.lesson_count = {row.cnt}
+    设 out.level = {best}
+    设 out.lesson_count = {cnt}
     返回 {out}
   结束
 
@@ -286,8 +309,14 @@
     如果 {title} 为空
       报错 400 导入文件有错
     结束
-    设 m = 匹配 {level} ^N[1-5]$
-    如果 {m.matched} 不等于 是
+    设 lvr = 调用 subject.科目等级 subject_id={subject_id}
+    设 okl = 0
+    遍历 lx 于 {lvr.levels}
+      如果 {lx} 等于 {level}
+        设 okl = 1
+      结束
+    结束
+    如果 {okl} 等于 0
       报错 400 导入文件有错
     结束
     如果 {edited} 不为空
@@ -546,6 +575,7 @@
     结束
     设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
     设 sid = {sj.subject_id}
+    设 lvs = 调用 subject.科目等级 subject_id={sid}
     设 mt = 匹配 {rows_json} ^\s*\[
     如果 {mt.matched} 不等于 是
       报错 400 课文数据有错
@@ -571,8 +601,13 @@
       如果 {lv} 为空
         报错 400 课文数据有错
       结束
-      设 mt = 匹配 {lv} ^N[1-5]$
-      如果 {mt.matched} 不等于 是
+      设 okl = 0
+      遍历 lx 于 {lvs.levels}
+        如果 {lx} 等于 {lv}
+          设 okl = 1
+        结束
+      结束
+      如果 {okl} 等于 0
         报错 400 课文数据有错
       结束
       如果 {ee} 不为空
@@ -819,6 +854,8 @@
       设 opts = 列表加项 {opts} {e2}
     结束
     设 fl = {lesson_level 或 全部}
+    设 lvo = 调用 subject.科目等级 subject_id={sid}
+    设 out.level_options = {lvo.options}
     设 out.lessons = {rows}
     设 out.series_options = {opts}
     设 out.series_head = {cur_name}
@@ -842,6 +879,7 @@
       设 o1.reading.missing = 没有这一课（{lesson}），回课文表重新选。
       设 o1.reading.back = #%E6%95%99%E6%9D%90
       设 o1.form = {pg.form}
+      设 o1.level_options = {pg.level_options}
       返回 {o1}
     结束
     设 qt = 调用 题数表 subject_id={sid}
@@ -940,6 +978,7 @@
     设 o2.series_head = {pg.series_head}
     设 o2.lesson_count = {pg.lesson_count}
     设 o2.form = {pg.form}
+    设 o2.level_options = {pg.level_options}
     返回 {o2}
   结束
 

@@ -272,42 +272,34 @@
     # 按等级累计 total；读 progress_mastery 该 learner 该点 mastered=1 的累计进 mastered
     # 返回 {"learner": learner, "covered_count": 有等级的点数, "levels": 5 项列表}
     设 lst = 调用 kg.列知识点 subject={sid}
-    设 covered = 0
-    设 t5 = 0
-    设 t4 = 0
-    设 t3 = 0
-    设 t2 = 0
-    设 t1 = 0
-    设 m5 = 0
-    设 m4 = 0
-    设 m3 = 0
-    设 m2 = 0
-    设 m1 = 0
+    设 sl = 调用 subject.科目等级 subject_id={sid}
+    设 pl = 解析JSON []
     遍历 pt 于 {lst.points}
       设 lv = 调用 lesson.取知识点等级 point_code={pt.code} subject={sid}
       如果 {lv.level} 不为空
-        设 covered = 计算 {covered} + 1
         设 mm = 查一行 app.db progress_mastery_get learner={learner} point_code={pt.code} subject_id={sid}
         设 mv = {mm.mastered 或 0}
-        如果 {lv.level} 等于 N5
-          设 t5 = 计算 {t5} + 1
-          设 m5 = 计算 {m5} + {mv}
-        否则如果 {lv.level} 等于 N4
-          设 t4 = 计算 {t4} + 1
-          设 m4 = 计算 {m4} + {mv}
-        否则如果 {lv.level} 等于 N3
-          设 t3 = 计算 {t3} + 1
-          设 m3 = 计算 {m3} + {mv}
-        否则如果 {lv.level} 等于 N2
-          设 t2 = 计算 {t2} + 1
-          设 m2 = 计算 {m2} + {mv}
-        否则如果 {lv.level} 等于 N1
-          设 t1 = 计算 {t1} + 1
-          设 m1 = 计算 {m1} + {mv}
-        结束
+        设 ent = {"level": "{lv.level}", "mv": {mv}}
+        设 pl = 列表加项 {pl} {ent}
       结束
     结束
-    返回 {"learner": "{learner}", "covered_count": {covered}, "levels": [{"level": "N5", "mastered": {m5}, "total": {t5}}, {"level": "N4", "mastered": {m4}, "total": {t4}}, {"level": "N3", "mastered": {m3}, "total": {t3}}, {"level": "N2", "mastered": {m2}, "total": {t2}}, {"level": "N1", "mastered": {m1}, "total": {t1}}]}
+    设 covered = 0
+    设 outl = 解析JSON []
+    遍历 ln 于 {sl.levels}
+      设 tt = 0
+      设 mt = 0
+      遍历 e 于 {pl}
+        如果 {e.level} 等于 {ln}
+          设 tt = 计算 {tt} + 1
+          设 mt = 计算 {mt} + {e.mv}
+        结束
+      结束
+      设 covered = 计算 {covered} + {tt}
+      设 item = {"level": "{ln}", "mastered": {mt}, "total": {tt}}
+      设 outl = 列表加项 {outl} {item}
+    结束
+    设 lcnt = 列表长度 {outl}
+    返回 {"learner": "{learner}", "covered_count": {covered}, "level_count": {lcnt}, "levels": {outl}}
   结束
 
   公开 函数 重建全部得分 pass_line? fall_line?
@@ -614,38 +606,19 @@
     结束
     设 lv = 调用 按级统计掌握 learner={learner} subject={sid}
     设 mp = 调用 取点级映射 subject_id={sid}
-    设 a5 = 0
-    设 a4 = 0
-    设 a3 = 0
-    设 a2 = 0
-    设 a1 = 0
+    设 acl = 解析JSON []
     遍历 mi 于 {mp.items}
       设 ac = 查一值 app.db progress_answer_point_count learner={learner} point_code={mi.code} subject_id={sid}
-      如果 {mi.level} 等于 N5
-        设 a5 = 计算 {a5} + {ac}
-      否则如果 {mi.level} 等于 N4
-        设 a4 = 计算 {a4} + {ac}
-      否则如果 {mi.level} 等于 N3
-        设 a3 = 计算 {a3} + {ac}
-      否则如果 {mi.level} 等于 N2
-        设 a2 = 计算 {a2} + {ac}
-      否则如果 {mi.level} 等于 N1
-        设 a1 = 计算 {a1} + {ac}
-      结束
+      设 acn = {"level": "{mi.level}", "ac": {ac}}
+      设 acl = 列表加项 {acl} {acn}
     结束
     设 lvs = 解析JSON []
     遍历 lr 于 {lv.levels}
       设 an = 0
-      如果 {lr.level} 等于 N5
-        设 an = {a5}
-      否则如果 {lr.level} 等于 N4
-        设 an = {a4}
-      否则如果 {lr.level} 等于 N3
-        设 an = {a3}
-      否则如果 {lr.level} 等于 N2
-        设 an = {a2}
-      否则如果 {lr.level} 等于 N1
-        设 an = {a1}
+      遍历 ae 于 {acl}
+        如果 {ae.level} 等于 {lr.level}
+          设 an = 计算 {an} + {ae.ac}
+        结束
       结束
       设 item = {"level": "{lr.level}", "tally": "{lr.mastered}/{lr.total}", "answers": {an}}
       设 lvs = 列表加项 {lvs} {item}
