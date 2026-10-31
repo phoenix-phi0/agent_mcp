@@ -49,7 +49,7 @@ SQL = K.build_sql(ws, P.closure(ws, "teacher_assist"))
 SUBJECTS = [
     ("subject_info", dict(code="jp_grammar", name="日语语法", kind="language", caps="x", levels="", qtypes="choice", visibility="public",
                           owner="t1", status="active", created_at="2026-01-01", updated_at="2026-01-01")),
-    ("subject_info", dict(code="math", name="数学", kind="general", caps="x", levels="", qtypes="choice", visibility="public",
+    ("subject_info", dict(code="math", name="数学", kind="general", caps="x", levels="初一,初二", qtypes="choice", visibility="public",
                           owner="t1", status="active", created_at="2026-01-01", updated_at="2026-01-01")),
 ]
 BASE = [("kg_point", dict(code="P1", title="点一")), ("kg_item", dict(code="I1", name="条目一", point_code="P1"))]

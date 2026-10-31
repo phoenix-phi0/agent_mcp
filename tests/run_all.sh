@@ -98,6 +98,7 @@ run 导入规则     $PY tests/kg_v4/test_kg_import_rules.py
 run 助手草稿     $PY tests/kg_v4/test_assist_drafts.py
 run 助手材料     $PY tests/kg_v4/test_assist_material.py
 run 助手学情     $PY tests/kg_v4/test_assist_insight.py
+run 科目等级     $PY tests/kg_v4/test_subject_levels.py
 # 浏览器走查（K97）：起服务 + playwright + 系统 Chrome，比别的组慢，时限给 300 秒。
 # 没 playwright 的机器上打「跳过」退出码 2——run() 里单独按「跳过」处理，详见脚本头部。
 # 解释器由 PW_PYTHON 指定（如 /tmp/k97_pw_venv/bin/python），不往 .venv 装 playwright。

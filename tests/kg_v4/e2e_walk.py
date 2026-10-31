@@ -335,6 +335,20 @@ def walk_student(s1, base, ck, marks, subject_mgmt):
     for n in STUDENT_PAGES:
         err = visit(s1, n, marks)
         ck(not err, f"学生端「{n}」打开且无 JS 错误", err)
+    # K161：等级下拉改成「选项来自 level_options」，日语科目仍是 全部+N5..N1
+    got = quiz_level_labels(s1, marks)
+    ck(got == ["全部", "N5", "N4", "N3", "N2", "N1"], "日语科目做题等级下拉：全部+N5..N1（行为不变）", got)
+
+
+def quiz_level_labels(page, marks):
+    """开做题页，读顶栏「等级」下拉的选项文字（去掉禁用的「请选择」）。"""
+    visit(page, "做题", marks)
+    page.wait_for_function(
+        "() => { const s = document.querySelector('label.field select');"
+        " return s && [...s.options].some(o => !o.disabled); }", timeout=10000)
+    return page.eval_on_selector_all(
+        'label.field:has-text("等级") select',
+        "els => els.length ? [...els[0].options].filter(o => !o.disabled).map(o => o.textContent.trim()) : []")
 
 
 def student_switch(s1, ck, marks):
@@ -357,6 +371,10 @@ def student_switch(s1, ck, marks):
     ck(selected_label(s1, "select.nav-subject") == SUBJ_NAME,
        "s1 顶栏可切到新科目，刷新后仍是它",
        "下拉选项：「" + selected_label(s1, "select.nav-subject") + "」")
+    # K161：新科目是通用科目（默认 入门,基础,进阶），做题页等级下拉显示自定义等级
+    got = quiz_level_labels(s1, marks)
+    ck(got == ["全部", "入门", "基础", "进阶"],
+       "切到通用科目后做题等级下拉：全部+入门/基础/进阶（不再是 N5..N1）", got)
     err = drain_errors(marks)
     ck(not err, "s1 页面整个流程无 JS 错误", err)
 
@@ -726,6 +744,35 @@ def subject_flow(t1, base, ck, marks):
        and "私有" in row.inner_text() and "草稿" in row.inner_text()
        and "负责" in row.inner_text(),
        "新科目在表里：私有、草稿，t1 是负责", row.inner_text()[:200])
+    # K161：新建时等级留空 → 通用科目默认三档；编辑浮层「载入」回填它
+    hits, stop = track_posts(t1, "/subject/manage/open")
+    row.locator('button:has-text("编辑")').first.click()
+    t1.wait_for_selector(".overlay", timeout=8000)
+    lv_in = t1.locator('.overlay label.field:has-text("等级") input').first
+    try:
+        t1.wait_for_function(
+            "() => { const e = [...document.querySelectorAll('.overlay label.field')]"
+            ".find(l => l.textContent.includes('等级')); const i = e && e.querySelector('input');"
+            " return i && i.value; }", timeout=10000)
+    except Exception:
+        pass
+    got = lv_in.input_value() if lv_in.count() else None
+    stop()
+    vals = t1.eval_on_selector_all(
+        ".overlay label.field",
+        "els => els.map(l => [l.textContent.trim().slice(0, 8),"
+        " (l.querySelector('input,textarea,select') || {}).value])")
+    api = "" if got == "入门,基础,进阶" else t1.evaluate("""async () => {
+      const sid = new URLSearchParams(location.hash.split('?')[1] || '').get('subj_id');
+      const r = await fetch('/subject/manage/open', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: 'subject_open', form: {subj_id: sid}})});
+      return r.status + ' ' + await r.text();
+    }""")
+    ck(got == "入门,基础,进阶", "新建通用科目默认三档：编辑浮层等级是 入门,基础,进阶",
+       f"等级框={got!r}；浮层各框={vals}；地址={hash_of(t1)}；载入请求{len(hits)}次；接口={api}")
+    t1.locator('.overlay button:has-text("取消")').first.click()
+    t1.wait_for_selector(".overlay", state="detached", timeout=8000)
 
     # 2) 成员浮层：加 t2 协作、批量分配 s1
     # K112：科目管理有界面级「触发 subject_members」，原先 runTrigger 把浮层参数从
