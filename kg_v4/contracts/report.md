@@ -49,7 +49,7 @@
   伪代码 所有科目（含 1 号日语）统一：调用 subject.列科目学生 subject_id=subject_id，得 students；只留 username 在 students 各项 learner 里的学生（科目里登记且 active 的学生；没有登记或已撤销的学生不出现），顺序不变。不再有「1 号=全部学生」的特例，也不按 id=1 判断：新建的学生由 account.建学生 自动登记进日语科目（jp_grammar），已有学生由 migrate_subject.py 补登记
 
 函数 取点等级 point_code subject_id
-  返回 等级文本（N5 到 N1），取不到返回空串
+  返回 等级文本（本科目等级之一，即 subject.科目等级 里的一项；日语 N5 到 N1），取不到返回空串
   伪代码 调用 lesson.取知识点等级 point_code=point_code subject=subject_id 出错时 e
   伪代码 出错（如 404）或其 level 为空，返回空串；否则返回其 level
 

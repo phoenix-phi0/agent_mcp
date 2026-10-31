@@ -31,7 +31,7 @@
 结束
 
 页面 实体 quiz_view 做题页面
-  字段 pick_level 枚举 全部,N5,N4,N3,N2,N1 等级
+  字段 pick_level 文本 等级（下拉选项来自接口的level_options：全部加上本科目等级）
   字段 pick_kind 枚举 全部,挖空,意思,接续,找错句 考点
   字段 given 文本 接续题的作答内容
 结束

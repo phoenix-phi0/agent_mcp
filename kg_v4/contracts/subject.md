@@ -8,7 +8,7 @@
   intro 长文本 说明，可空
   kind 文本 类型：language 或 general
   caps 文本 能力开关 JSON，如 {"vocab":1,"dictation":1,"lesson":1,"levels":1,"jp_judge":1,"textbook_import":1}，缺省键视为 0
-  levels 文本 自定义等级列表，英文逗号分隔有序（日语 N5,N4,N3,N2,N1），空表示不分级
+  levels 文本 本科目等级列表，英文逗号分隔、有序（从易到难；日语 N5,N4,N3,N2,N1，通用科目新建默认 入门,基础,进阶）；等级的编码就是显示名；空串视为 N5,N4,N3,N2,N1（兼容旧数据）；1–10 项，每项 1–12 字，不含 , | ^ 和空白，不重复
   qtypes 文本 启用的题型，英文逗号分隔（日语 choice,fill）
   visibility 文本 public 或 private
   owner 文本 创建者教师用户名
@@ -47,6 +47,7 @@
   subj_name 文本 科目名称
   subj_intro 长文本 科目说明
   subj_kind 枚举 通用,语言 类型（页面值域中文；通用存 general、语言存 language）
+  subj_levels 文本 本科目等级，英文逗号分隔、从易到难（新建时留空按类型取默认：通用 入门,基础,进阶，语言 N5,N4,N3,N2,N1）
   subj_visibility 文本 科目表「可见性」列（公共/私有）
   subj_status 文本 科目表「状态」列（启用/停用/草稿）
   subj_owner 文本 科目表「创建者」列
@@ -102,6 +103,26 @@
   伪代码 need 等于 write 但 auth_mode 不等于 on（单人/不登录）：不校验，同 need 缺省
   伪代码 need 等于 own（仅负责人通过，给改「全部科目(0)」的内容用）且 auth_mode 等于 on：先按上面两条解析出 subject_id（显式 subject 的 400/403/404 照旧），再按「科目访问 need=settings auth_mode=on」判断，ok 为 0 时——科目不存在报错 404 没有这个科目，否则报错 403 只有科目负责人可以操作（协作教师、公共科目的其他教师、学生都是它）；ok 为 1 返回 {"subject_id": 该数字}；need 等于 own 但 auth_mode 不等于 on：不校验，同 need 缺省
 
+公开 函数 科目等级 subject_id
+  返回 {levels, first, text, count, options}；本科目的有序等级（从易到难），各模块取等级一律调它，不再写死 N5–N1：levels 是等级文本的列表；first 是第一项（最基础的等级）；text 是 levels 用英文逗号连接；count 是项数；options 是下拉选项 [{value, label}]，第一项是 {value: 「全部」, label: 「全部」}，其后每个等级一项（value、label 都是该等级）
+  伪代码 subject_id 为空或不是纯数字时按 1 处理；按 subject_id 查 subject_info 的 levels（查询 subject_levels_by_id）
+  伪代码 levels 按英文逗号拆开，每项去首尾空白，丢掉空项
+  伪代码 兼容规则：查不到这一行、levels 为空串、或拆完一项都没有，一律当作 N5,N4,N3,N2,N1（日语科目、旧库、没有 subject_info 行的测试库行为不变）
+  伪代码 只读，不校验权限，不报错，不调用别的模块
+  伪代码 返回 {"levels": 列表, "first": 第一项, "text": 逗号连接, "count": 项数, "options": 选项列表}
+
+函数 校验等级 levels
+  返回 {text, count}；把用户填的等级串整理成存库口径（私有）：text 是整理后用英文逗号连接的串
+  报错 400 等级格式不对
+  伪代码 levels 按英文逗号拆开，每项去首尾空白，丢掉空项
+  伪代码 一项都没有、多于 10 项、某项超过 12 个字、某项含 | 或 ^ 或空白字符、或有重复项，报错 400 等级格式不对
+  伪代码 返回 {"text": 逗号连接, "count": 项数}
+
+函数 等级在用数 subject_id level
+  返回 {n}；本科目里还在用这个等级的记录条数（私有）：quiz_question（subject_id 相等且 level 相等）、lesson_text（同）、quiz_progress（同）、textbook_import_draft（level 相等且所属 textbook_import_task 的 subject_id 相等）四张表的行数之和
+  伪代码 直读下游模块的表——subject 是叶子、不声明依赖它们（先例 kg.外部引用）；每张表先查 app.db subject_table_exists（sqlite_master 里有没有这张表），模块用例的库只建本模块的表，表不在就按 0 计；整库和接口实测时表在、照实数
+  伪代码 只读；不调用别的模块
+
 公开 函数 列科目学生 subject_id
   返回 {total, students}；students 是 [{learner}]，subject_student 里该科目 status 等于 active 的学生，按 learner 升序（report、assist_common 用；学生范围的唯一规则，没有「1 号=全部学生」的特例）
   伪代码 查 subject_student 中 subject_id 相等且 status 等于 active 的行，按 learner 升序，去重
@@ -147,7 +168,7 @@
   返回 {n}；该科目的负责人个数（私有）：subject_info.owner 不为空算 1 个，再加 subject_teacher 中 role 等于 owner 且 teacher 不等于 subject_info.owner 的行数；except 不为空时，把 teacher 等于 except 的那一行（以及 owner 等于 except 时的 subject_info.owner）排除后再数
   伪代码 只读；给 改科目教师角色、移除科目教师 判「不能去掉最后一个负责人」用
 
-公开 函数 建科目 learner code name intro? kind? current_role? auth_mode?
+公开 函数 建科目 learner code name intro? kind? levels? current_role? auth_mode?
   返回 {id, code}；新建一个科目，建者自动成为负责人；新科目默认 private（私有）、draft（草稿，学生看不到，别的教师也看不到），由负责人「启用」后才对学生生效
   报错 400 learner 不能为空
   报错 403 只有教师可以管理科目
@@ -157,6 +178,7 @@
   报错 400 科目名称不能为空
   报错 400 科目名称最长40字
   报错 400 类型只能是 language 或 general
+  报错 400 等级格式不对
   伪代码 learner 为空，报错 400 learner 不能为空
   伪代码 auth_mode 等于 on 且 current_role 不等于 teacher，报错 403 只有教师可以管理科目（任何教师都能建，包括建成公共科目——K71 决定 1 选 A）；auth_mode 不等于 on（单人/不登录）不校验角色
   伪代码 code 去掉首尾空白；不匹配 ^[a-z][a-z0-9_]*$ 或长度超过 20，报错 400 科目编码只能是小写字母开头的小写字母、数字、下划线，最长20
@@ -164,22 +186,26 @@
   伪代码 subject_info 已有该 code，报错 409 科目编码已存在（code 全局唯一，兼作该科目知识点/条目编号前缀）
   伪代码 name 去掉首尾空白后为空，报错 400 科目名称不能为空；超过 40 个字，报错 400 科目名称最长40字（name 不要求唯一）
   伪代码 kind 为空取 general；不是 language 也不是 general，报错 400 类型只能是 language 或 general
-  伪代码 caps 按类型取默认模板：general 为 {"kg":1,"quiz":1,"progress":1,"tutor":1}；language 为 {"kg":1,"quiz":1,"progress":1,"tutor":1,"lesson":1,"textbook_import":1,"vocab":1,"dictation":1,"levels":1}（jp_judge 不开，日语判分只给日语科目）；levels 为空串；qtypes 为 choice,fill
-  伪代码 在一个事务里：插入 subject_info (code, name, intro=intro 或空串, kind, caps, levels, qtypes, visibility=private, owner=learner, status=draft, created_at=当前时间, updated_at=当前时间)；再插入 subject_teacher (subject_id=新 id, teacher=learner, role=owner, created_at=当前时间)
+  伪代码 caps 按类型取默认模板：general 为 {"kg":1,"quiz":1,"progress":1,"tutor":1}；language 为 {"kg":1,"quiz":1,"progress":1,"tutor":1,"lesson":1,"textbook_import":1,"vocab":1,"dictation":1,"levels":1}（jp_judge 不开，日语判分只给日语科目）；qtypes 为 choice,fill
+  伪代码 levels：去首尾空白后为空时按类型取默认——language 为 N5,N4,N3,N2,N1，general 为 入门,基础,进阶；不为空时调用本模块 校验等级 levels=levels（不过报错 400 等级格式不对），取它的 text；在 kind 校验之后检查
+  伪代码 在一个事务里：插入 subject_info (code, name, intro=intro 或空串, kind, caps, levels=上一条得到的等级串（两条 insert 查询都用 :levels，不再写死空串）, qtypes, visibility=private, owner=learner, status=draft, created_at=当前时间, updated_at=当前时间)；再插入 subject_teacher (subject_id=新 id, teacher=learner, role=owner, created_at=当前时间)
   伪代码 不写 subject_pref（建者要用新科目时自己切换；auth_me 的 subjects 由 列我的科目 现算，教师自己负责的科目不论状态都在里面，刷新页面后顶栏下拉即可见）
   伪代码 返回 {"id": 新 id, "code": code}
 
-公开 函数 改科目 learner subject_id name? intro? current_role? auth_mode?
-  返回 {ok}；改科目的名称和说明（只有负责人）；code 永不可改（任何科目都没有改 code 的入口，1 号日语科目的 jp_grammar 因此受保护）
+公开 函数 改科目 learner subject_id name? intro? levels? current_role? auth_mode?
+  返回 {ok}；改科目的名称、说明和等级（只有负责人）；等级只许新增和调顺序，删除或改名在用的等级被拒（D2，改名等于删旧加新）；code 永不可改（任何科目都没有改 code 的入口，1 号日语科目的 jp_grammar 因此受保护）
   报错 400 subject_id 不对
   报错 404 没有这个科目
   报错 403 只有教师可以管理科目
   报错 403 只有科目负责人可以操作
   报错 400 科目名称最长40字
+  报错 400 等级格式不对
+  报错 400 等级「<等级>」还有<n>条记录在用，先改掉题目和课文的等级再删
   伪代码 调用 管理校验 learner=learner subject_id=subject_id need=settings current_role=current_role auth_mode=auth_mode（400/404/403 由它报）
   伪代码 name 去掉首尾空白后为空：不改名；否则超过 40 个字报错 400 科目名称最长40字，不超过则改名
   伪代码 intro：按传入值原样写（不传或空串即清空说明；页面保存时名称和说明总是一起提交）
-  伪代码 更新 subject_info 的 name、intro、updated_at=当前时间；返回 {"ok": 1}
+  伪代码 levels 去首尾空白后为空：等级不改（存库的 levels 原样保留）；不为空：调用本模块 校验等级 levels=levels（不过报错 400 等级格式不对）得新串；旧等级取 调用本模块 科目等级 subject_id=subject_id 的 levels（含兼容规则：存库为空串时旧等级是 N5,N4,N3,N2,N1）；旧等级里不在新等级里的每一项（被删掉或改了名的），调用本模块 等级在用数 subject_id=subject_id level=该项，n 大于 0 报错 400 等级「<等级>」还有<n>条记录在用，先改掉题目和课文的等级再删（<等级>、<n> 换成真实值，不含空格；按旧等级顺序报第一个）；没被引用的旧等级可以删；新增和调顺序随时可以
+  伪代码 更新 subject_info 的 name、intro、levels（levels 为空时写回原值）、updated_at=当前时间（subject_info_update 查询加 :levels）；返回 {"ok": 1}
 
 公开 函数 设科目可见性 learner subject_id visibility current_role? auth_mode?
   返回 {ok, visibility}；把科目设为公共（public）或私有（private），只有负责人
@@ -315,23 +341,23 @@
   伪代码 更新该行 status=revoked；返回 {"ok": 1}
 
 公开 函数 科目管理页面 learner current_role? auth_mode?
-  返回 {subjects, manage_head, can_create}；「科目管理」页「进入时」的整页状态（动作 subject_manage_home）；subjects 是表格行 [{subj_id, subj_code, subj_name, subj_kind, subj_visibility, subj_status, subj_owner, subj_my_role, subj_student_n, subj_teacher_n, can_manage, can_assign}]
+  返回 {subjects, manage_head, can_create}；「科目管理」页「进入时」的整页状态（动作 subject_manage_home）；subjects 是表格行 [{subj_id, subj_code, subj_name, subj_kind, subj_levels, subj_visibility, subj_status, subj_owner, subj_my_role, subj_student_n, subj_teacher_n, can_manage, can_assign}]（subj_levels 要在行里：从行上点「编辑」时前端直接拿这一行填表单、不再发「载入」，行里没有的字段编辑框就是空的）
   报错 403 只有教师可以管理科目
   伪代码 调用 列可管理科目 learner=learner current_role=current_role auth_mode=auth_mode（学生 403）
-  伪代码 每行转页面口径：subj_id=id，subj_code=code，subj_name=name，subj_kind：language 为「语言」否则「通用」，subj_visibility：public 为「公共」否则「私有」，subj_status：active「启用」、disabled「停用」、draft「草稿」，subj_owner=owner，subj_my_role：owner「负责」、editor「协作」、public「公共只读」、single「单人」，subj_student_n=student_n，subj_teacher_n=teacher_n，can_manage：my_role 是 owner 或 single 为 1 否则 0，can_assign：status 不是 disabled 为 1 否则 0
+  伪代码 每行转页面口径：subj_id=id，subj_code=code，subj_name=name，subj_kind：language 为「语言」否则「通用」，subj_levels=调用本模块 科目等级 subject_id=该科目 id 的 text（存库为空串时是 N5,N4,N3,N2,N1），subj_visibility：public 为「公共」否则「私有」，subj_status：active「启用」、disabled「停用」、draft「草稿」，subj_owner=owner，subj_my_role：owner「负责」、editor「协作」、public「公共只读」、single「单人」，subj_student_n=student_n，subj_teacher_n=teacher_n，can_manage：my_role 是 owner 或 single 为 1 否则 0，can_assign：status 不是 disabled 为 1 否则 0
   伪代码 manage_head：「我能管理的科目共{total}个」（不含空格）；can_create：auth_mode 等于 on 时 current_role 等于 teacher 为 1，否则 1（单人模式也能建）
   伪代码 返回 {"subjects": 行表, "manage_head": 文案, "can_create": 1}
 
 公开 函数 载入科目页面 learner subj_id? current_role? auth_mode?
-  返回 回填表单 {subj_id, subj_code, subj_name, subj_intro, subj_kind}（动作 subject_open，「编辑科目」浮层的「载入」）
+  返回 回填表单 {subj_id, subj_code, subj_name, subj_intro, subj_kind, subj_levels}（动作 subject_open，「编辑科目」浮层的「载入」）
   报错 400 subject_id 不对
   报错 404 没有这个科目
   报错 403 只有教师可以管理科目
   报错 403 只有科目负责人可以操作
-  伪代码 subj_id 为空（新建）返回空表单 {"subj_id": "", "subj_code": "", "subj_name": "", "subj_intro": "", "subj_kind": "通用"}
-  伪代码 否则调用 管理校验 learner=learner subject_id=subj_id need=settings current_role=current_role auth_mode=auth_mode（只有负责人能打开编辑），查 subject_info 返回 {"subj_id": id, "subj_code": code, "subj_name": name, "subj_intro": intro 或空串, "subj_kind": language 为「语言」否则「通用」}
+  伪代码 subj_id 为空（新建）返回空表单 {"subj_id": "", "subj_code": "", "subj_name": "", "subj_intro": "", "subj_kind": "通用", "subj_levels": ""}（等级留空，保存时按类型取默认）
+  伪代码 否则调用 管理校验 learner=learner subject_id=subj_id need=settings current_role=current_role auth_mode=auth_mode（只有负责人能打开编辑），查 subject_info 返回 {"subj_id": id, "subj_code": code, "subj_name": name, "subj_intro": intro 或空串, "subj_kind": language 为「语言」否则「通用」, "subj_levels": 调用本模块 科目等级 subject_id=subj_id 的 text（存库为空串时是 N5,N4,N3,N2,N1）}
 
-公开 函数 保存科目页面 learner subj_name subj_id? subj_code? subj_intro? subj_kind? current_role? auth_mode?
+公开 函数 保存科目页面 learner subj_name subj_id? subj_code? subj_intro? subj_kind? subj_levels? current_role? auth_mode?
   返回 刷新后的整页状态，形状同 科目管理页面
   报错 400 learner 不能为空
   报错 400 类型只能是 language 或 general
@@ -344,9 +370,11 @@
   报错 409 科目编码已存在
   报错 400 科目名称不能为空
   报错 400 科目名称最长40字
+  报错 400 等级格式不对
+  报错 400 等级「<等级>」还有<n>条记录在用，先改掉题目和课文的等级再删
   伪代码 subj_kind 页面值转换：「通用」或空为 general，「语言」为 language，其他值原样交下去（由 建科目 报 400 类型只能是 language 或 general）
-  伪代码 subj_id 为空（新建）：调用 建科目 learner=learner code=subj_code name=subj_name intro=subj_intro kind=转换后 current_role=current_role auth_mode=auth_mode
-  伪代码 subj_id 不为空（编辑）：subj_code、subj_kind 忽略（建后不可改）；调用 改科目 learner=learner subject_id=subj_id name=subj_name intro=subj_intro current_role=current_role auth_mode=auth_mode
+  伪代码 subj_id 为空（新建）：调用 建科目 learner=learner code=subj_code name=subj_name intro=subj_intro kind=转换后 levels=subj_levels current_role=current_role auth_mode=auth_mode
+  伪代码 subj_id 不为空（编辑）：subj_code、subj_kind 忽略（建后不可改）；调用 改科目 learner=learner subject_id=subj_id name=subj_name intro=subj_intro levels=subj_levels current_role=current_role auth_mode=auth_mode
   伪代码 返回 调用 科目管理页面 learner=learner current_role=current_role auth_mode=auth_mode 的结果
 
 公开 函数 设科目可见性页面 learner subj_id visibility current_role? auth_mode?
@@ -1409,3 +1437,101 @@ POST /subject/manage/disable -> 设科目状态页面 动作 subject_disable 模
   先 数据 subject_info code=jp_grammar name=日语语法 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   调用 设科目状态页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 status=disabled
   报错 409
+
+用例 科目等级_没有这一行按N5到N1
+  调用 科目等级 subject_id=9
+  得 first=N5 count=5 text=N5,N4,N3,N2,N1
+
+用例 科目等级_空串兼容为N5到N1
+  先 数据 subject_info code=a name=甲 levels=空 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 科目等级 subject_id=1
+  得 first=N5 count=5 text=N5,N4,N3,N2,N1
+
+用例 科目等级_自定义三档
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 科目等级 subject_id=1
+  得 first=入门 count=3 text=入门,基础,进阶
+
+用例 科目等级_去掉空项
+  先 数据 subject_info code=py name=编程 levels=甲,,乙, kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 科目等级 subject_id=1
+  得 first=甲 count=2 text=甲,乙
+
+用例 建科目_通用默认三档
+  调用 建科目 learner=t1 current_role=teacher auth_mode=on code=py name=编程
+  得 code=py
+  库 subject_info 含 code=py kind=general levels=入门,基础,进阶
+
+用例 建科目_语言默认N5到N1
+  调用 建科目 learner=t1 current_role=teacher auth_mode=on code=en_1 name=英语 kind=language
+  得 code=en_1
+  库 subject_info 含 code=en_1 levels=N5,N4,N3,N2,N1
+
+用例 建科目_自定义等级
+  调用 建科目 learner=t1 current_role=teacher auth_mode=on code=math name=数学 levels=初一,初二,初三
+  得 code=math
+  库 subject_info 含 code=math levels=初一,初二,初三
+
+用例 建科目_等级重复400
+  调用 建科目 learner=t1 current_role=teacher auth_mode=on code=math name=数学 levels=初一,初一
+  报错 400
+  库 subject_info 共 0 行
+
+用例 建科目_等级超过10项400
+  调用 建科目 learner=t1 current_role=teacher auth_mode=on code=math name=数学 levels=a,b,c,d,e,f,g,h,i,j,k
+  报错 400
+  库 subject_info 共 0 行
+
+用例 建科目_等级含竖线400
+  调用 建科目 learner=t1 current_role=teacher auth_mode=on code=math name=数学 levels=初一|初二
+  报错 400
+
+用例 改科目_新增和调顺序
+  先 数据 subject_info code=py name=编程 levels=甲,乙 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 改科目 learner=t1 current_role=teacher auth_mode=on subject_id=1 name=编程 levels=乙,甲,丙
+  得 ok=1
+  库 subject_info 含 code=py levels=乙,甲,丙
+
+用例 改科目_删掉没在用的等级
+  先 数据 subject_info code=py name=编程 levels=甲,乙 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 改科目 learner=t1 current_role=teacher auth_mode=on subject_id=1 name=编程 levels=甲
+  得 ok=1
+  库 subject_info 含 code=py levels=甲
+
+用例 改科目_不传等级不改
+  先 数据 subject_info code=py name=编程 levels=甲,乙 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 改科目 learner=t1 current_role=teacher auth_mode=on subject_id=1 name=新名
+  得 ok=1
+  库 subject_info 含 code=py name=新名 levels=甲,乙
+
+用例 改科目_等级格式不对400
+  先 数据 subject_info code=py name=编程 levels=甲,乙 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 改科目 learner=t1 current_role=teacher auth_mode=on subject_id=1 name=编程 levels=甲,甲
+  报错 400
+  库 subject_info 含 code=py levels=甲,乙
+
+用例 载入科目页面_回填等级
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 载入科目页面 learner=t1 current_role=teacher auth_mode=on subj_id=1
+  得 subj_levels=入门,基础,进阶
+
+用例 载入科目页面_空串回填N5到N1
+  先 数据 subject_info code=a name=甲 levels=空 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 载入科目页面 learner=t1 current_role=teacher auth_mode=on subj_id=1
+  得 subj_levels=N5,N4,N3,N2,N1
+
+用例 保存科目页面_新建通用默认三档
+  调用 保存科目页面 learner=t1 current_role=teacher auth_mode=on subj_code=py subj_name=编程 subj_kind=通用
+  得 manage_head=我能管理的科目共1个
+  库 subject_info 含 code=py levels=入门,基础,进阶
+
+用例 保存科目页面_编辑改等级
+  先 数据 subject_info code=py name=编程 levels=甲,乙 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 保存科目页面 learner=t1 current_role=teacher auth_mode=on subj_id=1 subj_name=编程 subj_levels=乙,甲
+  得 manage_head=我能管理的科目共1个
+  库 subject_info 含 code=py levels=乙,甲
+
+用例 科目管理页面_行里带等级
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 科目管理页面 learner=t1 current_role=teacher auth_mode=on
+  得 manage_head=我能管理的科目共1个

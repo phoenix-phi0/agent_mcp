@@ -43,7 +43,7 @@
 结束
 页面 实体 lesson_view 教材页面
   字段 series 文本 系列编号（选项来自series_options）
-  字段 lesson_level 枚举 全部,N5,N4,N3,N2,N1 等级筛选
+  字段 lesson_level 文本 等级筛选（下拉选项来自接口的level_options：全部加上本科目等级）
   字段 keyword 文本 关键字（标题/一句话/条目名）
   字段 qcount 整数 课文表「题数」列（按挂接算出来的，不在真表）
   字段 jp 文本 例句表「日语」列

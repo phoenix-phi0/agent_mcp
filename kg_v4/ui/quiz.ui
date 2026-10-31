@@ -65,7 +65,7 @@
   动作 quiz_state 远程 进入时 隐藏 刷新
 
   分组 顶栏 横排 顶栏 间距 12px 对齐 center
-    字段 pick_level 控件 下拉 宽 90px 等级
+    字段 pick_level 控件 下拉 选项来自 level_options 宽 90px 等级
     字段 pick_kind 控件 下拉 宽 100px 考点
     动作 quiz_start 远程 开始
     显示 scope

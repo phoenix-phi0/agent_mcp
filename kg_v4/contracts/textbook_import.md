@@ -96,7 +96,9 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  报错 403 本科目没开教材导入
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；任务、块、草稿都属于所属任务的 subject_id（块、草稿经所属任务判断），下面所有查询和写入都只限这个 subject_id；按 id 取到别的科目的任务、块、草稿，一律当不存在（包括属于别的科目），报错或返回与「不存在」完全相同；本函数是写内容操作，auth_mode 等于 on 时只有负责/协作教师可写（公开科目的其他教师只读）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
+  伪代码 科目门控（K161 D3：本轮教材导入只给日语科目，仍按 N5–N1 校验等级；非日语科目关掉入口，免得往没有课文等级口径的科目里写进 N5–N1 的课）：解析出 subject_id 之后、其它校验之前判断——subject_id 等于 1 直接放行；否则按 subject_id 查 subject_info 的 caps（查询 textbook_import_subject_caps），解析成 JSON 后 textbook_import 键不等于 1（含查不到行、caps 不是 JSON、没有这个键），报错 403 本科目没开教材导入，不读文件、不建任务
   伪代码 series_code 为空，报错 400 series_code 不能为空；series_name 为空，报错 400 series_name 不能为空；code_prefix 为空，报错 400 code_prefix 不能为空
   伪代码 开关（旧 kg 口径）：series_code 不符合 ^[a-z][a-z0-9_-]{0,39}$ 报错 400 系列代号只能用小写字母开头…；series_code 等于 hanabira 报错 400 hanabira 是主教材，不能用导入覆盖它；lesson_level 不为空且不是 全部 N5 N4 N3 N2 N1 之一，报错 400 等级范围只能是全部或 N5 到 N1
   伪代码 课号前缀（旧 kg：queries/import_series_check.sql 第 12-13、16-18 行，routes/textbook_import.zs 第 81-86 行；建任务时就拦，不等到确认导入）：本科目 subject_id 等于 1（日语）时 code_prefix 不符合 ^[a-z][a-z0-9]{0,19}$（小写字母开头，只有小写字母、数字，不超过 20 个字），报错 400 课号前缀只能用小写字母开头，后面是小写字母、数字，不超过 20 个字（旧 kg 原文）；别的系列已经占着这个前缀，报错 400 课号前缀已经被别的系列用了，换一个（v4 报错行不带变量，不用旧 kg 带系列课数的那句）。「占着」＝ lesson_text 里有一行 series_code 不等于本任务的 series_code，且 code 以「前缀-」开头（旧 kg 的课号形态 前缀-三位序号）或 code 等于「前缀 + 纯数字」（v4 草稿课的课号形态 code_prefix 加序号）；用查询 textbook_import_prefix_taken 直读 lesson_text 数行数。本系列自己的课不算占着（覆盖重导自己的系列不会被拦）；前缀只是另一个前缀的开头（如 mnn 与 mnnx01）不算。这两条在 hanabira 检查之后、等级范围和覆盖开关之前判。非日语科目（subject_id 不等于 1）的 code_prefix 不套上面的旧正则，改为符合口径 2：调用本模块 编号前缀检查 subject_id=subject_id code=code_prefix 加 "1"（用 v4 草稿课号形态「前缀加序号」的样例课号检查），要求 code_prefix 以「<科目编码>.」开头（如 math.，之后可再跟字母数字下划线连字符），不符报错 400 编号要以「<编码>.」开头（草稿课号 code_prefix 加序号因此都带科目前缀，确认导入时 lesson 再按课号逐个复核）；「别的系列占着前缀」的检查对所有科目照旧（课号全局唯一，查询不限科目）
@@ -349,6 +351,7 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  报错 403 本科目没开教材导入
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；任务、块、草稿都属于所属任务的 subject_id（块、草稿经所属任务判断），下面所有查询和写入都只限这个 subject_id；按 id 取到别的科目的任务、块、草稿，一律当不存在（包括属于别的科目），报错或返回与「不存在」完全相同；本函数是写内容操作，auth_mode 等于 on 时只有负责/协作教师可写（公开科目的其他教师只读）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 页面口径转换后调用 新建导入：code_prefix 为空取 series_code 去掉连字符和下划线（旧 kg 口径：前缀不填就用系列代号）；lesson_level 为空取「全部」；rewrite 为空取 1，值为 false 0 否 off（不分大小写）取 0，其他取 1；overwrite 值为 true 1 是 on（不分大小写）取 1，其他（含空）取 0（页面开关提交上来可能是布尔、数字、文字）；file_path 取 document_path，其余入参原样传，并传 learner=learner current_role=current_role auth_mode=auth_mode subject=subject（新建导入 自己做 need=write 的科目校验）
   伪代码 返回 新建导入 的结果
@@ -1571,7 +1574,7 @@ GET /textbook_import/chunk/prompt -> 块提示词 角色 teacher
 
 用例 跨科目_新建导入落当前科目
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
-  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps={"textbook_import":1} levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 文件 imports/m.md 内容=第1课は的用法
   调用 新建导入 series_code=math_s series_name=数学教材 code_prefix=math. file_path=imports/m.md file_name=m.md subject=2
   得 ok=1 duplicate=0 chunk_count=1
@@ -1579,7 +1582,7 @@ GET /textbook_import/chunk/prompt -> 块提示词 角色 teacher
 
 用例 跨科目_新建导入前缀不符
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
-  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps={"textbook_import":1} levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 文件 imports/m.md 内容=第1课は的用法
   调用 新建导入 series_code=math_s series_name=数学教材 code_prefix=m file_path=imports/m.md subject=2
   报错 400
@@ -1587,7 +1590,7 @@ GET /textbook_import/chunk/prompt -> 块提示词 角色 teacher
 
 用例 跨科目_新建导入别的科目的前缀不符
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
-  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps={"textbook_import":1} levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 文件 imports/m.md 内容=第1课は的用法
   调用 新建导入 series_code=math_s series_name=数学教材 code_prefix=jp. file_path=imports/m.md subject=2
   报错 400
@@ -1595,7 +1598,7 @@ GET /textbook_import/chunk/prompt -> 块提示词 角色 teacher
 
 用例 跨科目_新建导入同文件别的科目不算重复
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
-  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps={"textbook_import":1} levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 文件 imports/m.md 内容=第1课は的用法
   先 调用 新建导入 series_code=s1 series_name=系列一 code_prefix=s1 file_path=imports/m.md
   调用 新建导入 series_code=math_s series_name=数学教材 code_prefix=math. file_path=imports/m.md subject=2
@@ -1605,7 +1608,7 @@ GET /textbook_import/chunk/prompt -> 块提示词 角色 teacher
 
 用例 跨科目_确认导入落当前科目
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
-  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps={"textbook_import":1} levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 kg_point code=math.a title=代数 subject_id=2
   先 数据 kg_item code=math.i1 name=条目 point_code=math.a subject_id=2
   先 数据 textbook_import_task series_code=math.s series_name=数学教材 code_prefix=math. file_name=m.md raw_text=y status=待审阅 created_at=2026-01-01 subject_id=2
@@ -1628,7 +1631,7 @@ GET /textbook_import/chunk/prompt -> 块提示词 角色 teacher
 
 用例 跨科目_确认导入课号前缀不符
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
-  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps={"textbook_import":1} levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 textbook_import_task series_code=math.s series_name=数学教材 code_prefix=m file_name=m.md raw_text=y status=待审阅 created_at=2026-01-01 subject_id=2
   先 数据 textbook_import_draft task_id=1 chunk_id=1 code=m1 level=N5 title=代数入门 examples_edited=0 seq=1 status=通过
   调用 确认导入 task_id=1 subject=2
@@ -1661,7 +1664,7 @@ GET /textbook_import/chunk/prompt -> 块提示词 角色 teacher
 
 用例 跨科目_need_新建导入公共科目非负责教师403
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
-  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps={"textbook_import":1} levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 文件 imports/m.md 内容=第1课は的用法
   调用 新建导入 series_code=math_s series_name=数学教材 code_prefix=math. file_path=imports/m.md learner=t2 current_role=teacher auth_mode=on subject=2
   报错 403
@@ -1669,7 +1672,7 @@ GET /textbook_import/chunk/prompt -> 块提示词 角色 teacher
 
 用例 跨科目_need_新建导入协作教师可写
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
-  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps={"textbook_import":1} levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
   先 文件 imports/m.md 内容=第1课は的用法
   调用 新建导入 series_code=math_s series_name=数学教材 code_prefix=math. file_path=imports/m.md learner=t2 current_role=teacher auth_mode=on subject=2
@@ -1678,7 +1681,7 @@ GET /textbook_import/chunk/prompt -> 块提示词 角色 teacher
 
 用例 跨科目_need_确认导入公共科目非负责教师403
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
-  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps={"textbook_import":1} levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 textbook_import_task series_code=math.s series_name=数学教材 code_prefix=math. file_name=m.md raw_text=y status=待审阅 created_at=2026-01-01 subject_id=2
   先 数据 textbook_import_draft task_id=1 chunk_id=1 code=math.1 level=N5 title=代数入门 examples_edited=0 seq=1 status=通过
   调用 确认导入 task_id=1 learner=t2 current_role=teacher auth_mode=on subject=2
@@ -1688,7 +1691,7 @@ GET /textbook_import/chunk/prompt -> 块提示词 角色 teacher
 
 用例 跨科目_need_确认导入协作教师可写
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
-  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps={"textbook_import":1} levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 subject_teacher subject_id=2 teacher=t2 role=editor created_at=2026-01-01
   先 数据 textbook_import_task series_code=math.s series_name=数学教材 code_prefix=math. file_name=m.md raw_text=y status=待审阅 created_at=2026-01-01 subject_id=2
   先 数据 textbook_import_draft task_id=1 chunk_id=1 code=math.1 level=N5 title=代数入门 examples_edited=0 seq=1 status=通过
@@ -1698,18 +1701,40 @@ GET /textbook_import/chunk/prompt -> 块提示词 角色 teacher
 
 用例 跨科目_need_读取公共科目非负责教师可读
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
-  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps={"textbook_import":1} levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 textbook_import_task series_code=math.s series_name=数学教材 code_prefix=math. file_name=m.md raw_text=y status=待审阅 created_at=2026-01-01 subject_id=2
   调用 列任务 learner=t2 current_role=teacher auth_mode=on subject=2
   得 total=1
 
 用例 跨科目_need_删除任务公共科目非负责教师403
   先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
-  先 数据 subject_info code=math name=数学 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=math name=数学 kind=general caps={"textbook_import":1} levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 textbook_import_task series_code=math.s series_name=数学教材 code_prefix=math. file_name=m.md raw_text=y status=待审阅 created_at=2026-01-01 subject_id=2
   调用 删除任务 task_id=1 learner=t2 current_role=teacher auth_mode=on subject=2
   报错 403
   库 textbook_import_task 共 1 行
+
+用例 门控_非日语科目没开教材导入403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=py name=编程 kind=general caps={"kg":1,"quiz":1} levels=入门,基础,进阶 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 文件 imports/m.md 内容=第1课は的用法
+  调用 新建导入 series_code=py_s series_name=编程教材 code_prefix=py. file_path=imports/m.md file_name=m.md subject=2
+  报错 403
+  库 textbook_import_task 共 0 行
+
+用例 门控_非日语科目caps不是JSON也403
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=py name=编程 kind=general caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 文件 imports/m.md 内容=第1课は的用法
+  调用 创建导入任务 series_code=py_s series_name=编程教材 document_path=imports/m.md code_prefix=py. subject=2
+  报错 403
+  库 textbook_import_task 共 0 行
+
+用例 门控_日语科目照常
+  先 数据 subject_info code=jp_grammar name=日语语法 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 文件 imports/m.md 内容=第1课は的用法
+  调用 新建导入 series_code=s1 series_name=系列一 code_prefix=s1 file_path=imports/m.md file_name=m.md
+  得 ok=1 duplicate=0
 
 ## 脚本
 scripts/textbook_import_run.zs 入参 task_id；出错 scripts/textbook_import_run_fail.zs；后台逐块处理一个导入任务里待处理的块（调 处理任务；新建导入和重试块都走它），完成后任务进入待审阅；出错时调 标记任务失败，把任务状态写成失败并记原因

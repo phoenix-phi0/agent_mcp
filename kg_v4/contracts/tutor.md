@@ -27,10 +27,11 @@
   伪代码 逐条拼成「学生：…」「老师：…」，用换行连接后返回
 
 函数 判意图 message subject_id
-  返回 {intent, keyword, level}；intent 只会是 quiz / progress / textbook / explain；keyword 是学生指名的语法点或课文关键词（可空串）；level 只会是 N5 N4 N3 N2 N1 或空串
-  伪代码 问JSON（快档）：让模型判断学生这句话的意图（出题 / 进度 / 教材 / 讲解，其他都算讲解），并抽出指名的内容关键词和指定的等级，要求返回 {"intent": …, "keyword": …, "level": …}
+  返回 {intent, keyword, level}；intent 只会是 quiz / progress / textbook / explain；keyword 是学生指名的语法点或课文关键词（可空串）；level 只会是本科目等级之一（subject.科目等级；日语 N5 N4 N3 N2 N1）或空串
+  伪代码 先调用 subject.科目等级 subject_id=subject_id 得 levels
+  伪代码 问JSON（快档）：让模型判断学生这句话的意图（出题 / 进度 / 教材 / 讲解，其他都算讲解），并抽出指名的内容关键词和指定的等级，要求返回 {"intent": …, "keyword": …, "level": …}；提示词里写明「level（只能是 {本科目等级用空格连接} 或空串）」（按科目换等级清单，不再写死 N5–N1）
   伪代码 intent 不是 quiz、progress、textbook、explain 之一（含模型出错或返回不合法），取 explain
-  伪代码 level 不是 N5 N4 N3 N2 N1 之一，取空串；subject_id 不等于 1（非日语科目）时 level 一律取空串（N5–N1 是日语等级，不往非日语科目塞；提问模型的提示词不按科目换）；keyword 缺失取空串并去首尾空白
+  伪代码 level 去首尾空白后不在本科目等级（levels）里，取空串（不再按 subject_id 特判：科目 1 和其它科目都只认自己的等级，用正则匹配 N5–N1 的写法去掉）；keyword 缺失取空串并去首尾空白
   伪代码 返回 {"intent": intent, "keyword": keyword, "level": level}
 
 函数 取进度摘要 learner subject_id
@@ -83,7 +84,7 @@
   伪代码 调用 lesson.取当前系列 learner=learner subject=subject_id 取 series_code
   伪代码 keyword 不为空：调用 lesson.列课文 series_code=series_code keyword=keyword subject=subject_id，有结果取第一课为 lesson_code，用模板拼 reply「好的，去做「标题」这一课的题吧」，link=/quiz?mode=lesson&lesson_code=课号，links=[{做题, link}, {读课文, /lesson?code=课号}]
   伪代码 否则（keyword 为空，或没找到课）且 level 不为空：lesson_code 为空，reply 模板「按 level 等级给你出题」（keyword 不为空时先说明没找到对应课文），link=/quiz?mode=free&level=level，links=[{做题, link}]
-  伪代码 否则 keyword 为空（没指定内容）看学情：调用 progress.取概览 learner=learner subject=subject_id，is_empty 等于 1：subject_id 等于 1 时 reply 模板「还没有学习记录，先从 N5 开始」，link=/quiz?mode=free&level=N5，links=[{做题, link}]；subject_id 不等于 1 时（N5 是日语等级，不往非日语科目塞）reply 模板「还没有学习记录，先去做题页做几道题吧」，link=/quiz，links=[{做题, /quiz}]
+  伪代码 否则 keyword 为空（没指定内容）看学情：调用 progress.取概览 learner=learner subject=subject_id，is_empty 等于 1：取 调用 subject.科目等级 subject_id=subject_id 的 first（日语是 N5），reply 模板「还没有学习记录，先从{first}开始」，link=/quiz?mode=free&level={first}（等级原样拼进地址；中文等级在 # 后面由前端 URLSearchParams 解析，不用另做编码），links=[{做题, link}]；所有科目同一口径（删掉科目 1 的特判和「先去做题页做几道题吧」那条分支）。实现注意：reply 是模板文字，「设 reply = …」右边不要以「词+空格」开头（会被当成动词调用），整句不带空格
   伪代码 有记录时调用 progress.列低分点 learner=learner limit=1 subject=subject_id，有低分点则 link=/quiz，links=[{做题, /quiz}, {复习薄弱点, /quiz?mode=review}]，reply 模板提到可以复习薄弱点；没有低分点则 link=/quiz，links=[{做题, /quiz}]
   伪代码 否则（指了 keyword 但没找到课也没有等级）：link=/quiz，links=[{做题, /quiz}]，reply 模板说明没找到对应内容，请在做题页自己选等级和考点
   伪代码 links_json 为 links 的 JSON 文本；返回 {"reply": reply, "lesson_code": lesson_code, "link": link, "links_json": links_json}
@@ -523,3 +524,17 @@ POST /tutor/summarize-round -> 总结本轮 角色 student
   调用 问老师 learner=u1 message=你好 current_role=student auth_mode=on subject=2
   得 ok=1
   库 tutor_message 含 learner=u1 role=user subject_id=2
+
+用例 问老师_自定义等级科目正常
+  先 数据 subject_info code=jp_grammar name=日语 levels=空 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 问老师 learner=u1 message=出几道题 subject=2
+  得 ok=1
+  库 tutor_message 含 learner=u1 role=user content=出几道题 subject_id=2
+  库 tutor_message 含 learner=u1 role=teacher subject_id=2
+
+用例 问老师_日语科目空等级照旧
+  先 数据 subject_info code=jp_grammar name=日语 levels=空 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 问老师 learner=u1 message=出几道题
+  得 ok=1
+  库 tutor_message 含 learner=u1 role=user content=出几道题 subject_id=1

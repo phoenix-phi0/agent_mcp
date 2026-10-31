@@ -148,16 +148,16 @@
   伪代码 返回 {"learner": learner, "total": 条数, "answers": 列表}
 
 公开 函数 按级统计掌握 learner current_role? auth_mode? subject?
-  返回 {learner, covered_count, levels}；levels 恒为 5 项、顺序 N5 N4 N3 N2 N1 的 [{level, mastered, total}]；total 是该等级下本科目的知识点数，mastered 是其中该学习者已掌握的个数；covered_count 是本科目有等级的知识点总数（非日语科目没有课文等级时恒为 0、五项全 0）
+  返回 {learner, covered_count, level_count, levels}；levels 是按本科目等级逐项的 [{level, mastered, total}]，项数等于本科目等级数、顺序就是 subject.科目等级 的 levels 顺序（日语仍是 5 项 N5 N4 N3 N2 N1，数值不变）；level_count 是 levels 的项数；total 是该等级下本科目的知识点数，mastered 是其中该学习者已掌握的个数；covered_count 是本科目有等级的知识点总数（点的等级取 lesson.取知识点等级，没有课文的科目按题目等级兜底；都取不到时为 0、各项全 0）
   报错 400 subject 不对
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 learner 和 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询都只限这个 subject_id；调用 kg./lesson. 的函数时一律只传 subject=subject_id（已解析，不再校验）
   伪代码 调用 kg.列知识点 subject=subject_id 取本科目全部点
-  伪代码 对每个点调用 lesson.取知识点等级 point_code=该点编号 subject=subject_id；level 为空串的点不计入任何等级
-  伪代码 按等级累计 total；读 progress_mastery 该 learner（subject_id 等于本科目）该点 mastered=1 的累计进 mastered
-  伪代码 返回 {"learner": learner, "covered_count": 有等级的点数, "levels": 5 项列表}
+  伪代码 对每个点调用 lesson.取知识点等级 point_code=该点编号 subject=subject_id；level 为空串、或不在本科目等级里的点不计入任何等级
+  伪代码 等级清单取 调用 subject.科目等级 subject_id=subject_id 的 levels；按 levels 逐项遍历，每个等级累计 total 和 mastered（读 progress_mastery 该 learner（subject_id 等于本科目）该点 mastered=1 的累计进 mastered），不再写死 5 组计数器
+  伪代码 返回 {"learner": learner, "covered_count": 有等级的点数, "level_count": 等级数, "levels": 按科目等级逐项的列表}
 
 公开 函数 重建全部得分 pass_line? fall_line?
   返回 {ok, pairs, changed}；pairs 是处理的 (学习者, 知识点) 对数，changed 是新记了得分行的对数
@@ -254,7 +254,7 @@
   伪代码 返回 {"days": days, "since": since, "total": 行数, "rows": 列表}
 
 函数 取点级映射 subject_id
-  返回 {code: level}，本科目知识点编号到 N5–N1 等级的映射；没有等级的知识点不在映射里；subject_id 是已解析的科目编号（整数）
+  返回 {code: level}，本科目知识点编号到本科目等级（subject.科目等级；日语 N5–N1）的映射；没有等级的知识点不在映射里；subject_id 是已解析的科目编号（整数）
   伪代码 调用 kg.列知识点 subject=subject_id 得本科目全部点；对每点调用 lesson.取知识点等级 point_code=该点编号 subject=subject_id，level 非空才收
 
 函数 得分视图 learner subject_id
@@ -275,7 +275,7 @@
   伪代码 doing：调用 取状态 learner=learner subject=subject_id，留 total 大于 0 的点；每行 {label: title, tally: 「{right}/{total}」, verdict}；verdict 按最新分现算：没有得分行「还没打分」；得分不小于 80、或 mastered=1 且得分不小于 60，是「达标（得分 {score}）」；否则「得分 {score}，差 {80-score} 分」；顺序按 progress_mastery.updated_at 降序、id 降序（最近答过的在前，旧行为），最多 50 行
   伪代码 next：调用 算下一步 learner=learner subject=subject_id 得 points（前置都掌握、自己没掌握），取前 20 个；调用 kg.列分层 subject=subject_id 得每点依赖深度（取不到算 0）；每行 {label: title, depth}
   伪代码 recent：调用 列最近作答 learner=learner limit=20 subject=subject_id；每行 {at, label: 该点 title（调 kg.取知识点 code=该点编号 subject=subject_id，取不到用 point_code）, item_label: 空串（v4 作答流水不记条目）, result: correct=1 是「对」否则「错」}
-  伪代码 levels：调用 按级统计掌握 learner=learner subject=subject_id 得五行；每行 {level, tally: 「{mastered}/{total}」, answers: 该级知识点的作答行数合计}（answers 用 取点级映射 subject_id=subject_id 把本科目 progress_answer 各行按所属点归级计数；v4 题不挂等级，与旧「按题挂级」口径的差别见报告）
+  伪代码 levels：调用 按级统计掌握 learner=learner subject=subject_id 得每个本科目等级一行（日语仍是五行）；按等级逐项累计答题数（不再写死 5 段 if）；每行 {level, tally: 「{mastered}/{total}」, answers: 该级知识点的作答行数合计}（answers 用 取点级映射 subject_id=subject_id 把本科目 progress_answer 各行按所属点归级计数；v4 题不挂等级，与旧「按题挂级」口径的差别见报告）
   伪代码 scores：对 sc.scores 每行 {label: title, value: score, delta, at: last[code]}；delta：once[code]=1 是「首次」；本次分大于上次「+{差}」、小于「−{差}」（全角减号）、相等「±0」；顺序沿用 列得分（分低的在前、同分按编号）
   伪代码 dictation：调用 dictation.取默写概况 learner=learner subject=subject_id 得 d；练过词数 words = dictation_attempt（表带 subject_id 列，按本科目过滤）中该 learner、subject_id 等于本科目的不同 word_id 的个数；text=「练过 {words} 个词，默写 {d.total} 次，正确率 {d.total 大于 0 时 d.accuracy% 否则 —}，错词本 {d.wrong_book_count} 个」；link 在 wrong_book_count 大于 0 时是「#%E9%BB%98%E5%86%99?source=review」否则「#%E9%BB%98%E5%86%99」
   伪代码 返回 {"prog": prog, "doing": doing, "next": next, "recent": recent, "levels": levels, "scores": scores, "dictation": {"text": …, "link": …}}
@@ -975,3 +975,25 @@ POST /progress/point -> 知识点页面 动作 node_detail 模板 页面状态 �
   先 数据 progress_answer learner=s2 point_code=P1 question_no=q1 correct=1 at=2025-12-31
   调用 按天统计作答 student=s2 days=7
   得 total=1 since=2025-12-26
+
+用例 按级统计掌握_日语仍是五项
+  先 数据 kg_point code=P1 title=一次函数
+  调用 按级统计掌握 learner=u1
+  得 learner=u1 covered_count=0 level_count=5
+
+用例 按级统计掌握_三档科目三项
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=P1 title=一次函数
+  先 数据 kg_point code=P2 title=二次函数
+  先 数据 lesson_text code=L1 level=基础 title=第一课 examples_edited=0 series_code=hanabira seq=1
+  先 数据 lesson_point_link lesson_code=L1 point_code=P1
+  调用 按级统计掌握 learner=u1
+  得 learner=u1 covered_count=1 level_count=3
+
+用例 按级统计掌握_不在科目等级里的不计
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=P1 title=一次函数
+  先 数据 lesson_text code=L1 level=N5 title=第一课 examples_edited=0 series_code=hanabira seq=1
+  先 数据 lesson_point_link lesson_code=L1 point_code=P1
+  调用 按级统计掌握 learner=u1
+  得 covered_count=0 level_count=3

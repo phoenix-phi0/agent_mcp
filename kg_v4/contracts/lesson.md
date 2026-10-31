@@ -12,7 +12,7 @@
   subject_id 整数 所属科目，默认 1（1 是日语语法）
 表 lesson_text
   code 文本 课文编号，唯一
-  level 文本 等级 N5/N4/N3/N2/N1
+  level 文本 等级，本科目等级之一（subject.科目等级；日语 N5/N4/N3/N2/N1）
   title 文本 标题
   summary 长文本 一句话，可空
   explain 长文本 讲解，可空
@@ -39,7 +39,7 @@
 ## 页面字段
 页面 lesson_view 教材页面
   series 文本 系列下拉所选的系列编号（选项来自接口 series_options，只有可用系列）
-  lesson_level 枚举 全部,N5,N4,N3,N2,N1 等级筛选
+  lesson_level 文本 等级筛选（下拉选项来自 level_options：「全部」加上本科目等级，教材页面、课文页面都回这个键）
   keyword 文本 关键字（标题、一句话、条目名）
   qcount 整数 课文表「题数」列（按挂接算出来的，不在真表）
   jp 文本 例句表「日语」列
@@ -145,7 +145,7 @@
   伪代码 返回 {"lesson_code": lesson_code, "total": 个数, "items": 列表}
 
 公开 函数 取知识点等级 point_code learner? current_role? auth_mode? subject?
-  返回 {point_code, level, lesson_count}；level 是与该知识点相关的课文里最基础的等级（N5 最基础、N1 最难），没有相关课文时 level 为空串、lesson_count 为 0
+  返回 {point_code, level, lesson_count}；level 是该知识点最基础的等级（按本科目等级顺序最靠前的；日语 N5 最基础、N1 最难）：先看相关课文，没有课文时从该点条目所挂题目的等级里取，都没有为空串；lesson_count 是相关课文数（口径不变，题目兜底时仍为 0）
   报错 404 没有这个知识点
   报错 400 subject 不对
   报错 403 该科目未分配给你
@@ -154,9 +154,12 @@
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 调用 kg.取知识点 code=point_code subject=subject_id，取不到（包括属于别的科目）报错 404 没有这个知识点
   伪代码 课文集合 = lesson_point_link 中 subject_id 等于本科目且 point_code 相等的课文编号，并上「调用 kg.按知识点列条目 point_code=point_code subject=subject_id」得到的每个条目在 lesson_item_link（subject_id 等于本科目）中挂的课文编号，去重
-  伪代码 连 lesson_text（subject_id 等于本科目）取每课 level，lesson_count = 集合大小
-  伪代码 集合为空返回 {"point_code": point_code, "level": "", "lesson_count": 0}
-  伪代码 否则取等级数字最大的 level（N5 > N4 > N3 > N2 > N1），返回 {"point_code": point_code, "level": level, "lesson_count": lesson_count}
+  伪代码 连 lesson_text（subject_id 等于本科目）取这些课的 DISTINCT level 列表（查询 lesson_level_by_point 改成返回等级列表和课数，不再用 SUBSTR 取数字），lesson_count = 集合大小
+  伪代码 等级顺序取 调用 subject.科目等级 subject_id=subject_id 的 levels；「最基础」= 在 levels 里位置最靠前的那个（不在 levels 里的等级忽略）
+  伪代码 集合不为空且取到了等级：返回 {"point_code": point_code, "level": 最基础的等级, "lesson_count": lesson_count}
+  伪代码 题目兜底（没有课文的科目，比如 Python，学情「各等级」靠它才有数据）：课文集合为空或没取到等级时，先查 app.db lesson_qq_exists（有没有 quiz_question 表），表在则查新增的 lesson_level_by_point_quiz：quiz_question JOIN kg_item（item_code 等于 kg_item.code）中 kg_item.point_code 等于 point_code、两张表 subject_id 都等于本科目的题的 DISTINCT level（直读 quiz 的表，同 题数表；lesson 不声明依赖 quiz），同样按 levels 顺序取最靠前的，返回 {"point_code": point_code, "level": 该等级, "lesson_count": lesson_count}；模块用例的库没有 quiz_question 表，这一步跳过
+  伪代码 都没有返回 {"point_code": point_code, "level": "", "lesson_count": lesson_count}（课文集合为空时 lesson_count 为 0）
+  伪代码 返回结构 {point_code, level, lesson_count} 不变，调用方（progress、report、teacher_assist、assist_material、assist_draft、/lesson/point-level）都不用改；日语科目的结果不变
 
 公开 函数 导入课文 series_code file_path series_name? intro? source? license? sort_order? learner? current_role? auth_mode? subject?
   返回 {ok, series_code, total, item_links, point_links}
@@ -178,7 +181,7 @@
   伪代码 sort_order 不为空且不是整数，报错 400 导入文件有错
   伪代码 用 doc 包「读文档」读 file_path 取文本，按行拆开；空行和以 # 开头的行忽略；没有有效行报错 400 导入文件有错
   伪代码 每行格式「课号|等级|标题|一句话|讲解|接续|例句|是否改过例句|原标题|课序|条目编号列表|知识点编号列表」，用 | 分隔；例句字段原样整体存入；后面从「是否改过例句」起的字段可省略或为空；条目编号列表、知识点编号列表内用英文逗号隔开
-  伪代码 校验：课号、标题不能为空；等级必须是 N5 N4 N3 N2 N1 之一；是否改过例句为空当 0，只能是 0 或 1；课序为空当 0，否则必须是整数；任一不满足报错 400 导入文件有错
+  伪代码 校验：课号、标题不能为空；等级必须在本科目等级里（调用 subject.科目等级 subject_id=subject_id 的 levels；日语是 N5 N4 N3 N2 N1）；是否改过例句为空当 0，只能是 0 或 1；课序为空当 0，否则必须是整数；任一不满足报错 400 导入文件有错
   伪代码 同一文件内课号重复，或课号已存在于 series_code 以外的系列的 lesson_text 中，报错 400 课号重复
   伪代码 课号前缀：每行课号调用本模块 编号前缀检查 subject_id=subject_id code=课号（日语 subject_id=1 豁免，其它科目要以「<科目编码>.」开头），不符报错 400 编号要以「<编码>.」开头，整批不写
   伪代码 条目编号列表里每个编号调用 kg.取条目 code=编号 subject=subject_id，取不到（包括属于别的科目）报错 400 课文映射对不上；知识点编号列表里每个编号调用 kg.取知识点 code=编号 subject=subject_id，取不到报错 400 课文映射对不上（映射只引用已有的，不新建）
@@ -205,7 +208,7 @@
   伪代码 series_code 为空，报错 400 series_code 不能为空
   伪代码 series_code 格式（它要拼进文件路径 content/lesson/series/{series_code}.jsonl，防路径穿越）：必须符合旧系列代号规则 ^[a-z][a-z0-9_-]{0,39}$（如 hanabira、s1、my-s_1），或符合科目编号规则 ^[a-z][a-z0-9_]*\.[A-Za-z0-9_-]+$（如 math.s）；两条都不符（含 /、\、..、空白、大写开头等）报错 400 series_code 格式不对，不写文件、不动库（在 rows_json 校验之前判）
   伪代码 rows_json 是 JSON 数组，每个元素是一课：{code, level, title, summary, explain, connection, examples, examples_edited, orig_title, seq, item_codes, point_codes}，item_codes、point_codes 是编号数组（可空）；不是数组或没有任何一课，报错 400 课文数据有错
-  伪代码 校验每课：code、title 不能为空；level 必须是 N5 N4 N3 N2 N1 之一；examples_edited 为空当 0，只能是 0 或 1；seq 为空当 0，否则必须是整数；任一不满足报错 400 课文数据有错
+  伪代码 校验每课：code、title 不能为空；level 必须在本科目等级里（调用 subject.科目等级 subject_id=subject_id 的 levels；日语是 N5 N4 N3 N2 N1）；examples_edited 为空当 0，只能是 0 或 1；seq 为空当 0，否则必须是整数；任一不满足报错 400 课文数据有错
   伪代码 同一批内 code 重复，或 code 已存在于 series_code 以外的系列的 lesson_text 中（任何科目，课号全局唯一），报错 400 课号重复
   伪代码 课号前缀：每课 code 调用本模块 编号前缀检查 subject_id=subject_id code=code（日语 subject_id=1 豁免，其它科目要以「<科目编码>.」开头），不符报错 400 编号要以「<编码>.」开头，整批不写、不写文件
   伪代码 先写文件：用 写JSONL 把全部课（每课一行 JSON，字段同上）写入 content/lesson/series/{series_code}.jsonl（覆盖旧文件，文件是源数据，库是它的投影），file_rows 为写入的行数
@@ -236,7 +239,7 @@
   伪代码 c 不为 0 则查 app.db lesson_qcount（带 subject_id），返回列表
 
 公开 函数 教材页面 learner series? lesson_level? keyword? current_role? auth_mode? subject?
-  返回 教材页「进入时/搜索/改系列」（动作 lesson_list）的整页状态：{lessons, series_options, series_head, lesson_count, form}；lessons 是 [{code, level, title, summary, qcount, href}]（qcount 为该课题数、没有为 0，href=#%E6%95%99%E6%9D%90?lesson={code}）；series_options 是可用系列的 [{value, label}]（label 用系列名）；series_head 是当前系列名；lesson_count 是「共{N}课」；form 回填 {series: 当前系列编号, lesson_level: 所选（空填「全部」）, keyword: 所选（可空）}
+  返回 教材页「进入时/搜索/改系列」（动作 lesson_list）的整页状态：{lessons, series_options, level_options, series_head, lesson_count, form}；level_options 是等级筛选下拉选项（调用 subject.科目等级 subject_id=subject_id 的 options）；lessons 是 [{code, level, title, summary, qcount, href}]（qcount 为该课题数、没有为 0，href=#%E6%95%99%E6%9D%90?lesson={code}）；series_options 是可用系列的 [{value, label}]（label 用系列名）；series_head 是当前系列名；lesson_count 是「共{N}课」；form 回填 {series: 当前系列编号, lesson_level: 所选（空填「全部」）, keyword: 所选（可空）}
   报错 400 subject 不对
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
@@ -246,10 +249,10 @@
   伪代码 series 不为空且在可用系列里：调用 选择系列 learner=learner series_code=series subject=subject_id，当前系列=该系列（编号、name）；否则（series 为空或不在可用系列里，不改偏好）调用 取当前系列 learner=learner subject=subject_id，当前系列取其 series_code、name
   伪代码 调用 列课文 series_code=当前系列编号 level=（lesson_level 为空或「全部」传空串，否则原值） keyword=keyword 或空串，得 {total, lessons}
   伪代码 lessons 逐行补 qcount（题数表中 lesson_code 相等的 n，没有为 0）和 href=#%E6%95%99%E6%9D%90?lesson={code}
-  伪代码 series_options 为可用系列逐行转 {value: code, label: name}；返回 {"lessons": 行列表, "series_options": 选项列表, "series_head": 当前系列 name, "lesson_count": "共{total}课", "form": {"series": 当前系列编号, "lesson_level": lesson_level 为空取「全部」否则原值, "keyword": keyword 或空串}}
+  伪代码 series_options 为可用系列逐行转 {value: code, label: name}；返回 {"lessons": 行列表, "series_options": 选项列表, "level_options": 科目等级 options, "series_head": 当前系列 name, "lesson_count": "共{total}课", "form": {"series": 当前系列编号, "lesson_level": lesson_level 为空取「全部」否则原值, "keyword": keyword 或空串}}
 
 公开 函数 课文页面 learner lesson? current_role? auth_mode? subject?
-  返回 教材页「载入」（地址 #教材?lesson=… 进来时前端调它，动作 lesson_one）的整页状态：正常 {reading, examples, lesson_items, lessons, series_options, series_head, lesson_count, form}（lessons/series_options/series_head/lesson_count/form 同 教材页面 的默认形态：当前系列全部课文、等级全部、关键字空，form 回填 {series: 当前系列编号, lesson_level: 「全部」, keyword: 空串}）；没有这一课不报错，只回 {reading, form}（旧行为）
+  返回 教材页「载入」（地址 #教材?lesson=… 进来时前端调它，动作 lesson_one）的整页状态：正常 {reading, examples, lesson_items, lessons, series_options, level_options, series_head, lesson_count, form}（lessons/series_options/level_options/series_head/lesson_count/form 同 教材页面 的默认形态：当前系列全部课文、等级全部、关键字空，form 回填 {series: 当前系列编号, lesson_level: 「全部」, keyword: 空串}）；没有这一课不报错，只回 {reading, form, level_options}（旧行为加 level_options）
   报错 400 lesson 不能为空
   报错 400 subject 不对
   报错 403 该科目未分配给你
@@ -257,11 +260,11 @@
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 lesson 为空，报错 400 lesson 不能为空
-  伪代码 调用 取当前系列 learner=learner subject=subject_id 得当前系列；调用 取课文 code=lesson subject=subject_id，查不到（返回空，包括属于别的科目的课，文案与不存在相同）则返回 {"reading": {"code": lesson, "missing": "没有这一课（{lesson}），回课文表重新选。", "back": "#%E6%95%99%E6%9D%90"}, "form": {"series": 当前系列编号, "lesson_level": "全部", "keyword": ""}}，不报错
+  伪代码 调用 取当前系列 learner=learner subject=subject_id 得当前系列；调用 取课文 code=lesson subject=subject_id，查不到（返回空，包括属于别的科目的课，文案与不存在相同）则返回 {"reading": {"code": lesson, "missing": "没有这一课（{lesson}），回课文表重新选。", "back": "#%E6%95%99%E6%9D%90"}, "form": {"series": 当前系列编号, "lesson_level": "全部", "keyword": ""}, "level_options": 科目等级 options}，不报错
   伪代码 有这一课：题数 n 取题数表（题数表 subject_id=subject_id）中 lesson_code 相等的 n（没有为 0）；reading={"code": code, "level": level, "title": title, "summary": summary 或空串, "formation": connection 或空串, "explanation": explain 或空串, "qcount": n, "head": "《{title}》　{level}　第{N}课（{code}）", "series": series_code, "series_label": 系列名（调 列系列 找 series_code 的 name，找不到用 series_code）, "practice": n 大于 0 则 #%E5%81%9A%E9%A2%98?lesson={code} 否则空串, "quiz_note": n 大于 0 则「这一课有 {n} 道题」否则「这一课还没有题，可以先问老师」, "ask": "#%E9%97%AE%E8%80%81%E5%B8%88", "explain": "#%E9%97%AE%E8%80%81%E5%B8%88?lesson={code}", "back": "#%E6%95%99%E6%9D%90", "missing": 空串}；N 为 seq 不为 0 时取 seq，否则取课号末三位转成整数（不足三位按整体数字）
   伪代码 examples：该课 examples 字段（日语^^中文@@日语^^中文）按 @@ 拆句、每句按 ^^ 拆，恰好两段收 {jp, zh}，拆不出两段的跳过（坏了当没有例句，不报错）
   伪代码 lesson_items：调用 取课文关联条目 lesson_code=lesson 得 items，逐条转 {code, label: name, point_label: 调用 kg.取知识点 code=point_code subject=subject_id 取 title（取不到用 point_code）}；再把 point_codes 按英文逗号拆开的每个直接挂知识点追加 {code: 点编号, label: （整个知识点）, point_label: 该点 title（取不到用编号）}（旧口径：排在条目后面）
-  伪代码 lessons/series_options/series_head/lesson_count/form 按 教材页面 的默认形态拼（series 入参为空、lesson_level=「全部」、keyword 空串）；返回 {"reading": reading, "examples": 例句列表, "lesson_items": 条目列表, "lessons": 行列表, "series_options": 选项列表, "series_head": 当前系列 name, "lesson_count": "共{total}课", "form": {"series": 当前系列编号, "lesson_level": "全部", "keyword": ""}}
+  伪代码 lessons/series_options/series_head/lesson_count/form 按 教材页面 的默认形态拼（series 入参为空、lesson_level=「全部」、keyword 空串）；返回 {"reading": reading, "examples": 例句列表, "lesson_items": 条目列表, "lessons": 行列表, "series_options": 选项列表, "level_options": 科目等级 options, "series_head": 当前系列 name, "lesson_count": "共{total}课", "form": {"series": 当前系列编号, "lesson_level": "全部", "keyword": ""}}
 
 函数 本科目 learner current_role auth_mode subject need?
   返回 {subject_id}；本次请求用哪个科目
@@ -864,3 +867,45 @@ content/lesson/series/{series_code}.withdrawn.jsonl 字段 code,level,title,summ
   先 数据 lesson_series code=math.s name=数学教材 sort_order=1 subject_id=2
   调用 选择系列 learner=t2 series_code=math.s current_role=teacher auth_mode=on subject=2
   得 ok=1
+
+用例 取知识点等级_自定义等级取最靠前
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=P1 title=助词
+  先 数据 kg_item code=I1 name=は point_code=P1
+  先 数据 lesson_text code=L1 level=进阶 title=第一课 examples_edited=0 series_code=a seq=1
+  先 数据 lesson_text code=L2 level=基础 title=第二课 examples_edited=0 series_code=a seq=2
+  先 数据 lesson_item_link lesson_code=L1 item_code=I1
+  先 数据 lesson_point_link lesson_code=L2 point_code=P1
+  调用 取知识点等级 point_code=P1
+  得 point_code=P1 level=基础 lesson_count=2
+
+用例 取知识点等级_科目顺序不按字母
+  先 数据 subject_info code=py name=编程 levels=N1,N5 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 kg_point code=P1 title=助词
+  先 数据 kg_item code=I1 name=は point_code=P1
+  先 数据 lesson_text code=L1 level=N5 title=第一课 examples_edited=0 series_code=a seq=1
+  先 数据 lesson_text code=L2 level=N1 title=第二课 examples_edited=0 series_code=a seq=2
+  先 数据 lesson_point_link lesson_code=L1 point_code=P1
+  先 数据 lesson_point_link lesson_code=L2 point_code=P1
+  调用 取知识点等级 point_code=P1
+  得 level=N1 lesson_count=2
+
+用例 导入课文_等级不在本科目里400
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 文件 imports/a.md 内容=L1|N5|新一
+  调用 导入课文 series_code=a file_path=imports/a.md
+  报错 400
+  库 lesson_text 共 0 行
+
+用例 导入课文_自定义等级正常
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 文件 imports/a.md 内容=L1|入门|新一
+  调用 导入课文 series_code=a file_path=imports/a.md
+  得 ok=1 total=1
+  库 lesson_text 含 code=L1 level=入门
+
+用例 写入系列课文并重灌_等级不在本科目里400
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 写入系列课文并重灌 series_code=a rows_json=[{"code":"L1","level":"N5","title":"新一"}]
+  报错 400
+  库 lesson_text 共 0 行
