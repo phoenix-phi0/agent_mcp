@@ -31,9 +31,9 @@
   subject_id 整数 当前科目编号
 表 subject_ai
   subject_id 整数 科目编号，唯一
-  persona 长文本 AI 老师设定（问老师的老师人设，科目负责人在科目管理的编辑浮层里改）；空串、NULL 或没有这一行时按科目名生成默认人设（见 科目老师设定）；可空；本表其余 *_prompt 列仍未启用
+  persona 长文本 AI 老师设定（问老师的老师人设，科目负责人在科目管理的编辑浮层里改）；空串、NULL 或没有这一行时按科目名生成默认人设（见 科目老师设定）；可空；本表除 persona、assist_prompt 外的 *_prompt 列仍未启用
   tutor_prompt 长文本 问老师提示词，可空
-  assist_prompt 长文本 教师助手提示词，可空
+  assist_prompt 长文本 教师助手的自我介绍覆盖（可选，界面不暴露、没有页面字段）：去首尾空白后不为空时替换教师助手回答时开头那句「你是…教学助手」（见 科目助手设定 的 intro）；空串、NULL 或没有这一行时按科目生成默认；可空
   summary_prompt 长文本 学情总结提示词，可空
   import_prompt 长文本 教材导入提示词，可空
   kg_gen_prompt 长文本 图谱生成提示词，可空
@@ -114,7 +114,7 @@
 
 公开 函数 科目老师设定 subject_id
   返回 {name, custom, persona, offtopic, point_word, explain_word}；问老师（tutor）拼提示词时取的本科目老师人设和措辞，不再写死日语老师：name 是科目名；custom 是负责人填的 AI 老师设定原文去首尾空白（没填为空串）；persona 是人设句（不带句末标点，调用方自己接「，回答简明。」或「。」）；offtopic 是「学生跑题时怎么回」那一句；point_word 是学生指名内容的称呼；explain_word 是「问……」的称呼
-  伪代码 subject_id 为空或不是纯数字时按 1 处理；按 subject_id 查 subject_info 取 name（查询 subject_info_full），查 subject_ai 该科目行的 persona（新查询 subject_ai_persona）
+  伪代码 subject_id 为空或不是纯数字时按 1 处理；按 subject_id 查 subject_info 取 name（查询 subject_info_full），查 subject_ai 该科目行的 persona（查询 subject_ai_persona：`SELECT COALESCE(persona, '') AS persona FROM subject_ai WHERE subject_id = CAST(:subject_id AS INTEGER)`；K164 起要 COALESCE：只写了 assist_prompt、persona 为 NULL 的行，查一值 取到的 NULL 会变成文本 None，人设就成了「None」）
   伪代码 日语口径：subject_id 等于 1，或查不到 subject_info 这一行（旧库、模块用例库，行为同旧）；name 查到行时取行的 name，查不到取「日语语法」
   伪代码 custom = persona 去首尾空白（没有行或为 NULL 是空串）
   伪代码 persona：custom 不为空时取 custom，再去掉末尾连续的句末标点和空白（。！；，.!;, ）；否则日语口径为「你是一位中文老师，教中文学习者日语语法」（与旧提示词逐字一致）；否则为「你是一位{name}老师，用中文给学生讲解{name}」
@@ -123,6 +123,21 @@
   伪代码 非日语口径生成的 persona、offtopic、point_word、explain_word 里除科目名本身外不出现「日语」「语法」「JLPT」（custom 原样用，内容由负责人负责）
   伪代码 只读，不校验权限，不报错，不调用别的模块
   伪代码 返回 {"name": name, "custom": custom, "persona": persona, "offtopic": offtopic, "point_word": point_word, "explain_word": explain_word}
+
+公开 函数 科目助手设定 subject_id
+  返回 {name, kind, levels, custom, system, intro, point_desc, this_point, prefix_note, example_tag}；教师助手（teacher_assist、assist_draft、assist_material）拼提示词时取的本科目措辞，不再写死「日语学习系统」：name 科目名；kind 科目类型（language / general）；levels 本科目等级用「、」连接；custom 是 subject_ai.assist_prompt 去首尾空白（没有为空串）；system 是「…学习系统」的称呼；intro 是教师助手回答时开头的自我介绍（不带句末标点，调用方自己接「，像同事一样和老师说话，只读。」）；point_desc 是「知识点或…条目」的称呼；this_point 是老师用代词指上一轮知识点的说法；prefix_note 是加知识点草稿里编号前缀那句的前半（调用方接「：」+ 前缀）；example_tag 是讲义里例子那一节的标题
+  伪代码 subject_id 为空或不是纯数字时按 1 处理；按 subject_id 查 subject_info 取 name、kind（查询 subject_info_full），查 subject_ai 该科目行的 assist_prompt（新查询 subject_ai_assist_prompt：`SELECT COALESCE(assist_prompt, '') AS assist_prompt FROM subject_ai WHERE subject_id = CAST(:subject_id AS INTEGER)`。必须在 SQL 里 COALESCE：有这一行但 assist_prompt 为 NULL 时（只存过老师人设的行都是这样），查一值 取到的 NULL 会变成文本 None，用「或」兜不住）；调用 科目等级 subject_id=subject_id 取 levels 列表
+  伪代码 日语口径同 科目老师设定：subject_id 等于 1，或查不到 subject_info 这一行（旧库、模块用例库，行为同旧）；name 查到行时取行的 name，查不到取「日语语法」；kind 查到行时取行的 kind，查不到取 language
+  伪代码 levels：科目等级 的 levels 各项用「、」连接（日语 N5、N4、N3、N2、N1）
+  伪代码 custom = assist_prompt 去首尾空白（没有行或为 NULL 是空串）
+  伪代码 system：日语口径为「日语学习系统」（与旧提示词逐字一致）；否则「{name}学习系统」
+  伪代码 intro：custom 不为空时取 custom，再去掉末尾连续的句末标点和空白（。！；，.!;, ）；否则「你是{system}教师端的教学助手」（日语口径即「你是日语学习系统教师端的教学助手」，与旧提示词逐字一致）
+  伪代码 point_desc：日语口径为「知识点或语法条目」，否则「知识点或条目」；this_point：日语口径为「这个语法、这个点」，否则「这个知识点、这个点」
+  伪代码 prefix_note：日语口径为「编号前缀（非日语科目必须以它开头）」（与旧提示词逐字一致），否则「编号前缀（本科目的编号必须以它开头）」
+  伪代码 example_tag：日语口径或 kind 等于 language 为「【例句】」，否则「【示例】」
+  伪代码 非日语口径生成的 system、intro、point_desc、this_point、prefix_note、example_tag 里除科目名本身外不出现「日语」「语法」「JLPT」（custom 原样用，内容由负责人负责）
+  伪代码 只读，不校验权限，不报错，除本模块的 科目等级 外不调用别的函数
+  伪代码 返回 {"name": name, "kind": kind, "levels": levels, "custom": custom, "system": system, "intro": intro, "point_desc": point_desc, "this_point": this_point, "prefix_note": prefix_note, "example_tag": example_tag}
 
 函数 存科目人设 learner subject_id persona
   返回 {changed}；把 AI 老师设定写进 subject_ai（私有，只给 保存科目页面 用；权限已由 建科目 / 改科目 校验过）
@@ -1583,6 +1598,47 @@ POST /subject/manage/disable -> 设科目状态页面 动作 subject_disable 模
   先 数据 subject_ai subject_id=1 persona=你是温和的日语老师
   调用 科目老师设定 subject_id=1
   得 persona=你是温和的日语老师 point_word=语法点 offtopic=学生闲聊、与日语学习无关时，简短自然地回应，不要强行讲语法
+
+用例 科目助手设定_日语科目与旧提示词一致
+  先 数据 subject_info code=jp_grammar name=日语语法 levels=N5,N4,N3,N2,N1 kind=language caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 科目助手设定 subject_id=1
+  得 name=日语语法 kind=language levels=N5、N4、N3、N2、N1 custom=空 system=日语学习系统 intro=你是日语学习系统教师端的教学助手 point_desc=知识点或语法条目 this_point=这个语法、这个点 prefix_note=编号前缀（非日语科目必须以它开头） example_tag=【例句】
+
+用例 科目助手设定_没有科目行按日语
+  调用 科目助手设定 subject_id=9
+  得 name=日语语法 kind=language system=日语学习系统 intro=你是日语学习系统教师端的教学助手 example_tag=【例句】
+
+用例 科目助手设定_通用科目按科目名生成
+  先 数据 subject_info code=jp_grammar name=日语语法 levels=空 kind=language caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 科目助手设定 subject_id=2
+  得 name=编程 kind=general levels=入门、基础、进阶 custom=空 system=编程学习系统 intro=你是编程学习系统教师端的教学助手 point_desc=知识点或条目 this_point=这个知识点、这个点 prefix_note=编号前缀（本科目的编号必须以它开头） example_tag=【示例】
+
+用例 科目助手设定_语言类科目讲义仍用例句
+  先 数据 subject_info code=jp_grammar name=日语语法 levels=空 kind=language caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=en name=英语 levels=入门,基础,进阶 kind=language caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 科目助手设定 subject_id=2
+  得 system=英语学习系统 point_desc=知识点或条目 example_tag=【例句】
+
+用例 科目助手设定_自定义开头优先并去句末标点
+  先 数据 subject_info code=jp_grammar name=日语语法 levels=空 kind=language caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_ai subject_id=2 persona=别动 assist_prompt=你是严谨的编程助教。
+  调用 科目助手设定 subject_id=2
+  得 custom=你是严谨的编程助教。 intro=你是严谨的编程助教 system=编程学习系统
+
+用例 科目老师设定_只有助手设定时老师人设用默认
+  先 数据 subject_info code=jp_grammar name=日语语法 levels=空 kind=language caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_ai subject_id=2 assist_prompt=你是严谨的编程助教
+  调用 科目老师设定 subject_id=2
+  得 custom=空 persona=你是一位编程老师，用中文给学生讲解编程
+
+用例 科目助手设定_只有老师人设时教师助手用默认
+  先 数据 subject_info code=jp_grammar name=日语语法 levels=空 kind=language caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  先 数据 subject_ai subject_id=1 persona=你是温和的日语老师
+  调用 科目助手设定 subject_id=1
+  得 custom=空 intro=你是日语学习系统教师端的教学助手
 
 用例 科目管理页面_行里带说明和AI老师设定
   先 数据 subject_info code=py name=编程 intro=原来的说明 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=private owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
