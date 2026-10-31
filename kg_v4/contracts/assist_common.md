@@ -25,7 +25,8 @@
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（本函数没有 current_user，故补 learner；路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用其它模块的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 调用本模块 学生范围 subject=subject_id，得 students：本科目全部学生（含停用），带出 username、display_name、status、last_at
-  伪代码 name 去首尾空白，再去掉结尾的「同学」二字；去完为空，返回 {"status": "none", …}（不是报错）
+  伪代码 name 去首尾空白，再去掉结尾的「同学」二字，再去一次首尾空白（「小明 同学」得「小明」）；去完为空，返回 {"status": "none", …}（不是报错）
+  伪代码 传参（K166）：转小写、数长度用的 assist_common_lower、assist_common_len，参数（name、显示名）一律装进对象用 查一值表 传，不得按位置 s={…}、t={…} 传（显示名是库里的自由文本，可能首尾有空白，按位置传引擎报错）
   伪代码 按顺序匹配，前一档有结果就停：①username 与 name 相等（忽略大小写）；②display_name 与 name 相等；③模糊：display_name 包含 name，或 name 包含 display_name（display_name 至少 2 个字才用这个方向），或 username 包含 name（name 至少 2 个字）
   伪代码 命中 1 个返回 one；命中多个返回 many（按学生列表顺序取前 5 个为 candidates）；0 个返回 none
   伪代码 停用的学生也参与匹配（教师可能问已停用的学生），status 原样带出「启用」「停用」
@@ -37,7 +38,8 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（本函数没有 current_user，故补 learner；路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用其它模块的函数时一律带 subject=subject_id（已解析，不再校验）
-  伪代码 keyword 去首尾空白，去掉开头的「～」「~」「〜」和结尾的「的用法」；去完为空，返回 {"status": "none", …}（不是报错）
+  伪代码 keyword 去首尾空白，去掉开头的「～」「~」「〜」和结尾的「的用法」，再去一次首尾空白（「ばかり 的用法」得「ばかり」）；去完为空，返回 {"status": "none", …}（不是报错）
+  伪代码 传参（K166）：转小写、数长度用的 assist_common_lower、assist_common_len，参数（keyword、知识点标题、条目名）一律装进对象用 查一值表 传，不得按位置传（标题、条目名是库里的自由文本）
   伪代码 调用 kg.列知识点 subject=subject_id，得全部知识点 [{code, title}]
   伪代码 按顺序匹配，前一档有结果就停：①code 与 keyword 相等（忽略大小写）；②title 与 keyword 相等；③title 包含 keyword，或 keyword 包含 title（title 至少 2 个字才用这个方向）
   伪代码 前三档都没有：调用 kg.列条目 subject=subject_id，取 name 包含 keyword（或 keyword 包含 name，name 至少 2 个字）的条目，把它们的 point_code 去重后当命中（条目名如「ばかり」，教师常用条目名问）；再调用 kg.取知识点 code=该编号 subject=subject_id 取 title

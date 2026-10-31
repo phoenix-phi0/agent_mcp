@@ -48,6 +48,7 @@
   伪代码 全班薄弱知识点前 5 个，每个一行「标题（level）｜student_count 人低于 80 分｜这些人平均 avg_score 分」
   伪代码 总长度超过 2500 个字时，从学生表末尾的行砍起，并写「（表已截断）」
   伪代码 total 等于 0 时只返回「今天：…」和「还没有学生账号」
+  伪代码 传参（K166）：数长度、截取用的 teacher_assist_len、teacher_assist_substr 的 t 一律装进对象用 查一值表 传（如 设 a.t = {row}，查一值表 app.db teacher_assist_len {a}；截取再加 a.n），不得写成 查一值 … t={…} 按位置传——学生行、学生表、表头表尾都是拼好的文本，last_at 为空（学生只在本科目作答，列学生 的 last_at 取不到）时学生行以「最近学习 」结尾带空格，显示名、知识点标题也可能首尾有空白，按位置传引擎直接报错（POST /teacher_assist/ask 500）
 
 函数 学生上下文 username display_name last_at subject_id
   返回 文本：某个学生在本科目的数据段（供 student_detail 用）
@@ -57,6 +58,7 @@
   伪代码 否则依次写：「作答 answer_total 题，近期正确率 recent_accuracy%，平均分 avg_score，已掌握 mastered_count 个知识点」；「低分点 weak_count 个，最低的 5 个：标题（等级）得分 …」；「最近答错 wrong_count 题，最近 5 条：知识点标题 日期」；「错词本 wrong_book_count 个，前 5 个：汉字【读音】意思」；「问老师提问 question_count 次，最近 3 条（每条截取前 40 个字）」；relays 里 finished 等于 0 的条数「未传达完的传达 n 条」
   伪代码 has_summary 等于 1 时附「最近的 AI 学情总结（summary_at，summary_author）：」加 summary 前 200 个字
   伪代码 总长度上限 1500 个字，超出从最后一段砍起
+  伪代码 传参（K166）：截取 last_at、作答时间、学生提问 content、学情总结 summary 和数整段长度、截整段用的 teacher_assist_len、teacher_assist_substr，t 一律装进对象用 查一值表 传，不得按位置 t={…} 传（提问原文、模型写的总结常带首尾空白或换行，按位置传引擎报错）
 
 函数 知识点上下文 code title subject_id
   返回 文本：某个知识点的本科目全班掌握数据段（供 point_status 用）
@@ -86,7 +88,7 @@
   伪代码 class_overview：context_text = 班级上下文 current_user=learner subject_id=subject_id（本函数没有 current_user，班级上下文 不用它做查询）；status 为 ok
   伪代码 student_detail：调用 assist_common.匹配学生 name=student subject=subject_id。none 或 student 为空：status=ask，hint「没有找到叫「student」的学生。现有学生：roster」（student 为空写「你想看哪位学生？现有学生：roster」）；many：status=ask，hint「找到多位：显示名（用户名）、…，你指哪一位？」；one：调用 assist_common.学生范围 subject=subject_id 取该生 last_at，context_text = 学生上下文 username=该生 username display_name=该生 display_name last_at=该生 last_at subject_id=subject_id，student、student_name 填上
   伪代码 point_status：调用 assist_common.匹配知识点 keyword=point subject=subject_id。none 或 point 为空：status=ask，hint「没有找到「point」这个知识点或条目，换个说法试试（知识点名、条目名或编号都行）」（point 为空写「你想看哪个知识点？」）；many：status=ask，hint「找到多个：标题（编号）、…（共 total 个，最多列 5 个），你指哪一个？」；one：context_text = 知识点上下文 code=该编号 title=该标题 subject_id=subject_id，point、point_title 填上
-  伪代码 teaching_advice：context_text = 建议上下文 current_user=learner subject_id=subject_id；student 不为空时再调用 assist_common.匹配学生 name=student subject=subject_id，one 的话把学生上下文附在后面并填 student（none 或 many 不拦，只是不附，不改 status）；point 不为空时同理用 assist_common.匹配知识点 keyword=point subject=subject_id，one 的话把知识点上下文附在后面并填 point；整段 context_text 总长度上限 4500 个字，超出从最后附加的段落末尾砍起
+  伪代码 teaching_advice：context_text = 建议上下文 current_user=learner subject_id=subject_id；student 不为空时再调用 assist_common.匹配学生 name=student subject=subject_id，one 的话把学生上下文附在后面并填 student（none 或 many 不拦，只是不附，不改 status）；point 不为空时同理用 assist_common.匹配知识点 keyword=point subject=subject_id，one 的话把知识点上下文附在后面并填 point；整段 context_text 总长度上限 4500 个字，超出从最后附加的段落末尾砍起；数长度、截取（teacher_assist_len、teacher_assist_substr）的 t 装进对象用 查一值表 传（K166，同 班级上下文）
   伪代码 chitchat：context_text = 系统功能说明（固定文字：教师端有学情、教师助手、学生管理、科目管理、图谱管理、AI 老师设定、教材导入、教学材料八页各管什么（P3 加「教学材料」：助手生成的教案、课堂练习、讲义、学情报告在这里列出、编辑、导出、删除，课堂练习可以做成出题草稿）（页数以 ui/ 下「端 教师」的界面为准，改密码不进导航不算）；学生端有问老师、做题、默写、教材、学习进度、知识图谱；助手页底栏可以传附件（txt、md、csv、pdf、docx，单个 10MB，每个科目最多存 20 个；xlsx 要另存为 csv，图片暂不支持），挂着的附件接下来几轮都带上，可以就附件提问、总结、分析成绩表（统计由系统算好），也可以「按附件出题」，点「移除附件」后不再带；助手能按老师的话生成「出题」「给学生发传达」「改 AI 老师设定」「加知识点/条目/前置边」四种草稿，草稿要老师在对话里或右边「待确认」列表里点「确认」才写入，7 天内可以撤销（设定在确认后被别人改过的不撤、知识点和条目已被引用的不撤）；助手能按老师的话写教案、课堂练习、讲义、学情报告（P3，先存成未保存，点「保存」才留下，7 天不保存自动清掉；只读老师不能生成）；助手能做深度学情（P4）：最近几周的正确率和作答量趋势、错题归因到知识点和条目、2 到 5 位学生对比、掉队名单（规则：全班近 7 天有作答而这位学生 7 天以上没作答，或近 14 天正确率比之前 14 天低 15 个百分点以上），数字和字符图都由系统算好；可以说「给掉队的学生发传达」，助手按掉队名单出传达草稿；助手不能直接改数据，只能改本科目的设定，「全部科目」的设定、科目设置和成员它做不了；只读老师只能提问不能生成草稿）；status 为 ok
   伪代码 返回 {"ok": 1, "intent": intent, "status": status, "student": …, "student_name": …, "point": …, "point_title": …, "hint": …, "context_text": …}
 
@@ -138,7 +140,7 @@
   伪代码 ②draft_kind 为空：回模板话「你是想让我出题、给学生发传达、改 AI 老师设定，还是加知识点/条目？」，status=ask，不调模型
   伪代码 ③a 给掉队的学生发传达（P4）：draft_kind 等于 relay_add、student 为空、message 含「掉队」「落后」任一时，L = 调用 assist_insight.掉队名单 subject=subject_id（规则由后端算，不让模型挑人）；L.total 等于 0：不调模型、不建草稿，reply = L.hint +「没有生成传达草稿。」（L.hint 是空态原文：没有学生 / 还没有作答记录 / 按现在的规则没有掉队的学生加规则），status=ask，跳到⑤写一轮；否则 student = L.students 前 30 个（assist_insight 的 relay_max，即传达草稿的人数上限）的 username 用「、」连接（用户名在 匹配学生 里是第一档精确匹配，不会多义），L.total 大于 30 时④的回复末尾加「（掉队名单共 L.total 人，这份草稿只带了前 30 位）」；assist_draft 不依赖 assist_insight，名单由本模块拿到再交给 生成草稿
   伪代码 ③否则：intent 等于 make_draft、draft_kind 等于 relay_add 且 student 为空且上轮聚焦的学生不为空时 student 取上轮聚焦学生的显示名；quiz_add 且 point 为空且上轮聚焦的知识点不为空时 point 取上轮的知识点标题；setting_save 的 student（设定针对谁）不自动取上轮聚焦（「给全班记一条」和「给他记一条」模型已经分开了，代码层不再补，免得把全班设定写成个人的）；kg_add 的 point 原样交给 生成草稿；依据附件出题（P2）：draft_kind 等于 quiz_add 且 cur.file_id 不为空时，t = 调用 assist_file.取附件文本 current_user=current_user file_id=cur.file_id question=message subject=subject_id，ref_text =「附件：」+ t.name + 换行 + t.text（t.stats 不为空时再接换行 +「后端算好的统计（按全部行）：」+ 换行 + t.stats），其它情况 ref_text 为空串（只有出题用附件；发传达、改设定、加知识点不带）；调用 assist_draft.生成草稿 current_user=current_user kind=draft_kind message=message point=point students=student count=count replaces_id=replaces_id ref_text=ref_text subject=subject_id（修订时 生成草稿 把旧稿 payload 放进提示词、旧稿置 superseded；写权限已在①校验，这里不传角色和登录模式），得 status、draft_id、title、preview、hint
-  伪代码 ④回复文字：status 等于 ask 时 reply=hint；status 等于 ok 时 reply=「已生成草稿 #draft_id：title」+ 换行 + preview 的前 300 个字 + 换行 +「点「确认」才会写入；不要就点「放弃」。也可以直接说哪里要改，我出一份修订稿。」
+  伪代码 ④回复文字：status 等于 ask 时 reply=hint；status 等于 ok 时 reply=「已生成草稿 #draft_id：title」+ 换行 + preview 的前 300 个字（截取用 teacher_assist_substr，t 装进对象用 查一值表 传，K166） + 换行 +「点「确认」才会写入；不要就点「放弃」。也可以直接说哪里要改，我出一份修订稿。」
   伪代码 ⑤调用 写一轮 current_user=current_user user_text=message reply=reply intent=make_draft student=空 point=空 status=status subject_id=subject_id，得 reply_id；建了草稿时调用 assist_draft.挂回消息 current_user=current_user draft_id=draft_id msg_id=reply_id subject=subject_id，把该草稿的 source_msg_id 设成 reply_id（加载历史时按它把按钮挂回这条消息；草稿表归 assist_draft，本模块不直接改）
   伪代码 ⑥返回 {"ok": 1, "reply_id": reply_id, "reply": reply, "intent": "make_draft", "student": "", "point": "", "status": status, "draft_id": draft_id 或空串}；模型调用次数：判意图 1 次 + 生成草稿 最多 2 次
   伪代码 【就附件提问，M4-P2】intent 等于 file_qa 时走这一段，走完直接返回（不调 取助手上下文；只读，只读老师也走得到，只是他没有附件）：
@@ -370,7 +372,7 @@
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id（同 确认草稿页面：只读老师 403）；本函数调用本模块和 assist_material、assist_draft 的函数时一律带 subject=subject_id
   伪代码 r = 调用 assist_material.练习转出题草稿 current_user=current_user mat_id=mat_id subject=subject_id（错误原样抛，不写对话）
-  伪代码 句子：r.status 等于 ok 时「已把课堂练习 #mat_id 做成出题草稿 #r.draft_id：r.title」+ 换行 + r.preview 的前 300 个字 + 换行 +「点「确认」才会写入题库；不要就点「放弃」。」；ask 时就是 r.hint
+  伪代码 句子：r.status 等于 ok 时「已把课堂练习 #mat_id 做成出题草稿 #r.draft_id：r.title」+ 换行 + r.preview 的前 300 个字（截取用 teacher_assist_substr，t 装进对象用 查一值表 传，K166） + 换行 +「点「确认」才会写入题库；不要就点「放弃」。」；ask 时就是 r.hint
   伪代码 msg = 调用 记一条 current_user=current_user content=句子 subject_id=subject_id intent=make_draft；r.status 等于 ok 时调用 assist_draft.挂回消息 current_user=current_user draft_id=r.draft_id msg_id=msg subject=subject_id（草稿按钮挂到这句话上）
   伪代码 page = 调用 列对话页面 current_user=current_user current_role=current_role auth_mode=auth_mode subject=subject_id
   伪代码 返回 page 加上 "draft_id": r.status 等于 ok 时 r.draft_id 否则空串
@@ -579,6 +581,25 @@ POST /teacher_assist/material/to_draft -> 材料转草稿页面 动作 assist_ma
   调用 取助手上下文 intent=class_overview subject=2
   得 ok=1 intent=class_overview status=ok
   库 teacher_assist_message 共 0 行
+
+用例 学生行首尾有空白_全班概况不报错
+  先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=2 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  先 数据 kg_point code=py.a title=变量 subject_id=2
+  先 数据 progress_answer learner=s1 point_code=py.a question_no=py.q1 correct=1 at=2026-01-01 subject_id=2
+  先 数据 progress_score learner=s1 point_code=py.a score=100 at=2026-01-01 subject_id=2
+  调用 取助手上下文 intent=class_overview subject=2
+  得 ok=1 intent=class_overview status=ok
+  库 teacher_assist_message 共 0 行
+
+用例 学生行首尾有空白_教学建议不报错
+  先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=2 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  先 数据 kg_point code=py.a title=变量 subject_id=2
+  先 数据 progress_answer learner=s1 point_code=py.a question_no=py.q1 correct=1 at=2026-01-01 subject_id=2
+  先 数据 progress_score learner=s1 point_code=py.a score=100 at=2026-01-01 subject_id=2
+  调用 取助手上下文 intent=teaching_advice subject=2
+  得 ok=1 intent=teaching_advice status=ok
 
 用例 跨科目_取助手上下文知识点掌握本科目
   先 数据 account_user username=s1 password_hash=x display_name=小一 role=student disabled=0 created_at=2025-12-01

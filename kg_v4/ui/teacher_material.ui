@@ -28,7 +28,7 @@
   结束
   显示 mat_note
 
-  文案 当 shared.materials&&!shared.materials.length 还没有材料。去「教师助手」说：写一份〜たばかり的教案／出一份课堂练习／写一份全班学情报告。
+  文案 当 shared.materials&&!shared.materials.length 还没有材料。去「教师助手」说：写一份某知识点的教案／出一份课堂练习／写一份全班学情报告。
   列表 材料表 绑 materials 当 shared.materials&&shared.materials.length
     列 mat_title 标题
     列 mat_kind 类型

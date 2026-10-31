@@ -493,8 +493,10 @@
   伪代码 调用 取生效设定 student=preview_student recent_text=recent_text subject=subject_id 得生效设定；调用 取待传达 student=preview_student subject=subject_id 得待传达
   伪代码 ids：取生效设定 的 setting_ids，为空写「（无）」
   伪代码 relay_pick：取待传达 的 relay_ids 为空写「（没有待传达的要点）」；否则取第一个编号，调用 取传达 relay_id=该编号 subject=subject_id 得 must_info 摘要（超过 30 字取前 30 加「…」）和 urgency（urgent 写立即、normal 写尽快、low 写顺便），写「传达#{编号}「{摘要}」，这次按「{紧急程度}」带；后面还排着{count-1}条（一条回复只带一条）」（这句是沿用旧 kg 的预览文案，原样输出不改；它只是预览里点出排第一的那条，不约束真实回复：真实回复由 tutor 带上 取待传达 的全部待传达、全部计入轮数，见 取待传达、记回复传达 的说明）
-  伪代码 layout：「【系统提示词】你是一位耐心的日语老师……你不要自己写网址。」接 memory_text（不为空时前加一个换行），再空一行（两个换行）接「【发给模型的提示词】学生现在用的教材：【……】课文、进度等材料：【……】」，card_text 不为空时先换行再接 card_text 再换行，接「最近的对话（旧的在前）：【……】」，待传达的 prompt_text 不为空时先换行再接它，note_text 不为空时先换行再接它，最后换行接「学生现在说：【{preview_message}】请直接回答学生现在这句话。」；某段为空就什么都不接（换行也不接）
+  伪代码 老师开头（K166，按科目取）：ts = 调用 subject.科目老师设定 subject_id=subject_id；subject_id 等于 1 且 ts.custom 为空时 opener 为「你是一位耐心的日语老师」（日语科目与改前逐字一致），否则 opener 为 ts.persona（非日语科目如「你是一位Python 编程老师，用中文给学生讲解Python 编程」，负责人填了 AI 老师设定时是它；不出现「日语」「语法」，科目名本身除外）
+  伪代码 layout：「【系统提示词】」+ opener +「……你不要自己写网址。」接 memory_text（不为空时前加一个换行），再空一行（两个换行）接「【发给模型的提示词】学生现在用的教材：【……】课文、进度等材料：【……】」，card_text 不为空时先换行再接 card_text 再换行，接「最近的对话（旧的在前）：【……】」，待传达的 prompt_text 不为空时先换行再接它，note_text 不为空时先换行再接它，最后换行接「学生现在说：【{preview_message}】请直接回答学生现在这句话。」；某段为空就什么都不接（换行也不接）
   伪代码 preview_hits：读 teacher_rules_setting 中 enabled 等于 1、kind 为 card、student 为空或等于 preview_student、subject_id 等于本科目或等于 0 的行（全班在前，再按 id）；keywords 按逗号拆开，recent_text 包含其中任一个的取第一个命中的为 hit_keyword；note_brief 同 设定列表 的摘要写法，hit_placed 恒为「放进去了」（v4 不设命中卡字数上限）
+  伪代码 传参（K166）：preview_message 是老师输入的原文（可能首尾有空格、换行），recent_text、memory_text、card_text、note_text、prompt_text、opener 是拼好的长文本；拼 recent_text（teacher_rules_text_join）、拼 layout（teacher_rules_preview_layout，参数加 opener）、算 preview_hits（teacher_rules_hit_cards 的 recent）的参数一律装进对象用 查一值表 / 查询表 传，不得按位置 k={…} 传（按位置传引擎对首尾有空白的值直接报错）；示例提问原样放进 layout，不去空白
   伪代码 返回 {"preview": {"ids": ids, "relay_pick": relay_pick, "layout": layout}, "preview_hits": 列表}
 
 公开 函数 载入传达页面 relay_id? student? learner? current_role? auth_mode? subject?

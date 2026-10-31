@@ -52,7 +52,7 @@
 
 函数 草稿行 draft
   返回 {draft_id, draft_kind, draft_brief, draft_state, draft_at, can_undo}：待确认表的一行（键名就是 .ui 列名）
-  伪代码 draft_id=draft.id；draft_kind=类型名 kind=draft.kind；draft_brief=draft.title；draft_state=状态名 status=draft.status，partial 和 failed 后面加「：」和 error 的前 30 个字；draft_at=draft.created_at；can_undo=能撤销 status=draft.status decided_at=draft.decided_at
+  伪代码 draft_id=draft.id；draft_kind=类型名 kind=draft.kind；draft_brief=draft.title；draft_state=状态名 status=draft.status，partial 和 failed 后面加「：」和 error 的前 30 个字（截取用 assist_draft_substr，t 装进对象用 查一值表 传，K166：error 是报错原文，可能带换行）；draft_at=draft.created_at；can_undo=能撤销 status=draft.status decided_at=draft.decided_at
 
 函数 草稿按钮 draft
   返回 {actions, links}：挂在生成这份草稿的那条助手消息上的按钮（E1，形状以 design.md §10 为准）
@@ -89,6 +89,7 @@
   伪代码 relay_add 的 normalized：{"items": [{"student": username, "display_name": 显示名}], "must_info", "facts", "urgency", "deadline", "rounds", "keywords"}；title 为空时取「给 n 名学生发传达」；preview「发给：显示名、…（换行）要传达：must_info（换行）必须准确：facts（没有写无）（换行）紧急程度：顺便/尽快/立即；轮数 rounds；截止 deadline（没有写无）」；范围固定为本科目（不传 scope，助手不生成「所有科目」的传达，那要负责人权限）
   伪代码 setting_save（P1b）：调用 assist_setting.校验设定草稿 payload_json=解析后的对象 subject=subject_id，它的 errors 并进通用检查的 errors，normalized、preview 原样用，title 模型没给时用它的
   伪代码 kg_add（P1b）：调用 assist_kg.校验图谱草稿 payload_json=解析后的对象 learner=learner subject=subject_id，同上
+  伪代码 传参（K166）：本函数数长度、截取用的 assist_draft_len、assist_draft_substr（title、stem、explain、must_info、facts 等模型输出），t 一律装进对象用 查一值表 传，不得按位置 t={…} 传——模型写的 explain、facts 常以换行结尾，按位置传引擎直接报错，草稿生成失败
   伪代码 返回 {"ok": errors 为空则 1 否则 0, "errors": errors, "normalized": …, "title": …, "preview": …}
 
 公开 函数 生成草稿 current_user kind message point? students? count? replaces_id? ref_text? current_role? auth_mode? subject?
@@ -308,6 +309,18 @@ GET /teacher_assist/drafts -> 列草稿 角色 teacher
   调用 校验草稿 kind=relay_add payload_json={"students":["小明"],"must_info":"周五小测","urgency":"urgent","deadline":"2026-01-09","rounds":2}
   得 ok=1
   库 teacher_rules_relay 共 0 行
+
+用例 首尾有空白_出题解析以换行结尾
+  先 数据 kg_point code=P1 title=点一
+  先 数据 kg_item code=I1 name=条目一 point_code=P1
+  调用 校验草稿 kind=quiz_add payload_json={"questions":[{"stem":"题一","options":["甲","乙"],"answer":"乙","explain":"因为是乙\n","item_code":"I1","level":"N5"}]}
+  得 ok=1
+
+用例 首尾有空白_传达信息以换行结尾且名字带同学
+  先 数据 account_user username=s1 password_hash=x display_name=小明 role=student disabled=0 created_at=2025-12-01
+  先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
+  调用 校验草稿 kind=relay_add payload_json={"students":["小明\t同学"],"must_info":"周五小测","facts":"周五第三节\n","rounds":2}
+  得 ok=1
 
 用例 校验草稿_传达学生找不到
   先 数据 account_user username=s1 password_hash=x display_name=小明 role=student disabled=0 created_at=2025-12-01
