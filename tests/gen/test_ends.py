@@ -13,6 +13,7 @@
 """
 
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -160,6 +161,97 @@ def main() -> int:
         (proj / "ui" / "bad.ui").write_text("界面 表单 坏页\n  字段 title 书名\n结束\n", encoding="utf-8")
         lines = build(proj)
         check(any("bad.ui：解析失败" in x and "分组" in x for x in lines), f"没有任何界面可编译时也带出解析失败：{lines}")
+
+        print("五、认证 换端 先退出（K177）")
+        # page_options：声明打开时非主页面 home 变「退出并打开<主端>端」并带 logout；
+        # 不写声明（默认参数）跟以前一模一样
+        sw = page_options(pages, pages[1], ROLES, switch_logout=True)
+        check(sw["home"] == {"path": "/", "label": "退出并打开学生端", "logout": True},
+              f"写声明：home 变「退出并打开学生端」+logout：{sw['home']}")
+        check(page_options(pages, pages[0], ROLES, True)["home"] is None,
+              "写声明：主页面照样没有 home")
+        check("logout" not in (t["home"] or {}), f"不写声明：home 不带 logout：{t['home']}")
+
+        def page_of(js: str) -> dict:
+            return json.loads(re.search(r"const PAGE = (\{.*?\});", js).group(1))
+
+        # kg：不写声明照旧（打开学生端、新标签页、无 onHome），写声明全换
+        def kg_copy(name: str, declare: bool):
+            proj = tmp / name
+            proj.mkdir()
+            for d in ("ui", "routes", "entities", "queries"):
+                shutil.copytree(ROOT / "kg" / d, proj / d)
+            if declare:
+                f = proj / "routes" / "auth.zs"
+                f.write_text("认证 换端 先退出\n" + f.read_text(encoding="utf-8"),
+                             encoding="utf-8")
+            build(proj, title="日语学习")
+            return proj
+
+        for name, has in (("kg_plain_noswitch", False), ("kg_decl_switch", True)):
+            p2 = kg_copy(name, has)
+            js = (p2 / "web" / "teacher.js").read_text(encoding="utf-8")
+            main_js = (p2 / "web" / "app.js").read_text(encoding="utf-8")
+            tag = "写声明" if has else "不写声明"
+            want_home = ({"path": "/", "label": "退出并打开学生端", "logout": True} if has
+                         else {"path": "/", "label": "打开学生端"})
+            check(page_of(js).get("home") == want_home, f"{tag}：PAGE.home：{page_of(js).get('home')}")
+            check(("onHome" in js) == has and ('click="onHome"' in js) == has,
+                  f"{tag}：teacher.js {'有' if has else '没有'} onHome")
+            check(("退出并打开学生端" in js) == has, f"{tag}：顶栏文案{'换' if has else '不换'}")
+            check(('target="_blank"' in js) != has, f"{tag}：换端链接{'本标签页' if has else '照旧新标签页'}")
+            if not has:
+                check('<span v-if="PAGE.home" class="nav-home"><a :href="PAGE.home.path" '
+                      'target="_blank" rel="noopener">{{ PAGE.home.label }}</a></span>' in js,
+                      "不写声明：nav-home 那一行跟改前一个字节都不差")
+            check("onHome" not in main_js and page_of(main_js).get("home") is None,
+                  f"{tag}：主页面（/）没有 home、没有 onHome")
+
+        # kg_v4（仓库里已带声明）：带声明的有 onHome，去声明的副本跟以前一样
+        def kgv4_copy(name: str, keep_decl: bool):
+            proj = tmp / name
+            proj.mkdir()
+            for d in ("ui", "routes", "entities", "queries"):
+                shutil.copytree(ROOT / "kg_v4" / d, proj / d)
+            if not keep_decl:
+                f = proj / "routes" / "account.zs"
+                f.write_text("\n".join(l for l in f.read_text(encoding="utf-8").splitlines()
+                                       if l.strip() != "认证 换端 先退出") + "\n",
+                             encoding="utf-8")
+            build(proj)
+            return proj
+
+        for name, has in (("kgv4_with_decl", True), ("kgv4_no_decl", False)):
+            p2 = kgv4_copy(name, has)
+            js = (p2 / "web" / "teacher.js").read_text(encoding="utf-8")
+            tag = "带声明" if has else "去声明副本"
+            check(("onHome" in js and "退出并打开学生端" in js) == has,
+                  f"kg_v4 {tag}：teacher.js {'有' if has else '没有'} onHome / 新文案")
+            check(('target="_blank"' in js) != has, f"kg_v4 {tag}：换端链接{'本标签页' if has else '照旧新标签页'}")
+            check(page_of(js).get("home", {}).get("logout") == (True if has else None),
+                  f"kg_v4 {tag}：PAGE.home.logout：{page_of(js).get('home', {}).get('logout')}")
+            if not has:
+                check('<span v-if="PAGE.home" class="nav-home"><a :href="PAGE.home.path" '
+                      'target="_blank" rel="noopener">{{ PAGE.home.label }}</a></span>' in js,
+                      "kg_v4 去声明副本：nav-home 那一行跟改前一个字节都不差")
+
+        # 声明了但项目没有退出接口（动作 auth_logout）：不开，文案也不换——
+        # 不然链接写着「退出并打开…」点了却只开个新标签页
+        proj = tmp / "kg_decl_nologout"
+        proj.mkdir()
+        for d in ("ui", "routes", "entities", "queries"):
+            shutil.copytree(ROOT / "kg" / d, proj / d)
+        af = proj / "routes" / "auth.zs"
+        txt = "认证 换端 先退出\n" + af.read_text(encoding="utf-8")
+        txt2 = re.sub(r"接口 POST /auth/logout 动作 auth_logout 公开\n(?:  .*\n)*结束\n", "", txt)
+        assert txt2 != txt
+        af.write_text(txt2, encoding="utf-8")
+        build(proj, title="日语学习")
+        js = (proj / "web" / "teacher.js").read_text(encoding="utf-8")
+        check(page_of(js).get("home") == {"path": "/", "label": "打开学生端"},
+              f"声明了但没有退出接口：home 照旧：{page_of(js).get('home')}")
+        check("onHome" not in js and "退出并打开" not in js and 'target="_blank"' in js,
+              "声明了但没有退出接口：不换文案、不开 onHome、照旧新标签页")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

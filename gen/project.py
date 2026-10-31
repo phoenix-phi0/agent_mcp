@@ -497,8 +497,15 @@ def split_pages(screens, roles: dict) -> list:
     return pages
 
 
-def page_options(pages: list, page: dict, roles: dict) -> dict:
-    """render_vue 的 page（见 tools/ui.py）：这一页是哪一端、别的端在哪个地址。"""
+def page_options(pages: list, page: dict, roles: dict,
+                 switch_logout: bool = False) -> dict:
+    """render_vue 的 page（见 tools/ui.py）：这一页是哪一端、别的端在哪个地址。
+
+    switch_logout：项目写了「认证 换端 先退出」（tools/dsl_http.py 的 auth_config）
+    时，非主页面的 home 变成「退出并打开<主端>端」并带 logout 标记，前端据它先
+    退出、再同标签页去主页面；没写时跟以前一模一样。声明了但项目没有退出
+    接口（动作 auth_logout）也不开，见 build。
+    """
     if len(pages) == 1:
         return {}
     code_of = {label: code for code, label in roles.items()}
@@ -513,8 +520,10 @@ def page_options(pages: list, page: dict, roles: dict) -> dict:
     return {"end": page["end"], "main": page["main"], "role": page["slug"],
             "badge": "" if page["main"] else f"{page['end']}端",
             "ends": ends,
-            "home": None if page["main"] else
-            {"path": "/", "label": f"打开{main_end}端" if main_end else "打开主页"},
+            "home": None if page["main"] else (
+                {"path": "/", "label": f"退出并打开{main_end}端" if main_end else "退出并打开主页",
+                 "logout": True} if switch_logout else
+                {"path": "/", "label": f"打开{main_end}端" if main_end else "打开主页"}),
             "elsewhere": {s.name: (pg["end"] or "主页")
                           for pg in pages if pg is not page
                           for s in pg["screens"] if s.name not in mine}}
@@ -565,9 +574,13 @@ def build(root: Path, entry: str = "", title: str = "") -> list:
         raise ProjectError(f"读接口失败：{e}") from e
 
     try:
-        roles = auth_config(root / "routes")["roles"] if (root / "routes").is_dir() else {}
+        auth = auth_config(root / "routes") if (root / "routes").is_dir() else {}
+        # 「认证 换端 先退出」要真有退出接口才开：没有 auth_logout 的话，
+        # 文案换成「退出并打开…」行为却还是老样子（开新标签页、不退出），纯误导
+        roles, switch_logout = auth.get("roles", {}), bool(
+            auth.get("switch_logout")) and "auth_logout" in endpoints
     except Exception:
-        roles = {}
+        roles, switch_logout = {}, False
     title = title or root.name
     pages = split_pages(screens, roles)
     results = []
@@ -579,7 +592,7 @@ def build(root: Path, entry: str = "", title: str = "") -> list:
                                 "endpoints": endpoints,
                                 "content_root": str(root / "ui"),
                                 "nav": compute_nav(page["screens"], "auth_logout" in endpoints),
-                                "page": page_options(pages, page, roles)})
+                                "page": page_options(pages, page, roles, switch_logout)})
         # 各页面的问题合在一起报，同一条（共用的登录页上的）只报一次
         seen = {(i.code, str(i)) for i in issues}
         issues += [i for i in r["issues"] if (i.code, str(i)) not in seen]

@@ -39,6 +39,8 @@
       协作教师 t2 可写；公共科目其他教师 t3 只读（看不到写按钮）。t3 是
       init_data 之后才建的账号，所以没被登记进 1 号科目（迁移会把先前已有
       的教师全登记成协作）。断言与数据内容无关：只认本段自建的 walk99.* 编号
+  8.  换端先退出（K177）：教师点顶栏「退出并打开学生端」→ 先退出、同标签页
+      到 / 登录页（不再开新标签页）；学生登录进学生端
 输出「通过 x/共 y」，失败列原因；退出码 0 全过 / 1 有失败 / 2 环境起不来。
 """
 import argparse
@@ -945,6 +947,39 @@ def logout_flow(browser, base, ck, marks, new_page):
     snapshot(marks)
 
 
+def switch_logout_flow(browser, base, ck, marks, new_page):
+    """K177「认证 换端 先退出」（声明写在 kg_v4/routes/account.zs）：教师点顶栏
+    「退出并打开学生端」→ 先退出、同一标签页到 / 登录页（不再开新标签页，
+    也不再到 /teacher 被弹回）；学生登录进学生端。"""
+    lt = new_page(browser.new_context(), "switch-t1")
+    login(lt, base, TEACHER_USER, end="/teacher")
+    snapshot(marks)
+    home = lt.locator("nav .nav-home a")
+    ck(home.count() == 1 and home.inner_text().strip() == "退出并打开学生端",
+       "教师端顶栏是「退出并打开学生端」",
+       f"个数 {home.count()}，文字「{(home.inner_text() if home.count() else '').strip()}」")
+    ck(home.get_attribute("target") is None and home.get_attribute("href") == "/",
+       "同一标签页（无 target），地址 /",
+       f"target={home.get_attribute('target')} href={home.get_attribute('href')}")
+    hits, stop = track_posts(lt, "/account/logout")
+    home.click()
+    lt.wait_for_url(base + "/", timeout=15000)
+    stop()
+    lt.wait_for_selector('form.screen input[type="password"]', timeout=15000)
+    ck(lt.evaluate("location.pathname") == "/", "点击后同一标签页到 /", lt.url)
+    me = lt.evaluate("fetch('/auth/me',{method:'POST',headers:{'Content-Type':'application/json'},"
+                     "body:'{}'}).then(r => r.json())")
+    ck(not me.get("user"), "退出真的发生了（/auth/me 没有登录者）", str(me))
+    ck(len(hits) >= 1, "点链接先调了 /account/logout", hits)
+    login(lt, base, STUDENT_NAME)
+    lt.wait_for_timeout(800)
+    ck(lt.evaluate("location.pathname") == "/"
+       and lt.locator(".nav-user-name").inner_text().strip() == STUDENT_NAME,
+       "学生登录进学生端，顶栏是 s1", lt.url)
+    ck(lt.locator("nav .nav-home").count() == 0, "学生端（主页面）没有换端链接")
+    snapshot(marks)
+
+
 def kg_create_point(page, code, title, ck, label):
     """顶栏「新建知识点」浮层建一个点，断言它出现在知识点表里。"""
     clear_toast(page)
@@ -1217,6 +1252,9 @@ def main(argv=None):
 
                 # ---- 退出（K159）----
                 logout_flow(browser, base, ck, marks, new_page)
+
+                # ---- 换端先退出（K177）----
+                switch_logout_flow(browser, base, ck, marks, new_page)
 
                 # ---- 390px 视口 ----
                 m = new_page(browser.new_context(viewport={"width": 390, "height": 844}),

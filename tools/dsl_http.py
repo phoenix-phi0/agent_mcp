@@ -124,6 +124,12 @@ GET 的查询参数也注入。
                                   「拒绝」后面是别人调「只许 学生」的接口时
                                   403 的说明（整句，可以有空格）；不写是
                                   「需要学生权限」
+    认证 换端 先退出              非主页面顶栏的「打开<主端>端」链接改成
+                                  「退出并打开<主端>端」：同一标签页，点击先退出
+                                  这个账号，退出成功（2xx）才去主页面地址（没登录
+                                  就是登录页）；退出没成功弹提示、留在原页。只影响
+                                  生成的前端，认证本身（要不要登录）不变；项目里
+                                  得真有退出接口（动作 auth_logout）才生效
 
 接口行上的「角色 teacher」或「只许 教师」（两种写法一样，后者用中文名，按上面
 的「认证 角色」对回 teacher）：开着登录时只许 {current_role} 是这个角色的人调，
@@ -186,6 +192,9 @@ AUTH_IDENTITY_RE = re.compile(r"^认证\s+身份\s+([A-Za-z_]\w*)\s+默认\s+(\S
 # 认证 角色 student 学生 拒绝 教师账号不参与学习，请用学生账号 —— 别人调「只许
 # 学生」的接口时 403 说这句（整句，到行尾）
 AUTH_ROLE_RE = re.compile(r"^认证\s+角色\s+(\S+)\s+(\S+)(?:\s+拒绝\s+(.+?))?\s*$")
+# 认证 换端 先退出 —— 非主页面顶栏的「打开<主端>端」改成「退出并打开<主端>端」：
+# 点击先退出这个账号，再在本标签页打开主页面地址（没登录就是登录页）。见文件开头「认证」一节
+AUTH_SWITCH_RE = re.compile(r"^认证\s+换端\s+先退出\s*$")
 # 开了登录、监听的又不是本机时，cookie 走明文 http 会被同网段的人截走
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 
@@ -342,7 +351,8 @@ def auth_config(root: Path) -> dict:
 
     返回 {"mandatory", "optional", "check": (库, 查询名) 或 None,
           "check_fn": (模块, 函数) 或 None,
-          "identity": (变量名, 单人默认值) 或 None, "roles": {角色: 中文名}}
+          "identity": (变量名, 单人默认值) 或 None, "roles": {角色: 中文名},
+          "switch_logout": 顶栏换端链接改成「退出并打开<主端>端」（认证 换端 先退出）}
     同一种声明写了两次不一样的，报错——哪个算数全看扫描顺序的话，查起来很难。
     """
     def one(pattern, what):
@@ -358,6 +368,7 @@ def auth_config(root: Path) -> dict:
     return {
         "mandatory": top_level_flag(root, AUTH_RE),
         "optional": top_level_flag(root, AUTH_OPTIONAL_RE),
+        "switch_logout": top_level_flag(root, AUTH_SWITCH_RE),
         "check": check,
         "check_fn": check_fn,
         "identity": one(AUTH_IDENTITY_RE, "身份"),

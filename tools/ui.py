@@ -1405,6 +1405,10 @@ def render_vue(screens, title="UI", options_map=None, rows=None,
         # 按它给的 hide 藏掉某些「侧」（kg 的学生看不到「管理」）
         "has_me": "auth_me" in (endpoints or {}),
         "has_logout": "auth_logout" in (endpoints or {}),
+        # 「认证 换端 先退出」：顶栏 home 链接先退出、再同标签页去主页面。单独算一个
+        # 变量给模板，没声明的项目（home 没有 logout 键）生成的 app.js 逐字节不变
+        "home_logout": "auth_logout" in (endpoints or {}) and bool(
+            ((page or {}).get("home") or {}).get("logout")),
         "has_shared_state": bool(shared),
         "shared_json": json.dumps(shared, ensure_ascii=False),
         "has_endpoints": bool(endpoints),

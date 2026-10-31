@@ -569,6 +569,25 @@ const _app = createApp({
     // 要换页面了：这一页的第一个界面不再进（进了就是一串 403）
     let leaving = false;
     function leaveTo(url) { location.href = url; }
+<% if home_logout %>
+    // 「认证 换端 先退出」：顶栏「退出并打开学生端」先退出这个账号，再在本标签页打开
+    // 主页面（没登录的主页面就是登录页）。退不掉就留在这儿说一声：不然登着教师打开 /
+    // 又会被 checkEnd 送回来，看着像没反应
+    async function onHome(ev) {
+      ev.preventDefault();
+      let ok = false;
+      try {
+        const r = await fetch(endpoints.auth_logout, { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "auth_logout", form: {} }) });
+        ok = r.ok;
+      } catch (e) { /* 下面统一提示 */ }
+      if (!ok) { showNotice("退出没成功，请稍后再试", "no"); return; }
+      me.value = { ...NOBODY };
+      leaving = true;
+      leaveTo(PAGE.home.path);
+    }
+<% endif %>
     function visible(s) {
       const m = me.value;
       if (!m.user) return true;
@@ -1327,7 +1346,7 @@ const _app = createApp({
 <% endif %>
     }
 <% endif %>
-    return { route, params, forms, form, rowsOf, lists, notice, nav, PAGE, AUTH_SCREENS, current<% if has_me %>, me<% endif %><% if has_subject_switch %>, switchSubject<% endif %>, visible, busy, pending, go, isHref, hrefOf, targetOf, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_row_remote %>, onRowRemote<% endif %><% if has_msg_actions %>, msgActions, onMsgAction<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
+    return { route, params, forms, form, rowsOf, lists, notice, nav, PAGE, AUTH_SCREENS, current<% if has_me %>, me<% endif %><% if has_subject_switch %>, switchSubject<% endif %>, visible, busy, pending, go, isHref, hrefOf, targetOf, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if home_logout %>, onHome<% endif %><% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_row_remote %>, onRowRemote<% endif %><% if has_msg_actions %>, msgActions, onMsgAction<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
   },
   template: `
 {#- 顶部导航。两种来路：
@@ -1397,8 +1416,13 @@ const _app = createApp({
 <% endif %>
       </span>
 <% endif %>
+<% if home_logout %>
+{#- 「认证 换端 先退出」：同一标签页，先退出再去主页面的登录页 -#}
+      <span v-if="PAGE.home" class="nav-home"><a :href="PAGE.home.path" @click="onHome">{{ PAGE.home.label }}</a></span>
+<% else %>
 {#- 非主页面（教师端）上一个小链接，新标签页打开主页面（学生端）看看 -#}
       <span v-if="PAGE.home" class="nav-home"><a :href="PAGE.home.path" target="_blank" rel="noopener">{{ PAGE.home.label }}</a></span>
+<% endif %>
     </nav>
 <% endif %>
 {#- 登录页上没有顶栏：按端拆出来的页面在登录框上面标一句是哪一端 -#}

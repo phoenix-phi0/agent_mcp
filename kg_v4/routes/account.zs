@@ -3,6 +3,7 @@
 认证 身份 learner 默认 me
 认证 角色 student 学生
 认证 角色 teacher 教师
+认证 换端 先退出
 
 
 接口 POST /account/login 动作 auth_login 公开
