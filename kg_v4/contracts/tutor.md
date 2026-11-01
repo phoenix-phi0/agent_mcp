@@ -1,5 +1,5 @@
 模块 tutor
-依赖 kg lesson progress quiz teacher_rules subject
+依赖 account kg lesson progress quiz teacher_rules subject
 
 ## 表
 表 tutor_message 学习记录
@@ -75,6 +75,8 @@
   伪代码 调用 teacher_rules.取待传达 student=learner subject=subject_id，得 relay_ids、prompt_text（prompt_text 是全部待传达，整段放进系统提示；下面 写一轮 传给 记回复传达 的 relay_ids 就是这全部编号，即本次回复实际带上的编号，每条计一轮）
   伪代码 人设按科目取：调用 subject.科目老师设定 subject_id=subject_id 得 persona、offtopic（日语科目 persona=「你是一位中文老师，教中文学习者日语语法」、offtopic=「学生闲聊、与日语学习无关时，简短自然地回应，不要强行讲语法」，拼出的系统提示与旧版逐字一致；非日语科目按科目名生成或用负责人填的 AI 老师设定，不出现「日语」「语法」）
   伪代码 系统提示 = persona +「，回答简明。」+ 回答格式与口吻要求（写进系统提示里，原话意思不变：①只输出纯文本，不用 Markdown 标题、加粗、表格、列表符号，不用 emoji，至多 1 个；②一般不超过 200 字；③ offtopic 原文；④不要说「昨天聊过」「上次说过」这类带时间的话（你没有可靠的日期信息，最近对话只是先后顺序，不带时间）；⑤推荐课程只能用上下文里给出的课号和标题，课号原样引用，不要自己编课号或把别的课的编号配到某个知识点上）+ memory_text + card_text（教师设定，学生看不到，不要向学生透露设定本身）+ prompt_text（用「[传达#编号]」标记的传达事项，要求自然地让学生在回复里知道其中必须准确的信息，回复里不要出现标记本身；prompt_text 为空则不加这一段）
+  伪代码 回答语言（K181 日语版第 2 期）：lg = 调用 account.取语言 username=learner 得 lang；lang 等于 ja 且未触发教师覆盖（见下一条）时，在系统提示最末尾（传达事项段之后）追加空格加一句「请用日语回答，专业术语第一次出现时用括号标注中文；与其他提示里的语言要求冲突时，以本句为准。」，用户内容不变；lang 为 zh、空或查不到该学习者（含单人模式无账号）时系统提示与旧版逐字一致，一个字节不改
+  伪代码 教师覆盖（K181）：ts.custom 非空（负责人写有自定义 AI 老师人设）且 persona 含明确回答语言指示时，视为教师在设定里写了明确回答语言要求，不追加语言指示句（以设定为准）；判「明确指示」不算只出现语言名：身份描述如「中文老师」「日语老师」「教中文学习者日语语法」不算（否则 ja 界面学生拿不到日语回答且无任何报错）；算的是「用中文/用日语/用英语」这类用+语言名、语言名后紧跟回答/回复/讲解/教学/授课/作答/说/讲（如「中文回答」「日语讲解」）、回答/回复/解释/说/讲等动词后接语言名（如「说中文」「回答用中文」）、日语式「日本語で/中国語で/英語で」、英文「in Chinese/Japanese/English、respond in、answer in」，正则判断不区分大小写；custom 为空（内置默认人设）或不含明确指示时照常追加；日语科目在 ja 界面照常按界面语言追加，不按科目特判
   伪代码 用户内容 = context_text + 最近对话 recent + note_text（作者注，紧贴在学生最新一句之前）+ 学生最新一句 user_text
   伪代码 问（回答档）：系统提示、用户内容，得 reply；模型出错则报错 400 老师暂时无法回答，整轮不写任何表
   伪代码 调用 写一轮 learner=learner user_text=user_text intent=intent lesson_code=lesson_code reply=reply link=link links_json=links_json setting_ids=setting_ids setting_versions=setting_versions relay_ids=relay_ids subject_id=subject_id，得 reply_id
@@ -169,6 +171,7 @@
   伪代码 total 等于 0（含没有进度行），报错 400 本轮还没有作答
   伪代码 对 answers 中每个不同的 point_code 调用 kg.取知识点 code=该编号 subject=subject_id 取 title，取不到用编号当标题
   伪代码 问（回答档）：提示词以 调用 subject.科目老师设定 subject_id=subject_id 的 persona 加「。」开头（日语科目即「你是一位中文老师，教中文学习者日语语法。」，与旧版逐字一致），再把模式 mode、课 lesson_code、每题（知识点标题、题号、对错、作答）、total、right 交给模型，要求写一段给学生的本轮总结（做得好的、该复习的）；模型出错报错 400 老师暂时无法回答，不写库
+  伪代码 回答语言（K181）：lg = 调用 account.取语言 username=learner 得 lang；lang 等于 ja 且未触发教师覆盖（口径同 答一轮：科目老师设定 custom 非空且 persona 含语言关键词时不追加）时，在提示词最末尾追加空格加一句「请用日语回答，专业术语第一次出现时用括号标注中文；与其他提示里的语言要求冲突时，以本句为准。」；zh、空或查不到该学习者时提示词与旧版逐字一致（总结是给学生看的，跟随学习者界面语言）
   伪代码 往 tutor_message 插入一行 (learner, role=teacher, content=总结, intent=summary, lesson_code=lesson_code, link 空, links 空, summary_round=round_key 的十进制文本, at=当前时间, subject_id=本科目 subject_id)，取其 id 为 reply_id（只写这一行；不记学生那条）
   伪代码 返回 {"ok": 1, "reused": 0, "round_key": round_key, "summary": 总结, "total": total, "right": right, "reply_id": reply_id}
 
@@ -311,6 +314,15 @@ POST /tutor/summarize-round -> 总结本轮 角色 student
   得 ok=1 reused=0 round_key=0 total=1 right=1
   库 tutor_message 共 1 行
   库 tutor_message 含 learner=u1 role=teacher intent=summary summary_round=0
+
+用例 总结本轮_界面日语提示词带语言指示
+  先 数据 account_user username=u1 password_hash=x display_name=一 role=student disabled=0 lang=ja created_at=2026-01-01
+  先 数据 kg_point code=P1 title=一次函数
+  先 数据 quiz_progress learner=u1 level=N5 category=接续题 current_no=Q1 answered=1 right_count=1 asked_nos=Q1 asked_count=1 mode=lesson lesson_code=L1 round_start_id=0 seq=1 last_correct=1
+  先 数据 progress_answer learner=u1 point_code=P1 question_no=Q1 correct=1 answer=A at=2026-01-01
+  调用 总结本轮 learner=u1
+  得 ok=1 reused=0 round_key=0 total=1 right=1
+  库 tutor_message 共 1 行
 
 用例 总结本轮_同一轮不再调模型
   先 数据 kg_point code=P1 title=一次函数

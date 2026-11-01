@@ -41,6 +41,8 @@
       的教师全登记成协作）。断言与数据内容无关：只认本段自建的 walk99.* 编号
   8.  换端先退出（K177）：教师点顶栏「退出并打开学生端」→ 先退出、同标签页
       到 / 登录页（不再开新标签页）；学生登录进学生端
+  9.  日语界面问老师（K181）：s1 lang=ja 问老师 → 答一轮提示词带「请用日语回答…」
+      追加句（假模型规则命中回固定日语，气泡可见），结束把 lang 改回 zh
 输出「通过 x/共 y」，失败列原因；退出码 0 全过 / 1 有失败 / 2 环境起不来。
 """
 import argparse
@@ -407,6 +409,40 @@ def walk_teacher(page, base, ck, marks, subject_mgmt, kg_mgmt=False):
     return kg_ok
 
 
+def ja_tutor_flow(browser, base, proj, ck, marks, new_page):
+    """K181 日语版第 2 期：s1 界面语言切 ja 后问老师，答一轮的提示词要带日语指示句。
+    假模型规则命中追加句时回固定日语（write_assist_mock 第一条），气泡里出现它即提示词带了指示。
+    结束把 lang 改回 zh，不影响后面的 390px 等段。"""
+    name = "日语界面问老师"
+    con = sqlite3.connect(proj / "app.db")
+    try:
+        con.execute("UPDATE account_user SET lang='ja' WHERE username=?", (STUDENT_NAME,))
+        con.commit()
+    finally:
+        con.close()
+    try:
+        p = new_page(browser.new_context(), "s1-ja")
+        login(p, base, STUDENT_NAME)
+        box = p.locator("textarea").last
+        box.fill("走查日语提问")
+        btn = p.locator("button", has_text="发送")
+        if btn.count():
+            btn.last.click()
+        else:
+            box.press("Enter")
+        p.get_by_text("これは日本語の返信です").first.wait_for(timeout=30000)
+        ck(True, f"{name}：假模型回了日语固定句（提示词带了「请用日语回答…」追加句）")
+    except Exception as e:
+        ck(False, f"{name}：没等到日语回复", f"{type(e).__name__}: {e}")
+    finally:
+        con = sqlite3.connect(proj / "app.db")
+        try:
+            con.execute("UPDATE account_user SET lang='zh' WHERE username=?", (STUDENT_NAME,))
+            con.commit()
+        finally:
+            con.close()
+
+
 def write_assist_mock(proj, tmp):
     """教师助手段用的假模型规则（DSL_MOCK_SCRIPT）：意图分类和草稿生成各回一份合法 JSON。
     出题要用库里真有的条目编号，所以建好库之后从 app.db 取一个。→ 规则文件路径"""
@@ -420,6 +456,10 @@ def write_assist_mock(proj, tmp):
     qs = [{"stem": f"走查题{i}", "options": ["甲", "乙", "丙"], "answer": "B", "explain": "走查", "item_code": row[0]}
           for i in (1, 2, 3)]
     rules = [
+        # K181 日语界面问老师（放最前）：学生端答一轮的提示词带了追加句才命中，别的提示没有这句不会误中；
+        # 气泡里出现这句日语固定回复 = 提示词带了「请用日语回答…」
+        {"when": ["请用日语回答，专业术语第一次出现时用括号标注中文"],
+         "reply": "これは日本語の返信です。"},
         # M4-P3/P4（放最前，按走查顺序从后往前排：后发的话带着前面的对话，先写的规则先中会误判）
         {"when": ["意图分类器", "走查看趋势"],
          "reply": json.dumps({"intent": "deep_analysis", "analysis_kind": "trend"}, ensure_ascii=False)},
@@ -1258,6 +1298,9 @@ def main(argv=None):
 
                 # ---- 换端先退出（K177）----
                 switch_logout_flow(browser, base, ck, marks, new_page)
+
+                # ---- 日语界面问老师（K181）：提示词带日语指示，假模型回固定日语 ----
+                ja_tutor_flow(browser, base, proj, ck, marks, new_page)
 
                 # ---- 390px 视口 ----
                 m = new_page(browser.new_context(viewport={"width": 390, "height": 844}),

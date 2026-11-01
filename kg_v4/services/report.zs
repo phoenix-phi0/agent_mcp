@@ -393,6 +393,10 @@
     设 subject_id = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
     设 d = 调用 取学生学情 student={student} subject={subject_id}
     设 pt = 请根据下面的学情数据，为教师写一段简明的学情总结（中文，不超过300字）。学生：{d.display_name}；近期正确率：{d.recent_accuracy}%；平均得分：{d.avg_score}；已掌握知识点数：{d.mastered_count}；最近答错的题：{d.wrong_answers}；错词本：{d.wrong_book}；薄弱点：{d.weak_points}；问老师的提问摘要：{d.recent_questions}；传达状态：{d.relays}
+    设 lg = 调用 account.取语言 username={current_user}
+    如果 {lg.lang} 等于 ja
+      设 pt = {pt} 请用日语回答，专业术语第一次出现时用括号标注中文；与其他提示里的语言要求冲突时，以本句为准。
+    结束
     问 reply = {pt} 用 平衡 出错时 qe
     如果 {qe} 不为空
       报错 400 老师暂时无法回答

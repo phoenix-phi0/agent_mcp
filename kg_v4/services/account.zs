@@ -26,6 +26,23 @@
     返回 {"username": "{u.username}", "display_name": "{u.display_name}", "role": "{u.role}", "disabled": {u.disabled}, "created_at": "{u.created_at}"}
   结束
 
+  公开 函数 取语言 username
+    # 返回 {lang}；username 为空、查不到该账号、lang 为空或空串，一律返回 zh；lang 只会是 zh 或 ja
+    如果 {username} 为空
+      返回 {"lang": "zh"}
+    结束
+    设 u = 查一行 app.db account_user_by_name username={username}
+    如果 {u.username 或} 为空
+      返回 {"lang": "zh"}
+    结束
+    设 lg0 = {u.lang 或}
+    设 lt = 替换 {lg0} ^\s+|\s+$
+    如果 {lt} 为空
+      返回 {"lang": "zh"}
+    结束
+    返回 {"lang": "{lt}"}
+  结束
+
   公开 函数 列学生 learner? current_role? auth_mode? subject?
     设 sj = 调用 subject.解析科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     # 返回 {total, students}；students 是 [{username, display_name, status, answer_count, last_at}]，只含 role 为 student 的账号，按 id 升序；status 为「启用」或「停用」；answer_count 是作答数，没有作答为 0；last_at 是最近学习时间，没有作答为空串

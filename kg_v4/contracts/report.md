@@ -115,6 +115,7 @@
   伪代码 student 为空，报错 400 student 不能为空；current_user 为空，报错 400 current_user 不能为空
   伪代码 调用 取学生学情 student=student subject=subject_id（学生不存在、不是学生或不在本科目学生范围里则报 404 没有这个学生）
   伪代码 问（回答档）：把学情（近期正确率、平均得分、已掌握数、最近答错的题、错词本、薄弱点、问老师的提问摘要、传达状态）交给模型，要求写一段给教师看的学情总结；模型出错报错 400 老师暂时无法回答，不写库
+  伪代码 回答语言（K181）：lg = 调用 account.取语言 username=current_user 得 lang；lang 等于 ja 时在提示词最末尾追加空格加一句「请用日语回答，专业术语第一次出现时用括号标注中文；与其他提示里的语言要求冲突时，以本句为准。」（学情总结给教师看，跟随教师界面语言；总结提示词是系统拼的、不来自教师设定，无覆盖判断）；lang 为 zh、空或查不到该教师时提示词与旧版逐字一致
   伪代码 往 report_summary 插入一行 (student, summary=总结, author=current_user, created_at=当前时间, subject_id=subject_id)，取其 id（总结只存在本表，不写 tutor 的问老师对话记录）
   伪代码 返回 {"ok": 1, "id": id, "student": student, "summary": 总结, "author": current_user, "created_at": 当前时间}
 

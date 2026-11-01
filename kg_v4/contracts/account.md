@@ -52,6 +52,12 @@
   伪代码 按 username 查 account_user，查不到则返回空
   伪代码 返回 {"username": 该行 username, "display_name": 该行 display_name, "role": 该行 role, "disabled": 该行 disabled, "created_at": 该行 created_at}
 
+公开 函数 取语言 username
+  返回 {lang}；K181 回答语言跟随界面用：lang 只会是 zh 或 ja；username 为空、查不到该账号、lang 为空或空串，一律返回 zh
+  伪代码 username 为空返回 {"lang": "zh"}
+  伪代码 按 username 查 account_user（同 取账号 的查询），查不到返回 {"lang": "zh"}
+  伪代码 该行 lang 去首尾空白后为空返回 {"lang": "zh"}；否则原样返回（写入只有 设语言 一个口子，只允许 zh/ja）
+
 公开 函数 列学生 learner? current_role? auth_mode? subject?
   返回 {total, students}；students 是 [{username, display_name, status, answer_count, last_at}]，只含 role 为 student 的账号（全部学生账号，不按科目筛），按 id 升序；status 为「启用」或「停用」；answer_count 是该生在本科目的作答数，本科目没有作答为 0；last_at 是该生在本科目的最近学习时间，本科目没有作答为空串（K170：按科目取，学生只在 Python 科目作答时，在 Python 科目下有值、在日语科目下为空）
   报错 400 subject 不对
@@ -336,6 +342,20 @@ POST /account/subject/teacher-remove -> 移除科目教师页面 动作 subject_
 用例 取账号_不存在
   调用 取账号 username=nobody
   得 为空
+
+用例 取语言_ja
+  先 数据 account_user username=u9 password_hash=x display_name=九 role=student disabled=0 lang=ja created_at=2026-01-01
+  调用 取语言 username=u9
+  得 lang=ja
+
+用例 取语言_没填过默认zh
+  先 数据 account_user username=u8 password_hash=x display_name=八 role=student disabled=0 created_at=2026-01-01
+  调用 取语言 username=u8
+  得 lang=zh
+
+用例 取语言_没有这个账号
+  调用 取语言 username=nobody
+  得 lang=zh
 
 用例 列学生_含作答统计
   先 数据 account_user username=s1 password_hash=x display_name=小明 role=student disabled=0 created_at=2026-01-01
