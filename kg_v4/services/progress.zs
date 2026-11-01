@@ -515,6 +515,8 @@
     如果 {learner} 为空
       报错 400 learner 不能为空
     结束
+    设 lg = 调用 subject.取界面语言 username={learner}
+    设 lang = {lg.lang 或 zh}
     设 ov = 调用 取概览 learner={learner} subject={sid}
     设 vw = 调用 得分视图 learner={learner} subject_id={sid}
     设 w1 = 已掌握
@@ -549,6 +551,12 @@
     遍历 dr 于 {drows}
       设 tp = 调用 kg.取知识点 code={dr.point_code} subject={sid}
       设 dtitle = {tp.title 或}
+      如果 {lang} 等于 ja
+        设 tr = 调用 subject.译文 tbl=kg_point row_key={dr.point_code} field=title lang=ja
+        如果 {tr.text} 不为空
+          设 dtitle = {tr.text}
+        结束
+      结束
       设 sc = 查一行 app.db progress_score_latest learner={learner} point_code={dr.point_code} subject_id={sid}
       设 verdict = 还没打分
       如果 {sc} 不为空
@@ -586,7 +594,14 @@
           结束
         结束
       结束
-      设 item = {"label": "{np.title}", "depth": {dep}}
+      设 ntitle = {np.title}
+      如果 {lang} 等于 ja
+        设 tr = 调用 subject.译文 tbl=kg_point row_key={np.code} field=title lang=ja
+        如果 {tr.text} 不为空
+          设 ntitle = {tr.text}
+        结束
+      结束
+      设 item = {"label": "{ntitle}", "depth": {dep}}
       设 nxt = 列表加项 {nxt} {item}
     结束
     设 rc = 调用 列最近作答 learner={learner} limit=20 subject={sid}
@@ -596,6 +611,12 @@
       设 rtitle = {tp.title 或}
       如果 {rtitle} 为空
         设 rtitle = {ra.point_code}
+      结束
+      如果 {lang} 等于 ja
+        设 tr = 调用 subject.译文 tbl=kg_point row_key={ra.point_code} field=title lang=ja
+        如果 {tr.text} 不为空
+          设 rtitle = {tr.text}
+        结束
       结束
       设 res_t = 错
       如果 {ra.correct} 等于 1
@@ -627,6 +648,12 @@
     遍历 vr2 于 {vw.rows}
       设 tp = 调用 kg.取知识点 code={vr2.point_code} subject={sid}
       设 stitle = {tp.title 或}
+      如果 {lang} 等于 ja
+        设 tr = 调用 subject.译文 tbl=kg_point row_key={vr2.point_code} field=title lang=ja
+        如果 {tr.text} 不为空
+          设 stitle = {tr.text}
+        结束
+      结束
       设 dl = 首次
       如果 {vr2.n} 大于 1
         设 df = 计算 {vr2.score} - {vr2.prev_score}
@@ -660,6 +687,8 @@
   公开 函数 图谱页面 learner current_role? auth_mode? subject?
     设 s0 = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 sid = {s0.subject_id}
+    设 lg = 调用 subject.取界面语言 username={learner}
+    设 lang = {lg.lang 或 zh}
     设 st = 调用 取状态 learner={learner} subject={sid}
     设 nodes = 解析JSON []
     遍历 pt 于 {st.points}
@@ -667,10 +696,17 @@
       设 pr = 调用 kg.列前置 code={pt.code} subject={sid}
       设 desc = {zz 或}
       遍历 q 于 {pr.points}
+        设 qt = {q.title}
+        如果 {lang} 等于 ja
+          设 tr = 调用 subject.译文 tbl=kg_point row_key={q.code} field=title lang=ja
+          如果 {tr.text} 不为空
+            设 qt = {tr.text}
+          结束
+        结束
         如果 {desc} 为空
-          设 desc = {q.title}
+          设 desc = {qt}
         否则
-          设 desc = {desc}、{q.title}
+          设 desc = {desc}、{qt}
         结束
       结束
       如果 {desc} 为空
@@ -682,7 +718,14 @@
       否则如果 {pt.unlocked} 等于 1
         设 stv = open
       结束
-      设 item = {"id": "{pt.code}", "code": "{pt.code}", "label": "{pt.title}", "state": "{stv}", "badge": {ds.total}, "desc": "{desc}"}
+      设 ptitle = {pt.title}
+      如果 {lang} 等于 ja
+        设 tr = 调用 subject.译文 tbl=kg_point row_key={pt.code} field=title lang=ja
+        如果 {tr.text} 不为空
+          设 ptitle = {tr.text}
+        结束
+      结束
+      设 item = {"id": "{pt.code}", "code": "{pt.code}", "label": "{ptitle}", "state": "{stv}", "badge": {ds.total}, "desc": "{desc}"}
       设 nodes = 列表加项 {nodes} {item}
     结束
     设 edges = 解析JSON []
@@ -711,6 +754,8 @@
     如果 {kp} 为空
       报错 404 没有这个知识点
     结束
+    设 lg = 调用 subject.取界面语言 username={learner}
+    设 lang = {lg.lang 或 zh}
     设 st = 调用 取状态 learner={learner} point_code={code} subject={sid}
     设 w6 = 答对
     设 nt = 还没做过
@@ -730,7 +775,14 @@
     设 its = 调用 kg.按知识点列条目 point_code={code} subject={sid}
     设 items = 解析JSON []
     遍历 x 于 {its.items}
-      设 item = {"label": "{x.name}", "form": "{x.after_form 或}"}
+      设 xname = {x.name}
+      如果 {lang} 等于 ja
+        设 tr = 调用 subject.译文 tbl=kg_item row_key={x.code} field=name lang=ja
+        如果 {tr.text} 不为空
+          设 xname = {tr.text}
+        结束
+      结束
+      设 item = {"label": "{xname}", "form": "{x.after_form 或}"}
       设 items = 列表加项 {items} {item}
     结束
     设 all = 调用 kg.列条目 subject={sid}
@@ -739,7 +791,18 @@
       如果 {y.after_form} 等于 {code}
         设 yp = 调用 kg.取知识点 code={y.point_code} subject={sid}
         设 ytitle = {yp.title 或}
-        设 item = {"label": "{y.name}", "point": "{ytitle}"}
+        设 yname = {y.name}
+        如果 {lang} 等于 ja
+          设 tr = 调用 subject.译文 tbl=kg_item row_key={y.code} field=name lang=ja
+          如果 {tr.text} 不为空
+            设 yname = {tr.text}
+          结束
+          设 tr2 = 调用 subject.译文 tbl=kg_point row_key={y.point_code} field=title lang=ja
+          如果 {tr2.text} 不为空
+            设 ytitle = {tr2.text}
+          结束
+        结束
+        设 item = {"label": "{yname}", "point": "{ytitle}"}
         设 forms = 列表加项 {forms} {item}
       结束
     结束

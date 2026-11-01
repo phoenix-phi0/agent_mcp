@@ -443,6 +443,69 @@ def ja_tutor_flow(browser, base, proj, ck, marks, new_page):
             con.close()
 
 
+def ja_quiz_flow(browser, base, proj, ck, marks, new_page):
+    """K182：s1 lang=ja 进 Python 科目做题页，题干/选项/解析用 subject_content_translation 日文译文，
+    点正确选项判对（判题不受译文影响）。本段自建 walk182.* 行，结束删净，lang 改回 zh。"""
+    name = "日语界面做题"
+    con = sqlite3.connect(proj / "app.db")
+    try:
+        sid = con.execute("SELECT id FROM subject_info WHERE code='python'").fetchone()[0]
+        con.execute("UPDATE account_user SET lang='ja' WHERE username=?", (STUDENT_NAME,))
+        con.execute("INSERT OR REPLACE INTO subject_pref(learner, subject_id) VALUES(?,?)", (STUDENT_NAME, sid))
+        con.execute("INSERT OR IGNORE INTO kg_point(code,title,subject_id) VALUES('walk182.point','walk182 知识点',?)", (sid,))
+        con.execute("INSERT OR IGNORE INTO kg_item(code,name,point_code,subject_id) VALUES('walk182.item','walk182 条目','walk182.point',?)", (sid,))
+        con.execute("INSERT OR REPLACE INTO quiz_question(question_no,course,level,category,stem,options,answer,accepted,explain,item_code,subject_id)"
+                    " VALUES('walk182.q1','','入门','选择','walk182 中文题干\nprint(6 * 7)','42^41^40^报错','A','','walk182 中文解析','walk182.item',?)", (sid,))
+        con.execute("INSERT OR REPLACE INTO quiz_progress(learner,level,category,current_no,answered,right_count,asked_nos,asked_count,mode,lesson_code,round_start_id,seq,last_correct,subject_id)"
+                    " VALUES(?,'入门','选择','walk182.q1',0,0,'walk182.q1',1,'free','',0,1,0,?)", (STUDENT_NAME, sid))
+        for tbl, rk, fd, tx in [("quiz_question", "walk182.q1", "stem", "walk182 次の出力は？\nprint(6 * 7)"),
+                                ("quiz_question", "walk182.q1", "options", "42^41^40^エラー"),
+                                ("quiz_question", "walk182.q1", "explain", "walk182 の日本語解析"),
+                                ("kg_item", "walk182.item", "name", "walk182 の項目")]:
+            con.execute("INSERT OR REPLACE INTO subject_content_translation(tbl,row_key,field,lang,text,updated_at) VALUES(?,?,?,'ja',?,'2026-01-01')", (tbl, rk, fd, tx))
+        con.commit()
+    finally:
+        con.close()
+    try:
+        p = new_page(browser.new_context(), "s1-ja-quiz")
+        login(p, base, STUDENT_NAME)
+        visit(p, "做题", marks)
+        for t in ("开始", "下一题"):
+            b = p.locator("button", has_text=t)
+            if b.count():
+                b.first.click()
+                p.wait_for_timeout(900)
+        p.get_by_text("walk182 次の出力は").first.wait_for(timeout=20000)
+        ck(True, f"{name}：做题页题干是日文（subject_content_translation 译文）")
+        ck("walk182 中文题干" not in p.inner_text("body"), f"{name}：中文题干未同时出现")
+        p.locator("button", has_text="42").first.click()
+        p.get_by_text("walk182 の日本語解析").first.wait_for(timeout=20000)
+        ck(True, f"{name}：点「42」判对且解析是日文（判题不受译文影响）")
+        err = drain_errors(marks)
+        ck(not err, f"{name}：无 JS 错误", err)
+    except Exception as e:
+        ck(False, f"{name}：走查失败", f"{type(e).__name__}: {e}")
+    finally:
+        con = sqlite3.connect(proj / "app.db")
+        try:
+            for q, args in [("DELETE FROM subject_content_translation WHERE row_key LIKE 'walk182.%'", ()),
+                            ("DELETE FROM quiz_progress WHERE current_no='walk182.q1'", ()),
+                            ("DELETE FROM progress_answer WHERE question_no='walk182.q1'", ()),
+                            ("DELETE FROM progress_score WHERE learner=? AND (point_code LIKE 'walk182.%' OR point LIKE 'walk182.%')", (STUDENT_NAME,)),
+                            ("DELETE FROM progress_mastery WHERE learner=? AND (point_code LIKE 'walk182.%' OR point LIKE 'walk182.%')", (STUDENT_NAME,)),
+                            ("DELETE FROM quiz_question WHERE question_no='walk182.q1'", ()),
+                            ("DELETE FROM kg_item WHERE code='walk182.item'", ()),
+                            ("DELETE FROM kg_point WHERE code='walk182.point'", ()),
+                            ("UPDATE account_user SET lang='zh' WHERE username=?", (STUDENT_NAME,))]:
+                try:
+                    con.execute(q, args)
+                except Exception:
+                    pass
+            con.commit()
+        finally:
+            con.close()
+
+
 def write_assist_mock(proj, tmp):
     """教师助手段用的假模型规则（DSL_MOCK_SCRIPT）：意图分类和草稿生成各回一份合法 JSON。
     出题要用库里真有的条目编号，所以建好库之后从 app.db 取一个。→ 规则文件路径"""
@@ -1301,6 +1364,7 @@ def main(argv=None):
 
                 # ---- 日语界面问老师（K181）：提示词带日语指示，假模型回固定日语 ----
                 ja_tutor_flow(browser, base, proj, ck, marks, new_page)
+                ja_quiz_flow(browser, base, proj, ck, marks, new_page)
 
                 # ---- 390px 视口 ----
                 m = new_page(browser.new_context(viewport={"width": 390, "height": 844}),

@@ -65,6 +65,25 @@
     否则
       设 rows = 查询 app.db subject_list_public
     结束
+    设 lang = zh
+    设 ev = 查一值 app.db subject_table_exists name=account_user
+    如果 {ev} 大于 0
+      设 lg = 查一值 app.db subject_user_lang username={learner}
+      设 lang = {lg 或 zh}
+    结束
+    如果 {lang} 等于 ja
+      设 out = 解析JSON []
+      遍历 s 于 {rows}
+        设 nm = {s.name}
+        设 tx = 调用 subject.译文 tbl=subject_info row_key={s.code} field=name lang=ja
+        如果 {tx.text} 不为空
+          设 nm = {tx.text}
+        结束
+        设 o = {"id": {s.id}, "code": "{s.code}", "name": "{nm}", "kind": "{s.kind}", "visibility": "{s.visibility}"}
+        设 out = 列表加项 {out} {o}
+      结束
+      设 rows = {out}
+    结束
     设 n = 列表长度 {rows}
     返回 {"total": {n}, "subjects": {rows}}
   结束
@@ -838,5 +857,24 @@
     设 r = 调用 设科目状态 learner={learner} subject_id={subj_id} status={status} current_role={current_role} auth_mode={auth_mode}
     设 pg = 调用 科目管理页面 learner={learner} current_role={current_role} auth_mode={auth_mode}
     返回 {pg}
+  结束
+
+  公开 函数 译文 tbl row_key field lang
+    如果 {lang} 不等于 ja
+      返回 {"text": ""}
+    结束
+    设 tx = 查一值 app.db subject_content_translation_text tbl={tbl} row_key={row_key} field={field} lang={lang}
+    设 t = {tx 或}
+    返回 {"text": "{t}"}
+  结束
+
+  公开 函数 取界面语言 username
+    设 ev = 查一值 app.db subject_table_exists name=account_user
+    如果 {ev} 不大于 0
+      返回 {"lang": "zh"}
+    结束
+    设 lg = 查一值 app.db subject_user_lang username={username}
+    设 lv = {lg 或 zh}
+    返回 {"lang": "{lv}"}
   结束
 结束

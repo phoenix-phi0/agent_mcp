@@ -279,6 +279,7 @@
   伪代码 levels：调用 按级统计掌握 learner=learner subject=subject_id 得每个本科目等级一行（日语仍是五行）；按等级逐项累计答题数（不再写死 5 段 if）；每行 {level, tally: 「{mastered}/{total}」, answers: 该级知识点的作答行数合计}（answers 用 取点级映射 subject_id=subject_id 把本科目 progress_answer 各行按所属点归级计数；v4 题不挂等级，与旧「按题挂级」口径的差别见报告）
   伪代码 scores：对 sc.scores 每行 {label: title, value: score, delta, at: last[code]}；delta：once[code]=1 是「首次」；本次分大于上次「+{差}」、小于「−{差}」（全角减号）、相等「±0」；顺序沿用 列得分（分低的在前、同分按编号）
   伪代码 dictation：调用 dictation.取默写概况 learner=learner subject=subject_id 得 d；练过词数 words = dictation_attempt（表带 subject_id 列，按本科目过滤）中该 learner、subject_id 等于本科目的不同 word_id 的个数；text=「练过 {words} 个词，默写 {d.total} 次，正确率 {d.total 大于 0 时 d.accuracy% 否则 —}，错词本 {d.wrong_book_count} 个」；link 在 wrong_book_count 大于 0 时是「#%E9%BB%98%E5%86%99?source=review」否则「#%E9%BB%98%E5%86%99」
+  伪代码 K182 内容日语替换：lang = 调用 subject.取界面语言 username=learner 取 lang（表不存在或无行视为 zh）；ja 时 doing/next/recent/scores 各行 label（知识点 title）调用 subject.译文 tbl=kg_point row_key=该点编号 field=title lang=ja，非空才替换（缺译文回退中文）；zh 或无译文这些 label 与改前逐字一致
   伪代码 返回 {"prog": prog, "doing": doing, "next": next, "recent": recent, "levels": levels, "scores": scores, "dictation": {"text": …, "link": …}}
 
 公开 函数 图谱页面 learner current_role? auth_mode? subject?
@@ -290,6 +291,7 @@
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 learner 和 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询都只限这个 subject_id；本函数在本模块内调用其它公开函数、调用 kg. 的函数时一律只传 subject=subject_id（已解析，不再校验）
   伪代码 调用 取状态 learner=learner subject=subject_id 得每点 mastered（right/total 顺带不用）；调用 kg.列知识点 subject=subject_id 得本科目全部点；badge 对每点调用 kg.列后代 code=该点编号 subject=subject_id 取 total；desc 对每点调用 kg.列前置 code=该点编号 subject=subject_id 拼 title
   伪代码 edges 直读 kg_edge 与 kg_contrast（两张表都带 subject_id 列，按本科目过滤，只取 subject_id 等于本科目的行）；对照两端各是知识点或条目，要通过 kg_point（带 subject_id 列，等于本科目）确认两端都是本科目的知识点才收，条目端丢掉（kg_point 的 code 全局唯一，不会误认别科目的点）
+  伪代码 K182 内容日语替换：lang = 调用 subject.取界面语言 username=learner 取 lang（表不存在或无行视为 zh）；ja 时 nodes 每点 label 与 desc 里的前置 title 调用 subject.译文 tbl=kg_point row_key=该点编号 field=title lang=ja，非空才替换；对照边只有编号不翻
   伪代码 返回 {"graph": {"nodes": 按编号升序, "edges": 前置边在前按 id、对照边按 id}, "node_count": nodes 的个数, "edge_count": edges 的个数}（前端只读 graph，多余键忽略）
 
 公开 函数 知识点页面 learner code current_role? auth_mode? subject?
@@ -303,6 +305,7 @@
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 learner 和 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询都只限这个 subject_id；本函数在本模块内调用其它公开函数、调用 kg./vocab. 的函数时一律只传 subject=subject_id（已解析，不再校验）
   伪代码 code 为空，报错 400 code 不能为空；调用 kg.取知识点 code=code subject=subject_id，取不到（包括编号属于别的科目）报错 404 没有这个知识点
   伪代码 调用 取状态 learner=learner point_code=code subject=subject_id 得该点 right/total/mastered：total 大于 0 时 node_tally=「答对 {right} / 答题 {total}」加 mastered=1 时的「（已掌握）」，否则「还没做过」
+  伪代码 K182 内容日语替换：lang = 调用 subject.取界面语言 username=learner 取 lang（表不存在或无行视为 zh）；ja 时 items 各行条目名调 subject.译文 tbl=kg_item row_key=条目编号 field=name lang=ja，forms 各行 label 与 point（所属知识点名）分别调 tbl=kg_item field=name / tbl=kg_point field=title，均非空才替换
   伪代码 用 得分视图 learner=learner subject_id=subject_id：by_code 里有该点则 node_score=最新得分，否则空串（浮层上那一格不显示）
   伪代码 items：调用 kg.按知识点列条目 point_code=code subject=subject_id；每行 {label: name, form: after_form 为空取空串}
   伪代码 forms：调用 kg.列条目 subject=subject_id 留 after_form 等于 code 的行；每行 {label: name, point: 所属知识点 title（调 kg.取知识点 code=所属知识点编号 subject=subject_id，取不到空串）}

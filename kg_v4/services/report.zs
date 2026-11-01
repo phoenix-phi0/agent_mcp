@@ -447,9 +447,16 @@
     返回 {out}
   结束
 
-  函数 取题干 question_no
+  函数 取题干 question_no lang?
     # 返回 题干文本，查不到返回空串
     设 e0 = {zz 或}
+    如果 {lang} 等于 ja
+      设 tr = 调用 subject.译文 tbl=quiz_question row_key={question_no} field=stem lang=ja
+      设 tt = {tr.text 或}
+      如果 {tt} 不为空
+        返回 {tt}
+      结束
+    结束
     设 ex = 查一值 app.db report_quiz_exists
     如果 {ex} 等于 0
       返回 {e0}
@@ -476,6 +483,8 @@
 
   公开 函数 学情首页页面 report_sort? learner? current_role? auth_mode? subject?
     设 subject_id = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 lg = 调用 account.取语言 username={learner}
+    设 lang = {lg.lang 或}
     设 sb = last_at
     设 sel = 最近学习
     如果 {report_sort} 等于 平均得分
@@ -602,8 +611,16 @@
     设 il = 解析JSON []
     设 k = 0
     遍历 g 于 {srt}
+      设 gtl = {g.title 或}
+      如果 {lang} 等于 ja
+        设 trp = 调用 subject.译文 tbl=kg_point row_key={g.code} field=title lang=ja
+        设 trpt = {trp.text 或}
+        如果 {trpt} 不为空
+          设 gtl = {trpt}
+        结束
+      结束
       如果 {k} 小于 10
-        设 cp.label = {g.title}
+        设 cp.label = {gtl}
         设 cp.wrong_n = {g.wrong_n}
         设 cp.answer_n = {g.answer_n}
         设 cp.learner_n = {g.learner_n}
@@ -613,8 +630,16 @@
       设 ki = 调用 kg.按知识点列条目 point_code={g.code} subject={subject_id} 出错时 er
       如果 {er} 为空
         遍历 it 于 {ki.items}
-          设 ii.label = {it.name}
-          设 ii.point_label = {g.title}
+          设 itn = {it.name 或}
+          如果 {lang} 等于 ja
+            设 tri = 调用 subject.译文 tbl=kg_item row_key={it.code} field=name lang=ja
+            设 trit = {tri.text 或}
+            如果 {trit} 不为空
+              设 itn = {trit}
+            结束
+          结束
+          设 ii.label = {itn}
+          设 ii.point_label = {gtl}
           设 ii.wrong_n = {g.wrong_n}
           设 ii.answer_n = {g.answer_n}
           设 ii.learner_n = {g.learner_n}
@@ -669,6 +694,8 @@
       报错 400 student 不能为空
     结束
     设 subject_id = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 lg2 = 调用 account.取语言 username={learner}
+    设 lang = {lg2.lang 或}
     设 acc = 调用 account.取账号 username={student}
     设 bad = 0
     如果 {acc} 为空
@@ -776,7 +803,15 @@
         如果 {p.mastered} 等于 1
           设 mx = 已掌握
         结束
-        设 pr.label = {p.title}
+        设 plb = {p.title 或}
+        如果 {lang} 等于 ja
+          设 trk = 调用 subject.译文 tbl=kg_point row_key={p.code} field=title lang=ja
+          设 trkt = {trk.text 或}
+          如果 {trkt} 不为空
+            设 plb = {trkt}
+          结束
+        结束
+        设 pr.label = {plb}
         设 pr.tally = {p.right}/{p.total}
         设 pr.score_text = {sx}
         设 pr.mastered_text = {mx}
@@ -896,7 +931,7 @@
     设 k = 0
     遍历 q 于 {wsort}
       如果 {k} 小于 10
-        设 stem = 调用 取题干 question_no={q.qn}
+        设 stem = 调用 取题干 question_no={q.qn} lang={lang}
         设 lab = 调用 缩略 text={stem} n=30
         如果 {lab} 为空
           设 lab = {q.qn}
@@ -908,6 +943,13 @@
         结束
         如果 {pt} 为空
           设 pt = {q.point_code}
+        结束
+        如果 {lang} 等于 ja
+          设 trq = 调用 subject.译文 tbl=kg_point row_key={q.point_code} field=title lang=ja
+          设 trqt = {trq.text 或}
+          如果 {trqt} 不为空
+            设 pt = {trqt}
+          结束
         结束
         设 tot = 计算 {q.wrong_n} + {q.right_n}
         设 wo.label = {lab}
@@ -929,7 +971,14 @@
       如果 {pt} 为空
         设 pt = {a.point_code}
       结束
-      设 stem = 调用 取题干 question_no={a.question_no}
+      如果 {lang} 等于 ja
+        设 trr = 调用 subject.译文 tbl=kg_point row_key={a.point_code} field=title lang=ja
+        设 trrt = {trr.text 或}
+        如果 {trrt} 不为空
+          设 pt = {trrt}
+        结束
+      结束
+      设 stem = 调用 取题干 question_no={a.question_no} lang={lang}
       设 sb2 = 调用 缩略 text={stem} n=40
       设 rs = 错
       如果 {a.correct} 等于 1

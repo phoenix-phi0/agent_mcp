@@ -47,6 +47,16 @@
   字段 updated_at 文本 最后修改时间，可空
 结束
 
+实体 subject_content_translation subject_content_translation
+  字段 tbl 文本 必填 内容表名：kg_point、kg_item、quiz_question、subject_info
+  字段 row_key 文本 必填 行业务键：知识点/条目 code、题号 question_no、科目编码 code（不用自增 id）
+  字段 field 文本 必填 字段名：title、name、stem、options、explain、intro
+  字段 lang 文本 必填 语言代码，目前只有 ja
+  字段 text 长文本 必填 译文（选项整串存，^ 分隔与原文同序同数）
+  字段 updated_at 文本 必填 更新时间
+  唯一 tbl row_key field lang
+结束
+
 页面 实体 subject_view 科目管理页面
   字段 subj_id 整数 科目表编号列，也是编辑/成员浮层地址里带的科目编号
   字段 subj_code 文本 科目编码（新建时填，建后不可改）

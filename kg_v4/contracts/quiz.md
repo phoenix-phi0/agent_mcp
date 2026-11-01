@@ -71,8 +71,9 @@
   伪代码 i 从 n-1 递减到 1：state = (state * 1103515245 + 12345) 对 2147483648 取余；j = state 对 (i+1) 取余；交换 arr[i] 与 arr[j]
   伪代码 返回 arr 用英文逗号连接（例如 n=2、seq=1 得 "1,0"）
 
-函数 组题面 question_no seq subject_id
-  返回 {question_no, course, level, category, stem, is_choice, options}；options 是 [{letter, text}]（已按 seq 打乱，letter 为显示字母 A B C…），非选择题为空列表；不含答案；题号查不到返回空
+函数 组题面 question_no seq subject_id lang?
+  返回 {question_no, course, level, category, stem, is_choice, options}；options 是 [{letter, text}]（已按 seq 打乱，letter 为显示字母 A B C…），非选择题为空列表；不含答案；题号查不到返回空；lang 为空视为 zh
+  伪代码 K182 内容日语替换（只动展示文本，判题不动）：lang 等于 ja 时调 subject.译文 tbl=quiz_question row_key=该题号 field=stem lang=ja，非空则 stem 用译文；再调 subject.译文 tbl=quiz_question row_key=该题号 field=options lang=ja，非空则用它整串替换原文选项（译文按 ^ 拆开的个数必须与原文一致，导入预检保证），随后拆开、洗牌等原逻辑不变——选项个数、洗牌顺序、显示字母与答案字母的映射都不变；lang 不等于 ja 或译文为空时用原文，输出与改前逐字一致
   伪代码 按 question_no 和 subject_id 查 quiz_question 一行，查不到（包括属于别的科目）返回空
   伪代码 options 字段为空：is_choice=0，options 为空列表
   伪代码 否则按 ^ 拆成 n 个文字，is_choice=1；order = 洗牌顺序 n=n seq=seq；显示位置 k 的选项 = {letter: 第 k 个字母(A=0), text: 原第 order[k] 个文字}
@@ -109,6 +110,7 @@
   伪代码 r.asked_count 不小于 round_size，返回 {"finished": 1, "question": "", "asked_count": r.asked_count, "round_size": round_size, "right_count": r.right_count}
   伪代码 new_seq = r.seq + 1；调用 选题 learner=learner mode=r.mode level=r.level category=r.category lesson_code=r.lesson_code asked_nos=r.asked_nos asked_count=r.asked_count new_seq=new_seq subject_id=subject_id
   伪代码 选题 返回空：r.asked_count 等于 0 报错 404 没有可出的题；否则返回 finished=1 的对象（不改库）
+  伪代码 K182：lang = 调用 subject.取界面语言 username=learner 取 lang（表不存在或无行视为 zh），调用 组题面 question_no=选中题号 seq=new_seq subject_id=subject_id lang={lang}
   伪代码 在一个事务里更新 quiz_progress 该行：current_no=选中的题号，answered=0，last_correct=0，asked_nos=（原为空则只写题号，否则原值+","+题号），asked_count+1，seq=new_seq
   伪代码 返回 {"finished": 0, "question": 组题面(question_no=选中题号, seq=new_seq, subject_id=subject_id), "asked_count": 新 asked_count, "round_size": round_size, "right_count": r.right_count}
 
@@ -206,7 +208,7 @@
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
   伪代码 按 learner 和当前科目 subject_id（本科目 得到的 subject_id）查 quiz_progress，没有则返回上述默认对象（started=0）
   伪代码 有则 started=1，mode 库里空值转为 free，round_size = 取轮大小，round_key = round_start_id
-  伪代码 current_no 不为空时 question = 组题面 question_no=current_no seq=该行 seq subject_id=subject_id（题已不在库则为空串），否则空串
+  伪代码 current_no 不为空时 question = 组题面 question_no=current_no seq=该行 seq subject_id=subject_id（题已不在库则为空串），否则空串；lang（K182）= 调用 subject.取界面语言 username=learner 取 lang（表不存在或无行视为 zh），原样传给 组题面
   伪代码 返回上述对象
 
 公开 函数 开始 learner mode? level? category? lesson_code? current_role? auth_mode? subject?
@@ -256,6 +258,7 @@
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
   伪代码 answer 去掉首尾空白后为空，报错 400 答案不能为空
   伪代码 按 learner 和当前科目 subject_id（本科目 得到的 subject_id）查 quiz_progress，没有或 current_no 为空，报错 400 还没有出题；判的永远是库里的 current_no，不接收前端题号
+  伪代码 K182 内容日语替换：explain 的展示值——lang = 调用 subject.取界面语言 username=learner 取 lang（表不存在或无行视为 zh），ja 时调 subject.译文 tbl=quiz_question row_key=该题号 field=explain lang=ja，非空则返回的 explain 用译文；correct_answer、判题比对、写库内容一律用原文不动
   伪代码 按 current_no 和 subject_id 查 quiz_question，查不到（包括属于别的科目）报错 404 题目不存在
   伪代码 选择题（options 不为空，n=选项个数，order = 洗牌顺序 n=n seq=该行 seq，出题和判题算出同一个顺序）：取 answer 去空白转大写后出现的第一个 A–Z 字母，位置 pos=字母序号；没有字母或 pos 不小于 n 则 correct=0、stored_answer=去空白后的原答案；否则原字母 = 第 order[pos] 个选项的字母，correct = 原字母等于标准答案（去空白转大写），stored_answer = 原字母（库里存题库原字母）
   伪代码 选择题的 correct_answer：标准答案的序号 s，找 order 中值为 s 的位置 k，取第 k 个字母；序号越界则取标准答案原文
@@ -322,6 +325,7 @@
   返回 顶栏范围说明文本：有低分点为「复习薄弱点：标题1、标题2、标题3」，没有为「复习薄弱点」
   伪代码 科目：subject_id 是调用方已解析的科目编号，调用 progress./kg. 的函数一律带 subject=subject_id
   伪代码 调用 progress.列低分点 learner=learner limit=3 subject=subject_id，逐个调用 kg.取知识点 code=编号 subject=subject_id 取 title（取不到用编号）
+  伪代码 K182：lang = 调用 subject.取界面语言 username=learner 取 lang（表不存在或无行视为 zh）；ja 时每个 title 调用 subject.译文 tbl=kg_point row_key=该点编号 field=title lang=ja，非空才替换再拼接
   伪代码 有标题则用「、」连接拼「复习薄弱点：…」，否则返回「复习薄弱点」
 
 公开 函数 做题页面 learner current_role? auth_mode? subject?
@@ -362,6 +366,7 @@
   伪代码 先取作答前旧分：由 question_no（取做题状态 得到的 question.question_no）查 app.db quiz_q_by_no 得 item_code（限本科目 subject_id），调 kg.取条目 code=item_code subject=subject_id 取 point_code；调用 progress.列得分 learner=learner subject=subject_id，取该 point_code 那一行的 score 作 prev_score，没有这一行（该知识点作答前从未记过分）prev_score 视为 0；这一步必须在 提交答案 之前（提交答案 内部的 记作答 会写新得分行）
   伪代码 调用 提交答案 learner=learner answer=作答 subject=subject_id，得 repeated、question_no、correct、correct_answer、explain、right_count、asked_count、score、changed、point_code（400/404 原样向上抛）
   伪代码 card 用 拼题卡 按 question 重建（和作答前同一张，code 不变不翻页）；选择题 options 逐项补 state：letter 等于 correct_answer 记 right、等于本次所交字母记 wrong、其余 dim；card 的 mine=本次作答；verdict=correct 等于 1 则「○ 答对了」否则「✗ 正确答案是 {correct_answer}」；explain 末尾拼「\n\n考的是：条目名」（查 app.db quiz_q_by_no 得 item_code，查询限本科目 subject_id；调 kg.取条目 code=item_code subject=subject_id 取 name），有课文再拼「　课文《标题》summary」（调 lesson.按条目列课文 item_code=item_code subject=subject_id 取第一课，取不到课就不拼那半句）；传参（K170）：拼接用的 quiz_explain_tail 的 expl（解析）、name（条目名）、lt（课文半句）装进对象用 查一值表 传，不得按位置 expl={…} 传——解析是题库原文、常以换行结尾，条目名、课文 summary 是库里的自由文本，按位置传引擎对首尾有空白的值直接报错（作答页 500）；解析原样拼、不去空白
+  伪代码 K182 内容日语替换：lang = 调用 subject.取界面语言 username=learner 取 lang（表不存在或无行视为 zh）；ja 时「考的是」的条目名调用 subject.译文 tbl=kg_item row_key=条目编号 field=name lang=ja，非空才替换；题干与选项已经过 组题面 的 ja 替换；「○ 答对了」这类提示文字不在本替换范围（走界面词表）
   伪代码 cheer、score_change 以本次 提交答案 的返回为准，不再用 列得分 作答后的 prev_score/delta（作答后再取最新两行，得分没变时会把更早一次的 delta 重显，首次记分时 delta 为 0 又漏掉）：repeated 等于 1（同题交两次），或 changed 等于 0（本次没新记得分行，得分没变），cheer、score_change 都为空串；否则新分 = 提交答案 返回的 score，旧分 = 上面作答前取的 prev_score，title 调 kg.取知识点 code=point_code subject=subject_id 取（取不到用编号）：score_change=「{title} 得分 {prev_score} → {score}」；prev_score 小于 80 且 score 不小于 80 则 cheer=「「{title}」达标了，图上它后面的知识点可能解锁了。」（首次记分作答前没有得分行，prev_score 视为 0，所以首次直接达标也会触发 cheer）
   伪代码 stat=「这一轮 {right_count}/{asked_count}」；返回 {"phase": "done", "card": card, "stat": stat, "cheer": cheer, "score_change": score_change, "level_options": subject.科目等级 subject_id=subject_id 的 options}
 

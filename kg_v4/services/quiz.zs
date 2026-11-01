@@ -131,7 +131,7 @@
     返回 {s}
   结束
 
-  函数 组题面 question_no seq subject_id
+  函数 组题面 question_no seq subject_id lang?
     # 返回 {question_no, course, level, category, stem, is_choice, options}；options 是 [{letter, text}]（已按 seq 打乱，letter 为显示字母 A B C…），非选择题为空列表；不含答案；题号查不到返回空
     # 按 question_no 查 quiz_question 一行，查不到返回空
     # options 字段为空：is_choice=0，options 为空列表
@@ -141,7 +141,20 @@
     如果 {q} 为空
       返回 {q}
     结束
+    设 stm = {q.stem}
+    如果 {lang} 等于 ja
+      设 trS = 调用 subject.译文 tbl=quiz_question row_key={question_no} field=stem lang=ja
+      如果 {trS.text} 不为空
+        设 stm = {trS.text}
+      结束
+    结束
     设 opts = {q.options}
+    如果 {lang} 等于 ja 且 {opts} 不为空
+      设 trO = 调用 subject.译文 tbl=quiz_question row_key={question_no} field=options lang=ja
+      如果 {trO.text} 不为空
+        设 opts = {trO.text}
+      结束
+    结束
     设 out = 解析JSON []
     设 isc = 0
     如果 {opts} 不为空
@@ -169,7 +182,7 @@
     结束
     设 oqt = {"question_no": "{q.question_no}", "course": "{q.course}", "level": "{q.level}", "category": "{q.category}", "is_choice": {isc}, "options": {out}}
     设 out_q = 解析JSON {oqt}
-    设 out_q.stem = {q.stem}
+    设 out_q.stem = {stm}
     返回 {out_q}
   结束
 
@@ -359,7 +372,8 @@
     事务 app.db
       设 w = 写库 app.db quiz_p_next learner={learner} current_no={qn} asked_nos={nos} asked_count={nc} seq={ns} subject_id={sj.subject_id}
     结束
-    设 qf = 调用 组题面 question_no={qn} seq={ns} subject_id={sj.subject_id}
+    设 lgq = 调用 subject.取界面语言 username={learner}
+    设 qf = 调用 组题面 question_no={qn} seq={ns} subject_id={sj.subject_id} lang={lgq.lang 或}
     返回 {"finished": 0, "question": {qf}, "asked_count": {nc}, "round_size": {rs}, "right_count": {r.right_count}}
   结束
 
@@ -732,7 +746,8 @@
     设 cn = {r.current_no 或}
     设 q = {zz 或}
     如果 {cn} 不为空
-      设 q = 调用 组题面 question_no={cn} seq={r.seq} subject_id={sj.subject_id}
+      设 lgs = 调用 subject.取界面语言 username={learner}
+      设 q = 调用 组题面 question_no={cn} seq={r.seq} subject_id={sj.subject_id} lang={lgs.lang 或}
     结束
     如果 {q} 为空
       返回 {"learner": "{learner}", "started": 1, "mode": "{m}", "level": "{r.level 或}", "category": "{r.category 或}", "lesson_code": "{r.lesson_code 或}", "current_no": "{cn}", "answered": {r.answered}, "right_count": {r.right_count}, "asked_count": {r.asked_count}, "round_size": {rs}, "last_correct": {r.last_correct}, "round_key": {r.round_start_id}, "question": ""}
@@ -844,6 +859,13 @@
     结束
     设 opts = {q.options}
     设 ex = {q.expl 或}
+    设 lga = 调用 subject.取界面语言 username={learner}
+    如果 {lga.lang} 等于 ja
+      设 trE = 调用 subject.译文 tbl=quiz_question row_key={cn} field=explain lang=ja
+      如果 {trE.text} 不为空
+        设 ex = {trE.text}
+      结束
+    结束
     设 sa1 = 替换 {q.answer} \s+
     设 sU = 转大写 {sa1}
     设 correct = 0
@@ -1006,6 +1028,7 @@
   结束
 
   函数 复习薄弱点文案 learner subject_id
+    设 lgp = 调用 subject.取界面语言 username={learner}
     设 lp = 调用 progress.列低分点 learner={learner} limit=3 subject={subject_id}
     设 names = {zz 或}
     遍历 pt 于 {lp.points}
@@ -1013,6 +1036,12 @@
       设 tt = {pt.point_code}
       如果 {kp} 不为空
         设 tt = {kp.title}
+      结束
+      如果 {lgp.lang} 等于 ja
+        设 trP = 调用 subject.译文 tbl=kg_point row_key={pt.point_code} field=title lang=ja
+        如果 {trP.text} 不为空
+          设 tt = {trP.text}
+        结束
       结束
       如果 {names} 为空
         设 names = {tt}
@@ -1134,6 +1163,13 @@
     设 it2 = 查一行 app.db quiz_q_by_no question_no={res.question_no} subject_id={sj.subject_id}
     设 ik = 调用 kg.取条目 code={it2.item_code} subject={sj.subject_id}
     设 nm = {ik.name 或}
+    设 lgj = 调用 subject.取界面语言 username={learner}
+    如果 {lgj.lang} 等于 ja
+      设 trN = 调用 subject.译文 tbl=kg_item row_key={it2.item_code} field=name lang=ja
+      如果 {trN.text} 不为空
+        设 nm = {trN.text}
+      结束
+    结束
     设 ltail = {zz 或}
     设 ll = 调用 lesson.按条目列课文 item_code={it2.item_code} subject={sj.subject_id} 出错时 e
     如果 {e} 为空

@@ -132,8 +132,9 @@
   伪代码 没有则返回 {"student": student, "has_summary": 0, "id": 0, "summary": "", "author": "", "created_at": ""}
   伪代码 返回 {"student": student, "has_summary": 1, "id": 该行 id, "summary": 该行 summary, "author": 该行 author, "created_at": 该行 created_at}
 
-函数 取题干 question_no
-  返回 题干文本，查不到返回空串（学情页给错题回题干，§七-13）
+函数 取题干 question_no lang?
+  返回 题干文本，查不到返回空串（学情页给错题回题干，§七-13）；lang 为空视为 zh
+  伪代码 K182 内容日语替换：lang 等于 ja 时调 subject.译文 tbl=quiz_question row_key=该题号 field=stem lang=ja，非空返回译文；zh 或无译文返回原题干（与改前逐字一致）
   伪代码 用 app.db 查询 report_quiz_exists（sqlite_master 里有没有 quiz_question 表）：没有（模块用例的库不含下游 quiz 的表）返回空串——report 不声明依赖 quiz，不调 quiz 的函数，只读它的表
   伪代码 有则查 app.db report_quiz_stem（quiz_question 按 question_no 取 stem），查不到返回空串；题号全局唯一，题干查询不按科目限定（调用方的题号来自本科目的作答流水）
 
@@ -154,6 +155,7 @@
   伪代码 全班薄弱点聚合：对每个学生调用 progress.取状态 learner=该学生 subject=subject_id，points 每项（code, title, right, total）：wrong=total-right，按 code 累计 wrong_n（wrong 之和）、answer_n（total 之和）、learner_n（wrong 大于 0 的学生数）；只留 wrong_n 大于 0 的点，按 wrong_n 降序、answer_n 降序、code 升序
   伪代码 class_weak_points 取聚合前 10 个，每个 {label: title, wrong_n, answer_n, learner_n}
   伪代码 class_weak_items：对聚合出的每个点（不限前 10）调用 kg.按知识点列条目 point_code=该点 subject=subject_id 出错时 e，出错的跳过；每个条目一行 {label: name, point_label: 该点 title, wrong_n/answer_n/learner_n 取该点的值（v4 按知识点记作答，条目沿用所属知识点的数）, code}，按 wrong_n 降序、answer_n 降序、code 升序，取前 10 个
+  伪代码 K182 内容日语替换：lang = 查一值 app.db content_user_lang username=learner（查不到为空视为 zh）；ja 时 class_weak_points 的 label（知识点 title）与 class_weak_items 的 label/point_label（条目 name、知识点 title）调用 subject.译文（tbl=kg_point field=title / tbl=kg_item field=name，row_key=对应编号），非空才替换；取全班学情 等共享函数不改（还要喂 AI 学情总结）
   伪代码 返回 {"class_rows": …, "class_weak_points": …, "class_weak_items": …, "class_count": …, "form": …}
 
 公开 函数 学生页面 student learner? current_role? auth_mode? subject?
@@ -167,6 +169,7 @@
   伪代码 student 为空，报错 400 student 不能为空
   伪代码 调用 account.取账号 username=student，取不到或 role 不等于 student；或调用 学生范围 subject_id=subject_id 里没有 username 等于 student 的学生（包括登记在别的科目的学生）：返回 {"student": {"username": student, "missing": "没有这个学生（{student}），回全班表重新选。", "back": "#%E5%AD%A6%E6%83%85"}}，不报错
   伪代码 调用 取学生学情 student=student subject=subject_id 得 g；调用 lesson.取当前系列 learner=student subject=subject_id 取 name；调用 progress.列最近作答 learner=student limit=20 subject=subject_id 得 recent；调用 dictation.取默写概况 learner=student subject=subject_id 得 dict
+  伪代码 K182 内容日语替换：lang = 查一值 app.db content_user_lang username=learner（查不到为空视为 zh）；ja 时 student_points/student_wrong/student_recent 各行的知识点 title、条目 name 调用 subject.译文（tbl=kg_point field=title / tbl=kg_item field=name，row_key=对应编号）、错题题干调 取题干 时带 lang={lang}，均非空才替换；取学生学情 本身不改（还要喂 AI 学情总结）
   伪代码 last：g.dialog_last_at、recent 第一条的 at、dict.last_at 三者里最晚的（空串不算），都没有写「还没有」
   伪代码 student 对象 = {username, head, overview, dictation, missing: "", back: "#%E5%AD%A6%E6%83%85"}：head=「{display_name}（{student}）　教材：{系列 name}　最近学习：{last}」（全角空格分隔）；overview 在 answer_total 为 0 时是「还没有作答」，否则「已掌握 {mastered_count} 个知识点　作答 {answer_total} 题　近期正确率 {recent_accuracy}%　平均得分 {avg_score}」；dictation 在 dict.total 为 0 时是「单词默写：还没有作答」，否则「单词默写：作答 {total} 次，正确率 {accuracy}%，错词本 {wrong_book_count} 个」
   伪代码 student_summary={"student": student, "head": has_summary 为 1 时「AI 学情总结（{summary_at}，{summary_author} 请的）」否则空串, "text": summary 或空串}

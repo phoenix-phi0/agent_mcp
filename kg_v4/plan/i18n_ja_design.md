@@ -6,7 +6,7 @@
 
 - **D1（定稿，K180 第 1 期已实施）**：项目里有 `i18n/<lang>.tsv` 即启用；中文原文作键，前端对界面文字做 DOM 整串替换（tdom + MutationObserver 兜底）、后端消息整串查表（tmsg），查不到回退中文；语言记在 `account_user.lang`（auth_me 返回，顶栏「中文 / 日本語」切换调 POST /account/lang 后整页刷新），未登录记浏览器 localStorage（键 zs_i18n，默认中文）；状态枚举值、路由键不翻。
 - **D2（定稿，第 2 期）**：AI 回答语言跟随界面语言——问老师/教师助手的提示词按 me.lang 注入「用日语回答」，另加假模型固定日语回复的 GOLDEN_JA 回归。
-- **D3（定稿，第 3 期）**：科目内容（知识点、条目、题目、讲解、单词释义，共约 16.7 万字）只翻 Python 科目，建 `content_translation` 翻译表（中文原文为键）分批导入，不动现有表和内容行，读取时按 lang 替换。
+- **D3（定稿，第 3 期）**：科目内容（知识点、条目、题目、讲解、单词释义，共约 16.7 万字）只翻 Python 科目，建 `subject_content_translation` 翻译表（中文原文为键）分批导入，不动现有表和内容行，读取时按 lang 替换。
 
 ## 0. 用户决定（范围）
 
@@ -123,7 +123,7 @@ services 里非注释 `报错 <码> <中文>` 539 处（复核口径 `报错 \d+
 ### 2.5 科目内容多语言（第 3 期）——推荐：通用翻译表
 
 三选一：
-- **a. 通用翻译表（推荐）**：新表 `content_translation(id, subject_id, tbl, row_id, field, lang, text, updated_at)`，唯一索引 (tbl,row_id,field,lang)。不动现有内容表、无需逐表 ALTER；查询不到回退原文=天然满足「缺日语回退中文」；读路径在 services 出口加一个统一函数（按 lang 查翻译表替换对应字段），或按需给热点查询加 LEFT JOIN 版查询。导入导出：导出加 `--lang ja`（tsv：tbl,row_id,field,text），导入走同表 upsert；textbook_import 产出的新内容暂不自动翻译，走人工/批量流程补。
+- **a. 通用翻译表（推荐）**：新表 `subject_content_translation(id, subject_id, tbl, row_id, field, lang, text, updated_at)`，唯一索引 (tbl,row_id,field,lang)。不动现有内容表、无需逐表 ALTER；查询不到回退原文=天然满足「缺日语回退中文」；读路径在 services 出口加一个统一函数（按 lang 查翻译表替换对应字段），或按需给热点查询加 LEFT JOIN 版查询。导入导出：导出加 `--lang ja`（tsv：tbl,row_id,field,text），导入走同表 upsert；textbook_import 产出的新内容暂不自动翻译，走人工/批量流程补。
 - b. 各表加 _ja 列：查询最简单（COALESCE(stem_ja, stem)），但要 ALTER 7 张表、改导入导出与 40+ 个查询，列膨胀。
 - c. 按语言分科目（jp_grammar_ja）：数据翻倍、学习记录不共享，不推荐。
 
@@ -142,7 +142,7 @@ services 里非注释 `报错 <码> <中文>` 539 处（复核口径 `报错 \d+
 |---|---|---|---|---|
 | 第 1 期（最小可用） | 引擎可选 i18n 机制 + account_user.lang + auth_me.lang + 切换接口/按钮 + 界面词表 ja.tsv（.ui 450 条 + 引擎 66 条 + gen 模板 + 顶部高频消息 30–50 条）+ 前端消息替换 | gen/project.py、tools/render.py、templates/frontend/*.j2（引擎，单独 diff 评审）；kg_v4 routes/services/account.zs、scripts 迁移、i18n/ja.tsv | GLM 约 4–6 小时（参考 K177 引擎小改 2.5h；词典制作另需 1–2h），约 $10–20；界面词表翻译 <¥5 | **是**：引擎模板与 ui.py 注入点、account_user 加列 |
 | 第 2 期 | AI 回答语言跟随界面（tutor/report/subject 人设 4–6 处按 lang 指示）+ GOLDEN_JA + 日语人设措辞 | kg_v4 services/{subject,tutor,report,teacher_assist}.zs、tests/kg_v4 | GLM 约 2–3 小时，约 $5–10 | 是：提示词改动（GOLDEN 更新） |
-| 第 3 期 | 内容翻译：content_translation 表 + 读路径替换 + 导入导出扩展 + 16.7 万字批量翻译与校对（4 批） | kg_v4 entities/queries/services、scripts、i18n 内容 tsv | 模型 GLM 约 3–4 小时 + 翻译费 ¥100–300（$15–45），人工校对另计 | 是：新表与导入导出格式、翻译花费 |
+| 第 3 期 | 内容翻译：subject_content_translation 表 + 读路径替换 + 导入导出扩展 + 16.7 万字批量翻译与校对（4 批） | kg_v4 entities/queries/services、scripts、i18n 内容 tsv | 模型 GLM 约 3–4 小时 + 翻译费 ¥100–300（$15–45），人工校对另计 | 是：新表与导入导出格式、翻译花费 |
 | （可选第 4 期） | 全量后端消息代码化、键化 i18n 演进、教师端助手日语化 | 引擎 + services 全量 | 另估 | 是 |
 
 ## 4. 需要用户拍板的决策点
@@ -150,5 +150,5 @@ services 里非注释 `报错 <码> <中文>` 539 处（复核口径 `报错 \d+
 1. **界面机制（批准引擎改动）**：推荐「i18n/ 目录存在即启用 + 前端 DOM 词典替换、中文原文作键」；备选「全键化 i18n」（彻底但引擎改动数倍）。→ 推荐前者。
 2. **后端消息**：推荐前端词典替换（后端 584 处零改动，插值消息回退中文）；备选消息代码化（干净但要改全部 .zs 与用例）。→ 推荐前者。
 3. **AI 回答语言**：跟随界面语言（ja 界面用日语讲日语语法，术语括注中文，教师人设可覆盖）还是锁中文？→ 推荐跟随界面语言。
-4. **内容多语言模型（涉表结构）**：推荐通用翻译表 content_translation（原表不动、缺省回退）；备选 _ja 列 / 按语言分科目。→ 推荐翻译表。
+4. **内容多语言模型（涉表结构）**：推荐通用翻译表 subject_content_translation（原表不动、缺省回退）；备选 _ja 列 / 按语言分科目。→ 推荐翻译表。
 5. **翻译范围与预算**：16.7 万字全翻（约 ¥100–300 模型费 + 人工校对）还是先翻界面+知识点+题目（约 9.5 万字）、单词释义 7.3 万字暂缓？→ 推荐分批，单词释义最后。

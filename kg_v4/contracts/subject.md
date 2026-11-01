@@ -40,6 +40,15 @@
   updated_by 文本 最后修改的教师，可空
   updated_at 文本 最后修改时间，可空
 
+表 subject_content_translation
+  tbl 文本 内容表名（K182 科目内容翻译表，原表不动、缺译文回退中文）：kg_point / kg_item / quiz_question / subject_info
+  row_key 文本 行业务键（不用自增 id）：知识点/条目 code、题号 question_no、科目编码 code
+  field 文本 字段名：title / name / stem / options / explain / intro（选项整串存，^ 分隔与原文同序同数）
+  lang 文本 语言代码，目前只有 ja
+  text 长文本 译文
+  updated_at 文本 更新时间
+  唯一 tbl row_key field lang
+
 ## 页面字段
 页面 subject_view 科目管理页面
   subj_id 整数 科目表「编号」列，也是编辑/成员浮层地址里带的科目编号
@@ -74,6 +83,7 @@
   伪代码 current_role 等于 student：subject_student 里该 learner 且 status 等于 active 的科目，且科目 status 等于 active
   伪代码 current_role 等于 teacher：科目 owner 等于 learner、或 subject_teacher 有该 learner 的行的科目（不论 status）；再加上 visibility 等于 public 且 status 不是 draft 的科目；去重
   伪代码 其他 current_role（单人模式或不登录）：visibility 等于 public 且 status 等于 active 的科目
+  伪代码 K182 内容日语替换：lang = 查一值 app.db content_user_lang username=learner（查不到为空视为 zh）；ja 时 subjects 每行 name 调用 subject.译文 tbl=subject_info row_key=该行 code field=name lang=ja，非空才替换（缺译文回退中文）；zh 或无译文输出与改前逐字一致
   伪代码 返回 {"total": 数量, "subjects": 列表}
 
 公开 函数 当前科目 learner current_role?
@@ -434,6 +444,16 @@
   报错 409 日语科目不能停用
   伪代码 调用 设科目状态 learner=learner subject_id=subj_id status=status current_role=current_role auth_mode=auth_mode
   伪代码 返回 调用 科目管理页面 learner=learner current_role=current_role auth_mode=auth_mode 的结果
+
+公开 函数 译文 tbl row_key field lang
+  返回 {text}；K182 科目内容日语替换的取译文口子，只给展示路径用（编辑/管理/提示词路径不调）：text 是译文，查不到为空串
+  伪代码 lang 不等于 ja 直接返回 {"text": ""}（zh 路径不查表，行为与改前一致）
+  伪代码 查 subject_content_translation 里 tbl、row_key、field、lang 四键都相等的一行，查不到返回 {"text": ""}；查到返回 {"text": 该行 text}
+
+ 公开 函数 取界面语言 username
+   返回 {lang}；K182 展示路径取当前用户界面语言的统一口子（progress/quiz 等依赖 subject 的模块调用；account_user 表不存在或无行都视为 zh）
+   伪代码 用 subject_table_exists 查 account_user 表是否存在，不存在直接返回 {"lang": "zh"}（不查语言）
+   伪代码 存在则查 subject_user_lang username=该用户，查不到或空返回 {"lang": "zh"}；否则返回 {"lang": 该值}
 
 ## 接口
 GET /subject/mine -> 列我的科目
@@ -1711,3 +1731,12 @@ POST /subject/manage/disable -> 设科目状态页面 动作 subject_disable 模
   调用 保存科目页面 learner=t2 current_role=teacher auth_mode=on subj_id=1 subj_name=编程 subj_persona=你是编程教练
   报错 403
   库 subject_ai 共 0 行
+
+用例 译文_ja命中
+  先 数据 subject_content_translation tbl=kg_point row_key=python.list field=title lang=ja text=リスト updated_at=2026-01-01
+  调用 译文 tbl=kg_point row_key=python.list field=title lang=ja
+  得 text=リスト
+
+用例 取界面语言_无表视为zh
+  调用 取界面语言 username=nobody
+  得 lang=zh
