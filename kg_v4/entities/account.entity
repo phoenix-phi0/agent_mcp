@@ -4,6 +4,7 @@
   字段 display_name 文本 必填 显示名
   字段 role 文本 必填 角色代号：student
   字段 disabled 整数 必填 是否停用（1/0）
+  字段 lang 文本 必填 默认 zh 界面语言（zh/ja）
   字段 created_at 文本 必填 建于时间，格式
 结束
 

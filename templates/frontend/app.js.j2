@@ -34,6 +34,8 @@
 <% set has_logout = has_logout if has_logout is defined else false %>
 <% set has_files = file_fields_json != "{}" %>
 <% set has_graphs = has_graphs if has_graphs is defined else false %>
+<% set i18n_langs = i18n_langs if i18n_langs is defined else [] %>
+<% set has_lang_switch = has_lang_switch if has_lang_switch is defined else false %>
 const { createApp, ref, computed } = Vue;
 const screens = <%= screens_json %>;
 {#- 每个界面一份表单状态，按界面名索引。共用一个对象会让同名字段串味，
@@ -145,7 +147,7 @@ const _app = createApp({
     const notice = ref(null);
     let noticeTimer = null;
     function showNotice(text, kind) {
-      notice.value = { text: String(text), kind: kind || "ok" };
+      notice.value = { text: <% if i18n_langs %>tmsg(text)<% else %>String(text)<% endif %>, kind: kind || "ok" };
       clearTimeout(noticeTimer);
       noticeTimer = setTimeout(() => { notice.value = null; },
                                kind === "no" ? 6000 : 2500);
@@ -187,6 +189,77 @@ const _app = createApp({
     // 问老师的对话里——做题页上什么都看不见，问老师那边平白多出一条。
     // 别的界面的流不归这个界面管，往里塞什么都是串台。
     const myStream = () => screenStream[current.value.name] || "";
+<% if i18n_langs %>
+    // —— 界面多语言（可选声明）：项目里有 i18n/<lang>.tsv 才生成这一段。
+    // 词典在 web/i18n.<lang>.js（window.I18N），中文原文作键、整串匹配，
+    // 查不到的一律回退中文。只翻「提示性文字」：数据值（状态枚举、表格行）
+    // 不进词典，路由键（go('学情')）是 JS 字符串，根本不经过 DOM。
+    // 语言记在账号上（auth_me 的 lang / POST /account/lang），没登录时记在
+    // 浏览器（localStorage，默认中文——登录页就用它）。
+    const i18nLang = ref((() => { try { return localStorage.getItem("zs_i18n") || "zh"; } catch (e) { return "zh"; } })());
+    function tmsg(s) {
+      const t = String(s == null ? "" : s);
+      if (i18nLang.value === "zh") return t;
+      return ((window.I18N || {})[i18nLang.value] || {})[t] || t;
+    }
+    function tdom() {
+      if (i18nLang.value === "zh") return;
+      const dict = (window.I18N || {})[i18nLang.value] || {};
+      const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        const v = n.nodeValue;
+        if (!v || !v.trim()) continue;
+        const t = dict[v.trim()];
+        if (t && t !== v.trim()) n.nodeValue = v.replace(v.trim(), t);
+      }
+      document.body.querySelectorAll("[placeholder],[title]").forEach(el => {
+        for (const a of ["placeholder", "title"]) {
+          const v = el.getAttribute(a);
+          if (!v || !v.trim()) continue;
+          const t = dict[v.trim()];
+          if (t && t !== v) el.setAttribute(a, v.replace(v.trim(), t));
+        }
+      });
+    }
+    // Vue 重渲染会把替换结果盖回中文（vdom patch）：MutationObserver 兜底
+    // 重跑，防抖 120ms；tdom 只改有变化的节点，不会触发自己无限循环。
+    let tdomTimer = null;
+    function scheduleTdom() {
+      if (i18nLang.value === "zh" || tdomTimer) return;
+      tdomTimer = setTimeout(() => { tdomTimer = null; tdom(); }, 120);
+    }
+    function applyLang(lg) {
+      lg = lg || "zh";
+      if (i18nLang.value !== lg) {
+        i18nLang.value = lg;
+        try { localStorage.setItem("zs_i18n", lg); } catch (e) { /* 存不了就算了 */ }
+      }
+      document.documentElement.lang = lg === "zh" ? "zh-CN" : lg;
+      if (lg !== "zh") tdom();
+    }
+    // 顶栏切换：写进账号（POST /account/lang，接口是项目声明的，没有就只切
+    // 本地），成功后整页刷新——界面文字、后端消息、<html lang> 一次到位。
+    async function switchLang(lg) {
+      if (i18nLang.value === lg) return;
+      try { localStorage.setItem("zs_i18n", lg); } catch (e) { /* 同上 */ }
+      if (me.value.user && typeof endpoints !== "undefined" && endpoints.account_lang) {
+        try {
+          const r = await postTo(endpoints.account_lang, { action: "account_lang", form: { lang: lg } });
+          if (r && r.error) { showNotice(tmsg(r.error), "no"); return; }
+        } catch (e) {
+          showNotice(tmsg("切换界面语言没成功，请稍后再试"), "no");
+          return;
+        }
+      }
+      location.reload();
+    }
+    Vue.onMounted(() => {
+      // 首屏就按该用的语言替换一遍；之后的中文由 MutationObserver 接住
+      applyLang(i18nLang.value);
+      new MutationObserver(scheduleTdom).observe(document.body,
+        { childList: true, subtree: true, characterData: true });
+    });
+<% endif %>
 <% if has_files %>
     // 文件单独放这里，不进 form——form 要能 JSON 深拷贝（payload、snapshot
     // 都靠它），而 File 对象走一遍 JSON 会变成 {}，静默丢失。
@@ -384,6 +457,14 @@ const _app = createApp({
     //   overlay   开关浮层："名字" 弹出，null 收起
     function applyResponse(resp) {
       if (!resp) return;
+<% if i18n_langs %>
+      // 后端消息按当前语言替换（整串查词典，缺失回退中文）。数据（state、
+      // lists 里的行）不在这里翻——状态枚举被「当」条件比较，动了会出错。
+      if (Array.isArray(resp.messages)) {
+        resp.messages = resp.messages.map(m => Object.assign({}, m, { who: tmsg(m.who), text: tmsg(m.text) }));
+      }
+      if (resp.error) resp.error = tmsg(resp.error);
+<% endif %>
       if (resp.state && typeof shared !== "undefined") Object.assign(shared.value, resp.state);
       // 「页面状态」那类接口把整页铺进 state，列表数据键也在里面。rowsOf 能回退去读
       // shared，但 .ui 里写的「当 lists.键&&lists.键.length」是直接读 lists 的——
@@ -496,13 +577,17 @@ const _app = createApp({
         const d = await r.json();
         me.value = { user: d.user || "", label: d.label || d.user || "",
                      hide: Array.isArray(d.hide) ? d.hide : [],
-                     role: d.role || "", roleLabel: d.role_label || "", badge: d.badge || ""<% if has_subject_switch %>,
+                     role: d.role || "", roleLabel: d.role_label || "", badge: d.badge || ""<% if i18n_langs %>, lang: d.lang || "zh"<% endif %><% if has_subject_switch %>,
                      // auth_me 多返回 subjects [{id,name}…] 和 subject（当前 id）时才有切换器
                      subjects: Array.isArray(d.subjects) ? d.subjects : [],
                      subject: d.subject === undefined ? null : d.subject<% endif %> };
       } catch (e) {
         me.value = { ...NOBODY };
       }
+<% if i18n_langs %>
+      // 界面语言：已登录以账号里存的为准（auth_me 的 lang），没登录用浏览器记住的
+      applyLang(me.value.user ? (me.value.lang || i18nLang.value) : i18nLang.value);
+<% endif %>
       if (await checkEnd(fresh)) return true;
       guardSide();
       return false;
@@ -1346,7 +1431,7 @@ const _app = createApp({
 <% endif %>
     }
 <% endif %>
-    return { route, params, forms, form, rowsOf, lists, notice, nav, PAGE, AUTH_SCREENS, current<% if has_me %>, me<% endif %><% if has_subject_switch %>, switchSubject<% endif %>, visible, busy, pending, go, isHref, hrefOf, targetOf, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if home_logout %>, onHome<% endif %><% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_row_remote %>, onRowRemote<% endif %><% if has_msg_actions %>, msgActions, onMsgAction<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
+    return { route, params, forms, form, rowsOf, lists, notice, nav, PAGE, AUTH_SCREENS, current<% if i18n_langs %>, i18nLang, switchLang<% endif %><% if has_me %>, me<% endif %><% if has_subject_switch %>, switchSubject<% endif %>, visible, busy, pending, go, isHref, hrefOf, targetOf, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if home_logout %>, onHome<% endif %><% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_row_remote %>, onRowRemote<% endif %><% if has_msg_actions %>, msgActions, onMsgAction<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
   },
   template: `
 {#- 顶部导航。两种来路：
@@ -1369,6 +1454,9 @@ const _app = createApp({
       <select v-if="me.user && me.subjects && me.subjects.length > 1" class="nav-subject" @change="switchSubject">
         <option v-for="s in me.subjects" :key="s.id" :value="s.id" :selected="s.id === me.subject">{{ s.name }}</option>
       </select>
+<% endif %>
+<% if has_lang_switch %>
+      <span class="nav-lang"><a href="#" :class="{ on: i18nLang === 'zh' }" @click.prevent="switchLang('zh')">中文</a><span class="nav-lang-sep">/</span><a href="#" :class="{ on: i18nLang === 'ja' }" @click.prevent="switchLang('ja')">日本語</a></span>
 <% endif %>
 <% if nav_logout %>
 {#- 退出登录是个动作，不是跳转，所以用 button 而不是 a：键盘和读屏软件
@@ -1415,6 +1503,9 @@ const _app = createApp({
         <button type="button" class="nav-logout" @click.prevent="submitTo('auth_logout')">退出</button>
 <% endif %>
       </span>
+<% endif %>
+<% if has_lang_switch %>
+      <span class="nav-lang"><a href="#" :class="{ on: i18nLang === 'zh' }" @click.prevent="switchLang('zh')">中文</a><span class="nav-lang-sep">/</span><a href="#" :class="{ on: i18nLang === 'ja' }" @click.prevent="switchLang('ja')">日本語</a></span>
 <% endif %>
 <% if home_logout %>
 {#- 「认证 换端 先退出」：同一标签页，先退出再去主页面的登录页 -#}

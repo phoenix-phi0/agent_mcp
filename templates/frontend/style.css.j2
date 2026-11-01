@@ -452,3 +452,15 @@ tr.row-locked td { opacity:.55; }
   .overlay { padding:8px; }
   .overlay-box { max-width:96vw; padding:14px; }
 }
+<% if i18n_langs %>
+/* —— 界面多语言（可选声明）：顶栏语言切换 + 日文字体栈。开 i18n 的项目才
+   生成这一段；html[lang="ja"] 时日文字体排在前面，中文回退不变。 —— */
+.nav-lang { display:inline-flex; align-items:center; gap:2px; margin-left:10px; }
+.nav-lang a { padding:3px 6px; border:none; background:none; font-size:13px;
+  color:var(--dim); cursor:pointer; }
+.nav-lang a.on { color:var(--ink); font-weight:600; text-decoration:underline; }
+.nav-lang .nav-lang-sep { color:var(--line); font-size:12px; }
+html[lang="ja"] body { font-family:-apple-system,"Hiragino Kaku Gothic ProN",
+  "Hiragino Sans","Yu Gothic Medium","Yu Gothic","Meiryo","Noto Sans CJK JP",
+  "Microsoft YaHei",sans-serif; }
+<% endif %>

@@ -177,7 +177,7 @@
       结束
     结束
     如果 {okf} 不等于 1
-      返回 {"user": "", "label": "", "role": "", "role_label": "", "badge": "", "hide": [], "mode": "{auth_mode}", "subjects": [], "subject": 1}
+      返回 {"user": "", "label": "", "role": "", "role_label": "", "lang": "zh", "badge": "", "hide": [], "mode": "{auth_mode}", "subjects": [], "subject": 1}
     结束
     设 sl = 调用 subject.列我的科目 learner={current_user} current_role={u.role}
     设 list = 解析JSON []
@@ -185,6 +185,10 @@
       设 it.id = {s.id}
       设 it.name = {s.name}
       设 list = 列表加项 {list} {it}
+    结束
+    设 lg = {u.lang 或}
+    如果 {lg} 为空
+      设 lg = zh
     结束
     设 sc = 调用 subject.当前科目 learner={current_user} current_role={u.role}
     设 rl = 
@@ -194,7 +198,29 @@
     如果 {u.role} 等于 student
       设 rl = 学生
     结束
-    返回 {"user": "{current_user}", "label": "{u.display_name}", "role": "{u.role}", "role_label": "{rl}", "badge": "", "hide": [], "mode": "on", "subjects": {list}, "subject": {sc.subject_id}}
+    返回 {"user": "{current_user}", "label": "{u.display_name}", "role": "{u.role}", "role_label": "{rl}", "lang": "{lg}", "badge": "", "hide": [], "mode": "on", "subjects": {list}, "subject": {sc.subject_id}}
+  结束
+
+  公开 函数 设语言 learner auth_mode lang
+    # 返回 {ok, lang}；把当前登录用户自己的界面语言写进 account_user.lang，只能改自己的
+    # 报错 404 单人模式没有账号；400 learner 不能为空；400 界面语言只能是 zh 或 ja；404 没有这个账号
+    如果 {auth_mode} 等于 off
+      报错 404 单人模式没有账号
+    结束
+    如果 {learner} 为空
+      报错 400 learner 不能为空
+    结束
+    如果 {lang} 不等于 zh 且 {lang} 不等于 ja
+      报错 400 界面语言只能是 zh 或 ja
+    结束
+    设 u = 查一行 app.db account_user_by_name username={learner}
+    如果 {u.username 或} 为空
+      报错 404 没有这个账号
+    结束
+    设 f.username = {learner}
+    设 f.lang = {lang}
+    设 n = 写库表 app.db account_user_set_lang {f}
+    返回 {"ok": 1, "lang": "{lang}"}
   结束
 
   公开 函数 退出 learner

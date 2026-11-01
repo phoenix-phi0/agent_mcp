@@ -151,6 +151,47 @@ def load_entities(root: Path) -> list:
 
 
 # ----------------------------------------------------------------------
+# 界面多语言（可选）：项目里 i18n/<lang>.tsv 存在即启用，其余项目逐字节不变
+# ----------------------------------------------------------------------
+
+
+def i18n_of(root: Path) -> dict:
+    """项目 i18n/ 下的 <lang>.tsv（tab 分两列：中文原文 → 译文；# 开头是注释）。
+
+    有就启用界面多语言：build 生成 web/i18n.<lang>.js，前端按词典把界面文字
+    和后端消息（中文原文作键、整串匹配）替换成对应语言，查不到回退中文。
+    没有 i18n/ 目录的项目返回 {}——生成物与以前逐字节相同。
+    词条行坏了（不是两列、键或译文为空、同名键译文不一样）直接报错：翻译
+    错了要能看见，不能悄悄漏翻。
+    """
+    d = root / "i18n"
+    if not d.is_dir():
+        return {}
+    out = {}
+    for f in sorted(d.glob("*.tsv")):
+        lang = f.stem
+        if not re.fullmatch(r"[a-z][a-z0-9_-]*", lang):
+            raise ProjectError(
+                f"i18n/{f.name}：文件名用小写语言代号（如 ja），不是「{lang}」")
+        words = {}
+        for no, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
+                raise ProjectError(
+                    f"i18n/{f.name} 第 {no} 行：要正好两列（tab 分隔）：{line!r}")
+            k, v = parts[0].strip(), parts[1].strip()
+            if k in words and words[k] != v:
+                raise ProjectError(
+                    f"i18n/{f.name} 第 {no} 行：「{k}」的译文跟前面不一样")
+            words[k] = v
+        if words:
+            out[lang] = words
+    return out
+
+
+# ----------------------------------------------------------------------
 # 生成
 # ----------------------------------------------------------------------
 
@@ -581,6 +622,7 @@ def build(root: Path, entry: str = "", title: str = "") -> list:
             auth.get("switch_logout")) and "auth_logout" in endpoints
     except Exception:
         roles, switch_logout = {}, False
+    i18n = i18n_of(root)
     title = title or root.name
     pages = split_pages(screens, roles)
     results = []
@@ -592,6 +634,7 @@ def build(root: Path, entry: str = "", title: str = "") -> list:
                                 "endpoints": endpoints,
                                 "content_root": str(root / "ui"),
                                 "nav": compute_nav(page["screens"], "auth_logout" in endpoints),
+                                "i18n_langs": sorted(i18n),
                                 "page": page_options(pages, page, roles, switch_logout)})
         # 各页面的问题合在一起报，同一条（共用的登录页上的）只报一次
         seen = {(i.code, str(i)) for i in issues}
@@ -641,9 +684,15 @@ def build(root: Path, entry: str = "", title: str = "") -> list:
     else:
         # 原来拆过、现在不拆了：留着旧的 pages.json，/teacher 还会打开过时的页面
         (web / PAGES_FILE).unlink(missing_ok=True)
+    for lang, words in i18n.items():
+        # 多语言并存：先建容器再按语言分键，几个 i18n.<lang>.js 互不覆盖
+        files[f"i18n.{lang}.js"] = ('window.I18N=window.I18N||{};window.I18N["' + lang
+                                    + '"]=' + json.dumps(words, ensure_ascii=False) + ";\n")
     for name, text in files.items():
         (web / name).write_text(text, encoding="utf-8")
     lines.append(f"  编译到 web/（{', '.join(sorted(files))}）")
+    for lang, words in sorted(i18n.items()):
+        lines.append(f"  界面多语言 {lang}：{len(words)} 条 → web/i18n.{lang}.js")
     for page in pages[1:]:
         lines.append(f"  {page['end']}端：/{page['slug']}（{len(page['screens']) - len([s for s in page['screens'] if s.name in AUTH_SCREENS])} 个界面），"
                      f"其余在 /")

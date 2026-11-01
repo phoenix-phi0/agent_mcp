@@ -8,6 +8,7 @@
   display_name 文本 显示名
   role 文本 角色代号：student 或 teacher
   disabled 整数 是否停用（1/0）
+  lang 文本 界面语言（zh/ja），默认 zh
   created_at 文本 建于时间，格式 YYYY-MM-DD HH:MM:SS
 表 account_login_fail
   username 文本 登录时填的用户名（不论是否存在），唯一
@@ -102,14 +103,27 @@
   伪代码 返回 {"auth_mode": auth_mode, "username": 其 username, "display_name": 其 display_name, "role": 其 role}
 
 公开 函数 认证信息 current_user current_role auth_mode
-  返回 {user, label, role, role_label, badge, hide, mode, subjects, subject}；给前端顶栏用（auth_me）：user 是登录的用户名（单人模式或没登录是空串），label 是显示名，role 是角色代号，role_label 是「学生」或「教师」，badge 与 hide 恒为空串与空数组，mode 是 auth_mode 原值，subjects 是当前用户可见的科目 [{id, name}]，subject 是当前科目编号（没登录是 1，subjects 为空数组）
-  伪代码 auth_mode 不等于 on 或 current_user 为空，返回 {"user": "", "label": "", "role": "", "role_label": "", "badge": "", "hide": [], "mode": auth_mode, "subjects": [], "subject": 1}
+  返回 {user, label, role, role_label, lang, badge, hide, mode, subjects, subject}；给前端顶栏用（auth_me）：user 是登录的用户名（单人模式或没登录是空串），label 是显示名，role 是角色代号，role_label 是「学生」或「教师」，lang 是该用户的界面语言（zh/ja，没登录或没存过是 zh），badge 与 hide 恒为空串与空数组，mode 是 auth_mode 原值，subjects 是当前用户可见的科目 [{id, name}]，subject 是当前科目编号（没登录是 1，subjects 为空数组）
+  伪代码 auth_mode 不等于 on 或 current_user 为空，返回 {"user": "", "label": "", "role": "", "role_label": "", "lang": "zh", "badge": "", "hide": [], "mode": auth_mode, "subjects": [], "subject": 1}
   伪代码 按 current_user 查 account_user；查不到或 disabled 等于 1，同样返回上面那个没登录的空对象
+  伪代码 lang：该行 lang 为空取 zh（老账号迁进来的列都有默认值，仍兜一层）
   伪代码 调用 subject.列我的科目 learner=current_user current_role=该行 role，取返回的 subjects，只保留 id 和 name 两个键，得到 subjects 数组
   伪代码 调用 subject.当前科目 learner=current_user current_role=该行 role，取 subject_id 作为 subject（教师偏好公共科目也不回退 1）
   伪代码 role_label：role 等于 teacher 取「教师」，等于 student 取「学生」，其他取空串
-  伪代码 返回 {"user": current_user, "label": 该行 display_name, "role": 该行 role, "role_label": role_label, "badge": "", "hide": [], "mode": "on", "subjects": subjects, "subject": subject}
+  伪代码 返回 {"user": current_user, "label": 该行 display_name, "role": 该行 role, "role_label": role_label, "lang": lang, "badge": "", "hide": [], "mode": "on", "subjects": subjects, "subject": subject}
   伪代码 依赖方向：account 依赖 subject（subject 是叶子，不依赖 account；角色由 account 查出后以 current_role 传给 subject）
+
+公开 函数 设语言 learner auth_mode lang
+  返回 {ok, lang}；把当前登录用户自己的界面语言写进 account_user.lang（顶栏「中文 / 日本語」切换按钮调它；只能改自己的：路由层注入的 learner 就是谁，不收 username 参数）
+  报错 400 learner 不能为空
+  报错 400 界面语言只能是 zh 或 ja
+  报错 404 单人模式没有账号
+  报错 404 没有这个账号
+  伪代码 auth_mode 等于 off，报错 404 单人模式没有账号
+  伪代码 learner 为空，报错 400 learner 不能为空
+  伪代码 lang 不是 zh 也不是 ja，报错 400 界面语言只能是 zh 或 ja
+  伪代码 按 learner 查 account_user，查不到报错 404 没有这个账号
+  伪代码 把该行 lang 更新为 lang，返回 {"ok": 1, "lang": lang}
 
 公开 函数 退出 learner
   返回 {ok}
@@ -282,6 +296,7 @@ POST /account/login -> 登录 动作 auth_login 模板 提交跳转 消息=已�
 POST /account/logout -> 退出 动作 auth_logout 模板 提交跳转 消息=已退出 跳转=登录 公开
 GET /account/me -> 我是谁
 POST /account/password -> 改密码 动作 auth_password 模板 提交消息 消息=密码改好了，下次用新密码登录
+POST /account/lang -> 设语言 动作 account_lang 模板 提交消息 消息=已切换界面语言
 GET /account/students -> 列学生 角色 teacher
 POST /account/students -> 列学生页面 动作 student_home 模板 列表 键=students 行=username,display_name,account_state,attempt_n,last_active 角色 teacher
 POST /account/students/create -> 建学生 动作 student_create 模板 提交消息 消息=建好了学生账号：{username} 键=students 角色 teacher
@@ -420,7 +435,12 @@ POST /account/subject/teacher-remove -> 移除科目教师页面 动作 subject_
   先 数据 subject_info code=a name=甲 kind=language caps=x levels=空 qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
   先 数据 subject_student subject_id=1 learner=s1 assigned_by=t1 status=active created_at=2026-01-01
   调用 认证信息 current_user=s1 current_role=student auth_mode=on
-  得 user=s1 label=小明 role=student role_label=学生 subject=1
+  得 user=s1 label=小明 role=student role_label=学生 subject=1 lang=zh
+
+用例 认证信息_语言是日语
+  先 数据 account_user username=s2 password_hash=x display_name=翔太 role=student disabled=0 lang=ja created_at=2026-01-01
+  调用 认证信息 current_user=s2 current_role=student auth_mode=on
+  得 user=s2 lang=ja
 
 用例 认证信息_学生两个科目偏好2
   先 数据 account_user username=s1 password_hash=x display_name=小明 role=student disabled=0 created_at=2026-01-01
@@ -467,6 +487,34 @@ POST /account/subject/teacher-remove -> 移除科目教师页面 动作 subject_
   先 调用 建学生 username=s1 password=pw123456 display_name=小明
   调用 改密码 learner=s1 auth_mode=on old_password=pw123456 new_password=newpw789 new_password2=other
   报错 400
+
+用例 设语言_改成日语
+  先 调用 建学生 username=s1 password=pw123456 display_name=小明
+  调用 设语言 learner=s1 auth_mode=on lang=ja
+  得 ok=1 lang=ja
+
+用例 设语言_改回中文
+  先 调用 建学生 username=s1 password=pw123456 display_name=小明
+  先 调用 设语言 learner=s1 auth_mode=on lang=ja
+  调用 设语言 learner=s1 auth_mode=on lang=zh
+  得 ok=1 lang=zh
+
+用例 设语言_只许zh和ja
+  先 调用 建学生 username=s1 password=pw123456 display_name=小明
+  调用 设语言 learner=s1 auth_mode=on lang=fr
+  报错 400
+
+用例 设语言_learner为空
+  调用 设语言 learner=空 auth_mode=on lang=ja
+  报错 400
+
+用例 设语言_单人模式
+  调用 设语言 learner=me auth_mode=off lang=ja
+  报错 404
+
+用例 设语言_没有这个账号
+  调用 设语言 learner=ghost auth_mode=on lang=ja
+  报错 404
 
 用例 改密码_单人模式
   调用 改密码 learner=me auth_mode=off old_password=a new_password=b new_password2=b

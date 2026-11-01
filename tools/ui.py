@@ -1010,7 +1010,8 @@ def vue_backend(screens, options=None):
                        vue_source=options.get("vue_source"),
                        vue_path=options.get("vue_path"),
                        nav=options.get("nav"),
-                       page=options.get("page"))
+                       page=options.get("page"),
+                       i18n_langs=options.get("i18n_langs"))
     return _envelope(screens, files, "vue")
 
 
@@ -1304,7 +1305,7 @@ def _page_info(page) -> dict:
 
 def render_vue(screens, title="UI", options_map=None, rows=None,
                endpoints=None, inline=False, vue_source=None, vue_path=None,
-               template_dir=None, nav=None, page=None):
+               template_dir=None, nav=None, page=None, i18n_langs=None):
     """Render the frontend. Jinja is imported here, not at module scope.
 
     inline=False  index.html + style.css + app.js, Vue from a CDN tag.
@@ -1399,6 +1400,12 @@ def render_vue(screens, title="UI", options_map=None, rows=None,
         "nav": bool(nav),
         "nav_json": json.dumps(nav or [], ensure_ascii=False),
         "page_json": json.dumps(_page_info(page), ensure_ascii=False),
+        # 界面多语言（可选）：项目带 i18n/ 才启用。顶栏切换按钮还要开着 auth_me、
+        # 项目声明了 account_lang 接口（按钮调它存进账号）——缺一样的项目
+        # 这些变量都是空/假，模板里一个字都不生成
+        "i18n_langs": list(i18n_langs or []),
+        "has_lang_switch": bool(i18n_langs) and "auth_me" in (endpoints or {})
+                           and "account_lang" in (endpoints or {}),
         # 导航里的「退出登录」：只有真有这个接口时才放，不然点了没反应
         "nav_logout": bool(nav) and "auth_logout" in (endpoints or {}),
         # 有 auth_me 就在页面打开、登录、退出时问一次「现在是谁」：顶栏显示名字，

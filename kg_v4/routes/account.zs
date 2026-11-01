@@ -31,6 +31,12 @@
   消息 系统 {_msg} ok
 结束
 
+接口 POST /account/lang 动作 account_lang
+  设 r = 调用 account.设语言 learner={learner} auth_mode={auth_mode} lang={lang}
+  设 _msg = 已切换界面语言
+  消息 系统 {_msg} ok
+结束
+
 接口 GET /account/students 角色 teacher
   设 r = 调用 account.列学生 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   返回 {r}

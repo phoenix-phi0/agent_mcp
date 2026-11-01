@@ -71,6 +71,8 @@
 | D5 | 设定预览与学生端真实提示词不一致 | 无自定义设定时预览开头是「你是一位耐心的日语老师」，问老师真实人设是「你是一位中文老师，教中文学习者日语语法」 | kg_v4/services/teacher_rules.zs:697-698（拼进 queries/teacher_rules_preview_layout.sql 的 :opener）；subject.zs:687 | K164 盘点、K166 已知问题 2 | 部分修（41df270，K166：预览按科目取，有自定义时显示自定义；日语默认措辞为保持改前一致有意不动） | 待用户决定是否让预览直接取 科目老师设定.persona | 小 |
 | D6 | 做题页等级只有 N5–N1、题卡显示「N5・选择」 | — | quiz.zs、quiz.entity | K157 §2、K160 | 已修（f6ede27、7e06dad，K161） | — | — |
 | D7 | 学情 5 个桶、知识点等级取数、课文导入、问老师写死 N5–N1 | — | progress.zs、lesson.zs、tutor.zs | K160 涉及文件 | 已修（7e06dad，K161；代码里已无 N5 字面量，注释残留见 W1） | — | — |
+| I1 | AI 回答语言跟随界面语言（日语版第 2 期） | 界面切到日本語后，问老师 / 教师助手的回答仍是中文（提示词不按 me.lang 注入） | kg_v4/services/tutor.zs、teacher_assist.zs 的提示词拼装 | K180 第 1 期上线后遗留（设计 kg_v4/plan/i18n_ja_design.md D2 定稿） | 未修 | 提示词按 me.lang 注入「用日语回答」；另加假模型固定日语回复的 GOLDEN_JA 回归 | 中 |
+| I2 | 科目内容日语翻译（日语版第 3 期） | 知识点、条目、题目、讲解、单词释义（约 16.7 万字）仍是中文，切日本語后内容不翻 | content 各表；kg/content | K180 第 1 期上线后遗留（设计 D3 定稿） | 未修 | 只翻 Python 科目；建 content_translation 翻译表（中文原文为键）分批导入，不动现有表和内容行，读取时按 lang 替换 | 大 |
 
 ## 五、界面文案
 

@@ -114,6 +114,7 @@ else
 fi
 run 模板命名    $PY tests/gen/test_templates.py
 run 按端拆页面  $PY tests/gen/test_ends.py
+run 界面多语言  $PY tests/gen/test_i18n.py
 run 界面序      $PY tests/gen/test_order.py
 run 只加迁移    $PY tests/gen/test_migrate.py
 run 显式重建表  $PY tests/gen/test_migrate_rebuild.py
@@ -214,6 +215,7 @@ run 教材系列E2E bash -c "cd $M/tests/e2e && node series_run.js"
 run 教材导入E2E bash -c "cd $M/tests/e2e && node textbook_import_run.js"
 run 多人E2E     bash -c "cd $M/tests/e2e && node multiuser_run.js"
 run 两端页面E2E bash -c "cd $M/tests/e2e && node ends_run.js"
+run 界面多语言E2E bash -c "cd $M/tests/e2e && node i18n_run.js"
 run 换端退出E2E bash -c "cd $M/tests/e2e && node switch_logout_run.js"
 run 老师设定E2E bash -c "cd $M/tests/e2e && node teacher_note_run.js"
 run 老师传达E2E bash -c "cd $M/tests/e2e && node teacher_relay_run.js"

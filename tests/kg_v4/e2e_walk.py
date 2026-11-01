@@ -271,7 +271,10 @@ def login(page, base, user, end=""):
 def nav_links(page):
     names = page.eval_on_selector_all(
         "nav a[href='#']", "els => els.map(e => e.textContent.trim())")
-    return sorted(n for n in names if n != "改密码")
+    # 顶栏语言切换（中文/日本語）不是页面导航（K180）
+    lang = page.eval_on_selector_all(
+        ".nav-lang a", "els => els.map(e => e.textContent.trim())")
+    return sorted(n for n in names if n != "改密码" and n not in lang)
 
 
 def visit(page, name, marks, settle=1200):

@@ -1,0 +1,28 @@
+# 无 i18n 项目的生成物基线（K180）：tests/gen/test_i18n.py 逐文件 sha256 对照。
+# 用途：i18n 机制全包在「项目里有 i18n/ 才走」的分支里，别的项目生成物一个
+# 字节都不能动——本文件就是「一个字节都不能动」的凭据。
+# 生成办法：临时目录拷 kg、kg_v4 的 ui/routes/entities/queries（不拷 i18n/）跑
+# gen.project.build；再照 test_i18n.py「二」里 app2ui 链路对 app2/ui/main.ui、
+# startup.ui 跑 compile_ui（title=agent / startup）；对每个产物（除
+# vue.global.prod.js）算 sha256。kg_v4 项目文件变了、或刻意改了引擎模板时，
+# diff 一遍生成物，确认差异就是预期改动，再用同一脚本重算更新此文件。
+kg/app.js: 5988da51037fcc6adb797dcc26c382ffae5b3ba85426cb2afb386a5ae6e72857
+kg/index.html: 15b595540fc998b8c6edbf6242f6319bfb4b9720302c99e2e26b9874a816b7c6
+kg/pages.json: dea663c6b9ec7bf38b6a59caa423c040e73279d3d8f0edc46d690099503c4e46
+kg/style.css: 343742e543d73e589179e9f5a221448f2924d0adcf821c0301b115501d0d1aa9
+kg/teacher.css: efcf883a1631e73f5391cc31640adfb6950093989e1e5d085597668112254929
+kg/teacher.html: 28c8a54f6756b15aa3fcf6589d38fa9779f23987a4d966737ba82199b3d28651
+kg/teacher.js: 28cbb6f28b9e15cacddb311f2e088a14b258647cfec45fcbfb5adb9578d75e55
+kg_v4/app.js: f504f250f65a542c96429f22c0b5ed4e66c72fb7631f9e5180cc35a5a8e39031
+kg_v4/index.html: fba4c0e23f05360d11b3168ffbdad1f96aa27f5e52f56392ab7aab44c2f83780
+kg_v4/pages.json: dea663c6b9ec7bf38b6a59caa423c040e73279d3d8f0edc46d690099503c4e46
+kg_v4/style.css: 94f177db26dd778d64b8e3e0317344c51e61518d899b8e56320d8b675b9c68e2
+kg_v4/teacher.css: eee59b763f5e852268eda9cbcae714ed928f646677b12e5752b8ac6358594e67
+kg_v4/teacher.html: 5fe7ebb542f969b3e8e99297aeb0016e12807aa0e51edeadb51ea5feb8f9252e
+kg_v4/teacher.js: 92a359d9a5584a329960b0724ba5c30880ab6d08836e1ab6ade9183d8aec340a
+app2ui/main.ui/app.js: 5609517f0ecd5fe369b3462c01308c59c39365ead238ec76eaa3b76b83b6f1da
+app2ui/main.ui/index.html: a24da81eace6f233d1378bf4947ddd7bab11b22c7eb3a40e475a306c7aa440e5
+app2ui/main.ui/style.css: efcf883a1631e73f5391cc31640adfb6950093989e1e5d085597668112254929
+app2ui/startup.ui/app.js: 23f6385f74b7f8d3c67fe2db7adbddc624f56be6b1535cc7afc851d8548ea5fd
+app2ui/startup.ui/index.html: 876f81033e9861e685f1f259b7538dc818e9e03f0420ba2a87e4f9185626b27e
+app2ui/startup.ui/style.css: efcf883a1631e73f5391cc31640adfb6950093989e1e5d085597668112254929
