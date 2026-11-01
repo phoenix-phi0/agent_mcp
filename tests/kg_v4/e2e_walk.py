@@ -422,7 +422,9 @@ def ja_tutor_flow(browser, base, proj, ck, marks, new_page):
         con.close()
     try:
         p = new_page(browser.new_context(), "s1-ja")
+        p._allowed_status = (401,)   # 登录前 401 跳登录页是预期行为，只在登录这几步放行
         login(p, base, STUDENT_NAME)
+        p._allowed_status = ()
         box = p.locator("textarea").last
         box.fill("走查日语提问")
         btn = p.locator("button", has_text="发送")
@@ -445,13 +447,30 @@ def ja_tutor_flow(browser, base, proj, ck, marks, new_page):
 
 def ja_quiz_flow(browser, base, proj, ck, marks, new_page):
     """K182：s1 lang=ja 进 Python 科目做题页，题干/选项/解析用 subject_content_translation 日文译文，
-    点正确选项判对（判题不受译文影响）。本段自建 walk182.* 行，结束删净，lang 改回 zh。"""
+    点正确选项判对（判题不受译文影响）。本段自建 walk182.* 行，结束删净，lang 改回 zh。
+    当前科目只认已登记（subject_student active）的科目：夹具登记 s1 为 Python 学生，
+    再用顶栏科目下拉（subject_switch）正式切过去；直接写 subject_pref 会被 当前科目 否掉、退回日语。"""
     name = "日语界面做题"
+    made_subject = False
+    made_student = False
+    old_pref = []
+    sname = ""
     con = sqlite3.connect(proj / "app.db")
     try:
-        sid = con.execute("SELECT id FROM subject_info WHERE code='python'").fetchone()[0]
+        row = con.execute("SELECT id FROM subject_info WHERE code='python'").fetchone()
+        if row is None:   # 走查库只有 1 号科目：自建一个 python 科目，结束时删
+            con.execute("INSERT INTO subject_info(code,name,kind,caps,levels,qtypes,visibility,owner,status,created_at,updated_at)"
+                        " VALUES('python','Python 编程','general','x','入门,基础,进阶','choice','public','t1','active','2026-01-01','2026-01-01')")
+            row = con.execute("SELECT id FROM subject_info WHERE code='python'").fetchone()
+            made_subject = True
+        sid = row[0]
+        sname = con.execute("SELECT name FROM subject_info WHERE id=?", (sid,)).fetchone()[0]
+        if con.execute("SELECT 1 FROM subject_student WHERE subject_id=? AND learner=?", (sid, STUDENT_NAME)).fetchone() is None:
+            con.execute("INSERT INTO subject_student(subject_id,learner,assigned_by,status,created_at)"
+                        " VALUES(?,?,'t1','active','2026-01-01')", (sid, STUDENT_NAME))
+            made_student = True
         con.execute("UPDATE account_user SET lang='ja' WHERE username=?", (STUDENT_NAME,))
-        con.execute("INSERT OR REPLACE INTO subject_pref(learner, subject_id) VALUES(?,?)", (STUDENT_NAME, sid))
+        old_pref = [r[0] for r in con.execute("SELECT subject_id FROM subject_pref WHERE learner=?", (STUDENT_NAME,))]
         con.execute("INSERT OR IGNORE INTO kg_point(code,title,subject_id) VALUES('walk182.point','walk182 知识点',?)", (sid,))
         con.execute("INSERT OR IGNORE INTO kg_item(code,name,point_code,subject_id) VALUES('walk182.item','walk182 条目','walk182.point',?)", (sid,))
         con.execute("INSERT OR REPLACE INTO quiz_question(question_no,course,level,category,stem,options,answer,accepted,explain,item_code,subject_id)"
@@ -468,13 +487,31 @@ def ja_quiz_flow(browser, base, proj, ck, marks, new_page):
         con.close()
     try:
         p = new_page(browser.new_context(), "s1-ja-quiz")
+        p._allowed_status = (401,)   # 同上：登录前的 401 不计
         login(p, base, STUDENT_NAME)
-        visit(p, "做题", marks)
-        for t in ("开始", "下一题"):
+        p._allowed_status = ()
+        sw = p.locator("select.nav-subject")
+        sw.wait_for(timeout=10000)
+        with p.expect_navigation(timeout=20000):   # switchSubject 提交 subject_switch 后整页 reload
+            sw.select_option(value=str(sid))
+        p.wait_for_load_state("domcontentloaded")
+        p.wait_for_function(
+            "u => { const el = document.querySelector('.nav-user-name');"
+            " return el && el.textContent.trim() === u; }",
+            arg=STUDENT_NAME, timeout=20000)
+        me = p.evaluate("async () => (await (await fetch('/auth/me', {method: 'POST',"
+                        " headers: {'Content-Type': 'application/json'}, body: '{}'})).json())")
+        ck(str(me.get("subject")) == str(sid), f"{name}：顶栏下拉切到 Python 科目（auth_me.subject={sid}）",
+           f"auth_me：subject={me.get('subject')} subjects={me.get('subjects')}")
+        p.evaluate("location.hash = encodeURIComponent('做题')")   # ja 界面导航文字是「練習」，按地址进
+        wait_screen(p, "做题")
+        p.wait_for_timeout(1200)
+        for t in ("スタート", "开始", "次の問題", "下一题"):
             b = p.locator("button", has_text=t)
             if b.count():
                 b.first.click()
                 p.wait_for_timeout(900)
+                break
         p.get_by_text("walk182 次の出力は").first.wait_for(timeout=20000)
         ck(True, f"{name}：做题页题干是日文（subject_content_translation 译文）")
         ck("walk182 中文题干" not in p.inner_text("body"), f"{name}：中文题干未同时出现")
@@ -484,7 +521,11 @@ def ja_quiz_flow(browser, base, proj, ck, marks, new_page):
         err = drain_errors(marks)
         ck(not err, f"{name}：无 JS 错误", err)
     except Exception as e:
-        ck(False, f"{name}：走查失败", f"{type(e).__name__}: {e}")
+        try:
+            body = p.inner_text("body")[:400].replace("\n", " | ")
+        except Exception:
+            body = "（取不到页面正文）"
+        ck(False, f"{name}：走查失败", f"{type(e).__name__}: {e} 页面：{body}")
     finally:
         con = sqlite3.connect(proj / "app.db")
         try:
@@ -496,7 +537,11 @@ def ja_quiz_flow(browser, base, proj, ck, marks, new_page):
                             ("DELETE FROM quiz_question WHERE question_no='walk182.q1'", ()),
                             ("DELETE FROM kg_item WHERE code='walk182.item'", ()),
                             ("DELETE FROM kg_point WHERE code='walk182.point'", ()),
-                            ("UPDATE account_user SET lang='zh' WHERE username=?", (STUDENT_NAME,))]:
+                            ("DELETE FROM subject_pref WHERE learner=?", (STUDENT_NAME,)),
+                            ("UPDATE account_user SET lang='zh' WHERE username=?", (STUDENT_NAME,))] + (
+                    [("DELETE FROM subject_student WHERE subject_id=? AND learner=?", (sid, STUDENT_NAME))] if made_student else []) + (
+                    [("DELETE FROM subject_info WHERE code='python'", ())] if made_subject else []) + [
+                    ("INSERT INTO subject_pref(learner, subject_id) VALUES(?,?)", (STUDENT_NAME, v)) for v in old_pref]:
                 try:
                     con.execute(q, args)
                 except Exception:
