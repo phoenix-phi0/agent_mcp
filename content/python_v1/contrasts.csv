@@ -1,0 +1,14 @@
+a_code,b_code
+python.list,python.tuple
+python.bool_eq,python.bool_is
+python.list_append,python.list_extend
+python.listop_sort,python.listop_sorted
+python.while,python.for
+python.while_break,python.while_continue
+python.scope_local,python.scope_global
+python.listop_remove,python.listop_pop
+python.env_print,python.ret_return
+python.param_pos,python.param_kw
+python.dict,python.set
+python.op_basic,python.op_floordiv
+python.file_write,python.file_read

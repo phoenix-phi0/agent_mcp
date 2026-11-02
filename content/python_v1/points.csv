@@ -1,0 +1,35 @@
+code,title
+python.env,环境与第一个程序
+python.var,变量与赋值
+python.num,数字类型
+python.op,算术运算
+python.str,字符串基础
+python.strm,字符串方法
+python.fstr,格式化输出 f-string
+python.io,输入输出
+python.bool,布尔与比较
+python.logic,逻辑运算
+python.if,if 条件语句
+python.while,while 循环
+python.for,for 循环与 range
+python.list,列表
+python.listop,列表常用操作
+python.slice,切片
+python.tuple,元组
+python.dict,字典
+python.set,集合
+python.nest,嵌套数据
+python.func,函数定义
+python.param,函数参数
+python.ret,返回值
+python.scope,作用域
+python.lambda,lambda 匿名函数
+python.module,模块与 import
+python.exc,异常处理
+python.file,文件读写
+python.comp,列表推导式
+python.builtin,常用内置函数
+python.type,类型判断与 None
+python.class,类与对象
+python.method,方法与属性
+python.inherit,继承

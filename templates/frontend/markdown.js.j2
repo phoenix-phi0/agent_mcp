@@ -1,0 +1,27 @@
+    // Markdown is deliberately a small, HTML-free subset. Escape before adding tags.
+    function markdown(value) {
+      const escape = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+      const inline = s => escape(s).split(/(`[^`\n]*`)/g).map((part, i) =>
+        i % 2 ? '<code>' + part.slice(1, -1) + '</code>' : part.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')).join('');
+      const lines = String(value == null ? '' : value).replace(/\r\n?/g, '\n').split('\n');
+      let html = '', paragraph = [], list = '', code = null;
+      const flush = () => { if (paragraph.length) { html += '<p>' + paragraph.map(inline).join('\n') + '</p>'; paragraph = []; } };
+      const closeList = () => { if (list) { html += '</' + list + '>'; list = ''; } };
+      for (const line of lines) {
+        if (code !== null) {
+          if (/^\s*```\s*$/.test(line)) { html += '<pre><code>' + escape(code.join('\n') + (code.length ? '\n' : '')) + '</code></pre>'; code = null; }
+          else code.push(line);
+          continue;
+        }
+        if (/^\s*```[^`]*$/.test(line)) { flush(); closeList(); code = []; continue; }
+        const heading = /^(#{1,6})\s+(.+)$/.exec(line);
+        if (heading) { flush(); closeList(); const n = heading[1].length; html += '<h' + n + '>' + inline(heading[2]) + '</h' + n + '>'; continue; }
+        const item = /^\s*([-*+]|\d+\.)\s+(.+)$/.exec(line);
+        if (item) { flush(); const kind = /\d/.test(item[1][0]) ? 'ol' : 'ul'; if (list !== kind) { closeList(); html += '<' + kind + '>'; list = kind; } html += '<li>' + inline(item[2]) + '</li>'; continue; }
+        closeList();
+        if (!line.trim()) flush(); else paragraph.push(line);
+      }
+      flush(); closeList();
+      if (code !== null) html += '<pre><code>' + escape(code.join('\n')) + '</code></pre>';
+      return html;
+    }

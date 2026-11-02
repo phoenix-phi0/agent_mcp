@@ -467,3 +467,9 @@ html[lang="ja"] body { font-family:-apple-system,"Hiragino Kaku Gothic ProN",
   "Hiragino Sans","Yu Gothic Medium","Yu Gothic","Meiryo","Noto Sans CJK JP",
   "Microsoft YaHei",sans-serif; }
 <% endif %>
+<% if has_markdown %>
+.markdown { white-space:normal; }
+.markdown pre { white-space:pre; overflow-x:auto; font-family:monospace; }
+.markdown code { font-family:monospace; }
+.markdown p { white-space:pre-wrap; }
+<% endif %>

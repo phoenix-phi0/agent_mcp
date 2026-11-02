@@ -220,6 +220,7 @@
 <%- endmacro -%>
 
 <%- macro 显示(n) -%>
+<% if n.has("Markdown") %><div class="dyn prose markdown"<%= 当(n) %><%= 尺寸(n) %>><% if n.label and n.label != n.name %><span class="lbl"><%= n.label %></span><% endif %><div class="dyn-v" v-html="markdown(getPath(shared, '<%= n.bind or n.name %>'))"></div></div><% else %>
 <p class="dyn<% if n.has("正文") %> prose<% endif %>"<%= 当(n) %><%= 尺寸(n) %>><% if n.label and n.label != n.name %><span class="lbl"><%= n.label %></span>
-<% endif %><span class="dyn-v">{{ getPath(shared, '<%= n.bind or n.name %>') }}</span></p>
+<% endif %><span class="dyn-v">{{ getPath(shared, '<%= n.bind or n.name %>') }}</span></p><% endif %>
 <%- endmacro -%>

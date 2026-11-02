@@ -215,7 +215,8 @@ const _app = createApp({
       const dict = (window.I18N || {})[i18nLang.value] || {};
       const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       for (let n = walk.nextNode(); n; n = walk.nextNode()) {
-        const v = n.nodeValue;
+<% if has_markdown %>        if (n.parentElement && n.parentElement.closest(".markdown code")) continue;
+<% endif %>        const v = n.nodeValue;
         if (!v || !v.trim()) continue;
         const t = dict[v.trim()];
         if (t && t !== v.trim()) n.nodeValue = v.replace(v.trim(), t);
@@ -356,6 +357,7 @@ const _app = createApp({
       list.push(...arr);
       Vue.nextTick(() => { const el = streamEls[name]; if (el) el.scrollTop = el.scrollHeight; });
     }
+<% if has_markdown %><% include "markdown.js.j2" %><% endif %>
     function getPath(obj, path) {
       return path.split(".").reduce((o, k) => (o == null ? o : o[k]), obj);
     }
@@ -1439,7 +1441,7 @@ const _app = createApp({
 <% endif %>
     }
 <% endif %>
-    return { route, params, forms, form, rowsOf, lists, notice, nav, PAGE, AUTH_SCREENS, current<% if i18n_langs %>, i18nLang, switchLang<% endif %><% if has_me %>, me<% endif %><% if has_subject_switch %>, switchSubject<% endif %>, visible, busy, pending, go, isHref, hrefOf, targetOf, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if home_logout %>, onHome<% endif %><% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_row_remote %>, onRowRemote<% endif %><% if has_msg_actions %>, msgActions, onMsgAction<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
+    return {<% if has_markdown %> markdown,<% endif %> route, params, forms, form, rowsOf, lists, notice, nav, PAGE, AUTH_SCREENS, current<% if i18n_langs %>, i18nLang, switchLang<% endif %><% if has_me %>, me<% endif %><% if has_subject_switch %>, switchSubject<% endif %>, visible, busy, pending, go, isHref, hrefOf, targetOf, reset, onSubmit, onAction, onRow, onKey, grow, screens<% if home_logout %>, onHome<% endif %><% if has_enter %>, enterKey<% endif %><% if has_files %>, files, pickFile, setFileEl<% endif %><% if has_row_remote %>, onRowRemote<% endif %><% if has_msg_actions %>, msgActions, onMsgAction<% endif %><% if has_overlays %>, openOverlay, showOverlay, closeOverlay<% endif %><% if has_shared_state %>, shared, setStreamEl, pushMessages, getPath<% endif %><% if has_endpoints or has_to_actions %>, submitTo, clearFields<% endif %><% if has_graphs %>, graphOf, onGraphNode<% endif %> };
   },
   template: `
 {#- 顶部导航。两种来路：

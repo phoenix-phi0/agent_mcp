@@ -375,7 +375,7 @@ FLAG_MODIFIERS = FLAG_MODIFIERS | {"隐藏"}
 # 「卡片」：分组画成居中的一张卡（做题的题卡）。配「翻页 <共享路径>」时那个
 # 值一变卡片就整个重建、播一次翻入动画——换题时看得出是新的一张。
 # 「正文」：「显示」按正文排（大字、保留换行），不是顶栏那种小号灰字。
-FLAG_MODIFIERS = FLAG_MODIFIERS | {"卡片", "正文"}
+FLAG_MODIFIERS = FLAG_MODIFIERS | {"卡片", "正文", "Markdown"}
 KEYED_MODIFIERS = KEYED_MODIFIERS | {"交给", "翻页"}
 
 # 列「地址 <键>」：这一格画成链接，见上面「链接」的说明
@@ -1433,6 +1433,7 @@ def render_vue(screens, title="UI", options_map=None, rows=None,
         "has_choices": any(n.kind == "选项" for s in screens for n in s.walk()),
         # 有图才插 Vue Flow 和 dagre 的 CDN，没有的页面一个外部依赖都不多
         "has_graphs": any(n.kind == "节点图" for s in screens for n in s.walk()),
+        "has_markdown": any(n.kind == "显示" and n.has("Markdown") for s in screens for n in s.walk()),
         # 界面名 -> 该界面的消息流。回显、占位、后端返回三处都按当前界面
         # 取，不能用全局第一条——见 _screen_streams 的说明。
         "screen_streams_json": json.dumps(_screen_streams(screens),

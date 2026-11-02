@@ -13,9 +13,8 @@ services/lesson.zs）。auth_mode=off 时显式 subject 才落到该科目，须
       --subject 2 --series-code python.core_v1 --series-name "Python 从零入门"
       [--intro ...] [--source ...] [--license ...] [--sort-order 100]
 
---intro：「写入系列课文并重灌」不接收简介（竖线版 /lesson/import 才有）；
-  全部课导入成功（无拒收）后才按 code+subject_id 一条 UPDATE 补上（纯展示字段）。
---sort-order：新系列该函数固定 sort_order=100，本参数不生效，只核对并提示。
+--intro / --sort-order：传给「写入系列课文并重灌」；服务未升级时明确拒绝，
+  不得在函数外直接补写。没有传入时保持原调用参数。
 --yes：目标是正式数据目录（kg_v4_data）时的确认开关；缺省拒绝，防止误灌正式库。
 
 出参：打印 total/imported/file_rows/rejected/item_links/point_links；
@@ -23,7 +22,7 @@ services/lesson.zs）。auth_mode=off 时显式 subject 才落到该科目，须
 """
 import argparse
 import json
-import sqlite3
+import re
 import sys
 import time
 from pathlib import Path
@@ -53,10 +52,10 @@ def main(argv=None):
     ap.add_argument("--subject", required=True, help="科目编号（如 2）")
     ap.add_argument("--series-code", required=True, help="系列号（如 python.core_v1）")
     ap.add_argument("--series-name", default="", help="系列名（缺省用系列号）")
-    ap.add_argument("--intro", default="", help="系列简介（函数不收，导入成功后单独补写）")
+    ap.add_argument("--intro", default=None, help="系列简介（须先升级服务）")
     ap.add_argument("--source", default="", help="来源")
     ap.add_argument("--license", default="", help="许可")
-    ap.add_argument("--sort-order", default="", help="排序（新系列固定 100，不生效，仅提示）")
+    ap.add_argument("--sort-order", default=None, type=int, help="排序整数（须先升级服务）")
     ap.add_argument("--yes", action="store_true", help="确认对正式数据目录（kg_v4_data）执行；缺省拒绝")
     a = ap.parse_args(argv)
 
@@ -78,9 +77,15 @@ def main(argv=None):
         print("--subject 要是数字"); return 2
     if root.name == "kg_v4_data" and not a.yes:
         print(f"{root} 像正式数据目录；要灌正式库请显式加 --yes"); return 2
-    if a.sort_order and a.sort_order != "100":
-        print(f"提示：「写入系列课文并重灌」对新系列固定 sort_order=100，"
-              f"--sort-order {a.sort_order} 不生效")
+    optional = {k: v for k, v in (("intro", a.intro), ("sort_order", a.sort_order)) if v is not None}
+    if optional:
+        service = root / "services" / "lesson.zs"
+        match = re.search(r"^\s*公开\s+函数\s+写入系列课文并重灌\s+([^\r\n]+)",
+                          service.read_text(encoding="utf-8"), re.MULTILINE)
+        parameters = set(re.findall(r"[A-Za-z_][A-Za-z_0-9]*", match.group(1))) if match else set()
+        if not optional.keys() <= parameters:
+            print("目标 lesson 服务尚不支持 intro/sort_order，请先完成 K187 服务升级；未写入")
+            return 2
 
     from gen.project import make_app
     from tools.dsl_http import Endpoint
@@ -93,6 +98,8 @@ def main(argv=None):
         " learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或}"
         " subject={subject 或}"
     )
+    for key in optional:
+        call_line += f" {key}={{{key}}}"
     ep = Endpoint("POST", "/setup/import-lesson-rows",
                   [call_line, "返回 {r}"],
                   src=root / "routes" / "lesson.zs", line=1)
@@ -104,6 +111,7 @@ def main(argv=None):
         "source": a.source,
         "license": a.license,
     }
+    form.update({k: str(v) for k, v in optional.items()})
     t0 = time.time()
     body_text, status, _auth = router.run(ep, form, user="")
     print(f"调用 lesson.写入系列课文并重灌 subject={a.subject} "
@@ -126,23 +134,9 @@ def main(argv=None):
     rejected = r.get("rejected") or []
     print("rejected=" + json.dumps(rejected, ensure_ascii=False))
     if rejected:
-        print("有拒收，按失败处理（不补写 intro）")
+        print("有拒收，按失败处理")
         return 1
 
-    if a.intro:
-        con = sqlite3.connect(root / "app.db")
-        try:
-            cur = con.execute(
-                "UPDATE lesson_series SET intro=? WHERE code=? AND subject_id=?",
-                (a.intro, a.series_code, int(a.subject)))
-            con.commit()
-            n = cur.rowcount
-        finally:
-            con.close()
-        print(f"intro 补写（函数不收简介，函数外补展示字段）：更新 {n} 行")
-        if n == 0:
-            print("intro 补写没命中任何系列行")
-            return 1
     print("完成。")
     return 0
 

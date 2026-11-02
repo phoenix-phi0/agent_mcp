@@ -1,0 +1,111 @@
+code,name,point_code,after_form,prev_code
+python.env_run,运行 .py 文件,python.env,,
+python.env_print,print 输出,python.env,,python.env_run
+python.env_comment,# 注释,python.env,,python.env_print
+python.var_assign,赋值语句 =,python.var,,
+python.var_name,变量命名规则,python.var,,python.var_assign
+python.var_multi,多重赋值与交换,python.var,,python.var_name
+python.num_int,int 整数,python.num,,
+python.num_float,float 浮点数,python.num,,python.num_int
+python.num_conv,int() float() 转换,python.num,,python.num_float
+python.op_basic,加减乘除 + - * /,python.op,,
+python.op_floordiv,整除 // 与取余 %,python.op,,python.op_basic
+python.op_pow,幂运算 **,python.op,,python.op_floordiv
+python.op_aug,复合赋值 += -=,python.op,,python.op_pow
+python.str_quote,引号写字符串,python.str,,
+python.str_concat,拼接 + 与重复 *,python.str,,python.str_quote
+python.str_len,len() 求长度,python.str,,python.str_concat
+python.str_index,字符串索引,python.str,,python.str_len
+python.strm_case,upper() lower(),python.strm,,
+python.strm_strip,strip() 去空白,python.strm,,python.strm_case
+python.strm_split,split() 与 join(),python.strm,,python.strm_strip
+python.strm_replace,replace() 替换,python.strm,,python.strm_split
+python.fstr_basic,f 字符串插入变量,python.fstr,,
+python.fstr_prec,保留小数 :.2f,python.fstr,,python.fstr_basic
+python.io_input,input() 读输入,python.io,,
+python.io_type,input 返回字符串,python.io,,python.io_input
+python.io_sepend,print 的 sep 与 end,python.io,,python.io_type
+python.bool_val,True 与 False,python.bool,,
+python.bool_cmp,比较运算符,python.bool,,python.bool_val
+python.bool_eq,== 比较值,python.bool,,python.bool_cmp
+python.bool_is,is 比较身份,python.bool,,python.bool_eq
+python.logic_and,and 并且,python.logic,,
+python.logic_or,or 或者,python.logic,,python.logic_and
+python.logic_not,not 取反,python.logic,,python.logic_or
+python.if_basic,if 单分支,python.if,,
+python.if_else,if-else 双分支,python.if,,python.if_basic
+python.if_elif,elif 多分支,python.if,,python.if_else
+python.if_indent,缩进表示代码块,python.if,,python.if_elif
+python.while_basic,while 条件循环,python.while,,
+python.while_break,break 跳出循环,python.while,,python.while_basic
+python.while_continue,continue 跳过本次,python.while,,python.while_break
+python.for_iter,for 遍历序列,python.for,,
+python.for_range,range(n),python.for,,python.for_iter
+python.for_range_step,"range(起, 止, 步长)",python.for,,python.for_range
+python.list_create,创建列表与索引,python.list,,
+python.list_append,append() 追加一个,python.list,,python.list_create
+python.list_extend,extend() 追加多个,python.list,,python.list_append
+python.list_modify,修改列表元素,python.list,,python.list_extend
+python.listop_sort,sort() 原地排序,python.listop,,
+python.listop_sorted,sorted() 返回新列表,python.listop,,python.listop_sort
+python.listop_remove,remove() 按值删,python.listop,,python.listop_sorted
+python.listop_pop,pop() 按位置删,python.listop,,python.listop_remove
+python.slice_basic,[起:止] 切片,python.slice,,
+python.slice_step,[::步长] 切片,python.slice,,python.slice_basic
+python.slice_neg,负索引,python.slice,,python.slice_step
+python.tuple_create,创建元组,python.tuple,,
+python.tuple_immut,元组不可修改,python.tuple,,python.tuple_create
+python.tuple_unpack,元组解包,python.tuple,,python.tuple_immut
+python.dict_create,创建字典与取值,python.dict,,
+python.dict_set,增加和修改键值,python.dict,,python.dict_create
+python.dict_get,get() 安全取值,python.dict,,python.dict_set
+python.dict_items,items() 遍历,python.dict,,python.dict_get
+python.set_create,创建集合,python.set,,
+python.set_dedup,集合去重,python.set,,python.set_create
+python.set_ops,交集与并集,python.set,,python.set_dedup
+python.nest_list,列表套列表,python.nest,,
+python.nest_dict,列表套字典,python.nest,,python.nest_list
+python.func_def,def 定义函数,python.func,,
+python.func_call,调用函数,python.func,,python.func_def
+python.func_doc,文档字符串,python.func,,python.func_call
+python.param_pos,位置参数,python.param,,
+python.param_default,默认参数,python.param,,python.param_pos
+python.param_kw,关键字参数,python.param,,python.param_default
+python.param_args,*args 可变参数,python.param,,python.param_kw
+python.ret_return,return 返回结果,python.ret,,
+python.ret_none,没写 return 得 None,python.ret,,python.ret_return
+python.ret_multi,返回多个值,python.ret,,python.ret_none
+python.scope_local,局部变量,python.scope,,
+python.scope_global,全局变量,python.scope,,python.scope_local
+python.scope_kw,global 关键字,python.scope,,python.scope_global
+python.lambda_basic,lambda 表达式,python.lambda,,
+python.lambda_key,sorted 的 key,python.lambda,,python.lambda_basic
+python.module_import,import 模块,python.module,,
+python.module_from,from ... import,python.module,,python.module_import
+python.module_std,math 与 random,python.module,,python.module_from
+python.exc_try,try-except,python.exc,,
+python.exc_types,常见异常类型,python.exc,,python.exc_try
+python.exc_finally,else 与 finally,python.exc,,python.exc_types
+python.exc_raise,raise 抛出异常,python.exc,,python.exc_finally
+python.file_with,with open() 打开,python.file,,
+python.file_read,读文件,python.file,,python.file_with
+python.file_write,写文件 w 与 a,python.file,,python.file_read
+python.file_enc,encoding 编码,python.file,,python.file_write
+python.comp_basic,基本推导式,python.comp,,
+python.comp_if,带条件推导式,python.comp,,python.comp_basic
+python.comp_dict,字典推导式,python.comp,,python.comp_if
+python.builtin_agg,max min sum,python.builtin,,
+python.builtin_enum,enumerate() 带序号,python.builtin,,python.builtin_agg
+python.builtin_zip,zip() 并行遍历,python.builtin,,python.builtin_enum
+python.type_type,type() 看类型,python.type,,
+python.type_isinst,isinstance() 判断,python.type,,python.type_type
+python.type_none,None 空值,python.type,,python.type_isinst
+python.class_def,class 定义类,python.class,,
+python.class_init,__init__ 初始化,python.class,,python.class_def
+python.class_self,self 指自己,python.class,,python.class_init
+python.method_def,实例方法,python.method,,
+python.method_attr,实例属性,python.method,,python.method_def
+python.method_str,__str__ 打印对象,python.method,,python.method_attr
+python.inherit_basic,子类继承父类,python.inherit,,
+python.inherit_override,方法重写,python.inherit,,python.inherit_basic
+python.inherit_super,super() 调父类,python.inherit,,python.inherit_override

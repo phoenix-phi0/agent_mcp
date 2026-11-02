@@ -122,6 +122,9 @@ def main() -> int:
         for src in ("kg", "kg_v4"):
             # 目录名与源同名：build 不传 title 时标题取目录名，要进 <title>
             proj = proj_copy(tmp, src, src)
+            if src == "kg_v4":
+                ui = proj / "ui/textbook.ui"
+                ui.write_text(ui.read_text(encoding="utf-8").replace("显示 reading.explanation 正文 Markdown", "显示 reading.explanation 正文"), encoding="utf-8")
             build(proj)
             n_i18n = sorted(f.name for f in (proj / "web").glob("i18n.*"))
             check(not n_i18n, f"{src} 副本没有 i18n.*.js：{n_i18n}")

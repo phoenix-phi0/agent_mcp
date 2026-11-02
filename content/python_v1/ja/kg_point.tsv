@@ -1,0 +1,35 @@
+tbl	row_key	field	text
+kg_point	python.env	title	環境と最初のプログラム
+kg_point	python.var	title	変数と代入
+kg_point	python.num	title	数値型
+kg_point	python.op	title	算術演算
+kg_point	python.str	title	文字列の基本
+kg_point	python.strm	title	文字列のメソッド
+kg_point	python.fstr	title	フォーマット出力 f-string
+kg_point	python.io	title	入出力
+kg_point	python.bool	title	真偽値と比較
+kg_point	python.logic	title	論理演算
+kg_point	python.if	title	if 条件分岐
+kg_point	python.while	title	while ループ
+kg_point	python.for	title	for ループと range
+kg_point	python.list	title	リスト
+kg_point	python.listop	title	リストのよく使う操作
+kg_point	python.slice	title	スライス
+kg_point	python.tuple	title	タプル
+kg_point	python.dict	title	辞書
+kg_point	python.set	title	集合
+kg_point	python.nest	title	入れ子のデータ
+kg_point	python.func	title	関数の定義
+kg_point	python.param	title	関数の引数
+kg_point	python.ret	title	戻り値
+kg_point	python.scope	title	スコープ
+kg_point	python.lambda	title	lambda 無名関数
+kg_point	python.module	title	モジュールと import
+kg_point	python.exc	title	例外処理
+kg_point	python.file	title	ファイルの読み書き
+kg_point	python.comp	title	リスト内包表記
+kg_point	python.builtin	title	よく使う組み込み関数
+kg_point	python.type	title	型の判定と None
+kg_point	python.class	title	クラスとオブジェクト
+kg_point	python.method	title	メソッドと属性
+kg_point	python.inherit	title	継承

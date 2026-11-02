@@ -6,16 +6,20 @@
 
 预检：4 列、tbl/field 白名单、row_key 在原表存在、quiz options 译文按 ^ 拆开的个数与原文一致、
 text 无制表符、换行必须写成字面 \\n（导入时转真实换行）。
+以 # text-encoding: json-string 开头的文件使用 JSON 字符串转义，保留代码中的字面反斜线。
 写入：显式事务逐行 upsert（ON CONFLICT 更新 text/updated_at），重复导入幂等；出错整批回滚。
 """
 import datetime
+import json
 import pathlib
 import sqlite3
 import sys
 
 KEY = {"kg_point": ("code", {"title"}), "kg_item": ("code", {"name"}),
        "quiz_question": ("question_no", {"stem", "options", "explain"}),
-       "subject_info": ("code", {"name", "intro"})}
+       "subject_info": ("code", {"name", "intro"}),
+       "lesson_text": ("code", {"title", "summary", "explain", "orig_title"}),
+       "lesson_series": ("code", {"name", "intro"})}
 LANG = "ja"
 
 
@@ -26,7 +30,9 @@ def main():
     do_apply = "--apply" in a
     rows, errs = [], []
     for f in sorted(d.glob("*.tsv")):
-        for ln, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+        lines = f.read_text(encoding="utf-8").splitlines()
+        json_encoding = bool(lines and lines[0] == "# text-encoding: json-string")
+        for ln, line in enumerate(lines, 1):
             if not line or line.startswith("#") or line == "tbl\trow_key\tfield\ttext":
                 continue
             p = line.split("\t")
@@ -49,7 +55,15 @@ def main():
             if "\n" in text.replace("\\n", ""):
                 errs.append(f"{f.name}:{ln}: text 有真实换行（换行应写成字面 \\n）")
                 continue
-            rows.append((f.name, ln, tbl, rk, fd, text.replace("\\n", "\n")))
+            if json_encoding:
+                try:
+                    text = json.loads('"' + text + '"')
+                except ValueError:
+                    errs.append(f"{f.name}:{ln}: JSON 转义不合法")
+                    continue
+            else:
+                text = text.replace("\\n", "\n")
+            rows.append((f.name, ln, tbl, rk, fd, text))
     con = sqlite3.connect(str(db), isolation_level=None)
     try:
         for fn, ln, tbl, rk, fd, text in rows:

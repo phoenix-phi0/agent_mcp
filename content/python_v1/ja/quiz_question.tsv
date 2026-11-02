@@ -1,0 +1,298 @@
+tbl	row_key	field	text
+quiz_question	python.q_env_print_1	stem	次のコードの出力は？\nprint("Hello, Python")
+quiz_question	python.q_env_print_1	options	エラー^print(Hello, Python)^'Hello, Python'^Hello, Python
+quiz_question	python.q_env_print_1	explain	print() は括弧の中身を表示します。文字列を囲む引用符は表示されません。
+quiz_question	python.q_env_comment_1	stem	Python で単一行コメントに使う記号はどれ？
+quiz_question	python.q_env_comment_1	options	--^#^/*^//
+quiz_question	python.q_env_comment_1	explain	# から行末まではコメントで、実行時に無視されます。// は他の言語の書き方です。
+quiz_question	python.q_env_run_1	stem	コマンドラインで hello.py を実行するとき、正しいコマンドは？
+quiz_question	python.q_env_run_1	options	hello.py python^python hello.py^print hello.py^run hello.py
+quiz_question	python.q_env_run_1	explain	python インタプリタにファイル名を付けて実行します：python hello.py（python3 という名前の環境もあります）。
+quiz_question	python.q_var_assign_1	stem	次のコードの出力は？\nx = 10\nx = x + 5\nprint(x)
+quiz_question	python.q_var_assign_1	options	15^5^10^x + 5
+quiz_question	python.q_var_assign_1	explain	x = 10 で 10 を x に保存し、x = x + 5 は右辺の 10+5=15 を計算してから x に戻し入れます。
+quiz_question	python.q_var_name_1	stem	次のうち、変数名として正しいものはどれ？
+quiz_question	python.q_var_name_1	options	my-age^my_age^2name^class
+quiz_question	python.q_var_name_1	explain	変数名は英字・数字・アンダースコアで構成されます。数字で始めること、ハイフンを含むこと、class のようなキーワードを使うことはできません。
+quiz_question	python.q_var_multi_1	stem	次のコードの出力は？\na, b = 1, 2\na, b = b, a\nprint(a, b)
+quiz_question	python.q_var_multi_1	options	2 1^2 2^1 2^1 1
+quiz_question	python.q_var_multi_1	explain	a, b = b, a は Python の交換の書き方です。右辺でまず (2, 1) を計算してから、それぞれ a と b に代入します。
+quiz_question	python.q_num_float_1	stem	次のコードの出力は？\nprint(type(3.0))
+quiz_question	python.q_num_float_1	options	<class 'int'>^3.0^<class 'str'>^<class 'float'>
+quiz_question	python.q_num_float_1	explain	小数点を含む数は float（浮動小数点数）です。小数部分が 0 でも同じです。type() はその型を表示します。
+quiz_question	python.q_num_conv_1	stem	次のコードの出力は？\nprint(int(3.9))
+quiz_question	python.q_num_conv_1	options	3^4^エラー^3.9
+quiz_question	python.q_num_conv_1	explain	int() は浮動小数点数を整数に変換するとき小数部分をそのまま切り捨てます（四捨五入しません）。int(3.9) は 3 になります。
+quiz_question	python.q_num_int_1	stem	次のコードの出力は？\nprint(int("5") + 5)
+quiz_question	python.q_num_int_1	options	5 5^55^エラー^10
+quiz_question	python.q_num_int_1	explain	int('5') は文字列を整数 5 に変換し、5 + 5 = 10 になります。変換しないと '5' + 5 はエラーになります。
+quiz_question	python.q_op_floordiv_1	stem	次のコードの出力は？\nprint(7 // 2, 7 % 2)
+quiz_question	python.q_op_floordiv_1	options	3.5 0^3 1^3 0.5^3.5 1
+quiz_question	python.q_op_floordiv_1	explain	// は整数除算で商の整数部分だけを取ります：7 // 2 = 3。% は剰余を求めます：7 % 2 = 1。
+quiz_question	python.q_op_basic_1	stem	次のコードの出力は？\nprint(6 / 3)
+quiz_question	python.q_op_basic_1	options	2.5^2.0^2^1
+quiz_question	python.q_op_basic_1	explain	Python 3 では / は常に浮動小数点数になります。割り切れる場合でも 6 / 3 の結果は 2.0 です。
+quiz_question	python.q_op_pow_1	stem	次のコードの出力は？\nprint(2 ** 3)
+quiz_question	python.q_op_pow_1	options	8^6^9^5
+quiz_question	python.q_op_pow_1	explain	** はべき乗演算で、2 ** 3 は 2 の 3 乗、つまり 8 です。
+quiz_question	python.q_str_concat_1	stem	次のコードの出力は？\nprint("ab" * 3)
+quiz_question	python.q_str_concat_1	options	エラー^ab ab ab^ab3^ababab
+quiz_question	python.q_str_concat_1	explain	文字列に整数を掛けると繰り返しになります。'ab' * 3 は 'ababab' です。
+quiz_question	python.q_str_len_1	stem	次のコードの出力は？\nprint(len("hello"))
+quiz_question	python.q_str_len_1	options	5^7^4^6
+quiz_question	python.q_str_len_1	explain	len() は文字数を返します。'hello' は 5 文字です。
+quiz_question	python.q_str_index_1	stem	次のコードの出力は？\ns = "Python"\nprint(s[1])
+quiz_question	python.q_str_index_1	options	P^y^t^n
+quiz_question	python.q_str_index_1	explain	文字列のインデックスは 0 から始まります。s[0] は P、s[1] は y です。
+quiz_question	python.q_strm_split_1	stem	次のコードの出力は？\nprint("a,b,c".split(","))
+quiz_question	python.q_strm_split_1	options	a b c^['a', 'b', 'c']^abc^['a,b,c']
+quiz_question	python.q_strm_split_1	explain	split(',') はカンマ区切りで文字列をリストに分割します。
+quiz_question	python.q_strm_strip_1	stem	次のコードの出力は？\ns = "  hi  "\nprint("[" + s.strip() + "]")
+quiz_question	python.q_strm_strip_1	options	[hi]^[hi  ]^[  hi  ]^[  hi]
+quiz_question	python.q_strm_strip_1	explain	strip() は文字列の両端の空白を取り除きます。真ん中の空白はそのままです。
+quiz_question	python.q_strm_replace_1	stem	次のコードの出力は？\nprint("I like Python".replace("Python", "Java"))
+quiz_question	python.q_strm_replace_1	options	I like Python^Java like Python^エラー^I like Java
+quiz_question	python.q_strm_replace_1	explain	replace(旧, 新) は、旧い部分を新しい内容に置き換えた新しい文字列を返します。
+quiz_question	python.q_fstr_basic_1	stem	次のコードの出力は？\nname = "小明"\nage = 12\nprint(f"我叫{name}，今年 {age} 岁")
+quiz_question	python.q_fstr_basic_1	options	我叫{name}，今年{age}岁^エラー^我叫小明，今年 12 岁^我叫 name，今年 age 岁
+quiz_question	python.q_fstr_basic_1	explain	文字列の前に f を付けると、波括弧の中の変数がその値に置き換えられます。
+quiz_question	python.q_fstr_prec_1	stem	次のコードの出力は？\npi = 3.14159\nprint(f"{pi:.2f}")
+quiz_question	python.q_fstr_prec_1	options	3.1^3^3.14^3.14159
+quiz_question	python.q_fstr_prec_1	explain	:.2f は小数第 2 位まで残す（四捨五入）という意味です。
+quiz_question	python.q_io_type_1	stem	x = input() を実行してユーザーが 5 を入力し Enter を押したとき、x の型は？
+quiz_question	python.q_io_type_1	options	bool（ブール値）^str（文字列）^float（浮動小数点数）^int（整数）
+quiz_question	python.q_io_type_1	explain	input() が読み取るのは常に文字列です。数値として使うには int(x) か float(x) で変換する必要があります。
+quiz_question	python.q_io_sepend_1	stem	次のコードの出力は？\nprint(1, 2, 3, sep="-", end="!")
+quiz_question	python.q_io_sepend_1	options	1-2-3!^123!^1 2 3!^1-2-3
+quiz_question	python.q_io_sepend_1	explain	sep は複数の値の間の区切り文字（既定は半角スペース）、end は末尾に付く文字（既定は改行）を指定します。
+quiz_question	python.q_io_input_1	stem	入力を待つ間に「请输入名字：」とヒントを出したいとき、正しい書き方はどれ？
+quiz_question	python.q_io_input_1	options	name = read('请输入名字：')^name = print('请输入名字：')^input name = '请输入名字：'^name = input('请输入名字：')
+quiz_question	python.q_io_input_1	explain	input() の括弧の中の文字列は、まずヒントとして表示されてからユーザーの入力を待ちます。
+quiz_question	python.q_bool_cmp_1	stem	次のコードの出力は？\nprint(3 > 2)
+quiz_question	python.q_bool_cmp_1	options	3 > 2^True^1^False
+quiz_question	python.q_bool_cmp_1	explain	比較の結果は真偽値になります。3 > 2 は成り立つので結果は True です。
+quiz_question	python.q_bool_eq_1	stem	次のコードの出力は？\na = [1, 2]\nb = [1, 2]\nprint(a == b)
+quiz_question	python.q_bool_eq_1	options	エラー^None^True^False
+quiz_question	python.q_bool_eq_1	explain	== は 2 つの値が等しいかを比較します。2 つのリストの要素は同じなので True です。
+quiz_question	python.q_bool_is_1	stem	次のコードの出力は？\na = [1, 2]\nb = [1, 2]\nprint(a is b)
+quiz_question	python.q_bool_is_1	options	True^False^エラー^None
+quiz_question	python.q_bool_is_1	explain	is は同じオブジェクトかどうかを判定します。a と b は別々に作られたリストで、値は等しくても同じオブジェクトではないので False です。値の比較には == を、None の判定には is を使います。
+quiz_question	python.q_logic_and_1	stem	次のコードの出力は？\nx = 10\nprint(x > 5 and x < 5)
+quiz_question	python.q_logic_and_1	options	False^エラー^None^True
+quiz_question	python.q_logic_and_1	explain	and は両辺がともに真のときだけ True になります。10 < 5 は偽なので結果は False です。
+quiz_question	python.q_logic_or_1	stem	次のコードの出力は？\nprint(1 > 2 or 2 > 1)
+quiz_question	python.q_logic_or_1	options	True^None^エラー^False
+quiz_question	python.q_logic_or_1	explain	or はどちらか一方が真なら True になります。2 > 1 は真です。
+quiz_question	python.q_logic_not_1	stem	次のコードの出力は？\nprint(not True)
+quiz_question	python.q_logic_not_1	options	エラー^not True^False^True
+quiz_question	python.q_logic_not_1	explain	not は真を偽に、偽を真にします。
+quiz_question	python.q_if_elif_1	stem	次のコードの出力は？\nscore = 85\nif score >= 90:\n    print("优")\nelif score >= 80:\n    print("良")\nelif score >= 60:\n    print("及格")\nelse:\n    print("不及格")
+quiz_question	python.q_if_elif_1	options	优^不及格^良^及格
+quiz_question	python.q_if_elif_1	explain	上から順に判定します。85 >= 90 は不成立、85 >= 80 が成立して「良」を出力し、その後の分岐は判定しません。
+quiz_question	python.q_if_else_1	stem	次のコードの出力は？\nn = 7\nif n % 2 == 0:\n    print("偶数")\nelse:\n    print("奇数")
+quiz_question	python.q_if_else_1	options	奇数^7^偶数^何も出力しない
+quiz_question	python.q_if_else_1	explain	7 % 2 は 1 なので条件 n % 2 == 0 は不成立で、else 側を実行します。
+quiz_question	python.q_if_basic_1	stem	次のコードの出力は？\nx = 5\nif x < 0:\n    print("负数")\nprint("结束")
+quiz_question	python.q_if_basic_1	options	负数^负数 结束^结束^何も出力しない
+quiz_question	python.q_if_basic_1	explain	x < 0 は不成立なのでインデントの中の print は実行されません。最終行はインデントがなく if に属さないため、必ず実行されます。
+quiz_question	python.q_while_basic_1	stem	次のコードの出力は？\ni = 0\nwhile i < 3:\n    print(i, end=" ")\n    i += 1
+quiz_question	python.q_while_basic_1	options	1 2 3^0 1 2^0 1 2 3^無限ループ
+quiz_question	python.q_while_basic_1	explain	i は 0 から始まり毎回 1 ずつ増え、i < 3 が成り立たなくなると止まります。0、1、2 を表示します。
+quiz_question	python.q_while_break_1	stem	次のコードの出力は？\ni = 0\nwhile True:\n    i += 1\n    if i == 3:\n        break\n    print(i, end=" ")
+quiz_question	python.q_while_break_1	options	1 2^3^1 2 3 4^1 2 3
+quiz_question	python.q_while_break_1	explain	i が 3 になると break が実行されてループ全体がすぐ終わるため、3 は表示されません。
+quiz_question	python.q_while_continue_1	stem	次のコードの出力は？\ni = 0\nwhile i < 3:\n    i += 1\n    if i == 2:\n        continue\n    print(i, end=" ")
+quiz_question	python.q_while_continue_1	options	1 2 3^2^1^1 3
+quiz_question	python.q_while_continue_1	explain	continue は今回の残りの処理を飛ばして次の周回に進みます。i が 2 のとき print はスキップされます。
+quiz_question	python.q_for_range_1	stem	次のコードの出力は？\nfor i in range(5):\n    print(i, end=" ")\nprint()
+quiz_question	python.q_for_range_1	options	0 1 2 3 4^1 2 3 4 5^0 1 2 3 4 5^5
+quiz_question	python.q_for_range_1	explain	range(5) は 0 から 4 までを生成します（5 を含まない）。
+quiz_question	python.q_for_range_step_1	stem	次のコードの出力は？\nprint(list(range(1, 10, 3)))
+quiz_question	python.q_for_range_step_1	options	[1, 4, 7]^[3, 6, 9]^[1, 4, 7, 10]^[1, 3, 5, 7, 9]
+quiz_question	python.q_for_range_step_1	explain	range(1, 10, 3) は 1 から始めて毎回 3 を加え、10 を超える前に止まります：1、4、7。
+quiz_question	python.q_for_iter_1	stem	次のコードの出力は？\ntotal = 0\nfor x in [1, 2, 3]:\n    total += x\nprint(total)
+quiz_question	python.q_for_iter_1	options	6^[1, 2, 3]^123^3
+quiz_question	python.q_for_iter_1	explain	for はリストの各要素を順に取り出して足し合わせます：1+2+3=6。
+quiz_question	python.q_list_create_1	stem	次のコードの出力は？\nlst = ["a", "b", "c"]\nprint(lst[-1])
+quiz_question	python.q_list_create_1	options	エラー^c^d^b
+quiz_question	python.q_list_create_1	explain	リストのインデックスは 0 から始まり、-1 は最後の要素を意味します。
+quiz_question	python.q_list_append_1	stem	次のコードの出力は？\na = [1, 2]\na.append([3, 4])\nprint(a)
+quiz_question	python.q_list_append_1	options	[1, 2, 3, 4]^[1, 2, 3]^エラー^[1, 2, [3, 4]]
+quiz_question	python.q_list_append_1	explain	append() は引数をひとまとまりとして末尾に追加します。リスト [3, 4] が 1 つの要素になります。
+quiz_question	python.q_list_extend_1	stem	次のコードの出力は？\na = [1, 2]\na.extend([3, 4])\nprint(a)
+quiz_question	python.q_list_extend_1	options	[1, 2, [3, 4]]^[1, 2, 3, 4]^エラー^[3, 4, 1, 2]
+quiz_question	python.q_list_extend_1	explain	extend() は別のリストの要素を 1 つずつ末尾に加えます。
+quiz_question	python.q_listop_sort_1	stem	次のコードの出力は？\na = [3, 1, 2]\nprint(a.sort())
+quiz_question	python.q_listop_sort_1	options	[3, 1, 2]^エラー^[1, 2, 3]^None
+quiz_question	python.q_listop_sort_1	explain	sort() はその場でソートし、リスト自体を直接変更します。戻り値は None です。ソート済みの新しいリストが欲しいときは sorted() を使います。
+quiz_question	python.q_listop_sorted_1	stem	次のコードの出力は？\na = [3, 1, 2]\nb = sorted(a)\nprint(a, b)
+quiz_question	python.q_listop_sorted_1	options	None [1, 2, 3]^[3, 1, 2] None^[1, 2, 3] [1, 2, 3]^[3, 1, 2] [1, 2, 3]
+quiz_question	python.q_listop_sorted_1	explain	sorted() はソート済みの新しいリストを返します。元のリスト a は変わりません。
+quiz_question	python.q_listop_pop_1	stem	次のコードの出力は？\na = ["a", "b", "c"]\nx = a.pop()\nprint(x, a)
+quiz_question	python.q_listop_pop_1	options	['a', 'b']^a ['b', 'c']^c ['a', 'b', 'c']^c ['a', 'b']
+quiz_question	python.q_listop_pop_1	explain	pop() は引数なしで呼ぶと、最後の要素を削除して返します。
+quiz_question	python.q_slice_basic_1	stem	次のコードの出力は？\na = [0, 1, 2, 3, 4]\nprint(a[1:3])
+quiz_question	python.q_slice_basic_1	options	[1, 2]^[1, 2, 3]^[0, 1, 2]^[2, 3]
+quiz_question	python.q_slice_basic_1	explain	スライス [開始:終了] は開始位置を含み終了位置を含みません。[1:3] はインデックス 1 と 2 を取ります。
+quiz_question	python.q_slice_step_1	stem	次のコードの出力は？\nprint("hello"[::-1])
+quiz_question	python.q_slice_step_1	options	olleh^エラー^hello^h
+quiz_question	python.q_slice_step_1	explain	ステップ -1 は後ろから前へ取るという意味で、[::-1] は文字列を反転させる定番の書き方です。
+quiz_question	python.q_slice_neg_1	stem	次のコードの出力は？\na = [0, 1, 2, 3, 4]\nprint(a[-2:])
+quiz_question	python.q_slice_neg_1	options	[4]^[3, 4]^[2, 3, 4]^[0, 1]
+quiz_question	python.q_slice_neg_1	explain	負のインデックスは末尾から数えます。-2 は後ろから 2 番目で、[-2:] は最後の 2 つを取ります。
+quiz_question	python.q_tuple_immut_1	stem	次のコードを実行するとどうなりますか？\nt = (1, 2, 3)\nt[0] = 10
+quiz_question	python.q_tuple_immut_1	options	TypeError になり、タプルは変更できない^t が [10, 2, 3] になる^何も変わらず、エラーも出ない^t が (10, 2, 3) になる
+quiz_question	python.q_tuple_immut_1	explain	タプルは作成後に要素を変更できません。要素への代入は TypeError になります。変更したい場合はリストを使います。
+quiz_question	python.q_tuple_create_1	stem	次のコードの出力は？\na = (5)\nb = (5,)\nprint(type(a), type(b))
+quiz_question	python.q_tuple_create_1	options	<class 'tuple'> <class 'int'>^<class 'int'> <class 'tuple'>^<class 'tuple'> <class 'tuple'>^<class 'int'> <class 'int'>
+quiz_question	python.q_tuple_create_1	explain	要素が 1 つのタプルにはカンマが必要です：(5,)。(5) は括弧を付けただけの整数 5 です。
+quiz_question	python.q_tuple_unpack_1	stem	次のコードの出力は？\npoint = (3, 4)\nx, y = point\nprint(x, y)
+quiz_question	python.q_tuple_unpack_1	options	(3, 4)^3^エラー^3 4
+quiz_question	python.q_tuple_unpack_1	explain	タプルはアンパックできます。x, y = point は 2 つの要素をそれぞれ x と y に代入します。
+quiz_question	python.q_dict_create_1	stem	次のコードの出力は？\nd = {"name": "Tom", "age": 18}\nprint(d["age"])
+quiz_question	python.q_dict_create_1	options	18^{'age': 18}^age^エラー
+quiz_question	python.q_dict_create_1	explain	辞書は キー: 値 の形でデータを保存し、d['age'] はキーで対応する値を取り出します。
+quiz_question	python.q_dict_get_1	stem	次のコードの出力は？\nd = {"name": "Tom"}\nprint(d.get("score", 0))
+quiz_question	python.q_dict_get_1	options	0^KeyError になる^score^None
+quiz_question	python.q_dict_get_1	explain	get(キー, 既定値) はキーが存在しないとき既定値を返し、エラーになりません。直接 d['score'] と書くと KeyError になります。
+quiz_question	python.q_dict_items_1	stem	次のコードの出力は？\nd = {"a": 1, "b": 2}\nfor k, v in d.items():\n    print(f"{k}={v}", end=" ")\nprint()
+quiz_question	python.q_dict_items_1	options	('a', 1) ('b', 2)^a=1 b=2^a b^1 2
+quiz_question	python.q_dict_items_1	explain	items() は (キー, 値) の組を順に返します。k, v の 2 つの変数で受け取ります。
+quiz_question	python.q_set_dedup_1	stem	次のコードの出力は？\ns = {1, 2, 2, 3, 3}\nprint(len(s))
+quiz_question	python.q_set_dedup_1	options	エラー^3^2^5
+quiz_question	python.q_set_dedup_1	explain	集合の要素は重複しません。{1, 2, 2, 3, 3} には実際には 1、2、3 の 3 要素しかありません。
+quiz_question	python.q_set_create_1	stem	次のコードの出力は？\nprint(type({}))
+quiz_question	python.q_set_create_1	options	<class 'tuple'>^<class 'set'>^<class 'dict'>^<class 'list'>
+quiz_question	python.q_set_create_1	explain	空の波括弧 {} が作るのは空の辞書です。空の集合は set() と書きます。
+quiz_question	python.q_set_ops_1	stem	次のコードの出力は？\na = {1, 2, 3}\nb = {2, 3, 4}\nprint(a.intersection(b))
+quiz_question	python.q_set_ops_1	options	{2, 3}^{1, 4}^{1}^{1, 2, 3, 4}
+quiz_question	python.q_set_ops_1	explain	intersection() は交集（2 つの集合のどちらにもある要素）を求めます。
+quiz_question	python.q_nest_list_1	stem	次のコードの出力は？\nm = [[1, 2, 3], [4, 5, 6]]\nprint(m[1][2])
+quiz_question	python.q_nest_list_1	options	2^4^6^[4, 5, 6]
+quiz_question	python.q_nest_list_1	explain	m[1] で 2 行目の [4, 5, 6] を取り、さらに [2] でそのインデックス 2 の要素 6 を取ります。
+quiz_question	python.q_nest_dict_1	stem	次のコードの出力は？\npeople = [{"name": "张三"}, {"name": "李四"}]\nprint(people[1]["name"])
+quiz_question	python.q_nest_dict_1	options	李四^张三^エラー^{'name': '李四'}
+quiz_question	python.q_nest_dict_1	explain	リストの各要素は辞書です。まずインデックスで辞書を取り出し、次にキーで値を取ります。
+quiz_question	python.q_func_def_1	stem	関数を定義するときに使うキーワードはどれ？
+quiz_question	python.q_func_def_1	options	func^define^function^def
+quiz_question	python.q_func_def_1	explain	Python は def 関数名(引数): で関数を定義します。関数の本体はインデントします。
+quiz_question	python.q_func_call_1	stem	次のコードの出力は？\ndef greet(name):\n    print("你好，" + name)\n\ngreet("小红")
+quiz_question	python.q_func_call_1	options	你好，name^你好，小红^何も出力しない^greet
+quiz_question	python.q_func_call_1	explain	greet('小红') を呼び出すと、引数 name に '小红' が入り、関数本体の print が実行されます。
+quiz_question	python.q_func_doc_1	stem	関数定義の直下の行に三重引用符で書いた文字列を何と呼びますか？
+quiz_question	python.q_func_doc_1	options	必ず書くコメント（書かないとエラーになる）^関数の戻り値^ドキュメンテーション文字列（docstring）。関数の説明を書く^関数の引数
+quiz_question	python.q_func_doc_1	explain	ドキュメンテーション文字列は関数の用途の説明で、help(関数名) で見られます。書かなくてもエラーにはなりません。
+quiz_question	python.q_param_default_1	stem	次のコードの出力は？\ndef power(x, n=2):\n    return x ** n\n\nprint(power(3), power(2, 3))
+quiz_question	python.q_param_default_1	options	エラー^3 8^9 8^9 4
+quiz_question	python.q_param_default_1	explain	n には既定値 2 があります。power(3) は既定値で 3**2=9、power(2, 3) は 3 が渡されるので 2**3=8 になります。
+quiz_question	python.q_param_kw_1	stem	次のコードの出力は？\ndef show(a, b):\n    print(f"{a}-{b}")\n\nshow(b=2, a=5)
+quiz_question	python.q_param_kw_1	options	5-2^2-5^エラー^a-b
+quiz_question	python.q_param_kw_1	explain	キーワード引数は名前で値を渡すので順序は関係ありません。a は 5、b は 2 を受け取ります。
+quiz_question	python.q_param_args_1	stem	次のコードの出力は？\ndef total(*args):\n    return sum(args)\n\nprint(total(1, 2, 3, 4))
+quiz_question	python.q_param_args_1	options	エラー^4^(1, 2, 3, 4)^10
+quiz_question	python.q_param_args_1	explain	*args は余った位置引数を 1 つのタプルにまとめ、sum で合計の 10 になります。
+quiz_question	python.q_ret_none_1	stem	次のコードの出力は？\ndef f():\n    print(5, end=" ")\n\nr = f()\nprint(r)
+quiz_question	python.q_ret_none_1	options	5 5^None^5 None^5
+quiz_question	python.q_ret_none_1	explain	関数には print があっても return がありません。呼び出すとまず 5 を表示し、関数自体は None を返すので r は None です。
+quiz_question	python.q_ret_return_1	stem	次のコードの出力は？\ndef f():\n    print("A")\n    return\n    print("B")\n\nf()
+quiz_question	python.q_ret_return_1	options	A B^None^A^B
+quiz_question	python.q_ret_return_1	explain	return に到達した時点で関数はすぐ終わるので、後の print('B') は実行されません。
+quiz_question	python.q_ret_multi_1	stem	次のコードの出力は？\ndef min_max(nums):\n    return min(nums), max(nums)\n\nprint(min_max([3, 1, 2]))
+quiz_question	python.q_ret_multi_1	options	エラー^[1, 3]^(1, 3)^1 3
+quiz_question	python.q_ret_multi_1	explain	return a, b は実際にはタプルを返します。そのまま表示すると (1, 3) で、x, y = f() でアンパックすることもできます。
+quiz_question	python.q_scope_local_1	stem	次のコードの出力は？\nx = 1\ndef f():\n    x = 2\nf()\nprint(x)
+quiz_question	python.q_scope_local_1	options	2^1^None^エラー
+quiz_question	python.q_scope_local_1	explain	関数内で代入した x はローカル変数で、関数の中でだけ有効です。外側の x には影響しません。
+quiz_question	python.q_scope_kw_1	stem	次のコードの出力は？\nx = 1\ndef f():\n    global x\n    x = 2\nf()\nprint(x)
+quiz_question	python.q_scope_kw_1	options	None^2^エラー^1
+quiz_question	python.q_scope_kw_1	explain	global x と宣言すると、関数内で x に代入したとき変更されるのはグローバル変数です。
+quiz_question	python.q_scope_global_1	stem	関数の中でグローバル変数 count を読むだけ（代入しない）場合、どうなりますか？
+quiz_question	python.q_scope_global_1	options	読めるのは常に 0^グローバル変数の値をそのまま読める^必ず NameError になる^読むには先に global count と書く必要がある
+quiz_question	python.q_scope_global_1	explain	関数内でローカル変数が見つからない場合は外側のグローバル変数を探します。読むだけなら global は不要で、関数内で変更するときにだけ必要です。
+quiz_question	python.q_lambda_basic_1	stem	次のコードの出力は？\nadd = lambda a, b: a + b\nprint(add(3, 4))
+quiz_question	python.q_lambda_basic_1	options	エラー^7^lambda^34
+quiz_question	python.q_lambda_basic_1	explain	lambda a, b: a + b は無名関数で、def add(a, b): return a + b と同じことです。
+quiz_question	python.q_lambda_key_1	stem	次のコードの出力は？\nwords = ["banana", "kiwi", "apple"]\nprint(sorted(words, key=lambda w: len(w)))
+quiz_question	python.q_lambda_key_1	options	['banana', 'apple', 'kiwi']^['kiwi', 'banana', 'apple']^['kiwi', 'apple', 'banana']^['apple', 'banana', 'kiwi']
+quiz_question	python.q_lambda_key_1	explain	key=len により sorted は文字列の長さ順にソートします：kiwi(4) < apple(5) < banana(6)。
+quiz_question	python.q_module_import_1	stem	次のコードの出力は？\nimport math\nprint(math.sqrt(16))
+quiz_question	python.q_module_import_1	options	4.0^エラー^16^4
+quiz_question	python.q_module_import_1	explain	import math の後は math.関数名 で呼び出します。math.sqrt(16) は平方根を求め、結果は浮動小数点数 4.0 です。
+quiz_question	python.q_module_from_1	stem	from math import pi を実行した後、円周率はどうやって使いますか？
+quiz_question	python.q_module_from_1	options	import.pi と書く^直接 pi と書く^from.pi と書く^math.pi と書く必要がある
+quiz_question	python.q_module_from_1	explain	from モジュール import 名前 は、その名前を現在のファイルに直接取り込むので、モジュール名の前置はもう不要です。
+quiz_question	python.q_module_std_1	stem	1 から 6 までのランダムな整数（さいころのように）を作りたいとき、どれを使いますか？
+quiz_question	python.q_module_std_1	options	range(1, 6)^math.randint(1, 6)^random.random(1, 6)^random.randint(1, 6)
+quiz_question	python.q_module_std_1	explain	random.randint(a, b) は a から b まで（両端を含む）のランダムな整数を返します。random.random() は 0 から 1 の間の小数を返します。
+quiz_question	python.q_exc_try_1	stem	次のコードの出力は？\ntry:\n    print(1 / 0)\nexcept ZeroDivisionError:\n    print("不能除以 0")
+quiz_question	python.q_exc_try_1	options	ZeroDivisionError のエラーでプログラムが終了する^0^None^不能除以 0
+quiz_question	python.q_exc_try_1	explain	1 / 0 は ZeroDivisionError を送出しますが、except で捕捉されて except の中の処理が実行されるため、プログラムはクラッシュしません。
+quiz_question	python.q_exc_types_1	stem	int("abc") はどの例外を送出しますか？
+quiz_question	python.q_exc_types_1	options	ValueError^IndexError^TypeError^NameError
+quiz_question	python.q_exc_types_1	explain	値の型は合っているが中身が正しくないとき ValueError が送出されます。'abc' は整数に変換できません。未定義の変数を使うと NameError、インデックスの範囲外は IndexError です。
+quiz_question	python.q_exc_raise_1	stem	次のコードの出力は？\ntry:\n    age = -1\n    if age < 0:\n        raise ValueError("年龄不能是负数")\nexcept ValueError as e:\n    print(e)
+quiz_question	python.q_exc_raise_1	options	何も出力しない^None^年龄不能是负数^-1
+quiz_question	python.q_exc_raise_1	explain	raise は例外を意図的に送出し、except で受け取ります。e は例外オブジェクトで、表示すると括弧の中の説明が出ます。
+quiz_question	python.q_file_with_1	stem	with open("a.txt") as f: でファイルを開く利点はどれ？
+quiz_question	python.q_file_with_1	options	ファイルが自動的に削除される^読み取りしかできず書き込みができない^ファイルの中身が自動的に大文字になる^コードブロックの終了後に自動的にファイルが閉じる
+quiz_question	python.q_file_with_1	explain	with 文はコードブロックの終わり（エラーのときでも）に自動で f.close() を呼ぶので、自分で閉じるのを忘れません。
+quiz_question	python.q_file_write_1	stem	open("a.txt", "w") と open("a.txt", "a") の違いはどれ？
+quiz_question	python.q_file_write_1	options	w は読み取り専用、a は書き込み専用^w は追加、a は空にして書き直す^両者はまったく同じ^w は空にして書き直し、a は末尾に追加する
+quiz_question	python.q_file_write_1	explain	モード w（write）はファイルを空にしてから書き込み、モード a（append）は元の内容を残して末尾に追加します。既定のモード r は読み取り専用です。
+quiz_question	python.q_file_read_1	stem	f.readlines() は何を返しますか？
+quiz_question	python.q_file_read_1	options	ファイルの行数^最初の 1 行の中身^ファイル全体の 1 つの文字列^各行からなるリスト
+quiz_question	python.q_file_read_1	explain	read() はファイル全体を 1 つの文字列として読み、readline() は 1 行だけ読み、readlines() は全行からなるリスト（各行に改行が付く）を返します。
+quiz_question	python.q_comp_basic_1	stem	次のコードの出力は？\nprint([x * x for x in [1, 2, 3]])
+quiz_question	python.q_comp_basic_1	options	[2, 4, 6]^14^[1, 4, 9]^[1, 2, 3]
+quiz_question	python.q_comp_basic_1	explain	[x * x for x in シーケンス] は各要素の平方を求めて新しいリストを作ります。
+quiz_question	python.q_comp_if_1	stem	次のコードの出力は？\nprint([x for x in range(6) if x % 2 == 0])
+quiz_question	python.q_comp_if_1	options	[1, 3, 5]^[0, 1, 2, 3, 4, 5]^[0, 2, 4]^[2, 4]
+quiz_question	python.q_comp_if_1	explain	内包表記の後ろの if は絞り込みに使い、x % 2 == 0 の偶数だけを残します。0 も偶数です。
+quiz_question	python.q_comp_dict_1	stem	次のコードの出力は？\nprint({x: x * x for x in [1, 2, 3]})
+quiz_question	python.q_comp_dict_1	options	[1, 4, 9]^{1: 2, 2: 4, 3: 6}^{1, 4, 9}^{1: 1, 2: 4, 3: 9}
+quiz_question	python.q_comp_dict_1	explain	{キー: 値 for ...} は辞書内包表記で、ここでは数をキー、平方を値にします。
+quiz_question	python.q_builtin_enum_1	stem	次のコードの出力は？\nfor i, ch in enumerate(["a", "b"], start=1):\n    print(i, ch, end=" ")\nprint()
+quiz_question	python.q_builtin_enum_1	options	a b^1 a 2 b^0 a 1 b^1 2
+quiz_question	python.q_builtin_enum_1	explain	enumerate(シーケンス, start=1) は番号と要素を同時に返します。番号は start から始まります。
+quiz_question	python.q_builtin_zip_1	stem	次のコードの出力は？\nprint(list(zip(["a", "b"], [1, 2])))
+quiz_question	python.q_builtin_zip_1	options	[('a', 'b'), (1, 2)]^['a', 'b', 1, 2]^[('a', 1), ('b', 2)]^{'a': 1, 'b': 2}
+quiz_question	python.q_builtin_zip_1	explain	zip は複数のシーケンスを位置ごとに組にします。各組はタプルです。
+quiz_question	python.q_builtin_agg_1	stem	次のコードの出力は？\nnums = [3, 9, 1, 2]\nprint(max(nums), min(nums), sum(nums))
+quiz_question	python.q_builtin_agg_1	options	9 1 15^9 1 5^1 9 15^15 9 1
+quiz_question	python.q_builtin_agg_1	explain	max は最大値、min は最小値、sum は合計を求めます。
+quiz_question	python.q_type_isinst_1	stem	次のコードの出力は？\nprint(isinstance(5, int))
+quiz_question	python.q_type_isinst_1	options	int^True^False^エラー
+quiz_question	python.q_type_isinst_1	explain	isinstance(値, 型) は値がその型かどうかを判定します。5 は int です。
+quiz_question	python.q_type_none_1	stem	変数 x が None かどうかの判定として、おすすめの書き方はどれ？
+quiz_question	python.q_type_none_1	options	x is None^type(x) == 0^x == 'None'^x = None
+quiz_question	python.q_type_none_1	explain	None は「値がない」ことを表し、ただ 1 つしかありません。判定には is None がおすすめです。x = None は代入であって判定ではありません。
+quiz_question	python.q_type_type_1	stem	次のコードの出力は？\nprint(type("10"))
+quiz_question	python.q_type_type_1	options	<class 'str'>^10^<class 'int'>^<class 'float'>
+quiz_question	python.q_type_type_1	explain	引用符付きの '10' は文字列であって数ではありません。
+quiz_question	python.q_class_init_1	stem	次のコードの出力は？\nclass Dog:\n    def __init__(self, name):\n        self.name = name\n\nd = Dog("旺财")\nprint(d.name)
+quiz_question	python.q_class_init_1	options	Dog^name^エラー^旺财
+quiz_question	python.q_class_init_1	explain	オブジェクト Dog('旺财') を作ると自動で __init__ が呼ばれ、名前が self.name に保存されます。
+quiz_question	python.q_class_def_1	stem	class について、次の説明で正しいものはどれ？
+quiz_question	python.q_class_def_1	options	クラスはテンプレートであり、クラスから複数のオブジェクトを作れる^1 つのクラスから作れるオブジェクトは 1 つだけ^クラス名はすべて小文字でなければならない^class と def はまったく同じ
+quiz_question	python.q_class_def_1	explain	クラスは、ある種のものがどんな属性とメソッドを持つかを記述します。オブジェクトはクラスから作られる具体的なインスタンスで、いくつでも作れます。クラス名は慣習的に先頭を大文字にします。
+quiz_question	python.q_class_self_1	stem	メソッド定義 def bark(self): の self は何を指しますか？
+quiz_question	python.q_class_self_1	options	グローバル変数^手動で渡さなければならない引数^クラスの名前^そのメソッドを呼び出したオブジェクト自身
+quiz_question	python.q_class_self_1	explain	self は現在のオブジェクトを表します。d.bark() を呼ぶと Python が自動的に d を self に渡すので、手動で渡す必要はありません。
+quiz_question	python.q_method_def_1	stem	次のコードの出力は？\nclass Counter:\n    def __init__(self):\n        self.n = 0\n    def add(self):\n        self.n += 1\n\nc = Counter()\nc.add()\nc.add()\nprint(c.n)
+quiz_question	python.q_method_def_1	options	エラー^0^2^1
+quiz_question	python.q_method_def_1	explain	add() を呼ぶたびにカウントが 1 増えます。2 回呼びました。
+quiz_question	python.q_method_str_1	stem	次のコードの出力は？\nclass P:\n    def __init__(self, x, y):\n        self.x = x\n        self.y = y\n    def __str__(self):\n        return f"点({self.x}, {self.y})"\n\nprint(P(1, 2))
+quiz_question	python.q_method_str_1	options	点(1, 2)^<__main__.P object>^P^1 2
+quiz_question	python.q_method_str_1	explain	__str__ を定義すると、print(オブジェクト) は __str__ が返す文字列を表示します。
+quiz_question	python.q_method_attr_1	stem	次のコードの出力は？\nclass Box:\n    def __init__(self, v):\n        self.v = v\n\na = Box(3)\nb = Box(3)\na.v = 5\nprint(a.v, b.v)
+quiz_question	python.q_method_attr_1	options	エラー^5 5^3 3^5 3
+quiz_question	python.q_method_attr_1	explain	オブジェクトごとに属性は独立しています。a.v を変えても b.v には影響しません。
+quiz_question	python.q_inherit_override_1	stem	次のコードの出力は？\nclass Animal:\n    def speak(self):\n        return "..."\n\nclass Dog(Animal):\n    def speak(self):\n        return "汪汪"\n\nprint(Dog().speak())
+quiz_question	python.q_inherit_override_1	options	... 汪汪^エラー^...^汪汪
+quiz_question	python.q_inherit_override_1	explain	子クラス Dog が speak をオーバーライドしているので、呼び出しには子クラス側の実装が使われます。
+quiz_question	python.q_inherit_basic_1	stem	次のコードの出力は？\nclass Animal:\n    def move(self):\n        print("我会动")\n\nclass Cat(Animal):\n    pass\n\nCat().move()
+quiz_question	python.q_inherit_basic_1	options	エラー^None^何も出力しない^我会动
+quiz_question	python.q_inherit_basic_1	explain	class Cat(Animal) は Cat が Animal を継承することを表します。自分で書いていない move は親クラスから受け継がれます。
+quiz_question	python.q_inherit_super_1	stem	次のコードの出力は？\nclass Animal:\n    def __init__(self, name):\n        self.name = name\n\nclass Dog(Animal):\n    def __init__(self, name, age):\n        super().__init__(name)\n        self.age = age\n\nd = Dog("小白", 3)\nprint(d.name, d.age)
+quiz_question	python.q_inherit_super_1	options	小白^3^小白 3^エラー
+quiz_question	python.q_inherit_super_1	explain	super().__init__(name) は親クラスの初期化を呼んで self.name を設定します。子クラスはさらに自分の age を設定します。

@@ -74,7 +74,7 @@
       显示 reading.formation 当 shared.reading.formation 接续
     结束
     区域 讲解
-      显示 reading.explanation 正文
+      显示 reading.explanation 正文 Markdown
     结束
     区域 例句 当 lists.examples&&lists.examples.length
       列表 例句表 绑 examples

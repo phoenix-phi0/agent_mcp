@@ -1,0 +1,111 @@
+tbl	row_key	field	text
+kg_item	python.env_run	name	.py ファイルの実行
+kg_item	python.env_print	name	print での出力
+kg_item	python.env_comment	name	# コメント
+kg_item	python.var_assign	name	代入文 =
+kg_item	python.var_name	name	変数名の命名規則
+kg_item	python.var_multi	name	多重代入と交換
+kg_item	python.num_int	name	int 整数
+kg_item	python.num_float	name	float 浮動小数点数
+kg_item	python.num_conv	name	int() float() による変換
+kg_item	python.op_basic	name	四則演算 + - * /
+kg_item	python.op_floordiv	name	整数除算 // と剰余 %
+kg_item	python.op_pow	name	べき乗 **
+kg_item	python.op_aug	name	複合代入 += -=
+kg_item	python.str_quote	name	クォートで文字列を書く
+kg_item	python.str_concat	name	連結 + と繰り返し *
+kg_item	python.str_len	name	len() で長さを求める
+kg_item	python.str_index	name	文字列のインデックス
+kg_item	python.strm_case	name	upper() lower()
+kg_item	python.strm_strip	name	strip() で空白を取り除く
+kg_item	python.strm_split	name	split() と join()
+kg_item	python.strm_replace	name	replace() で置換
+kg_item	python.fstr_basic	name	f 文字列で変数を埋め込む
+kg_item	python.fstr_prec	name	小数の桁数指定 :.2f
+kg_item	python.io_input	name	input() で入力を読む
+kg_item	python.io_type	name	input の戻り値は文字列
+kg_item	python.io_sepend	name	print の sep と end
+kg_item	python.bool_val	name	True と False
+kg_item	python.bool_cmp	name	比較演算子
+kg_item	python.bool_eq	name	== で値を比較
+kg_item	python.bool_is	name	is で同一性を比較
+kg_item	python.logic_and	name	and（かつ）
+kg_item	python.logic_or	name	or（または）
+kg_item	python.logic_not	name	not で否定
+kg_item	python.if_basic	name	if の単一分岐
+kg_item	python.if_else	name	if-else の二分岐
+kg_item	python.if_elif	name	elif による多分岐
+kg_item	python.if_indent	name	インデントでコードブロックを表す
+kg_item	python.while_basic	name	while 条件ループ
+kg_item	python.while_break	name	break でループを抜ける
+kg_item	python.while_continue	name	continue で今回をスキップ
+kg_item	python.for_iter	name	for でシーケンスを走査
+kg_item	python.for_range	name	range(n)
+kg_item	python.for_range_step	name	range(開始, 終了, ステップ)
+kg_item	python.list_create	name	リストの作成とインデックス
+kg_item	python.list_append	name	append() で 1 つ追加
+kg_item	python.list_extend	name	extend() で複数追加
+kg_item	python.list_modify	name	リスト要素の変更
+kg_item	python.listop_sort	name	sort() でその場でソート
+kg_item	python.listop_sorted	name	sorted() は新しいリストを返す
+kg_item	python.listop_remove	name	remove() で値を指定して削除
+kg_item	python.listop_pop	name	pop() で位置を指定して削除
+kg_item	python.slice_basic	name	[開始:終了] スライス
+kg_item	python.slice_step	name	[::ステップ] スライス
+kg_item	python.slice_neg	name	負のインデックス
+kg_item	python.tuple_create	name	タプルの作成
+kg_item	python.tuple_immut	name	タプルは変更不可
+kg_item	python.tuple_unpack	name	タプルのアンパック
+kg_item	python.dict_create	name	辞書の作成と値の取得
+kg_item	python.dict_set	name	キーと値の追加・変更
+kg_item	python.dict_get	name	get() で安全に値を取る
+kg_item	python.dict_items	name	items() で走査
+kg_item	python.set_create	name	集合の作成
+kg_item	python.set_dedup	name	集合で重複をなくす
+kg_item	python.set_ops	name	交集と和集合
+kg_item	python.nest_list	name	リストの中にリスト
+kg_item	python.nest_dict	name	リストの中に辞書
+kg_item	python.func_def	name	def で関数を定義
+kg_item	python.func_call	name	関数の呼び出し
+kg_item	python.func_doc	name	ドキュメンテーション文字列
+kg_item	python.param_pos	name	位置引数
+kg_item	python.param_default	name	デフォルト引数
+kg_item	python.param_kw	name	キーワード引数
+kg_item	python.param_args	name	*args 可変長引数
+kg_item	python.ret_return	name	return で結果を返す
+kg_item	python.ret_none	name	return を書かないと None
+kg_item	python.ret_multi	name	複数の値を返す
+kg_item	python.scope_local	name	ローカル変数
+kg_item	python.scope_global	name	グローバル変数
+kg_item	python.scope_kw	name	global キーワード
+kg_item	python.lambda_basic	name	lambda 式
+kg_item	python.lambda_key	name	sorted の key
+kg_item	python.module_import	name	import でモジュールを読み込む
+kg_item	python.module_from	name	from ... import
+kg_item	python.module_std	name	math と random
+kg_item	python.exc_try	name	try-except
+kg_item	python.exc_types	name	よくある例外の型
+kg_item	python.exc_finally	name	else と finally
+kg_item	python.exc_raise	name	raise で例外を送出
+kg_item	python.file_with	name	with open() で開く
+kg_item	python.file_read	name	ファイルを読む
+kg_item	python.file_write	name	ファイルに書く w と a
+kg_item	python.file_enc	name	encoding（エンコーディング）
+kg_item	python.comp_basic	name	基本の内包表記
+kg_item	python.comp_if	name	条件付き内包表記
+kg_item	python.comp_dict	name	辞書内包表記
+kg_item	python.builtin_agg	name	max min sum
+kg_item	python.builtin_enum	name	enumerate() で番号付き
+kg_item	python.builtin_zip	name	zip() で並列走査
+kg_item	python.type_type	name	type() で型を見る
+kg_item	python.type_isinst	name	isinstance() で判定
+kg_item	python.type_none	name	None（空値）
+kg_item	python.class_def	name	class でクラスを定義
+kg_item	python.class_init	name	__init__ での初期化
+kg_item	python.class_self	name	self は自分自身
+kg_item	python.method_def	name	インスタンスメソッド
+kg_item	python.method_attr	name	インスタンス属性
+kg_item	python.method_str	name	__str__ でオブジェクトを表示
+kg_item	python.inherit_basic	name	子クラスが親クラスを継承
+kg_item	python.inherit_override	name	メソッドのオーバーライド
+kg_item	python.inherit_super	name	super() で親クラスを呼ぶ
