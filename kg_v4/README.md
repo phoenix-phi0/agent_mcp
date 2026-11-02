@@ -14,6 +14,7 @@
 | `ui/` | 14 个 .ui，编译出 15 个界面（学生端 `/` 8 个，教师端 `/teacher` 7 个） |
 | `plan/top.zs` | 模块清单和依赖（约定检查、回归会读） |
 | `setup/init_data.py` | 数据初始化 |
+| `setup/import_lesson_rows.py` | rows_json 课文一次性导入（进程内调「写入系列课文并重灌」，K186） |
 | `req.md` | 需求说明 |
 
 不进版本库（见仓库 `.gitignore`）：`app.db`、`web/`（每次 build 重写）、`uploads/`、`sessions/`、`.auth_secret`。
