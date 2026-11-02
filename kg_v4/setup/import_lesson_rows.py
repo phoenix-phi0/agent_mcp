@@ -14,8 +14,9 @@ services/lesson.zs）。auth_mode=off 时显式 subject 才落到该科目，须
       [--intro ...] [--source ...] [--license ...] [--sort-order 100]
 
 --intro：「写入系列课文并重灌」不接收简介（竖线版 /lesson/import 才有）；
-  调用成功后按 code+subject_id 一条 UPDATE 补上（纯展示字段）。
+  全部课导入成功（无拒收）后才按 code+subject_id 一条 UPDATE 补上（纯展示字段）。
 --sort-order：新系列该函数固定 sort_order=100，本参数不生效，只核对并提示。
+--yes：目标是正式数据目录（kg_v4_data）时的确认开关；缺省拒绝，防止误灌正式库。
 
 出参：打印 total/imported/file_rows/rejected/item_links/point_links；
 接口失败或 rejected 非空退出码 1，参数/路径错误退出码 2，否则 0。
@@ -56,6 +57,7 @@ def main(argv=None):
     ap.add_argument("--source", default="", help="来源")
     ap.add_argument("--license", default="", help="许可")
     ap.add_argument("--sort-order", default="", help="排序（新系列固定 100，不生效，仅提示）")
+    ap.add_argument("--yes", action="store_true", help="确认对正式数据目录（kg_v4_data）执行；缺省拒绝")
     a = ap.parse_args(argv)
 
     root = Path(a.project).resolve()
@@ -74,6 +76,8 @@ def main(argv=None):
         print("rows 文件要是非空 JSON 数组"); return 2
     if not str(a.subject).isdigit():
         print("--subject 要是数字"); return 2
+    if root.name == "kg_v4_data" and not a.yes:
+        print(f"{root} 像正式数据目录；要灌正式库请显式加 --yes"); return 2
     if a.sort_order and a.sort_order != "100":
         print(f"提示：「写入系列课文并重灌」对新系列固定 sort_order=100，"
               f"--sort-order {a.sort_order} 不生效")
@@ -121,7 +125,9 @@ def main(argv=None):
         print(f"{k}={r.get(k)}")
     rejected = r.get("rejected") or []
     print("rejected=" + json.dumps(rejected, ensure_ascii=False))
-    bad = bool(rejected)
+    if rejected:
+        print("有拒收，按失败处理（不补写 intro）")
+        return 1
 
     if a.intro:
         con = sqlite3.connect(root / "app.db")
@@ -135,11 +141,8 @@ def main(argv=None):
             con.close()
         print(f"intro 补写（函数不收简介，函数外补展示字段）：更新 {n} 行")
         if n == 0:
-            print("intro 补写没命中任何系列行"); bad = True
-
-    if bad:
-        print("有拒收，按失败处理")
-        return 1
+            print("intro 补写没命中任何系列行")
+            return 1
     print("完成。")
     return 0
 
