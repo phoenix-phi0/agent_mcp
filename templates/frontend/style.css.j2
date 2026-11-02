@@ -466,6 +466,26 @@ tr.row-locked td { opacity:.55; }
 html[lang="ja"] body { font-family:-apple-system,"Hiragino Kaku Gothic ProN",
   "Hiragino Sans","Yu Gothic Medium","Yu Gothic","Meiryo","Noto Sans CJK JP",
   "Microsoft YaHei",sans-serif; }
+/* 教师端顶栏项多，加上语言切换、日文长文案后中等宽度放不下，文字会被挤成两行：
+   这个宽度段里收紧间距、不折行，再放不下就顶栏自己横向滚（同窄屏的做法）。
+   只作用于教师端顶栏；640px 以下仍走上面的窄屏规则，够宽时保持原样。 */
+@media (min-width:641px) and (max-width:1799px) {
+  nav.nav-role-teacher { gap:3px; padding-left:8px; padding-right:8px; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; }
+  nav.nav-role-teacher > *, nav.nav-role-teacher .nav-side > *, nav.nav-role-teacher .nav-user > * { flex:none; white-space:nowrap; }
+  nav.nav-role-teacher a { padding:4px 5px; font-size:12px; }
+  nav.nav-role-teacher .nav-side, nav.nav-role-teacher .nav-user { gap:3px; padding-left:5px; }
+  nav.nav-role-teacher .nav-badge { padding:3px 6px; }
+  nav.nav-role-teacher .nav-user-name { font-size:12px; }
+  nav.nav-role-teacher .nav-subject { font-size:12px; }
+  nav.nav-role-teacher .nav-logout { font-size:12px; padding:4px; }
+  nav.nav-role-teacher .nav-lang { margin-left:3px; }
+  nav.nav-role-teacher .nav-lang a { padding:3px 2px; }
+  nav.nav-role-teacher .nav-home { padding-left:3px; }
+  html[lang="ja"] nav.nav-role-teacher { letter-spacing:-.02em; }
+  html[lang="ja"] nav.nav-role-teacher .nav-side-h { display:none; }
+  html[lang="ja"] nav.nav-role-teacher .nav-user-name { max-width:48px; overflow:hidden; text-overflow:ellipsis; }
+  html[lang="ja"] nav.nav-role-teacher .nav-subject { max-width:84px; }
+}
 <% endif %>
 <% if has_markdown %>
 .markdown { white-space:normal; }

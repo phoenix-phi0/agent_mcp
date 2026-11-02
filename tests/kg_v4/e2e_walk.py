@@ -786,6 +786,7 @@ def k187_lesson_flow(browser, base, proj, ck, marks, new_page):
         body = p.inner_text("body")
         ck("第1課" in body and "応用" in body and "《日本語タイトル》" in body, f"{name}：ja 抬头课序和等级为日文", body[:200])
         ck("この課にはまだ問題がありません" in body, f"{name}：ja 0 题提示为日文", body[:300])
+        ck("接続" not in body, f"{name}：接续为空时整栏隐藏", body[:300])  # K188
         code_ok(p, "ja ")
         go(p, tb + "?lesson=walk187.nope")
         p.get_by_text("そのような課はありません").first.wait_for(timeout=15000)
@@ -867,6 +868,48 @@ def k187_lesson_flow(browser, base, proj, ck, marks, new_page):
         finally:
             con.close()
         ctx.close(); ctx_t.close(); ctx_zh.close()
+
+
+def k188_nav_flow(browser, base, proj, ck, marks, new_page):
+    """K188：教师端顶栏 1280 / 1440 宽 zh/ja 都不折行、不横向溢出。结束把 t1 的 lang 改回原值。"""
+    name = "K188顶栏"
+    js = ("() => { const n = document.querySelector('nav');"
+          " const els = [...n.querySelectorAll('a,button,select,.nav-user-name,.nav-badge')].filter(e => e.offsetParent);"
+          " const b = els.map(e => e.getBoundingClientRect());"
+          " const mid = b.map(r => r.top + r.height / 2);"
+          " return { lines: Math.max(...els.map(e => e.getClientRects().length)), maxH: Math.max(...b.map(r => r.height)),"
+          " spread: Math.max(...mid) - Math.min(...mid), right: Math.max(...b.map(r => r.right)), sw: n.scrollWidth, cw: n.clientWidth,"
+          " home: n.querySelector('.nav-home') ? n.querySelector('.nav-home').textContent.trim() : '' }; }")
+
+    def set_lang(lang):
+        con = sqlite3.connect(proj / "app.db")
+        try:
+            con.execute("UPDATE account_user SET lang=? WHERE username=?", (lang, TEACHER_USER))
+            con.commit()
+        finally:
+            con.close()
+
+    con = sqlite3.connect(proj / "app.db")
+    try:
+        old = con.execute("SELECT lang FROM account_user WHERE username=?", (TEACHER_USER,)).fetchone()[0]
+    finally:
+        con.close()
+    try:
+        for lang in ("zh", "ja"):
+            set_lang(lang)
+            for w in (1280, 1440):
+                ctx = browser.new_context(viewport={"width": w, "height": 800})
+                p = new_page(ctx, f"k188-{lang}-{w}")
+                p._allowed_status = (401,)
+                login(p, base, TEACHER_USER, "/teacher")
+                p._allowed_status = ()
+                p.wait_for_timeout(600)
+                d = p.evaluate(js)
+                ck(d["home"] and d["lines"] == 1 and d["maxH"] <= 40 and d["spread"] <= 3 and d["right"] <= w and d["sw"] <= d["cw"],
+                   f"{name}：{lang} {w} 宽一行放得下", str(d))
+                ctx.close()
+    finally:
+        set_lang(old)
 
 
 def write_assist_mock(proj, tmp):
@@ -1730,6 +1773,7 @@ def main(argv=None):
                 ja_quiz_flow(browser, base, proj, ck, marks, new_page)
                 ja_textbook_login_flow(browser, base, proj, ck, marks, new_page)   # K184：登录页跟浏览器 + Python 教材空态页 ja
                 k187_lesson_flow(browser, base, proj, ck, marks, new_page)   # K187：课文 Markdown、ja 译文、教师只读
+                k188_nav_flow(browser, base, proj, ck, marks, new_page)   # K188：教师端顶栏不折行
 
                 # ---- 390px 视口 ----
                 m = new_page(browser.new_context(viewport={"width": 390, "height": 844}),
