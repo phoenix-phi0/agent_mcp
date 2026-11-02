@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # build_bundle.sh —— 把 kg_v4 项目 + 引擎最小运行集打包成可单独上线的文件夹
 # （K178 打中文包；K183 起本脚本打日文包 kg_v4_bundle_ja：project/i18n/ja.tsv 界面/消息词表、
-#   init_data.sh 按 DEFAULT_LANG（默认 ja）建账号、content/ 带 Python 科目内容包与 442 条日文译文、
+#   init_data.sh 按 DEFAULT_LANG（默认 ja）建账号、content/ 带 Python 科目内容包、课文 13 课与 496 条日文译文、
 #   README.ja.md。最小运行集的分析与验证见 data/reports/kg_K178_glm.md（K178，前作 K123）；
 #   日文包的验证见 data/reports/kg_K183_glm.md（K183）。中文包目录 kg_v4_bundle 保留不动，脚本有护栏。）
 #
 # 用法：
-#   bash scripts/build_bundle.sh [输出目录]
-# 输出默认 /workspace/dslagent_exp/kg_v4_bundle_ja，旁边生成 kg_v4_bundle_ja.tar.gz。
+#   bash scripts/build_bundle.sh [--lang ja|zh] [输出目录]
+# --lang 默认 ja，输出默认 /workspace/dslagent_exp/kg_v4_bundle_ja；--lang zh 输出默认 kg_v4_bundle（K187）。旁边生成同名 .tar.gz。
+# 两个包内容相同，只差默认界面语言和说明文字；内容包一律取自本提交的 content/python_v1（不再有外部来源）。
 #
 # 原则：
 # - 基线一律 git archive HEAD：工作区未提交改动不进包，包内容与提交号一一对应。
@@ -23,11 +24,19 @@
 set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-OUT=${1:-/workspace/dslagent_exp/kg_v4_bundle_ja}
-# 护栏：中文包（K178 产物）位置保留不动——本脚本会加 content/ 内容包和 ja 默认值，别指到那里
-case "$(readlink -f "$OUT")" in
-  */kg_v4_bundle|*/kg_v4_bundle/|*/kg_v4_bundle.tar.gz)
-    echo "!! $OUT 是 K178 中文包的位置：本脚本打的是日文包（含 content/ 内容包、默认语言 ja），不要覆盖它"; exit 1 ;;
+BUNDLE_LANG=ja
+if [ "${1:-}" = "--lang" ]; then BUNDLE_LANG=${2:-}; shift 2 || true; fi
+case "$BUNDLE_LANG" in
+  ja) BUNDLE_NAME=kg_v4_bundle_ja ;;
+  zh) BUNDLE_NAME=kg_v4_bundle ;;
+  *) echo "!! --lang 只能是 ja 或 zh：$BUNDLE_LANG"; exit 2 ;;
+esac
+[ -z "${CONTENT_SRC:-}" ] || { echo "!! CONTENT_SRC 已取消：内容包一律取自本提交的 content/python_v1，包才和提交号一一对应"; exit 2; }
+OUT=${1:-/workspace/dslagent_exp/$BUNDLE_NAME}
+# 护栏：不能把一种语言的包打到另一种语言的位置（改名冒充）
+case "$BUNDLE_LANG:$(readlink -f "$OUT")" in
+  ja:*/kg_v4_bundle|zh:*/kg_v4_bundle_ja)
+    echo "!! $OUT 是另一种语言包的位置，--lang $BUNDLE_LANG 不能覆盖它"; exit 1 ;;
 esac
 TAG=$(git -C "$REPO" rev-parse HEAD)
 SHORT=${TAG:0:7}
@@ -38,7 +47,7 @@ say(){ echo "[build_bundle] $*"; }
 TMP=$(mktemp -d /tmp/build_bundle.XXXXXX)
 trap 'rm -rf "$TMP"' EXIT
 say "导出 HEAD=$SHORT（git archive，不含工作区未提交改动）"
-git -C "$REPO" archive "$TAG" gen tools templates verbs app2 models.json kg_v4 | tar -x -C "$TMP"
+git -C "$REPO" archive "$TAG" gen tools templates verbs app2 models.json kg_v4 content/python_v1 | tar -x -C "$TMP"
 
 # ---- 2 组装 ----
 say "组装 $OUT"
@@ -67,16 +76,20 @@ cp -a "$TMP/kg_v4/." "$OUT/project/"
 find "$OUT/project/plan" -name '*.md' -delete 2>/dev/null || true
 
 # ---- 2b content/：Python 科目内容包（可选内容，scripts/load_python_content.sh 经接口导入）----
-# 只带导入要用的文件（points/items/edges/contrasts/quiz_v2 + ja/ 译文 4 份 tsv）。
-# gen.py、ja/check_ja.py 是开发机的生成/自查工具（含开发机绝对路径，收尾检查也会拦），不随包；
-# quiz.txt 是旧版题库（内容 README 明确不要再导入），也不带。日语科目内容不打包（非日文版受众）。
-CSRC=${CONTENT_SRC:-/workspace/dslagent_exp/content/python_v1}
+# 只带导入要用的文件：points/items/edges/contrasts/quiz_v2 + ja/ 译文 4 份 tsv + lessons/lesson_rows.zh.json（中文课文）
+# + ja_lesson/lesson.tsv（课文译文）。lesson.tsv 单放一个目录：它的 row_key 是课号，课文导入之前预检必失败，
+# 要排在课文导入之后单独预检/写入。教材的生成/校验脚本、日文 JSON 等不随包。日语科目内容不打包。
+CSRC=$TMP/content/python_v1
 for f in points.csv items.csv edges.csv contrasts.csv quiz_v2.txt; do
-  [ -f "$CSRC/$f" ] || { echo "!! 内容源缺 $CSRC/$f（用 CONTENT_SRC=内容目录 指定别的位置）"; exit 1; }
+  [ -f "$CSRC/$f" ] || { echo "!! 提交里缺 content/python_v1/$f"; exit 1; }
 done
-NJ=$( { ls "$CSRC"/ja/*.tsv 2>/dev/null || true; } | wc -l )
-[ "$NJ" -eq 4 ] || { echo "!! 内容源 ja/ 应有 4 份译文 tsv，实际 $NJ：$CSRC/ja/"; exit 1; }
-mkdir -p "$OUT/content/python_v1/ja"
+[ -f "$CSRC/ja/lesson.tsv" ] && [ -f "$CSRC/lessons/lesson_rows.zh.json" ] || { echo "!! 提交里缺课文 lessons/lesson_rows.zh.json 或译文 ja/lesson.tsv"; exit 1; }
+NJ=$( { ls "$CSRC"/ja/*.tsv 2>/dev/null || true; } | grep -vc '/lesson\.tsv$' || true )
+[ "$NJ" -eq 4 ] || { echo "!! 内容源 ja/ 除 lesson.tsv 外应有 4 份译文 tsv，实际 $NJ"; exit 1; }
+mkdir -p "$OUT/content/python_v1/ja" "$OUT/content/python_v1/ja_lesson" "$OUT/content/python_v1/lessons"
+cp "$CSRC/lessons/lesson_rows.zh.json" "$OUT/content/python_v1/lessons/"
+cp "$CSRC/ja/lesson.tsv" "$OUT/content/python_v1/ja_lesson/"
+rm -f "$CSRC/ja/lesson.tsv"
 for f in points.csv items.csv edges.csv contrasts.csv quiz_v2.txt; do cp "$CSRC/$f" "$OUT/content/python_v1/$f"; done
 cp "$CSRC"/ja/*.tsv "$OUT/content/python_v1/ja/"
 
@@ -309,7 +322,9 @@ cat > "$OUT/scripts/load_python_content.sh" <<'XEOF_LOAD'
 # 导入「Python 编程」科目内容包（content/python_v1/，可选内容）：
 #   建 Python 科目 → 知识图谱导入（知识点/条目/前置边/对照，走图谱管理 preview→confirm，先预检再写）
 #   → 题库导入（POST /quiz/import，清空本科目题库重灌）→ 日文译文导入（project/scripts/import_content_ja.py，
-#   先预检再 --apply）。最后按库里的行数自检：图谱 34/49/110/13、题库 99、译文 442。
+#   先预检再 --apply）→ 中文课文 13 课（project/setup/import_lesson_rows.py，按条目/知识点挂接，所以在图谱之后）
+#   → 课文译文 54 行（ja_lesson/lesson.tsv，要在课文之后）。最后按库里的行数自检：图谱 34/49/110/13、题库 99、
+#   课文 13、挂接 110/34、译文 496（442+54）。
 # 前提：install.sh、init_data.sh 已跑，服务已在跑（bash scripts/start.sh）。
 # 可重复执行：图谱导入按编号「新增/更新」，题库重灌结果一致，译文 upsert；科目已存在则跳过建科目。
 # 用法：KG_PASSWORD='管理员口令' bash scripts/load_python_content.sh
@@ -329,6 +344,7 @@ for f in points.csv items.csv edges.csv contrasts.csv quiz_v2.txt; do
   [ -f "$C/$f" ] || { echo "!! 缺 $C/$f（内容包不全）"; exit 1; }
 done
 [ "$(ls "$C"/ja/*.tsv 2>/dev/null | wc -l)" -eq 4 ] || { echo "!! 缺 $C/ja/*.tsv（应 4 份译文）"; exit 1; }
+[ -f "$C/lessons/lesson_rows.zh.json" ] && [ -f "$C/ja_lesson/lesson.tsv" ] || { echo "!! 缺课文 lessons/lesson_rows.zh.json 或译文 ja_lesson/lesson.tsv"; exit 1; }
 [ -x "$PY" ] || { echo "!! 先跑 bash scripts/install.sh"; exit 1; }
 [ -f "$DB" ] || { echo "!! 没找到 $DB：先 bash scripts/init_data.sh"; exit 1; }
 [ -n "${KG_PASSWORD:-}" ] || { echo "!! 请用环境变量 KG_PASSWORD 给管理员口令（init_data.sh 用的那个）"; exit 1; }
@@ -401,7 +417,16 @@ say "日文译文预检"
 say "日文译文写入"
 "$PY" "$HERE/project/scripts/import_content_ja.py" --db "$DB" --dir "$C/ja" --apply
 
-say "自检行数（期望 图 34/49/110/13、题 99、译文 442）"
+say "导入中文课文 13 课（按系列重灌，可重复执行）"
+# import_lesson_rows.py 按当前目录找引擎（gen/project.py），所以要在 engine/ 里跑；有拒收则退出码非 0、在这里停下
+( cd "$HERE/engine" && "$PY" "$HERE/project/setup/import_lesson_rows.py" "$DATA" "$C/lessons/lesson_rows.zh.json" \
+    --subject "$SID" --series-code python.core_v1 --series-name 'Python 从零入门' --yes )
+say "课文译文预检"
+"$PY" "$HERE/project/scripts/import_content_ja.py" --db "$DB" --dir "$C/ja_lesson"
+say "课文译文写入"
+"$PY" "$HERE/project/scripts/import_content_ja.py" --db "$DB" --dir "$C/ja_lesson" --apply
+
+say "自检行数（期望 图 34/49/110/13、题 99、课文 13、挂接 110/34、译文 496）"
 "$PY" - "$DB" "$SID" <<'XPY'
 import sqlite3, sys
 con = sqlite3.connect(sys.argv[1]); sid = sys.argv[2]
@@ -412,8 +437,11 @@ got = [n("select count(*) from kg_point where subject_id=?"),
        n("select count(*) from kg_item where subject_id=?"),
        n("select count(*) from kg_contrast where subject_id=?"),
        n("select count(*) from quiz_question where subject_id=?"),
+       n("select count(*) from lesson_text where subject_id=?"),
+       n("select count(*) from lesson_item_link where subject_id=?"),
+       n("select count(*) from lesson_point_link where subject_id=?"),
        con.execute("select count(*) from subject_content_translation where lang='ja'").fetchone()[0]]
-exp = [34, 49, 110, 13, 99, 442]
+exp = [34, 49, 110, 13, 99, 13, 110, 34, 496]
 print("实际:", "/".join(map(str, got)))
 if got != exp:
     print("!! 行数和期望不符：期望 " + "/".join(map(str, exp)))
@@ -484,6 +512,8 @@ Python 科目（code=python）的知识图谱与题库源文件，附 ja/ 日文
 | contrasts.csv | 对照（a_code,b_code） | 13 |
 | quiz_v2.txt | 选择题（等级 入门38/基础34/进阶27；题干换行是字面 \n） | 99 |
 | ja/*.tsv | 日文译文 442 条（kg_point 34 / kg_item 110 / quiz_question 297 / subject_info 1） | 442 |
+| lessons/lesson_rows.zh.json | 中文课文 13 课（挂接条目 110、知识点 34） | 13 |
+| ja_lesson/lesson.tsv | 课文译文（lesson_text 52 / lesson_series 2），文件用 JSON 字符串转义；必须在课文导入后导入 | 54 |
 
 译文格式：tbl、row_key、field、text 四列；代码与程序输出保留原文，自然语言译日语；换行写成字面 \n。
 等级约定：通用科目的题要能出，等级用科目自定义等级（这里是 入门/基础/进阶）。
@@ -798,7 +828,7 @@ cat > "$OUT/README.md" <<'XEOF_README'
 
 自包含文件夹：拿到一台新机器，解压 → 装依赖 → 初始化（或迁移旧库）→ 启动，不依赖开发机上的任何东西。
 默认假模型（回复带 [模拟回复]），页面全部可演示；配好密钥可切真模型。
-**日文版**：界面/后端消息词表 `project/i18n/ja.tsv`（顶栏「中文 / 日本語」随时切换，跟随账号）；`init_data.sh` 建的账号默认日语（`DEFAULT_LANG=ja`）；`content/` 带 Python 科目内容包（知识图谱+题库+442 条日文译文）。日文说明见 `README.ja.md`。
+**日文版**：界面/后端消息词表 `project/i18n/ja.tsv`（顶栏「中文 / 日本語」随时切换，跟随账号）；`init_data.sh` 建的账号默认日语（`DEFAULT_LANG=ja`）；`content/` 带 Python 科目内容包（知识图谱+题库+课文 13 课+496 条日文译文）。日文说明见 `README.ja.md`。
 引擎基线、打包时间、Python 版本见 `VERSION`；打包脚本在引擎仓库 `scripts/build_bundle.sh`，可重复打包。
 
 ## 目录
@@ -806,7 +836,7 @@ cat > "$OUT/README.md" <<'XEOF_README'
 |---|---|
 | `engine/` | 引擎最小运行集（`python -m gen run` 实际 import/读取的，经追踪分析验证）：`gen/`（不含 out/ 与编辑器 .pyw）、`tools/` 31 个运行时模块（含 cbatch/zcode_tool：--real 的 cli:claude/cli:zcode 后端懒加载，缺了请求直接断）、`templates/`（db+frontend 的 .j2）、`gen/templates/`、`verbs/` 全量（动词包懒加载，裁不动）、`app2/assets/vue.global.prod.js`（本地 Vue）、`models.json`（模型档位说明，无密钥） |
 | `project/` | kg_v4 项目源：contracts entities queries routes scripts services setup ui **i18n**（ja.tsv 界面/消息词表 720 条） plan/top.zs req.md README.md。**不含** app.db、uploads、web 生成物；plan/ 只带 top.zs（设计 .md 不随包） |
-| `content/` | 可选内容包 `python_v1/`：Python 科目知识图谱与题库源文件（points/items/edges/contrasts/quiz_v2）+ `ja/` 日文译文 442 条。不导入不影响其它功能；导入用 `scripts/load_python_content.sh` |
+| `content/` | 可选内容包 `python_v1/`：Python 科目知识图谱与题库源文件（points/items/edges/contrasts/quiz_v2）+ 中文课文 13 课 + 日文译文 496 条（`ja/` 442、`ja_lesson/` 课文 54）。不导入不影响其它功能；导入用 `scripts/load_python_content.sh` |
 | `scripts/` | `install.sh`（装依赖）· `init_data.sh`（建库+建管理员，语言 DEFAULT_LANG=ja）· `add_teacher.py`（建账号，--lang）· `set_lang.py`（改账号界面语言 ja/zh）· `load_python_content.sh`（导入 Python 内容包）· `start.sh`（幂等启动）· `stop.sh` · `watch.sh`（看门狗）· `deploy.sh`（上线，同步清单含 i18n/）· `config.example.json`（真模型样板）· `bundle.conf.example`（配置样板） |
 | `wheels/` | 离线依赖 wheel，平台见 `WHEELS.txt` |
 | `requirements.txt` | 直接依赖，精确版本（传递依赖由 pip 按 wheels/ 解出） |
@@ -892,7 +922,7 @@ cat > "$OUT/README.ja.md" <<'XEOF_READMEJA'
 
 自己完結フォルダーです。新しいマシンでは、展開 → 依存関係のインストール → 初期化（または既存 DB の移行）→ 起動 の 4 ステップだけで、開発機には何も依存しません。
 既定ではダミーモデルで動き（返答に [模拟回复] と付きます）、画面はすべてデモできます。API キーを設定すれば本物のモデルに切り替えられます。
-**日本語版の内容**：画面・バックエンドメッセージの辞書 `project/i18n/ja.tsv`（上部バーの「中文 / 日本語」でいつでも切り替え、選択はアカウントに保存）；`init_data.sh` が作るアカウントは既定で日本語（`DEFAULT_LANG=ja`）；`content/` に「Python プログラミング」科目のコンテンツパック（知識グラフ＋問題バンク＋日本語訳 442 件）を同梱。中国語の説明は `README.md`。
+**日本語版の内容**：画面・バックエンドメッセージの辞書 `project/i18n/ja.tsv`（上部バーの「中文 / 日本語」でいつでも切り替え、選択はアカウントに保存）；`init_data.sh` が作るアカウントは既定で日本語（`DEFAULT_LANG=ja`）；`content/` に「Python プログラミング」科目のコンテンツパック（知識グラフ＋問題バンク＋テキスト 13 課＋日本語訳 496 件）を同梱。中国語の説明は `README.md`。
 エンジンのコミット、パッケージ日時、Python バージョンは `VERSION` を参照。パッケージ化作成スクリプトはエンジンリポジトリーの `scripts/build_bundle.sh`（再実行で同じものが作れます）。
 
 ## ディレクトリー構成
@@ -900,7 +930,7 @@ cat > "$OUT/README.ja.md" <<'XEOF_READMEJA'
 |---|---|
 | `engine/` | エンジン最小実行セット（`python -m gen run` が実際に import/読込するもの）：`gen/`（out/ とエディター .pyw を除く）、`tools/` 31 モジュール（cbatch/zcode_tool 含む：--real の cli:claude/cli:zcode バックエンドが遅延ロード、無いとリクエストが即切れる）、`templates/`（db+frontend の .j2）、`gen/templates/`、`verbs/` 全部（動詞パックは遅延ロードで削れない）、`app2/assets/vue.global.prod.js`（ローカル Vue）、`models.json`（モデル枠の説明のみ、キー無し） |
 | `project/` | kg_v4 プロジェクトソース：contracts entities queries routes scripts services setup ui **i18n**（ja.tsv 画面・メッセージ辞書 720 件） plan/top.zs req.md README.md。**含まない**：app.db、uploads、web 生成物；plan/ は top.zs のみ（設計 .md は同梱しない） |
-| `content/` | 任意コンテンツパック `python_v1/`：Python 科目の知識グラフ・問題バンクのソース（points/items/edges/contrasts/quiz_v2）+ `ja/` 日本語訳 442 件。取り込まなくても他の機能に影響なし。取り込みは `scripts/load_python_content.sh` |
+| `content/` | 任意コンテンツパック `python_v1/`：Python 科目の知識グラフ・問題バンクのソース（points/items/edges/contrasts/quiz_v2）+ 中国語テキスト 13 課 + 日本語訳 496 件（`ja/` 442、`ja_lesson/` テキスト 54）。取り込まなくても他の機能に影響なし。取り込みは `scripts/load_python_content.sh` |
 | `scripts/` | `install.sh`（依存導入）· `init_data.sh`（DB 初期化+管理者作成、言語 DEFAULT_LANG=ja）· `add_teacher.py`（アカウント作成、--lang 対応）· `set_lang.py`（アカウントの画面言語を ja/zh に変更）· `load_python_content.sh`（Python コンテンツパック取り込み）· `start.sh`（冪等起動）· `stop.sh` · `watch.sh`（ウォッチドッグ）· `deploy.sh`（配備、同期リストに i18n/ を含む）· `config.example.json`（真モデル設定見本）· `bundle.conf.example`（設定見本） |
 | `wheels/` | オフライン依存 wheel、プラットフォームは `WHEELS.txt` |
 | `requirements.txt` | 直接依存の正確なバージョン（推移依存は pip が wheels/ から解決） |
@@ -981,14 +1011,23 @@ XEOF_READMEJA
 
 # ---- 7 VERSION / 权限 ----
 cat > "$OUT/VERSION" <<XEOF_VERSION
-包: kg_v4_bundle_ja（engine + project + content(Python科目+ja译文) + 离线依赖，可单独上线）
-语言: ja（日文版：project/i18n/ja.tsv 词表 720 条；DEFAULT_LANG=ja；Python 科目日文译文 442 条在 content/python_v1/ja）
+包: $BUNDLE_NAME（engine + project + content(Python科目+课文+ja译文) + 离线依赖，可单独上线）
+语言: $BUNDLE_LANG（DEFAULT_LANG=$BUNDLE_LANG；界面词表 project/i18n/ja.tsv；Python 科目课文 13 课；日文译文 442+54 条在 content/python_v1/ja 和 ja_lesson）
 引擎提交: $TAG（引擎仓库 HEAD，origin/master）
 打包时间: $PACK_TIME
 Python: $PYVER（wheels 标签见 wheels/WHEELS.txt）
 打包脚本: 引擎仓库 scripts/build_bundle.sh（本目录由它生成）
 最小运行集分析: 引擎仓库 data/reports/kg_K178_glm.md（K178；方法与验证见报告）；日文包见 data/reports/kg_K183_glm.md（K183）
 XEOF_VERSION
+# 中文包：同一份脚本改默认语言和说明，内容不变（日文读路径和译文照样带，账号切日语即可用）
+if [ "$BUNDLE_LANG" = zh ]; then
+  rm -f "$OUT/README.ja.md"
+  sed -i -e 's/DEFAULT_LANG:-ja/DEFAULT_LANG:-zh/g' -e 's/DEFAULT_LANG:=ja/DEFAULT_LANG:=zh/g' -e 's/DEFAULT_LANG=ja/DEFAULT_LANG=zh/g' \
+    -e 's/默认 ja/默认 zh/g' -e 's/账号默认日语/账号默认中文/g' -e 's/日文版/中文版/g' -e 's/kg_v4_bundle_ja/kg_v4_bundle/g' \
+    -e 's/ *日文说明见 `README.ja.md`。//' \
+    "$OUT/README.md" "$OUT/scripts/init_data.sh" "$OUT/scripts/install.sh" "$OUT/scripts/bundle.conf.example" "$OUT/scripts/load_python_content.sh"
+  ! grep -q 'README\.ja' "$OUT/README.md" || { echo "!! 中文包 README 还引用已删除的 README.ja.md"; exit 1; }
+fi
 chmod +x "$OUT"/scripts/*.sh
 chmod 644 "$OUT/scripts/config.example.json" "$OUT/scripts/bundle.conf.example"
 
