@@ -551,6 +551,148 @@ def ja_quiz_flow(browser, base, proj, ck, marks, new_page):
             con.close()
 
 
+def ja_textbook_login_flow(browser, base, proj, ck, marks, new_page):
+    """K184：登录页语言跟浏览器 + Python 教材页（空态）ja 无中文残留。
+    ① context locale=ja-JP（navigator.language ja、localStorage 空）→ 登录页直接日文；
+       登录页有「中文 / 日本語」切换（auth-lang，不在顶栏），点了只写本机 localStorage
+       不调接口，整页刷新后保持；登录后以账号 lang 为准（s1 账号 lang=zh → 登录后中文）。
+    ② s1 lang=ja 顶栏切到 Python 科目（夹具同 ja_quiz_flow，自建的行结束时删净）→
+       #教材：空态页（a 类词表全覆盖），「共0课」是报告列明的保留项（b 类带插值遗留）。"""
+
+    def ja_login(page, user):
+        page.locator('form.screen input:not([type="password"])').first.fill(user)
+        page.locator('form.screen input[type="password"]').first.fill(TEST_PASSWORD)
+        page.locator("form.screen button", has_text="ログイン").first.click()
+        page.wait_for_function(
+            "u => { const el = document.querySelector('.nav-user-name');"
+            " return el && el.textContent.trim() === u; }",
+            arg=user, timeout=20000)
+
+    # ---- ① 登录页语言跟浏览器 ----
+    name = "登录页语言"
+    ctx = browser.new_context(locale="ja-JP")
+    p = new_page(ctx, "k184-login-ja")
+    try:
+        p._allowed_status = (401,)
+        p.goto(base, wait_until="domcontentloaded")
+        wait_screen(p, "登录")
+        p.wait_for_function("() => document.documentElement.lang === 'ja'", timeout=15000)
+        ck(True, f"{name}：浏览器语言 ja、没存过 localStorage → 登录页直接日文（html lang=ja）")
+        p.locator("form.screen").wait_for(timeout=10000)
+        try:
+            # ja 下 label 要等 tdom（120ms 防抖）替换后才变日文，这里显式等而不是立刻数
+            p.locator("label.field", has_text="ユーザー名").first.wait_for(timeout=10000)
+            ok_field = True
+        except Exception:
+            ok_field = False
+        lab = " | ".join(p.locator("label.field").all_inner_texts())[:160]
+        ck(ok_field, f"{name}：登录页字段日文（ユーザー名/パスワード）",
+           "" if ok_field else f"实际字段：{lab!r}")
+        ck(p.locator(".auth-lang").count() == 1, f"{name}：登录页有语言切换（auth-lang，不在顶栏）")
+        ck("on" in (p.locator(".auth-lang a", has_text="日本語").get_attribute("class") or ""),
+           f"{name}：当前语言（ja）在切换上是选中态")
+        with p.expect_navigation(timeout=15000):
+            p.locator(".auth-lang a", has_text="中文").click()
+        p.wait_for_function("() => document.documentElement.lang === 'zh-CN'", timeout=15000)
+        ls = p.evaluate("() => localStorage.getItem('zs_i18n')")
+        ck(ls == "zh", f"{name}：登录页点「中文」→ 只写本机 localStorage（zs_i18n={ls}），整页刷新后中文")
+        ck(p.locator("label.field", has_text="用户名").count() > 0 and p.locator(".auth-lang").count() == 1,
+           f"{name}：刷新后保持中文，切换还在")
+        with p.expect_navigation(timeout=15000):
+            p.locator(".auth-lang a", has_text="日本語").click()
+        p.wait_for_function("() => document.documentElement.lang === 'ja'", timeout=15000)
+        ck(True, f"{name}：再点「日本語」→ 刷新后回日文（切换→刷新保持）")
+        ja_login(p, STUDENT_NAME)
+        ck(p.locator("nav a", has_text="知识图谱").count() > 0,
+           f"{name}：登录页是日文、账号 lang=zh → 登录后界面中文（账号 lang 覆盖）")
+        err = drain_errors(marks)
+        ck(not err, f"{name}：无 JS 错误", err)
+    except Exception as e:
+        try:
+            body = p.inner_text("body")[:400].replace("\n", " | ")
+        except Exception:
+            body = "（取不到页面正文）"
+        ck(False, f"{name}：走查失败", f"{type(e).__name__}: {e} 页面：{body}")
+    finally:
+        ctx.close()
+
+    # ---- ② Python 科目 #教材 空态页 ja ----
+    name2 = "Python教材页ja"
+    made_subject = made_student = False
+    sid = None
+    old_pref = []
+    con = sqlite3.connect(proj / "app.db")
+    try:
+        row = con.execute("SELECT id FROM subject_info WHERE code='python'").fetchone()
+        if row is None:
+            con.execute("INSERT INTO subject_info(code,name,kind,caps,levels,qtypes,visibility,owner,status,created_at,updated_at)"
+                        " VALUES('python','Python 编程','general','x','入门,基础,进阶','choice','public','t1','active','2026-01-01','2026-01-01')")
+            sid = con.execute("SELECT id FROM subject_info WHERE code='python'").fetchone()[0]
+            made_subject = True
+        else:
+            sid = row[0]
+        if con.execute("SELECT 1 FROM subject_student WHERE subject_id=? AND learner=?", (sid, STUDENT_NAME)).fetchone() is None:
+            con.execute("INSERT INTO subject_student(subject_id,learner,assigned_by,status,created_at)"
+                        " VALUES(?,?,'t1','active','2026-01-01')", (sid, STUDENT_NAME))
+            made_student = True
+        con.execute("UPDATE account_user SET lang='ja' WHERE username=?", (STUDENT_NAME,))
+        old_pref = [r[0] for r in con.execute("SELECT subject_id FROM subject_pref WHERE learner=?", (STUDENT_NAME,))]
+        con.commit()
+    finally:
+        con.close()
+    ctx2 = browser.new_context(locale="ja-JP")
+    p2 = new_page(ctx2, "k184-textbook-ja")
+    try:
+        p2._allowed_status = (401,)
+        p2.goto(base, wait_until="domcontentloaded")
+        wait_screen(p2, "登录")
+        ja_login(p2, STUDENT_NAME)
+        sw = p2.locator("select.nav-subject")
+        sw.wait_for(timeout=10000)
+        with p2.expect_navigation(timeout=20000):
+            sw.select_option(value=str(sid))
+        p2.wait_for_load_state("domcontentloaded")
+        p2.evaluate("location.hash = encodeURIComponent('教材')")   # ja 导航是「教科書」，按地址进
+        wait_screen(p2, "教材")
+        p2.wait_for_timeout(1500)
+        body = p2.inner_text("body")
+        ck("共0课" in body, f"{name2}：「共0课」可见——b 类带插值遗留，报告列明的保留项", body[:160])
+        ck("条件に合うテキストがありません" in body, f"{name2}：空态文案日文")
+        opts = p2.evaluate(
+            "() => { for (const s of document.querySelectorAll('select')) {"
+            " const os = [...s.options].map(o => ({v: o.value, t: o.textContent.trim()})).filter(o => o.v !== '');"
+            " if (os.some(o => o.v === '全部')) return os; } return []; }")
+        ck([o["t"] for o in opts] == ["すべて", "入門", "基礎", "応用"]
+           and [o["v"] for o in opts] == ["全部", "入门", "基础", "进阶"],
+           f"{name2}：等级下拉选项日文、value 不变（a 类词表）", opts)
+        resid = sorted({c for c in body.replace("共0课", "") if c in "课级习题请说这输试关键搜换"})
+        ck(not resid, f"{name2}：正文无简体残留（共0课为列明保留项）", resid)
+        err = drain_errors(marks)
+        ck(not err, f"{name2}：无 JS 错误", err)
+    except Exception as e:
+        try:
+            body = p2.inner_text("body")[:400].replace("\n", " | ")
+        except Exception:
+            body = "（取不到页面正文）"
+        ck(False, f"{name2}：走查失败", f"{type(e).__name__}: {e} 页面：{body}")
+    finally:
+        con = sqlite3.connect(proj / "app.db")
+        try:
+            for q, args in [("DELETE FROM subject_pref WHERE learner=?", (STUDENT_NAME,)),
+                            ("UPDATE account_user SET lang='zh' WHERE username=?", (STUDENT_NAME,))] + (
+                    [("DELETE FROM subject_student WHERE subject_id=? AND learner=?", (sid, STUDENT_NAME))] if made_student else []) + (
+                    [("DELETE FROM subject_info WHERE code='python'", ())] if made_subject else []) + [
+                    ("INSERT INTO subject_pref(learner, subject_id) VALUES(?,?)", (STUDENT_NAME, v)) for v in old_pref]:
+                try:
+                    con.execute(q, args)
+                except Exception:
+                    pass
+            con.commit()
+        finally:
+            con.close()
+        ctx2.close()
+
+
 def write_assist_mock(proj, tmp):
     """教师助手段用的假模型规则（DSL_MOCK_SCRIPT）：意图分类和草稿生成各回一份合法 JSON。
     出题要用库里真有的条目编号，所以建好库之后从 app.db 取一个。→ 规则文件路径"""
@@ -1410,6 +1552,7 @@ def main(argv=None):
                 # ---- 日语界面问老师（K181）：提示词带日语指示，假模型回固定日语 ----
                 ja_tutor_flow(browser, base, proj, ck, marks, new_page)
                 ja_quiz_flow(browser, base, proj, ck, marks, new_page)
+                ja_textbook_login_flow(browser, base, proj, ck, marks, new_page)   # K184：登录页跟浏览器 + Python 教材空态页 ja
 
                 # ---- 390px 视口 ----
                 m = new_page(browser.new_context(viewport={"width": 390, "height": 844}),

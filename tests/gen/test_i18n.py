@@ -163,8 +163,9 @@ def main() -> int:
             t = (web / js).read_text(encoding="utf-8")
             check(all(s in t for s in ("zs_i18n", "function tmsg(", "function tdom(",
                                        "function switchLang(", "MutationObserver",
-                                       'class="nav-lang"', "switchLang('ja')")),
-                  f"{js}：tmsg/tdom/switchLang/Observer/顶栏切换")
+                                       "navigator.language",
+                                       'class="nav-lang"', 'class="auth-lang"', "switchLang('ja')")),
+                  f"{js}：tmsg/tdom/switchLang/Observer/浏览器语言/顶栏与登录页切换")
         for css in ("style.css", "teacher.css"):
             t = (web / css).read_text(encoding="utf-8")
             check('html[lang="ja"]' in t and ".nav-lang" in t,
@@ -177,8 +178,8 @@ def main() -> int:
         t = (proj / "web" / "app.js").read_text(encoding="utf-8")
         check((proj / "web" / "i18n.ja.js").is_file() and "function tmsg(" in t,
               "kg + 词典：i18n.ja.js 和 tmsg 照生成")
-        check("nav-lang" not in t and "switchLang('ja')" not in t,
-              "没有 /account/lang 接口：顶栏切换按钮不出")
+        check("nav-lang" not in t and "switchLang('ja')" not in t and "auth-lang" not in t,
+              "没有 /account/lang 接口：顶栏与登录页的切换按钮都不出")
         check('<script src="./i18n.ja.js"></script>'
               in (proj / "web" / "index.html").read_text(encoding="utf-8"),
               "index.html 照样引词典")

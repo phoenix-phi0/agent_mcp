@@ -195,8 +195,16 @@ const _app = createApp({
     // 查不到的一律回退中文。只翻「提示性文字」：数据值（状态枚举、表格行）
     // 不进词典，路由键（go('学情')）是 JS 字符串，根本不经过 DOM。
     // 语言记在账号上（auth_me 的 lang / POST /account/lang），没登录时记在
-    // 浏览器（localStorage，默认中文——登录页就用它）。
-    const i18nLang = ref((() => { try { return localStorage.getItem("zs_i18n") || "zh"; } catch (e) { return "zh"; } })());
+    // 浏览器（localStorage；没存过看 navigator.language，以 ja 开头 → 日文——
+    // 登录页就用它）。登录后 applyLang 以账号 lang 为准。
+    const i18nLang = ref((() => {
+      try {
+        const saved = localStorage.getItem("zs_i18n");
+        if (saved) return saved;
+      } catch (e) { /* 存不了就往下走 */ }
+      try { if ((navigator.language || "").toLowerCase().startsWith("ja")) return "ja"; } catch (e) { /* 没有 navigator 就中文 */ }
+      return "zh";
+    })());
     function tmsg(s) {
       const t = String(s == null ? "" : s);
       if (i18nLang.value === "zh") return t;
@@ -1515,6 +1523,12 @@ const _app = createApp({
       <span v-if="PAGE.home" class="nav-home"><a :href="PAGE.home.path" target="_blank" rel="noopener">{{ PAGE.home.label }}</a></span>
 <% endif %>
     </nav>
+<% endif %>
+<% if has_lang_switch %>
+{#- 登录页没有导航（登录/注册在 AUTH_SCREENS 里，上面的导航整个不渲染），
+    语言切换单独画一份：只改本机 localStorage，不调接口——登录后 applyLang
+    以账号 lang 为准（auth_me 的 lang）。 -#}
+    <div v-if="AUTH_SCREENS.includes(current.name)" class="auth-lang"><span class="nav-lang"><a href="#" :class="{ on: i18nLang === 'zh' }" @click.prevent="switchLang('zh')">中文</a><span class="nav-lang-sep">/</span><a href="#" :class="{ on: i18nLang === 'ja' }" @click.prevent="switchLang('ja')">日本語</a></span></div>
 <% endif %>
 {#- 登录页上没有顶栏：按端拆出来的页面在登录框上面标一句是哪一端 -#}
     <div v-if="PAGE.badge && (current.name === '登录' || current.name === '注册')" class="page-end">{{ PAGE.badge }}</div>

@@ -14,11 +14,14 @@
 //     cookie（登录态）在 jar 里全局共享，跟真浏览器一致。
 //
 // 语言切换的约定（见 app.js 模板 i18n 段注释）：登录后记在账号上（auth_me 的 lang /
-// POST /account/lang），没登录记在浏览器 localStorage，默认中文；登录页不显示顶栏，
-// 语言切换按钮在登录后的顶栏「中文 / 日本語」。
+// POST /account/lang），没登录记在浏览器——localStorage 存过就沿用，没存过看
+// navigator.language（以 ja 开头 → 日文）；登录页不显示顶栏，语言切换单独画一份
+// （auth-lang，只写本机 localStorage 不调接口），登录后的顶栏也有「中文 / 日本語」。
 //
 // 顺序：
 //   一、登录页语言：默认中文；浏览器存过 ja 时登录页直接日文（tdom 首屏替换）；
+//       登录页有「中文 / 日本語」切换（只写 localStorage 不调接口）；浏览器语言 ja
+//       （没存过）也日文；登录页切过的语言刷新后保持；登录后以账号 lang 为准；
 //       日文登录页输错密码：报错消息也是日文（后端消息 tmsg）
 //   二、学生 s1：登录是中文 → 顶栏点「日本語」→ POST /account/lang + 整页刷新 →
 //       刷新后导航、退出登录全日文；换一个浏览器（localStorage 空）也日文——语言记在
@@ -87,7 +90,7 @@ async function browserFetch(u, o = {}) {
 // 页面 html 里的 <script src> 全剥掉，i18n.ja.js 由这里按 head 里的顺序先 eval，
 // 再 Vue、再 app.js——跟浏览器里的加载顺序一致。i18n.ja.js 是服务启动时 build
 // 出来的，这里每次现读（脚本刚启动时 web/ 还不存在）。
-function openPage(hash, path = "/", locale = null) {
+function openPage(hash, path = "/", locale = null, navLang = null) {
   const name = path === "/" ? "index" : path.slice(1);
   const html = fs.readFileSync(WEB + `/${name}.html`, "utf8")
     .replace(/<script src="[^"]*"><\/script>/g, "");
@@ -97,6 +100,7 @@ function openPage(hash, path = "/", locale = null) {
   const dom = new JSDOM(html, { url: BASE + path + (hash || ""), runScripts: "outside-only", virtualConsole: vc });
   const w = dom.window;
   if (locale) w.localStorage.setItem("zs_i18n", locale);
+  if (navLang) Object.defineProperty(w.navigator, "language", { value: navLang, configurable: true });
   w.fetch = browserFetch;
   w.console.log = () => {};
   w.console.warn = () => {};
@@ -199,15 +203,36 @@ async function typeLogin(p, user, pw, userLbl = "用户名", loginBtn = "登录"
     await waitFor(() => p.hash() === "#登录");
     say(await waitFor(() => !!p.field("用户名")) && !p.field("ユーザー名"),
         "默认中文：登录页是「用户名/密码」");
-    say(!p.$("nav"), "登录页不显示顶栏（切换按钮在登录后的顶栏；登录页语言跟浏览器 localStorage，默认中文）");
+    say(!p.$("nav"), "登录页不显示顶栏（切换按钮单独画在登录框上方；登录页语言跟浏览器：localStorage 存过就沿用，没存过看 navigator.language，默认中文）");
     p.close();
     p = openPage("", "/", "ja");
     say(await waitFor(() => !!p.field("ユーザー名")), "浏览器存过 ja：登录页直接日文");
+    say(await waitFor(() => p.langBtns().join("/") === "中文/日本語") && !!p.$(".auth-lang"),
+        "登录页也有「中文 / 日本語」切换（auth-lang，不在顶栏里）");
+    calls.length = 0;
+    p.langBtn("中文").click();
+    say(await waitFor(() => p.w.localStorage.getItem("zs_i18n") === "zh")
+        && !calls.some(c => c.path === "/account/lang"),
+        "登录页点「中文」：只写本机 localStorage（zs_i18n=zh），不调 /account/lang，随后整页刷新");
+    p.close();
+    p = openPage("", "/", null, "ja");
+    say(await waitFor(() => !!p.field("ユーザー名")), "没存过语言、浏览器语言 ja：登录页直接日文（navigator.language）");
+    p.close();
+    p = openPage("", "/", "ja");
+    say(await waitFor(() => !!p.field("ユーザー名")), "刷新后保持：localStorage 存过 ja，登录页还是日文");
     p.type(p.field("ユーザー名"), "s1");
     p.type(p.$('input[type=password]'), "wrong-pass");
     p.btn("ログイン").click();
     say(await waitFor(() => p.toast().includes("ユーザー名かパスワードが違います")),
         `日文登录页输错密码：消息也日文：「${p.toast()}」`);
+    p.close();
+    // 登录页切过 ja（localStorage=ja），登录后账号 lang=zh 说了算——登录后以账号为准
+    p = openPage("", "/", "ja");
+    await typeLogin(p, "s1", PW, "ユーザー名", "ログイン");
+    say(await waitFor(() => navText(p).includes("知识图谱") && !navText(p).includes("知識マップ")),
+        "登录页是日文、账号 lang=zh：登录后界面是中文（账号 lang 覆盖）");
+    p.btn("退出").click();
+    say(await waitFor(() => p.hash() === "#登录"), "退出清理会话（后面各节照旧从头登录）");
     p.close();
 
     console.log("二、学生 s1");
