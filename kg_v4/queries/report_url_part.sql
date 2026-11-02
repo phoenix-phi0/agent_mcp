@@ -1,0 +1,1 @@
+SELECT replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(:text, '%', '%25'), '&', '%26'), '#', '%23'), '+', '%2B'), '=', '%3D'), '?', '%3F'), '{', '%7B'), '}', '%7D'), ' ', '%20'), char(10), '%0A'), char(9), '%09') AS v

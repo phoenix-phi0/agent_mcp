@@ -90,7 +90,7 @@ run 会话        $PY tests/http/test_session.py
 run 库出错      $PY tests/http/test_db_errors.py
 run 服务并发    $PY tests/http/test_concurrent.py
 run 块识别当重复 $PY tests/http/test_block_openers.py
-LIMIT=300 run kg_v4项目  $PY tests/kg_v4/test_project.py
+LIMIT=600 run kg_v4项目  $PY tests/kg_v4/test_project.py
 run 设定行科目列  $PY tests/kg_v4/test_tr_rows.py
 run 学生页设定表  $PY tests/kg_v4/test_report_notes.py
 run 整库引用保护 $PY tests/kg_v4/test_kg_refs.py
@@ -104,11 +104,11 @@ run 教师助手人设 $PY tests/kg_v4/test_assist_persona.py
 run 空白传参与设定预览 $PY tests/kg_v4/test_k166_whitespace_preview.py
 run 最近学习按科目与对象传参 $PY tests/kg_v4/test_k170_subject_last_and_params.py
 run 选项解析拼JSON $PY tests/kg_v4/test_k173_json_literal.py
-# 浏览器走查（K97）：起服务 + playwright + 系统 Chrome，比别的组慢，时限给 300 秒。
+# 浏览器走查（K97）：起服务 + playwright + 系统 Chrome，比别的组慢，时限给 600 秒。
 # 没 playwright 的机器上打「跳过」退出码 2——run() 里单独按「跳过」处理，详见脚本头部。
 # 解释器由 PW_PYTHON 指定（如 /tmp/k97_pw_venv/bin/python），不往 .venv 装 playwright。
 if [ -n "${PW_PYTHON:-}" ] && [ -x "$PW_PYTHON" ]; then
-  LIMIT=300 run kg_v4走查  "$PW_PYTHON" tests/kg_v4/e2e_walk.py
+  LIMIT=600 run kg_v4走查  "$PW_PYTHON" tests/kg_v4/e2e_walk.py
 else
   echo "kg_v4走查    跳过（未设 PW_PYTHON 或不可执行；设成装了 playwright 的 python 即可跑）"
 fi

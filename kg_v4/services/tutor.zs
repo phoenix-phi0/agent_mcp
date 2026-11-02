@@ -505,6 +505,112 @@
     返回 {out}
   结束
 
+  公开 函数 列问答轮 learner page? page_size? keyword? date_from? date_to? intent? current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
+    设 ps = 20
+    如果 {page_size} 不为空
+      设 pm = 匹配 {page_size} ^[0-9]+$
+      如果 {pm.matched} 不等于 是
+        报错 400 page_size 不合法
+      结束
+      设 ps = {page_size}
+      如果 {ps} 小于 1 或 {ps} 大于 100
+        报错 400 page_size 不合法
+      结束
+    结束
+    设 df = {date_from 或}
+    设 dt = {date_to 或}
+    如果 {df} 不为空
+      设 dm1 = 匹配 {df} ^[0-9]{4}-[0-9]{2}-[0-9]{2}$
+      如果 {dm1.matched} 不等于 是
+        报错 400 日期要写成 YYYY-MM-DD
+      结束
+    结束
+    如果 {dt} 不为空
+      设 dm2 = 匹配 {dt} ^[0-9]{4}-[0-9]{2}-[0-9]{2}$
+      如果 {dm2.matched} 不等于 是
+        报错 400 日期要写成 YYYY-MM-DD
+      结束
+    结束
+    设 it0 = {intent 或}
+    如果 {it0} 不为空
+      如果 {it0} 不等于 quiz 且 {it0} 不等于 progress 且 {it0} 不等于 textbook 且 {it0} 不等于 explain 且 {it0} 不等于 summary
+        报错 400 意图不对
+      结束
+    结束
+    设 q.learner = {learner}
+    设 q.subject_id = {subject_id}
+    设 q.keyword = {keyword 或}
+    设 q.date_from = {df}
+    设 q.date_to = {dt}
+    设 q.intent = {it0}
+    设 q.ps = {ps}
+    设 cr = 查一行表 app.db tutor_round_count {q}
+    设 total = {cr.total}
+    设 pc = {cr.page_count}
+    设 pg = 1
+    如果 {page} 不为空
+      设 gm = 匹配 {page} ^[0-9]+$
+      如果 {gm.matched} 等于 是
+        设 pg = {page}
+      结束
+    结束
+    如果 {pg} 小于 1
+      设 pg = 1
+    结束
+    如果 {pg} 大于 {pc}
+      设 pg = {pc}
+    结束
+    设 off = 计算 ({pg} - 1) * {ps}
+    设 q.lim = {ps}
+    设 q.off = {off}
+    设 rows = 查询表 app.db tutor_round_page {q}
+    设 rounds = 解析JSON []
+    遍历 r 于 {rows}
+      设 it = {r}
+      设 lj = {r.links 或}
+      如果 {lj} 为空
+        设 lj = []
+      结束
+      设 it.links = 解析JSON {lj}
+      设 rounds = 列表加项 {rounds} {it}
+    结束
+    设 out.learner = {learner}
+    设 out.total = {total}
+    设 out.page = {pg}
+    设 out.page_count = {pc}
+    设 out.page_size = {ps}
+    设 out.rounds = {rounds}
+    返回 {out}
+  结束
+
+  公开 函数 取问答轮 learner round_id current_role? auth_mode? subject?
+    设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 subject_id = {sj.subject_id}
+    设 rm = 匹配 {round_id} ^[0-9]+$
+    如果 {rm.matched} 不等于 是
+      报错 400 round_id 不合法
+    结束
+    如果 {round_id} 小于 1
+      报错 400 round_id 不合法
+    结束
+    设 q.learner = {learner}
+    设 q.round_id = {round_id}
+    设 q.subject_id = {subject_id}
+    设 o = 查一行表 app.db tutor_round_one {q}
+    如果 {o} 为空
+      报错 404 没有这条问老师记录
+    结束
+    设 it = {o}
+    设 lj = {o.links 或}
+    如果 {lj} 为空
+      设 lj = []
+    结束
+    设 it.links = 解析JSON {lj}
+    返回 {it}
+  结束
+
   公开 函数 取对话摘要 learner current_role? auth_mode? subject?
     # 返回 {learner, question_count, last_at, recent}；question_count 是该学习者 role=user 的消息数；last_at 是该学习者最后一条消息的 at（没有为空串）；recent 是最近 5 条学生提问 [{content, intent, at}]，按 id 降序；本表只有问老师对话，不含教师写的学情总结
     # 统计 tutor_message 中该 learner 且 role=user 的行数为 question_count

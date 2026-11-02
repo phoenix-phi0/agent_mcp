@@ -29,8 +29,16 @@
   字段 given_text 文本 作答列
   字段 result 文本 对错列
   字段 direction_label 文本 方向列
-  字段 chat_who 文本 问老师表谁列
-  字段 chat_text 文本 问老师表内容列
+  字段 chat_q 文本 问老师筛选关键词
+  字段 chat_from 文本 问老师筛选起始日期
+  字段 chat_to 文本 问老师筛选结束日期
+  字段 chat_intent 枚举 全部,出题,进度,教材,讲解,本轮总结 问老师筛选意图
+  字段 chat_id 整数 问老师表一轮的编号
   字段 chat_at 文本 问老师表时间列
+  字段 chat_intent_label 文本 问老师表意图列
+  字段 chat_ask 文本 问老师表学生问列
+  字段 chat_reply 文本 问老师表AI老师答列
   字段 chat_notes 文本 问老师表用了的设定列
+  字段 link_label 文本 问老师全文链接表名称列
+  字段 link_url 文本 问老师全文链接表地址列
 结束

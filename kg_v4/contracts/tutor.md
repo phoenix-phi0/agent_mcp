@@ -143,6 +143,39 @@
   伪代码 查 tutor_message 中该 learner 且 subject_id 等于本科目的行（别的科目的对话不出现），按 id 降序取前 limit 条，再翻成升序
   伪代码 返回 {"learner": learner, "total": 条数, "messages": 列表}
 
+公开 函数 列问答轮 learner page? page_size? keyword? date_from? date_to? intent? current_role? auth_mode? subject?
+  返回 {learner, total, page, page_count, page_size, rounds}；教师看学情用的只读分页。rounds 是 [{id, ask, reply, reply_id, intent, lesson_code, link, links, at}]，新的在前（id 降序）；total 是符合筛选条件的轮数；page_count 至少是 1；links 是解析后的列表（没有为空列表）；reply_id 没有回复时为 0
+  报错 400 page_size 不合法
+  报错 400 日期要写成 YYYY-MM-DD
+  报错 400 意图不对
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；别的模块调用时传 subject=已解析的科目编号；所有查询都只限这个 subject_id
+  伪代码 一轮的定义（写在查询里）：同一 learner、同一科目的消息按 id 排序；老师那条（role=teacher）的前一条不是老师、且 intent 不是 summary 时，它是前一条学生消息的回复，两条合成一轮，编号取学生那条的 id；其余的行各自单独成一轮（学生单独一条没有回复：reply 空、reply_id=0；老师单独一条比如本轮总结：ask 空、reply_id=自己的 id）。一轮的 at 取编号那一行的 at
+  伪代码 page_size 为空取 20；不是 1 到 100 的整数，报错 400 page_size 不合法
+  伪代码 date_from、date_to 不为空且不匹配 ^[0-9]{4}-[0-9]{2}-[0-9]{2}$，报错 400 日期要写成 YYYY-MM-DD；intent 不为空且不是 quiz、progress、textbook、explain、summary 之一，报错 400 意图不对
+  伪代码 用 查一行 tutor_round_count 取 total、page_count（筛选条件都在 SQL 里）；page 为空、不是正整数都当 1；大于 page_count 时取 page_count
+  伪代码 用 查询 tutor_round_page（LIMIT、OFFSET 都在 SQL 里，不取全量再截）得当前页；每行 links 为空当 []，解析成列表
+  伪代码 引擎事实：值恰好形如 {name} 时「如果 {x} 不为空」判成空（当成没展开的变量），所以 keyword 不用「如果」判断，直接作绑定参数传给查询，去空白和判空都在 SQL 里做（trim(:keyword) = ''）
+  伪代码 筛选：keyword 去首尾空白后不为空时，在 ask 和 reply 里按字面找、不区分大小写（用 instr(lower(..), lower(..))，不用 LIKE，% _ ' 都按普通字符）；date_from、date_to 按 at 的前 10 个字符比较，含两端；intent 不为空时只留这种意图
+  伪代码 只读：不写任何表
+  伪代码 返回 {"learner": learner, "total": total, "page": page, "page_count": page_count, "page_size": page_size, "rounds": 列表}
+
+公开 函数 取问答轮 learner round_id current_role? auth_mode? subject?
+  返回 {id, ask, reply, reply_id, intent, lesson_code, link, links, at}；一轮的全文，形状同 列问答轮 的 rounds 每项；只读
+  报错 400 round_id 不合法
+  报错 404 没有这条问老师记录
+  报错 400 subject 不对
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 科目：同 列问答轮
+  伪代码 round_id 不是正整数，报错 400 round_id 不合法
+  伪代码 用 查一行 tutor_round_one learner=learner round_id=round_id subject_id=subject_id；查不到（含别的学生、别的科目的编号，老师回复那条自己的编号也查不到）报错 404 没有这条问老师记录
+  伪代码 links 为空当 []，解析成列表后返回
+
 公开 函数 取对话摘要 learner current_role? auth_mode? subject?
   返回 {learner, question_count, last_at, recent}；question_count 是该学习者 role=user 的消息数；last_at 是该学习者最后一条消息的 at（没有为空串）；recent 是最近 5 条学生提问 [{content, intent, at}]，按 id 降序；本表只有问老师对话，不含教师写的学情总结
   报错 400 subject 不对
@@ -415,6 +448,125 @@ POST /tutor/summarize-round -> 总结本轮 角色 student
   先 数据 tutor_message learner=u1 role=teacher content=数学回答 at=2026-01-01 subject_id=2
   调用 列对话 learner=u1
   得 learner=u1 total=1
+
+用例 列问答轮_一问一答合成一轮
+  先 数据 tutor_message learner=u1 role=user content=问一 intent=explain at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=teacher content=答一 intent=explain at=2026-01-01_09:00:01
+  先 数据 tutor_message learner=u1 role=user content=问二 intent=quiz at=2026-01-02_09:00:00
+  调用 列问答轮 learner=u1
+  得 learner=u1 total=2 page=1 page_count=1 page_size=20
+
+用例 列问答轮_总结单独成轮
+  先 数据 tutor_message learner=u1 role=user content=问一 intent=explain at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=teacher content=总结 intent=summary at=2026-01-01_09:00:01
+  调用 列问答轮 learner=u1
+  得 total=2
+
+用例 列问答轮_页码超出取最后一页
+  先 数据 tutor_message learner=u1 role=user content=问一 at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=user content=问二 at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=user content=问三 at=2026-01-01_09:00:00
+  调用 列问答轮 learner=u1 page=9 page_size=2
+  得 total=3 page=2 page_count=2 page_size=2
+
+用例 列问答轮_页码非法当第一页
+  先 数据 tutor_message learner=u1 role=user content=问一 at=2026-01-01_09:00:00
+  调用 列问答轮 learner=u1 page=abc
+  得 total=1 page=1 page_count=1
+
+用例 列问答轮_没有记录
+  调用 列问答轮 learner=u1
+  得 total=0 page=1 page_count=1
+
+用例 列问答轮_每页条数非法
+  调用 列问答轮 learner=u1 page_size=0
+  报错 400
+
+用例 列问答轮_关键词不分大小写找问和答
+  先 数据 tutor_message learner=u1 role=user content=What_is intent=explain at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=teacher content=PYTHON答 intent=explain at=2026-01-01_09:00:01
+  先 数据 tutor_message learner=u1 role=user content=别的 intent=explain at=2026-01-02_09:00:00
+  调用 列问答轮 learner=u1 keyword=python
+  得 total=1
+
+用例 列问答轮_百分号按字面找
+  先 数据 tutor_message learner=u1 role=user content=打了50%折 at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=user content=没有折扣 at=2026-01-01_09:00:00
+  调用 列问答轮 learner=u1 keyword=%
+  得 total=1
+
+用例 列问答轮_下划线按字面找
+  先 数据 tutor_message learner=u1 role=user content=a_b at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=user content=acb at=2026-01-01_09:00:00
+  调用 列问答轮 learner=u1 keyword=a_b
+  得 total=1
+
+用例 列问答轮_单引号按字面找
+  先 数据 tutor_message learner=u1 role=user content=it's at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=user content=its at=2026-01-01_09:00:00
+  调用 列问答轮 learner=u1 keyword=it's
+  得 total=1
+
+用例 列问答轮_花括号按字面找
+  先 数据 tutor_message learner=u1 role=user content=写{name}格式 at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=user content=别的 at=2026-01-01_09:00:00
+  调用 列问答轮 learner=u1 keyword={name}
+  得 total=1
+
+用例 列问答轮_日期含两端
+  先 数据 tutor_message learner=u1 role=user content=问一 at=2026-01-01_23:59:59
+  先 数据 tutor_message learner=u1 role=user content=问二 at=2026-01-02_00:00:00
+  先 数据 tutor_message learner=u1 role=user content=问三 at=2026-01-03_00:00:00
+  调用 列问答轮 learner=u1 date_from=2026-01-01 date_to=2026-01-02
+  得 total=2
+
+用例 列问答轮_日期格式不对
+  调用 列问答轮 learner=u1 date_from=20260101
+  报错 400
+
+用例 列问答轮_按意图筛
+  先 数据 tutor_message learner=u1 role=user content=问一 intent=quiz at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=teacher content=答一 intent=quiz at=2026-01-01_09:00:01
+  先 数据 tutor_message learner=u1 role=user content=问二 intent=explain at=2026-01-01_09:00:02
+  调用 列问答轮 learner=u1 intent=quiz
+  得 total=1
+
+用例 列问答轮_意图不对
+  调用 列问答轮 learner=u1 intent=bad
+  报错 400
+
+用例 跨科目_列问答轮只看本科目
+  先 数据 tutor_message learner=u1 role=user content=日语问题 at=2026-01-01_09:00:00 subject_id=1
+  先 数据 tutor_message learner=u1 role=user content=数学问题 at=2026-01-01_09:00:00 subject_id=2
+  调用 列问答轮 learner=u1 subject=2
+  得 total=1
+
+用例 取问答轮_全文
+  先 数据 tutor_message learner=u1 role=user content=问一 intent=explain at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=teacher content=答一 intent=explain at=2026-01-01_09:00:01
+  调用 取问答轮 learner=u1 round_id=1
+  得 id=1 ask=问一 reply=答一 reply_id=2 intent=explain
+
+用例 取问答轮_学生单独一条
+  先 数据 tutor_message learner=u1 role=user content=问一 intent=explain at=2026-01-01_09:00:00
+  调用 取问答轮 learner=u1 round_id=1
+  得 id=1 ask=问一 reply_id=0
+
+用例 取问答轮_回复那条的编号查不到
+  先 数据 tutor_message learner=u1 role=user content=问一 intent=explain at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=teacher content=答一 intent=explain at=2026-01-01_09:00:01
+  调用 取问答轮 learner=u1 round_id=2
+  报错 404
+
+用例 取问答轮_别人的查不到
+  先 数据 tutor_message learner=u2 role=user content=问一 at=2026-01-01_09:00:00
+  调用 取问答轮 learner=u1 round_id=1
+  报错 404
+
+用例 跨科目_取问答轮别的科目查不到
+  先 数据 tutor_message learner=u1 role=user content=日语问题 at=2026-01-01_09:00:00 subject_id=1
+  调用 取问答轮 learner=u1 round_id=1 subject=2
+  报错 404
 
 用例 跨科目_取对话摘要只算本科目
   先 数据 tutor_message learner=u1 role=user content=日语问题 at=2026-01-01 subject_id=1 intent=explain

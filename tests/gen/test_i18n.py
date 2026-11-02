@@ -129,6 +129,23 @@ def main() -> int:
                 (proj / "ui/teacher_lesson.ui").unlink()  # K187 新界面不在基线 golden 里
                 routes = proj / "routes/lesson.zs"  # K187 只读接口也是新增，同样不在基线里
                 routes.write_text(re.sub(r"\n接口 POST /lesson/teacher/\w+ .*?\n结束\n", "\n", routes.read_text(encoding="utf-8"), flags=re.S), encoding="utf-8")
+                # K189 问老师记录的分页/筛选界面、接口、页面字段也不在基线里，还原成基线的写法
+                ui = proj / "ui/report.ui"
+                t = ui.read_text(encoding="utf-8")
+                t = re.sub(r"    区域 问老师记录\n.*?\n    区域 AI老师设定\n",
+                           "    区域 问老师记录 当 lists.student_chat&&lists.student_chat.length\n      列表 问老师表 绑 student_chat\n"
+                           "        列 chat_who 谁\n        列 chat_text 内容\n        列 chat_at 时间\n        列 chat_notes 用了的设定\n      结束\n    结束\n"
+                           "    区域 AI老师设定\n", t, flags=re.S)
+                t = re.sub(r"  浮层 问老师全文 .*?\n  浮层 学生传达记录 ", "  浮层 学生传达记录 ", t, flags=re.S)
+                ui.write_text(t, encoding="utf-8")
+                routes = proj / "routes/report.zs"
+                routes.write_text(re.sub(r"\n接口 POST /report/chat/\w+ .*?\n结束\n", "\n", routes.read_text(encoding="utf-8"), flags=re.S), encoding="utf-8")
+                ent = proj / "entities/report.entity"
+                t = ent.read_text(encoding="utf-8")
+                t = re.sub(r"  字段 chat_q .*?  字段 chat_at ", "  字段 chat_who 文本 问老师表谁列\n  字段 chat_text 文本 问老师表内容列\n  字段 chat_at ", t, flags=re.S)
+                t = re.sub(r"  字段 chat_intent_label .*?  字段 chat_notes ", "  字段 chat_notes ", t, flags=re.S)
+                t = re.sub(r"  字段 link_label .*?\n  字段 link_url .*?\n", "", t, flags=re.S)
+                ent.write_text(t, encoding="utf-8")
             build(proj)
             n_i18n = sorted(f.name for f in (proj / "web").glob("i18n.*"))
             check(not n_i18n, f"{src} 副本没有 i18n.*.js：{n_i18n}")

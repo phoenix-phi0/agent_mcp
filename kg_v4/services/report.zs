@@ -481,6 +481,190 @@
     返回 {res}
   结束
 
+  函数 地址段 text
+    设 q.text = {text}
+    设 row = 查一行表 app.db report_url_part {q}
+    设 o.v = {row.v 或}
+    返回 {o}
+  结束
+
+  函数 意图标签 code
+    设 lb = {code}
+    如果 {code} 等于 quiz
+      设 lb = 出题
+    否则如果 {code} 等于 progress
+      设 lb = 进度
+    否则如果 {code} 等于 textbook
+      设 lb = 教材
+    否则如果 {code} 等于 explain
+      设 lb = 讲解
+    否则如果 {code} 等于 summary
+      设 lb = 本轮总结
+    结束
+    设 o.label = {lb}
+    返回 {o}
+  结束
+
+  函数 学生对话地址 student chat_page? chat_kw? chat_start? chat_end? chat_kind?
+    设 sa = 调用 地址段 text={student}
+    设 hf = #%E5%AD%A6%E6%83%85?student={sa.v}
+    如果 {chat_page} 不为空 且 {chat_page} 不等于 1
+      设 hf = {hf}&chat_page={chat_page}
+    结束
+    设 ka = 调用 地址段 text={chat_kw}
+    设 kav = {ka.v 或}
+    如果 {kav} 不为空
+      设 hf = {hf}&chat_kw={kav}
+    结束
+    如果 {chat_start} 不为空
+      设 hf = {hf}&chat_start={chat_start}
+    结束
+    如果 {chat_end} 不为空
+      设 hf = {hf}&chat_end={chat_end}
+    结束
+    如果 {chat_kind} 不为空
+      设 hf = {hf}&chat_kind={chat_kind}
+    结束
+    设 o.href = {hf}
+    返回 {o}
+  结束
+
+  函数 问老师表单 chat_kw? chat_start? chat_end? chat_kind?
+    设 il = 调用 意图标签 code={chat_kind}
+    设 ci = {il.label 或}
+    如果 {ci} 为空
+      设 ci = 全部
+    结束
+    设 o.chat_q = {chat_kw 或}
+    设 o.chat_from = {chat_start 或}
+    设 o.chat_to = {chat_end 或}
+    设 o.chat_intent = {ci}
+    返回 {o}
+  结束
+
+  公开 函数 问老师筛选 student chat_q? chat_from? chat_to? chat_intent? learner? current_role? auth_mode? subject?
+    如果 {student} 为空
+      报错 400 student 不能为空
+    结束
+    设 subject_id = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 scope = 调用 学生范围 subject_id={subject_id}
+    设 ins = 0
+    遍历 sc0 于 {scope}
+      如果 {sc0.username} 等于 {student}
+        设 ins = 1
+      结束
+    结束
+    如果 {ins} 等于 0
+      报错 404 没有这个学生
+    结束
+    设 kind = {zz 或}
+    如果 {chat_intent} 为空 或 {chat_intent} 等于 全部
+      设 kind = {zz 或}
+    否则如果 {chat_intent} 等于 出题
+      设 kind = quiz
+    否则如果 {chat_intent} 等于 进度
+      设 kind = progress
+    否则如果 {chat_intent} 等于 教材
+      设 kind = textbook
+    否则如果 {chat_intent} 等于 讲解
+      设 kind = explain
+    否则如果 {chat_intent} 等于 本轮总结
+      设 kind = summary
+    否则
+      报错 400 意图不对
+    结束
+    设 re = ^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$
+    如果 {chat_from} 不为空
+      设 m1 = 匹配 {chat_from} {re}
+      如果 {m1.matched} 不等于 是
+        报错 400 日期要写成 YYYY-MM-DD
+      结束
+    结束
+    如果 {chat_to} 不为空
+      设 m2 = 匹配 {chat_to} {re}
+      如果 {m2.matched} 不等于 是
+        报错 400 日期要写成 YYYY-MM-DD
+      结束
+    结束
+    设 kw1 = 替换 {chat_q} ^\s+
+    设 kw = 替换 {kw1} \s+$
+    设 h = 调用 学生对话地址 student={student} chat_kw={kw} chat_start={chat_from} chat_end={chat_to} chat_kind={kind}
+    设 out.go = {h.href}
+    返回 {out}
+  结束
+
+  公开 函数 问老师全文页面 student chat_id chat_kw? chat_start? chat_end? chat_kind? learner? current_role? auth_mode? subject?
+    如果 {student} 为空
+      报错 400 student 不能为空
+    结束
+    设 subject_id = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 scope = 调用 学生范围 subject_id={subject_id}
+    设 ins = 0
+    遍历 sc0 于 {scope}
+      如果 {sc0.username} 等于 {student}
+        设 ins = 1
+      结束
+    结束
+    如果 {ins} 等于 0
+      报错 404 没有这个学生
+    结束
+    设 t = 调用 tutor.取问答轮 learner={student} round_id={chat_id} subject={subject_id}
+    设 nt = {zz 或}
+    如果 {t.reply_id} 大于 0
+      设 nr = 调用 teacher_rules.取回复用到 reply_id={t.reply_id} subject={subject_id}
+      设 nt = {nr.text 或}
+    结束
+    设 lt = {zz 或}
+    设 lh = {zz 或}
+    如果 {t.lesson_code} 不为空
+      设 les = 调用 lesson.取课文 code={t.lesson_code} subject={subject_id} 出错时 le
+      设 ttl = {les.title 或}
+      如果 {le} 不为空
+        设 ttl = {zz 或}
+      结束
+      设 lg = 调用 account.取语言 username={learner}
+      如果 {lg.lang} 等于 ja
+        设 trl = 调用 subject.译文 tbl=lesson_text row_key={t.lesson_code} field=title lang=ja
+        设 trlt = {trl.text 或}
+        如果 {trlt} 不为空
+          设 ttl = {trlt}
+        结束
+      结束
+      设 lt = {t.lesson_code}
+      如果 {ttl} 不为空
+        设 lt = {t.lesson_code} {ttl}
+      结束
+      设 ca = 调用 地址段 text={t.lesson_code}
+      设 lh = #%E8%AF%BE%E6%96%87%E6%9F%A5%E7%9C%8B?code={ca.v}
+    结束
+    设 cl = 解析JSON []
+    遍历 lk 于 {t.links}
+      设 lo.link_label = {lk.label 或}
+      设 lo.link_url = {lk.url 或}
+      设 cl = 列表加项 {cl} {lo}
+    结束
+    设 cn = 列表长度 {cl}
+    如果 {cn} 等于 0 且 {t.link 或} 不为空
+      设 lo2.link_label = 链接
+      设 lo2.link_url = {t.link}
+      设 cl = 列表加项 {cl} {lo2}
+    结束
+    设 il = 调用 意图标签 code={t.intent}
+    设 cf.id = {t.id}
+    设 cf.at = {t.at 或}
+    设 cf.intent_label = {il.label 或}
+    设 cf.ask = {t.ask 或}
+    设 cf.reply = {t.reply 或}
+    设 cf.notes = {nt}
+    设 cf.lesson_text = {lt}
+    设 cf.lesson_href = {lh}
+    设 fm = 调用 问老师表单 chat_kw={chat_kw} chat_start={chat_start} chat_end={chat_end} chat_kind={chat_kind}
+    设 out.chat_full = {cf}
+    设 out.chat_links = {cl}
+    设 out.form = {fm}
+    返回 {out}
+  结束
+
   公开 函数 学情首页页面 report_sort? learner? current_role? auth_mode? subject?
     设 subject_id = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 lg = 调用 account.取语言 username={learner}
@@ -689,13 +873,32 @@
     返回 {out}
   结束
 
-  公开 函数 学生页面 student learner? current_role? auth_mode? subject?
+  公开 函数 学生页面 student chat_page? chat_kw? chat_start? chat_end? chat_kind? learner? current_role? auth_mode? subject?
     如果 {student} 为空
       报错 400 student 不能为空
     结束
     设 subject_id = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 lg2 = 调用 account.取语言 username={learner}
     设 lang = {lg2.lang 或}
+    设 kw1 = 替换 {chat_kw} ^\s+
+    设 kw2 = 替换 {kw1} \s+$
+    设 re = ^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$
+    如果 {chat_start} 不为空
+      设 m1 = 匹配 {chat_start} {re}
+      如果 {m1.matched} 不等于 是
+        报错 400 日期要写成 YYYY-MM-DD
+      结束
+    结束
+    如果 {chat_end} 不为空
+      设 m2 = 匹配 {chat_end} {re}
+      如果 {m2.matched} 不等于 是
+        报错 400 日期要写成 YYYY-MM-DD
+      结束
+    结束
+    如果 {chat_kind} 不为空 且 {chat_kind} 不等于 quiz 且 {chat_kind} 不等于 progress 且 {chat_kind} 不等于 textbook 且 {chat_kind} 不等于 explain 且 {chat_kind} 不等于 summary
+      报错 400 意图不对
+    结束
+    设 fm = 调用 问老师表单 chat_kw={kw2} chat_start={chat_start} chat_end={chat_end} chat_kind={chat_kind}
     设 acc = 调用 account.取账号 username={student}
     设 bad = 0
     如果 {acc} 为空
@@ -720,6 +923,7 @@
       设 so.missing = {mt}
       设 so.back = {bk}
       设 mo.student = {so}
+      设 mo.form = {fm}
       返回 {mo}
     结束
     设 g = 调用 取学生学情 student={student} subject={subject_id}
@@ -1006,23 +1210,69 @@
       设 bo.last_wrong = {bw.last_at 或}
       设 sbk = 列表加项 {sbk} {bo}
     结束
-    设 ch = 调用 tutor.列对话 learner={student} limit=40 subject={subject_id}
+    设 ch = 调用 tutor.列问答轮 learner={student} page={chat_page} page_size=20 keyword={kw2} date_from={chat_start} date_to={chat_end} intent={chat_kind} subject={subject_id}
     设 sch = 解析JSON []
-    遍历 mg 于 {ch.messages}
-      设 who = 学生
+    遍历 rd 于 {ch.rounds}
+      设 il2 = 调用 意图标签 code={rd.intent}
       设 nt = {zz 或}
-      如果 {mg.role} 等于 teacher
-        设 who = 老师
-        设 nr2 = 调用 teacher_rules.取回复用到 reply_id={mg.id} subject={subject_id}
+      如果 {rd.reply_id} 大于 0
+        设 nr2 = 调用 teacher_rules.取回复用到 reply_id={rd.reply_id} subject={subject_id}
         设 nt = {nr2.text 或}
       结束
-      设 ct = 调用 缩略 text={mg.content} n=120
-      设 co.chat_who = {who}
-      设 co.chat_text = {ct}
-      设 co.chat_at = {mg.at 或}
+      设 ca2 = 调用 缩略 text={rd.ask} n=120
+      设 cr2 = 调用 缩略 text={rd.reply} n=120
+      设 co.chat_id = {rd.id}
+      设 co.chat_at = {rd.at 或}
+      设 co.chat_intent_label = {il2.label 或}
+      设 co.chat_ask = {ca2}
+      设 co.chat_reply = {cr2}
       设 co.chat_notes = {nt}
+      设 co.note_content = {zz 或}
+      设 co.note_keywords = {zz 或}
+      设 co.note_kind = {zz 或}
+      设 co.note_once = {zz 或}
       设 sch = 列表加项 {sch} {co}
     结束
+    设 pg = {ch.page 或}
+    设 pgc = {ch.page_count 或}
+    设 ctot = {ch.total 或}
+    设 filt = 0
+    设 kwa = 调用 地址段 text={kw2}
+    设 kwv = {kwa.v 或}
+    如果 {kwv} 不为空 或 {chat_start} 不为空 或 {chat_end} 不为空 或 {chat_kind} 不为空
+      设 filt = 1
+    结束
+    设 w3 = 共
+    设 info = {w3} {ctot} 条，第 {pg}/{pgc} 页
+    如果 {lang} 等于 ja
+      设 w4 = 全
+      设 info = {w4} {ctot} 件、{pg}/{pgc} ページ
+    结束
+    设 olh = {zz 或}
+    如果 {pg} 小于 {pgc}
+      设 pn = 计算 {pg} + 1
+      设 oh = 调用 学生对话地址 student={student} chat_page={pn} chat_kw={kw2} chat_start={chat_start} chat_end={chat_end} chat_kind={chat_kind}
+      设 olh = {oh.href}
+    结束
+    设 nwh = {zz 或}
+    如果 {pg} 大于 1
+      设 pp = 计算 {pg} - 1
+      设 nh = 调用 学生对话地址 student={student} chat_page={pp} chat_kw={kw2} chat_start={chat_start} chat_end={chat_end} chat_kind={chat_kind}
+      设 nwh = {nh.href}
+    结束
+    设 clh = {zz 或}
+    如果 {filt} 等于 1
+      设 chh = 调用 学生对话地址 student={student}
+      设 clh = {chh.href}
+    结束
+    设 scp.info = {info}
+    设 scp.total = {ctot}
+    设 scp.page = {pg}
+    设 scp.page_count = {pgc}
+    设 scp.filtered = {filt}
+    设 scp.older = {olh}
+    设 scp.newer = {nwh}
+    设 scp.clear = {clh}
     设 snotes = 调用 teacher_rules.设定列表 student={student} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
     设 srel = 调用 teacher_rules.传达列表 student={student} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
     设 out.student = {so}
@@ -1032,8 +1282,10 @@
     设 out.student_recent = {srec}
     设 out.student_book = {sbk}
     设 out.student_chat = {sch}
+    设 out.student_chat_page = {scp}
     设 out.student_notes = {snotes}
     设 out.student_relays = {srel}
+    设 out.form = {fm}
     返回 {out}
   结束
 

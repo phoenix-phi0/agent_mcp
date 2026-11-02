@@ -14,7 +14,12 @@
 #   #学情?student=s1   一个学生：抬头（教材、最近学习）、概况、「请 AI 写学情总结」
 #                      （平衡档，十几秒，等的时候有提示；写好的存起来，下次打开还
 #                      在）、各知识点得分与掌握、常错条目、最近作答、默写错词本、
-#                      问老师记录（只读，老师的回答带着当时用了的 AI 老师设定）、
+#                      问老师记录（只读，老师的回答带着当时用了的 AI 老师设定；K189：
+#                      按「一轮问答」每页 20 轮，新的在前，因为教师打开学情先要看最近问了什么；
+#                      页码和筛选条件都放地址 chat_page / chat_kw / chat_start / chat_end /
+#                      chat_kind，翻页是链接，「筛选」由接口算地址回 go，「看全文」是行上打开
+#                      浮层。放地址是因为行上打开浮层会清空表单，放表单里筛选条件就丢了；
+#                      筛选框名字故意和地址参数不同，否则输入框会被引擎设成只读）、
 #                      AI 老师设定：这个学生个人的和全班的放在一起（全班的只读），
 #                      新增 / 编辑在「编辑学生设定」浮层里（地址里的 student 跟着
 #                      提交，接口就知道是给这个学生的），行上停用 / 启用 / 删除；
@@ -118,12 +123,29 @@
         列 last_wrong 最近答错
       结束
     结束
-    区域 问老师记录 当 lists.student_chat&&lists.student_chat.length
-      列表 问老师表 绑 student_chat
-        列 chat_who 谁
-        列 chat_text 内容
+    区域 问老师记录
+      分组 问老师筛选 横排 底栏 间距 12px 对齐 end
+        字段 chat_q 宽 200px 提示 在学生问和老师答里找 关键词
+        字段 chat_from 控件 日期 起始日期
+        字段 chat_to 控件 日期 结束日期
+        字段 chat_intent 控件 下拉 宽 120px 改时 report_chat_search 意图
+        动作 report_chat_search 远程 筛选
+        链接 chat_clear 绑 student_chat_page.clear 次要 清除筛选
+      结束
+      显示 student_chat_page.info
+      文案 当 lists.student_chat&&!lists.student_chat.length&&shared.student_chat_page&&shared.student_chat_page.filtered!=1 还没有问老师记录。
+      文案 当 lists.student_chat&&!lists.student_chat.length&&shared.student_chat_page&&shared.student_chat_page.filtered==1 没有符合筛选条件的记录。
+      列表 问老师表 绑 student_chat 当 lists.student_chat&&lists.student_chat.length
         列 chat_at 时间
+        列 chat_intent_label 意图
+        列 chat_ask 学生问
+        列 chat_reply AI老师答
         列 chat_notes 用了的设定
+        动作 open_chat_full 打开 问老师全文 带 chat_id 看全文
+      结束
+      分组 问老师翻页 横排 底栏 间距 12px
+        链接 chat_newer 绑 student_chat_page.newer 次要 ← 更新
+        链接 chat_older 绑 student_chat_page.older 次要 更早 →
       结束
     结束
     区域 AI老师设定
@@ -195,6 +217,27 @@
     分组 底栏 横排 底栏
       动作 teacher_relay_save 提交 远程 关闭 保存
       动作 cancel_student_relay 次要 关闭 取消
+    结束
+  结束
+
+  浮层 问老师全文 宽 720px 载入 report_chat_full
+    分组 这一轮 竖排 间距 12px 当 shared.chat_full&&shared.chat_full.id==params.chat_id
+      显示 chat_full.at 时间
+      显示 chat_full.intent_label 当 shared.chat_full.intent_label 意图
+      显示 chat_full.ask 正文 当 shared.chat_full.ask 学生问
+      文案 当 !shared.chat_full.ask 这一轮没有学生提问。
+      显示 chat_full.reply 正文 当 shared.chat_full.reply AI老师的回复
+      文案 当 !shared.chat_full.reply 这一轮没有AI老师的回复。
+      显示 chat_full.notes 当 shared.chat_full.notes 用了的设定
+      显示 chat_full.lesson_text 当 shared.chat_full.lesson_text 关联课文
+      链接 chat_lesson 绑 chat_full.lesson_href 次要 打开这一课
+    结束
+    列表 问老师全文链接 绑 chat_links 当 shared.chat_full&&shared.chat_full.id==params.chat_id&&lists.chat_links&&lists.chat_links.length
+      列 link_label 名称
+      列 link_url 地址
+    结束
+    分组 底栏 横排 底栏
+      动作 close_chat_full 次要 关闭 返回
     结束
   结束
 

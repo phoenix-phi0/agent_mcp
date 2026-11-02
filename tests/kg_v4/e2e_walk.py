@@ -912,6 +912,320 @@ def k188_nav_flow(browser, base, proj, ck, marks, new_page):
         set_lang(old)
 
 
+def k189_chat_flow(browser, base, proj, ck, marks, new_page):
+    """K189：学情页问老师记录——分页、看全文、筛选、隔离、权限、ja 文案。
+    夹具自建自删：专用学生 walk189s（日语科目 + 一个 t1 负责的私有科目），对话直接写库。"""
+    name = "K189问老师"
+    stu = "walk189s"
+    long_ask = "walk189 long " + "长问" * 100 + "问尾巴"
+    long_reply = "长答第一行\n第二行\n    缩进行\n" + "答" * 300 + "答尾巴"
+    xss = '<img src=x onerror="window.xss189=1">'
+    # (role, content, intent, at, lesson_code, link, links)，按时间从旧到新
+    rows = [("user", long_ask, "explain", "2026-01-10 09:00:00", "", "", ""),
+            ("teacher", long_reply, "explain", "2026-01-10 09:00:01", "", "/lesson?code=x",
+             json.dumps([{"label": "读课文", "url": "/lesson?code=x"}], ensure_ascii=False))]
+    def one(text, at="2026-01-20 09:00:00", intent="explain", reply="walk189 普通回复"):
+        rows.append(("user", text, intent, at, "", "", ""))
+        rows.append(("teacher", reply, intent, at, "", "", ""))
+    one("walk189 d1", "2026-01-01 23:59:59")
+    one("walk189 d2", "2026-01-02 00:00:00")
+    one("walk189 d3", "2026-01-03 00:00:00")
+    one("打了50%折")
+    one("写法 a_b")
+    one("写法 acb")
+    one("it's 这样")
+    one("符号 p&q#r+s=t?u v")
+    one("花括号 {student}")
+    one(xss, reply=xss)
+    one("问大小写", reply="MixedCaseWord 在回答里")
+    one("walk189 出题问", intent="quiz")
+    one("walk189 进度问", intent="progress")
+    one("walk189 教材问", intent="textbook")
+    for i in range(30):
+        one(f"walk189 filler{i:02d}", f"2026-02-{(i % 28) + 1:02d} 09:00:00")
+    rows.append(("teacher", "walk189 本轮总结全文", "summary", "2026-03-01 09:00:00", "", "", ""))
+    rows.append(("user", "walk189solo 没人回", "explain", "2026-03-02 09:00:00", "", "", ""))
+    total = sum(1 for r in rows if r[0] == "user") + 1   # 学生每条一轮 + 总结单独一轮
+    pages = (total + 19) // 20
+    last_n = total - 20 * (pages - 1)
+
+    con = sqlite3.connect(proj / "app.db")
+    con.row_factory = sqlite3.Row
+    try:
+        old_lang = con.execute("SELECT lang FROM account_user WHERE username=?", (TEACHER_USER,)).fetchone()[0]
+        h = con.execute("SELECT password_hash FROM account_user WHERE username=?", (STUDENT_NAME,)).fetchone()[0]
+        con.execute("INSERT INTO account_user(username,password_hash,display_name,role,disabled,created_at) VALUES(?,?,?,'student',0,'2026-01-01')",
+                    (stu, h, "走查189"))
+        con.execute("INSERT INTO subject_student(subject_id,learner,assigned_by,status,created_at) VALUES(1,?,'t1','active','2026-01-01')", (stu,))
+        con.execute("INSERT INTO subject_info(code,name,kind,caps,levels,qtypes,visibility,owner,status,created_at,updated_at)"
+                    " VALUES('walk189','走查189私有','general','x','入门','choice','private','t1','active','2026-01-01','2026-01-01')")
+        sid = con.execute("SELECT id FROM subject_info WHERE code='walk189'").fetchone()[0]
+        con.execute("INSERT INTO subject_teacher(subject_id,teacher,role,created_at) VALUES(?,'t1','owner','2026-01-01')", (sid,))
+        con.execute("INSERT INTO subject_student(subject_id,learner,assigned_by,status,created_at) VALUES(?,?,'t1','active','2026-01-01')", (sid, stu))
+        con.execute("INSERT INTO tutor_message(learner,role,content,intent,lesson_code,link,links,summary_round,at,subject_id)"
+                    " VALUES(?,'user','别的科目的问题','explain','','','','','2026-01-05 09:00:00',?)", (stu, sid))
+        other_id = con.execute("SELECT last_insert_rowid()").fetchone()[0]
+        for r in rows:
+            con.execute("INSERT INTO tutor_message(learner,role,content,intent,lesson_code,link,links,summary_round,at,subject_id)"
+                        " VALUES(?,?,?,?,?,?,?,'',?,1)", (stu, r[0], r[1], r[2], r[4], r[5], r[6], r[3]))
+        ids = {x["content"]: x["id"] for x in con.execute("SELECT id,content FROM tutor_message WHERE learner=? AND subject_id=1", (stu,))}
+        msg_before = con.execute("SELECT count(*), COALESCE(sum(length(content)),0) FROM tutor_message").fetchone()[0:2]
+        con.commit()
+    finally:
+        con.close()
+
+    hash0 = "#" + quote("学情") + "?student=" + stu
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    p = new_page(ctx, "k189-t1")
+    ctx_t2 = browser.new_context()
+    t2 = new_page(ctx_t2, "k189-t2")
+    ctx_s = browser.new_context()
+    s = new_page(ctx_s, "k189-s1")
+
+    def has(page, text, timeout=15000):
+        try:
+            page.wait_for_function("t => document.body.innerText.includes(t)", arg=text, timeout=timeout)
+            return True
+        except Exception:
+            return False
+
+    def go(h, wait=None):
+        p.evaluate("h => { location.hash = h; }", h)
+        if wait:
+            return has(p, wait)
+
+    def rows_n():
+        return p.locator('tr:has(button:has-text("看全文"))').count()
+
+    def first_row():
+        return p.locator('tr:has(button:has-text("看全文"))').first.inner_text()
+
+    def settle():
+        # 筛选是「接口回 go → 改地址 → 载入」两段请求：等它们都回来再断言，不然旧内容会让断言白过
+        p.wait_for_timeout(300)
+        p.wait_for_load_state("networkidle")
+        p.wait_for_timeout(200)
+
+    def fill(q="", start="", end=""):
+        p.locator('label.field:has-text("关键词") input').first.fill(q)
+        p.locator('label.field:has-text("起始日期") input').first.fill(start)
+        p.locator('label.field:has-text("结束日期") input').first.fill(end)
+
+    def search(q="", start="", end=""):
+        fill(q, start, end)
+        p.locator('button:text-is("筛选")').first.click()
+        settle()
+
+    def api(c, path, data, sub=None):
+        q = f"?subject={sub}" if sub else ""
+        return c.request.post(base + path + q, data=data)
+
+    def keyword(q, want, label, text):
+        search(q)
+        ok = has(p, f"共 {want} 条") and rows_n() == want and text in first_row()
+        ck(ok, f"{name}：关键词 {label} 命中 {want} 轮", f"{rows_n()} {hash_of(p)}")
+        ck(p.locator('label.field:has-text("关键词") input').first.input_value() == q, f"{name}：关键词 {label} 筛完框里还是原文")
+
+    try:
+        p._allowed_status = (401,)
+        login(p, base, TEACHER_USER, "/teacher")
+        p._allowed_status = ()
+        # ---- 分页 ----
+        ok = go(hash0, f"共 {total} 条，第 1/{pages} 页")
+        ck(ok, f"{name}：默认第 1 页，显示共 {total} 条", p.inner_text("body")[:300])
+        p.wait_for_selector('tr:has(button:has-text("看全文"))', timeout=15000)
+        ck(rows_n() == 20, f"{name}：一页 20 轮", str(rows_n()))
+        ck("walk189solo" in first_row(), f"{name}：新的在前", first_row())
+        ck(p.locator('a:has-text("← 更新")').count() == 0 and p.locator('a:has-text("更早 →")').count() == 1,
+           f"{name}：第 1 页只有「更早」")
+        p.screenshot(path=str(proj / "k189_list.png"))
+        p.locator('a:has-text("更早 →")').click()
+        ck(has(p, f"第 2/{pages} 页"), f"{name}：点更早到第 2 页")
+        ck(p.locator('a:has-text("← 更新")').count() == 1, f"{name}：第 2 页有「更新」")
+        ck("chat_page=2" in hash_of(p), f"{name}：页码进地址（刷新、后退可用）", hash_of(p))
+        p.locator('a:has-text("← 更新")').click()
+        ck(has(p, f"第 1/{pages} 页"), f"{name}：点更新回第 1 页")
+        go(hash0 + f"&chat_page={pages}", f"第 {pages}/{pages} 页")
+        p.wait_for_function("n => document.querySelectorAll('tr button').length >= 0", arg=0)
+        p.wait_for_timeout(400)
+        ck(rows_n() == last_n and p.locator('a:has-text("更早 →")').count() == 0, f"{name}：最后一页 {last_n} 轮、没有「更早」", str(rows_n()))
+        go(hash0 + "&chat_page=999", f"第 {pages}/{pages} 页")
+        ck(has(p, f"第 {pages}/{pages} 页"), f"{name}：页码超出取最后一页")
+        go(hash0 + "&chat_page=abc", f"第 1/{pages} 页")
+        ck(has(p, f"第 1/{pages} 页"), f"{name}：页码非法当第 1 页")
+
+        # ---- 看全文 ----
+        go(hash0 + f"&chat_page={pages}", f"第 {pages}/{pages} 页")
+        p.wait_for_timeout(400)
+        row = p.locator('tr:has(button:has-text("看全文"))', has_text="walk189 long").first
+        ck("问尾巴" not in row.inner_text() and "…" in row.inner_text(), f"{name}：列表里截断", row.inner_text()[:200])
+        row.locator('button:has-text("看全文")').click()
+        ok = has(p, "问尾巴") and has(p, "答尾巴")
+        ck(ok, f"{name}：浮层显示问和答的全文", p.inner_text("body")[-400:])
+        box = p.locator(".overlay-box")
+        pre = box.evaluate("e => [...e.querySelectorAll('.dyn.prose .dyn-v')].map(x => x.textContent)")
+        ck(long_ask in pre and long_reply in pre, f"{name}：全文逐字（含换行和缩进）", str([len(x) for x in pre]))
+        t = box.inner_text()
+        ck("2026-01-10 09:00:00" in t and "讲解" in t and "读课文" in t and "/lesson?code=x" in t, f"{name}：时间、意图、链接都在", t[-200:])
+        ck(f"chat_page={pages}" in hash_of(p) and "student=" in hash_of(p), f"{name}：开浮层地址还带着学生和页码", hash_of(p))
+        p.screenshot(path=str(proj / "k189_full.png"))
+        box.locator('button:has-text("返回")').click()
+        ck(has(p, f"第 {pages}/{pages} 页") and p.locator(".overlay-box").count() == 0, f"{name}：关浮层回到原来那一页")
+        p.wait_for_timeout(500)
+        ck(p.evaluate("() => location.hash.includes('student=')"), f"{name}：关浮层后还在这个学生", hash_of(p))
+        for label, content, want in (("学生单独一条", "walk189solo 没人回", "这一轮没有AI老师的回复。"),
+                                     ("本轮总结单独一条", "walk189 本轮总结全文", "这一轮没有学生提问。")):
+            go(hash0, f"第 1/{pages} 页")
+            p.wait_for_timeout(400)
+            p.locator('tr:has(button:has-text("看全文"))', has_text=content[:12]).first.locator('button:has-text("看全文")').click()
+            ck(has(p, want) and content in p.locator(".overlay-box").inner_text(), f"{name}：{label}也能看全文", p.inner_text("body")[-200:])
+            p.locator('.overlay-box button:has-text("返回")').click()
+            settle()
+        # XSS：内容原样显示，不执行
+        search("<img")
+        ck(has(p, "共 1 条"), f"{name}：能搜到含尖括号的内容")
+        p.locator('tr:has(button:has-text("看全文"))').first.locator('button:has-text("看全文")').click()
+        ck(has(p, "onerror") and p.locator(".overlay-box img").count() == 0 and p.evaluate("() => window.xss189 === undefined"),
+           f"{name}：HTML 按文字显示，不执行")
+        p.locator('.overlay-box button:has-text("返回")').click()
+        settle()
+
+        # ---- 筛选 ----
+        keyword("%", 1, "%", "50%折")
+        keyword("_", 1, "_", "a_b")
+        keyword("a_b", 1, "a_b（不当通配符）", "a_b")
+        keyword("it's", 1, "单引号", "it's")
+        keyword("p&q#r+s=t?u v", 1, "地址特殊字符和空格", "p&q#r+s=t?u v")
+        keyword("{student}", 1, "花括号（不当变量）", "{student}")
+        keyword("mixedcaseword", 1, "小写找回答里的大写", "MixedCaseWord")
+        go(hash0, f"第 1/{pages} 页")
+        settle()
+        p.locator('a:has-text("更早 →")').click()
+        settle()
+        ck(has(p, f"第 2/{pages} 页"), f"{name}：先翻到第 2 页")
+        search("walk189 filler")
+        ck(has(p, "共 30 条，第 1/2 页"), f"{name}：筛选改了回到第 1 页", hash_of(p))
+        p.locator('a:has-text("更早 →")').click()
+        ck(has(p, "共 30 条，第 2/2 页"), f"{name}：翻页带着筛选条件")
+        p.wait_for_timeout(400)
+        ck(p.locator('label.field:has-text("关键词") input').first.input_value() == "walk189 filler", f"{name}：翻页后筛选框还是这个词")
+        p.locator('tr:has(button:has-text("看全文"))').first.locator('button:has-text("看全文")').click()
+        has(p, "AI老师的回复")
+        p.locator('.overlay-box button:has-text("返回")').click()
+        ck(has(p, "共 30 条，第 2/2 页"), f"{name}：开关浮层后筛选和页码都在")
+        p.wait_for_timeout(500)
+        ck(p.locator('label.field:has-text("关键词") input').first.input_value() == "walk189 filler", f"{name}：开关浮层后筛选框还在")
+        p.locator('a:has-text("清除筛选")').click()
+        settle()
+        ck(has(p, f"共 {total} 条，第 1/{pages} 页"), f"{name}：清除筛选")
+        search("", "2026-01-02", "2026-01-02")
+        ck(has(p, "共 1 条"), f"{name}：起止同一天，只有当天（d2）")
+        ck("walk189 d2" in (p.wait_for_timeout(300) or first_row()), f"{name}：含当天 00:00:00", first_row())
+        search("walk189 d", "2026-01-01", "2026-01-02")
+        ck(has(p, "共 2 条") and rows_n() == 2, f"{name}：起始含当天 23:59:59，结束不多算第 3 天", str(rows_n()))
+        search("", "2026-01-03", "2026-01-02")
+        ck(has(p, "没有符合筛选条件的记录。"), f"{name}：起晚于止，结果为空有提示")
+        ck(has(p, "共 0 条，第 1/1 页"), f"{name}：空结果也显示共 0 条")
+        search()
+        has(p, f"共 {total} 条")
+        p.wait_for_timeout(400)
+        sel = p.locator('label.field:has-text("意图") select').first
+        ck(sel.input_value() == "全部", f"{name}：意图默认全部", sel.input_value())
+        sel.select_option("出题")
+        settle()
+        ok = has(p, "共 1 条")
+        ck(ok and "chat_kind=quiz" in hash_of(p), f"{name}：选出题，改了就筛", hash_of(p))
+        p.wait_for_timeout(400)
+        ck(p.locator('label.field:has-text("意图") select').first.input_value() == "出题", f"{name}：筛完下拉还是出题")
+        for label, want in (("进度", 1), ("教材", 1), ("本轮总结", 1)):
+            p.locator('label.field:has-text("意图") select').first.select_option(label)
+            settle()
+            ok = has(p, f"共 {want} 条") and rows_n() == want and label in first_row()
+            ck(ok, f"{name}：只看{label}", first_row() if rows_n() else "")
+        sel = p.locator('label.field:has-text("意图") select').first
+        sel.select_option("全部")
+        settle()
+        ck(has(p, f"共 {total} 条"), f"{name}：选回全部")
+        # ---- 接口：校验、隔离、权限 ----
+        r = api(ctx, "/report/one", {"student": stu, "chat_start": "20260101"})
+        ck(r.status == 400, f"{name}：日期格式不对 400", str(r.status))
+        r = api(ctx, "/report/chat/search", {"student": stu, "chat_intent": "乱写"})
+        ck(r.status == 400, f"{name}：意图不对 400", str(r.status))
+        r = api(ctx, "/report/chat/one", {"student": stu, "chat_id": str(ids[long_reply])})
+        ck(r.status == 404, f"{name}：回复那条的编号查不到", str(r.status))
+        r = api(ctx, "/report/chat/one", {"student": stu, "chat_id": str(other_id)})
+        ck(r.status == 404, f"{name}：跨科目编号 404", str(r.status))
+        r = api(ctx, "/report/chat/one", {"student": STUDENT_NAME, "chat_id": str(ids[long_ask])})
+        ck(r.status == 404, f"{name}：别的学生的记录拿不到", str(r.status))
+        b = api(ctx, "/report/one", {"student": stu}, sid).json()["state"]
+        ck(b["student_chat_page"]["total"] in (1, "1") and "别的科目的问题" in json.dumps(b["student_chat"], ensure_ascii=False),
+           f"{name}：私有科目只看到自己科目那 1 轮", str(b["student_chat_page"]))
+        b = api(ctx, "/report/one", {"student": stu, "chat_kw": "别的科目"}).json()["state"]
+        ck(b["student_chat_page"]["total"] in (0, "0"), f"{name}：日语科目搜不到别的科目的内容", str(b["student_chat_page"]))
+        t2._allowed_status = (401,)
+        login(t2, base, "t2", "/teacher")
+        t2._allowed_status = ()
+        r = api(ctx_t2, "/report/one", {"student": stu}, sid)
+        ck(r.status == 403, f"{name}：没分配的教师看私有科目 403", str(r.status))
+        r = api(ctx_t2, "/report/chat/one", {"student": stu, "chat_id": str(other_id)}, sid)
+        ck(r.status == 403, f"{name}：没分配的教师看全文 403", str(r.status))
+        r = api(ctx_t2, "/report/chat/search", {"student": stu}, sid)
+        ck(r.status == 403, f"{name}：没分配的教师筛选 403", str(r.status))
+        s._allowed_status = (401,)
+        login(s, base, STUDENT_NAME)
+        s._allowed_status = ()
+        for path, data in (("/report/one", {"student": stu}), ("/report/chat/one", {"student": stu, "chat_id": str(ids[long_ask])}),
+                           ("/report/chat/search", {"student": stu})):
+            r = api(ctx_s, path, data)
+            ck(r.status == 403, f"{name}：学生调 {path} 403", str(r.status))
+        anon = browser.new_context()
+        r = api(anon, "/report/chat/one", {"student": stu, "chat_id": str(ids[long_ask])})
+        ck(r.status == 401, f"{name}：没登录 401", str(r.status))
+        anon.close()
+        # ---- ja ----
+        c = sqlite3.connect(proj / "app.db")
+        c.execute("UPDATE account_user SET lang='ja' WHERE username=?", (TEACHER_USER,))
+        c.commit()
+        c.close()
+        p.goto(base + "/teacher" + hash0, wait_until="domcontentloaded")
+        p.reload(wait_until="domcontentloaded")   # 只改 # 不会重载，语言在加载时才读
+        ok = has(p, f"全 {total} 件、1/{pages} ページ")
+        ck(ok, f"{name}：ja 分页文案", p.inner_text("body")[:300])
+        settle()   # 界面文字是 MutationObserver 防抖后才替换成日文的
+        p.wait_for_timeout(300)
+        body = p.inner_text("body")
+        miss = [w for w in ("絞り込む", "開始日", "終了日", "意図", "全文を見る", "以前の記録 →", "AI先生の回答", "学生の質問") if w not in body]
+        ck(not miss, f"{name}：ja 列表文案", str(miss))
+        opts = p.locator('select:has(option[value="本轮总结"]) option').all_inner_texts()
+        ck("今回のまとめ" in opts and "出題" in opts and "すべて" in opts, f"{name}：ja 意图选项", str(opts))
+        p.screenshot(path=str(proj / "k189_ja.png"))
+        p.locator('tr:has(button:has-text("全文を見る"))').first.locator('button:has-text("全文を見る")').click()
+        ck(has(p, "このやり取りにAI先生の返信はありません。"), f"{name}：ja 全文空回复提示")
+        p.locator(".overlay-box button.btn-ghost").first.click()
+        p.wait_for_timeout(500)
+        p.locator('label.field input[type="text"]').first.fill("没有这个词")
+        p.locator('button:text-is("絞り込む")').first.click()
+        ck(has(p, "条件に合う記録はありません。"), f"{name}：ja 空结果提示")
+        c = sqlite3.connect(proj / "app.db")
+        msg_after = c.execute("SELECT count(*), COALESCE(sum(length(content)),0) FROM tutor_message").fetchone()[0:2]
+        c.close()
+        ck(tuple(msg_after) == tuple(msg_before), f"{name}：全程只读，tutor_message 不变", f"{msg_before} {msg_after}")
+    finally:
+        for c0 in (ctx, ctx_t2, ctx_s):
+            c0.close()
+        c = sqlite3.connect(proj / "app.db")
+        try:
+            c.execute("UPDATE account_user SET lang=? WHERE username=?", (old_lang, TEACHER_USER))
+            c.execute("DELETE FROM tutor_message WHERE learner=?", (stu,))
+            c.execute("DELETE FROM subject_student WHERE learner=?", (stu,))
+            c.execute("DELETE FROM subject_teacher WHERE subject_id=?", (sid,))
+            c.execute("DELETE FROM subject_info WHERE id=?", (sid,))
+            c.execute("DELETE FROM account_user WHERE username=?", (stu,))
+            c.commit()
+        finally:
+            c.close()
+
+
 def write_assist_mock(proj, tmp):
     """教师助手段用的假模型规则（DSL_MOCK_SCRIPT）：意图分类和草稿生成各回一份合法 JSON。
     出题要用库里真有的条目编号，所以建好库之后从 app.db 取一个。→ 规则文件路径"""
@@ -1774,6 +2088,7 @@ def main(argv=None):
                 ja_textbook_login_flow(browser, base, proj, ck, marks, new_page)   # K184：登录页跟浏览器 + Python 教材空态页 ja
                 k187_lesson_flow(browser, base, proj, ck, marks, new_page)   # K187：课文 Markdown、ja 译文、教师只读
                 k188_nav_flow(browser, base, proj, ck, marks, new_page)   # K188：教师端顶栏不折行
+                k189_chat_flow(browser, base, proj, ck, marks, new_page)   # K189：问老师记录分页、看全文、筛选
 
                 # ---- 390px 视口 ----
                 m = new_page(browser.new_context(viewport={"width": 390, "height": 844}),

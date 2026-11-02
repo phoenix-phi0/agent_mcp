@@ -453,6 +453,8 @@ tr.row-locked td { opacity:.55; }
   .overlay-box { max-width:96vw; padding:14px; }
 }
 <% if i18n_langs %>
+/* 行上的按钮文字不折行：长文本列把按钮挤窄时「看全文」不会竖着排（K189） */
+.row-acts .btn { white-space:nowrap; }
 /* —— 界面多语言（可选声明）：顶栏语言切换 + 日文字体栈。开 i18n 的项目才
    生成这一段；html[lang="ja"] 时日文字体排在前面，中文回退不变。 —— */
 .nav-lang { display:inline-flex; align-items:center; gap:2px; margin-left:10px; }
