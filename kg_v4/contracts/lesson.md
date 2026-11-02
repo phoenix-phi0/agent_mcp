@@ -201,11 +201,12 @@
   伪代码 逐行插入 lesson_text（series_code 取入参，带 subject_id），对条目编号列表每个编号插入 lesson_item_link (lesson_code, item_code, subject_id)，对知识点编号列表每个编号插入 lesson_point_link (lesson_code, point_code, subject_id)，同一课内重复编号只插一次，统计 item_links、point_links
   伪代码 返回 {"ok": 1, "series_code": series_code, "total": 有效行数, "item_links": item_links, "point_links": point_links}
 
-公开 函数 写入系列课文并重灌 series_code rows_json series_name? source? license? learner? current_role? auth_mode? subject?
+公开 函数 写入系列课文并重灌 series_code rows_json series_name? source? license? intro? intro_given? sort_order? learner? current_role? auth_mode? subject?
   返回 {ok, series_code, total, imported, item_links, point_links, file_rows, rejected}
   报错 400 series_code 不能为空
   报错 400 series_code 格式不对
   报错 400 课文数据有错
+  报错 400 排序必须是整数
   报错 400 课号重复
   报错 400 编号要以「<编码>.」开头
   报错 400 系列编号已被其他科目使用
@@ -217,13 +218,14 @@
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 series_code 为空，报错 400 series_code 不能为空
   伪代码 series_code 格式（它要拼进文件路径 content/lesson/series/{series_code}.jsonl，防路径穿越）：必须符合旧系列代号规则 ^[a-z][a-z0-9_-]{0,39}$（如 hanabira、s1、my-s_1），或符合科目编号规则 ^[a-z][a-z0-9_]*\.[A-Za-z0-9_-]+$（如 math.s）；两条都不符（含 /、\、..、空白、大写开头等）报错 400 series_code 格式不对，不写文件、不动库（在 rows_json 校验之前判）
+  伪代码 sort_order 不为空且不匹配 ^-?\d+$，在写文件和写库之前报错 400 排序必须是整数。引擎里可选参数缺省就是空串，分不出缺省与显式空串，所以显式传简介（含空串）时调用方同时传 intro_given=1；intro_given 等于 1 才算明确传入 intro；sort_order 按是否空串判断，字符串 0 是明确传入，不依赖 truthy。
   伪代码 rows_json 是 JSON 数组，每个元素是一课：{code, level, title, summary, explain, connection, examples, examples_edited, orig_title, seq, item_codes, point_codes}，item_codes、point_codes 是编号数组（可空）；不是数组或没有任何一课，报错 400 课文数据有错
   伪代码 校验每课：code、title 不能为空；level 必须在本科目等级里（调用 subject.科目等级 subject_id=subject_id 的 levels；日语是 N5 N4 N3 N2 N1）；examples_edited 为空当 0，只能是 0 或 1；seq 为空当 0，否则必须是整数；任一不满足报错 400 课文数据有错
   伪代码 同一批内 code 重复，或 code 已存在于 series_code 以外的系列的 lesson_text 中（任何科目，课号全局唯一），报错 400 课号重复
   伪代码 课号前缀：每课 code 调用本模块 编号前缀检查 subject_id=subject_id code=code（日语 subject_id=1 豁免，其它科目要以「<科目编码>.」开头），不符报错 400 编号要以「<编码>.」开头，整批不写、不写文件
   伪代码 先写文件：用 写JSONL 把全部课（每课一行 JSON，字段同上）写入 content/lesson/series/{series_code}.jsonl（覆盖旧文件，文件是源数据，库是它的投影），file_rows 为写入的行数
   伪代码 再按文件重灌：读 content/lesson/series/{series_code}.jsonl 逐行处理；每课的 item_codes 每个编号调用 kg.取条目 code=编号 subject=subject_id、point_codes 每个编号调用 kg.取知识点 code=编号 subject=subject_id，任何一个取不到（包括属于别的科目），这一课整行拒收，记入 rejected（元素 {code, reason}，reason 写明哪个条目或知识点编号在库里没有），其余课照常导入；映射只引用已有的，不新建
-  伪代码 在一个事务里：按 series_code 查 lesson_series：已有但 subject_id 不等于本科目，报错 400 系列编号已被其他科目使用（整批不写，系列编号全局唯一；这一步放在写文件之前检查）；没有则插入 (code=series_code, name=series_name 不为空取之否则取 series_code, source, license, sort_order=100, subject_id)；有则对 series_name、source、license 中不为空的项更新对应列，并把 sort_order 小于 0 的改回 100（重新上架）
+  伪代码 在一个事务里：按 series_code 查 lesson_series：已有但 subject_id 不等于本科目，报错 400 系列编号已被其他科目使用（整批不写，系列编号全局唯一；这一步放在写文件之前检查）；没有则插入 (code=series_code, name=series_name 不为空取之否则取 series_code, intro=intro_given 等于 1 时取 intro 否则原默认空串, source, license, sort_order=sort_order 不为空取之否则 100, subject_id)；有则对 series_name、source、license 中不为空的项更新对应列；sort_order 不为空时用所给值替换（包括 0 和负数），为空时沿用原逻辑（小于 0 的改回 100 重新上架，其他保留）；intro_given 等于 1 时用新增查询 lesson_series_set_intro 把 intro 写成所给字符串（可为空，不用 lesson_series_update，它把空串当不改），否则保持旧值。其余字段的原语义不变；系列元数据与课文重灌在同一数据库事务中提交；重灌拒收语义与原来一致。
   伪代码 同一事务里删除 lesson_item_link、lesson_point_link 中属于 series_code 系列各课的行，再删除 lesson_text 中 series_code 相等的行（只动这个系列，其它系列、其它科目和 lesson_pref 不动；纵深防御：这几条按 series 清库的 SQL 都必须带 subject_id 等于本科目的条件，同 导入课文），然后逐课插入通过的课：lesson_text（series_code 取入参，带 subject_id）、lesson_item_link (lesson_code, item_code, subject_id)、lesson_point_link (lesson_code, point_code, subject_id)，同一课内重复编号只插一次，统计 item_links、point_links
   伪代码 total 为 rows_json 的课数，imported 为实际导入的课数（total 减去拒收数）
   伪代码 返回 {"ok": 1, "series_code": series_code, "total": total, "imported": imported, "item_links": item_links, "point_links": point_links, "file_rows": file_rows, "rejected": rejected}
@@ -983,6 +985,41 @@ content/lesson/series/{series_code}.withdrawn.jsonl 字段 code,level,title,summ
 用例 教师课文详情_不存在404
   调用 教师课文详情 learner=t1 code=NOPE
   报错 404
+
+用例 写入系列课文并重灌_新系列带简介排序
+  调用 写入系列课文并重灌 series_code=a rows_json=[{"code":"L1","level":"N5","title":"新一"}] intro=简介 intro_given=1 sort_order=0
+  得 ok=1
+  库 lesson_series 含 code=a intro=简介 sort_order=0
+
+用例 写入系列课文并重灌_新系列缺省排序100
+  调用 写入系列课文并重灌 series_code=a rows_json=[{"code":"L1","level":"N5","title":"新一"}]
+  得 ok=1
+  库 lesson_series 含 code=a sort_order=100
+
+用例 写入系列课文并重灌_已有系列未传保持旧值
+  先 数据 lesson_series code=a name=甲 intro=旧简介 sort_order=7
+  调用 写入系列课文并重灌 series_code=a rows_json=[{"code":"L1","level":"N5","title":"新一"}]
+  得 ok=1
+  库 lesson_series 含 code=a intro=旧简介 sort_order=7
+
+用例 写入系列课文并重灌_已有系列负排序未传恢复100
+  先 数据 lesson_series code=a name=甲 sort_order=-1
+  调用 写入系列课文并重灌 series_code=a rows_json=[{"code":"L1","level":"N5","title":"新一"}]
+  得 ok=1
+  库 lesson_series 含 code=a sort_order=100
+
+用例 写入系列课文并重灌_已有系列显式空简介与排序0
+  先 数据 lesson_series code=a name=甲 intro=旧简介 sort_order=7
+  调用 写入系列课文并重灌 series_code=a rows_json=[{"code":"L1","level":"N5","title":"新一"}] intro_given=1 sort_order=0
+  得 ok=1
+  库 lesson_series 含 code=a intro= sort_order=0
+
+用例 写入系列课文并重灌_非法排序400无副作用
+  先 数据 lesson_series code=a name=甲 sort_order=7
+  调用 写入系列课文并重灌 series_code=a rows_json=[{"code":"L1","level":"N5","title":"新一"}] sort_order=abc
+  报错 400
+  库 lesson_text 共 0 行
+  库 lesson_series 含 code=a sort_order=7
 
 用例 写入系列课文并重灌_等级不在本科目里400
   先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01

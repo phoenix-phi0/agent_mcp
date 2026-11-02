@@ -14,7 +14,8 @@ services/lesson.zs）。auth_mode=off 时显式 subject 才落到该科目，须
       [--intro ...] [--source ...] [--license ...] [--sort-order 100]
 
 --intro / --sort-order：传给「写入系列课文并重灌」；服务未升级时明确拒绝，
-  不得在函数外直接补写。没有传入时保持原调用参数。
+  不得在函数外直接补写。没有传入时保持原调用参数。传了 --intro（含空串）就同时转发
+  intro_given=1：引擎里可选参数缺省就是空串，服务靠它区分「没传」和「显式传空」。
 --yes：目标是正式数据目录（kg_v4_data）时的确认开关；缺省拒绝，防止误灌正式库。
 
 出参：打印 total/imported/file_rows/rejected/item_links/point_links；
@@ -78,13 +79,15 @@ def main(argv=None):
     if root.name == "kg_v4_data" and not a.yes:
         print(f"{root} 像正式数据目录；要灌正式库请显式加 --yes"); return 2
     optional = {k: v for k, v in (("intro", a.intro), ("sort_order", a.sort_order)) if v is not None}
+    if a.intro is not None:
+        optional["intro_given"] = 1
     if optional:
         service = root / "services" / "lesson.zs"
         match = re.search(r"^\s*公开\s+函数\s+写入系列课文并重灌\s+([^\r\n]+)",
                           service.read_text(encoding="utf-8"), re.MULTILINE)
         parameters = set(re.findall(r"[A-Za-z_][A-Za-z_0-9]*", match.group(1))) if match else set()
         if not optional.keys() <= parameters:
-            print("目标 lesson 服务尚不支持 intro/sort_order，请先完成 K187 服务升级；未写入")
+            print("目标 lesson 服务尚不支持 intro/intro_given/sort_order，请先升级服务；未写入")
             return 2
 
     from gen.project import make_app

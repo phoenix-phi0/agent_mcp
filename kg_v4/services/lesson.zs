@@ -631,7 +631,7 @@
     返回 {"ok": 1, "series_code": "{series_code}", "total": {total}, "item_links": {il}, "point_links": {pl}}
   结束
 
-  公开 函数 写入系列课文并重灌 series_code rows_json series_name? source? license? learner? current_role? auth_mode? subject?
+  公开 函数 写入系列课文并重灌 series_code rows_json series_name? source? license? intro? intro_given? sort_order? learner? current_role? auth_mode? subject?
     如果 {series_code} 为空
       报错 400 series_code 不能为空
     结束
@@ -650,6 +650,12 @@
     结束
     设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
     设 sid = {sj.subject_id}
+    如果 {sort_order} 不为空
+      设 mso = 匹配 {sort_order} ^-?\d+$
+      如果 {mso.matched} 不等于 是
+        报错 400 排序必须是整数
+      结束
+    结束
     设 lvs = 调用 subject.科目等级 subject_id={sid}
     设 mt = 匹配 {rows_json} ^\s*\[
     如果 {mt.matched} 不等于 是
@@ -773,12 +779,27 @@
           设 p.name = {series_code}
         结束
         设 p.sort_order = 100
+        如果 {sort_order} 不为空
+          设 p.sort_order = {sort_order}
+        结束
+        如果 {intro_given} 等于 1
+          设 p.intro = {intro 或}
+        结束
         设 w = 写库表 app.db lesson_series_insert {p}
       否则
         如果 {s.sort_order} 小于 0
           设 p.sort_order = 100
         结束
+        如果 {sort_order} 不为空
+          设 p.sort_order = {sort_order}
+        结束
         设 w = 写库表 app.db lesson_series_update {p}
+        如果 {intro_given} 等于 1
+          设 pi.code = {series_code}
+          设 pi.subject_id = {sid}
+          设 pi.intro = {intro 或}
+          设 w = 写库表 app.db lesson_series_set_intro {pi}
+        结束
       结束
       设 w = 写库 app.db lesson_item_link_delete_series series_code={series_code} subject_id={sid}
       设 w = 写库 app.db lesson_point_link_delete_series series_code={series_code} subject_id={sid}

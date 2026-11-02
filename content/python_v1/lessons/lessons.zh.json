@@ -5,6 +5,7 @@
   "language": "zh",
   "series_code": "python.core_v1",
   "series_name": "Python 从零入门",
+  "series_intro": "通过 13 课学习 Python 基础。",
   "lessons": [
     {
       "code": "python.lesson01",

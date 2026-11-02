@@ -29,15 +29,22 @@ with tempfile.TemporaryDirectory() as d:
     (p / 'services').mkdir(); (p / 'routes').mkdir(); (p / 'app.db').touch()
     rows = p / 'rows.json'; rows.write_text(json.dumps([{'code': 'python.l1'}]))
     svc = p / 'services/lesson.zs'
-    svc.write_text('  公开 函数 写入系列课文并重灌 series_code rows_json intro? sort_order?\n')
+    svc.write_text('  公开 函数 写入系列课文并重灌 series_code rows_json intro? intro_given? sort_order?\n')
     base = [str(p), str(rows), '--subject', '2', '--series-code', 'python.core_v1']
     assert mod.main(base) == 0
     assert 'intro=' not in seen[-1][0] and 'sort_order=' not in seen[-1][0]
     assert 'intro' not in seen[-1][1] and 'sort_order' not in seen[-1][1]
+    assert 'intro_given' not in seen[-1][0] and 'intro_given' not in seen[-1][1]
     assert mod.main(base + ['--intro', '', '--sort-order', '0']) == 0
     assert 'intro={intro}' in seen[-1][0] and 'sort_order={sort_order}' in seen[-1][0]
     assert seen[-1][1]['intro'] == '' and seen[-1][1]['sort_order'] == '0'
+    assert 'intro_given={intro_given}' in seen[-1][0] and seen[-1][1]['intro_given'] == '1'
+    assert mod.main(base + ['--sort-order', '0']) == 0
+    assert 'intro_given' not in seen[-1][0] and 'intro_given' not in seen[-1][1]
+    n = len(seen)
+    svc.write_text('  公开 函数 写入系列课文并重灌 series_code rows_json intro? sort_order?\n')
+    assert mod.main(base + ['--intro', 'hello']) == 2 and len(seen) == n
     svc.write_text('  公开 函数 写入系列课文并重灌 series_code rows_json\n')
-    assert mod.main(base + ['--intro', 'hello']) == 2 and len(seen) == 2
+    assert mod.main(base + ['--intro', 'hello']) == 2 and len(seen) == n
     assert (p / 'app.db').stat().st_size == 0
 print('adapter: absent, explicit empty/zero and old service guard passed')

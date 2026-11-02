@@ -48,6 +48,10 @@ def main():
     ensure(docs['zh']['language'] == 'zh' and docs['ja']['language'] == 'ja', 'wrong language metadata')
     source_ja = {r['row_key']: r['text'] for r in read_csv(SOURCE / 'ja/kg_point.tsv', '\t')}
     source_zh = {r['code']: r['title'] for r in points}
+    ensure(docs['zh'].get('series_intro'), 'zh: missing series_intro')
+    for lang in docs:
+        rows = json.loads((HERE / f'lesson_rows.{lang}.json').read_text(encoding='utf-8'))
+        ensure(len(rows) == len(docs[lang]['lessons']) and all(r['connection'] == '' for r in rows), f'{lang}: connection must stay empty')
     for lang, doc in docs.items():
         ensure(doc['subject_code'] == 'python' and doc['subject_id'] == 2, f'{lang}: wrong subject')
         ensure(doc['series_code'] == 'python.core_v1', f'{lang}: wrong series')

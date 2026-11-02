@@ -50,7 +50,7 @@ lesson 自身导入无 textbook_import 的非日语 caps 门控，但依然要�
 - 系列：python.core_v1 / Python 从零入门；subject_id 应由 subject=2 的上下文注入，不能依赖默认 1。
 - 课号、标题、等级、课序、知识点、条目：直接映射相应字段与 link 表。
 - objectives[0] → summary；完整学习目标、讲解、52 个代码示例、常见错误和练习答案 → explain（Markdown）。
-- connection 使用知识点编码顺序，不伪造日语接续/假名数据；orig_title 用该语言的本课标题；examples_edited=0。
+- connection 留空（K188）：这一栏是日语语法的「接续」，Python 没有对应内容，留空时课文页整栏隐藏；知识点关联看 point_codes。orig_title 用该语言的本课标题；examples_edited=0。
 - 例句概念应映射为代码/标准输入/预期输出。当前派生导入文件将 examples 留空，完整代码放在 explain，避开 jp^^zh 文本解析。若后续增加结构化示例 UI，可直接从主文件 examples 提取，原内容不丢失。
 - 原模型没有独立学习目标、常见错误、练习答案表，本次全部完整保存到 explain；若以后需要交互答题，再由单独任务建模，不把教材练习混入现有正式题库。
 

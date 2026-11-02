@@ -88,6 +88,10 @@ NJ=$( { ls "$CSRC"/ja/*.tsv 2>/dev/null || true; } | grep -vc '/lesson\.tsv$' ||
 [ "$NJ" -eq 4 ] || { echo "!! 内容源 ja/ 除 lesson.tsv 外应有 4 份译文 tsv，实际 $NJ"; exit 1; }
 mkdir -p "$OUT/content/python_v1/ja" "$OUT/content/python_v1/ja_lesson" "$OUT/content/python_v1/lessons"
 cp "$CSRC/lessons/lesson_rows.zh.json" "$OUT/content/python_v1/lessons/"
+# 中文系列简介的来源是 lessons.zh.json 的 series_intro；主文件不随包，取出这一句单放
+"$REPO/.venv/bin/python" -I -c 'import json,sys; print(json.load(open(sys.argv[1],encoding="utf-8"))["series_intro"])' \
+  "$CSRC/lessons/lessons.zh.json" > "$OUT/content/python_v1/lessons/series_intro.zh.txt"
+[ -s "$OUT/content/python_v1/lessons/series_intro.zh.txt" ] || { echo "!! lessons.zh.json 缺 series_intro"; exit 1; }
 cp "$CSRC/ja/lesson.tsv" "$OUT/content/python_v1/ja_lesson/"
 rm -f "$CSRC/ja/lesson.tsv"
 for f in points.csv items.csv edges.csv contrasts.csv quiz_v2.txt; do cp "$CSRC/$f" "$OUT/content/python_v1/$f"; done
@@ -420,7 +424,8 @@ say "日文译文写入"
 say "导入中文课文 13 课（按系列重灌，可重复执行）"
 # import_lesson_rows.py 按当前目录找引擎（gen/project.py），所以要在 engine/ 里跑；有拒收则退出码非 0、在这里停下
 ( cd "$HERE/engine" && "$PY" "$HERE/project/setup/import_lesson_rows.py" "$DATA" "$C/lessons/lesson_rows.zh.json" \
-    --subject "$SID" --series-code python.core_v1 --series-name 'Python 从零入门' --yes )
+    --subject "$SID" --series-code python.core_v1 --series-name 'Python 从零入门' \
+    --intro "$(cat "$C/lessons/series_intro.zh.txt")" --yes )
 say "课文译文预检"
 "$PY" "$HERE/project/scripts/import_content_ja.py" --db "$DB" --dir "$C/ja_lesson"
 say "课文译文写入"
@@ -445,6 +450,9 @@ exp = [34, 49, 110, 13, 99, 13, 110, 34, 496]
 print("实际:", "/".join(map(str, got)))
 if got != exp:
     print("!! 行数和期望不符：期望 " + "/".join(map(str, exp)))
+    raise SystemExit(1)
+if not con.execute("select intro from lesson_series where code='python.core_v1'").fetchone()[0]:
+    print("!! 系列 python.core_v1 的中文简介为空")
     raise SystemExit(1)
 print("内容包导入完成")
 XPY

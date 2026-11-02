@@ -42,7 +42,7 @@ def markdown(doc):
 def import_rows(doc):
     # Exact lesson rows_json/JSONL field schema. All teaching material remains in
     # explain so the legacy jp^^zh examples parser cannot corrupt code delimiters.
-    return [dict(code=d['code'],level=d['level'],title=d['title'],summary=d['objectives'][0],explain=body(d,doc['language']),connection=', '.join(d['point_codes']),examples='',examples_edited=0,orig_title=d['title'],seq=d['seq'],item_codes=d['item_codes'],point_codes=d['point_codes']) for d in doc['lessons']]
+    return [dict(code=d['code'],level=d['level'],title=d['title'],summary=d['objectives'][0],explain=body(d,doc['language']),connection='',examples='',examples_edited=0,orig_title=d['title'],seq=d['seq'],item_codes=d['item_codes'],point_codes=d['point_codes']) for d in doc['lessons']]
 
 def main():
     for lang in ('zh','ja'):
