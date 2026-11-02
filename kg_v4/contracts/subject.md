@@ -41,7 +41,7 @@
   updated_at 文本 最后修改时间，可空
 
 表 subject_content_translation
-  tbl 文本 内容表名（K182 科目内容翻译表，原表不动、缺译文回退中文）：kg_point / kg_item / quiz_question / subject_info
+  tbl 文本 内容表名（K182 科目内容翻译表，原表不动、缺译文回退中文）：kg_point / kg_item / quiz_question / subject_info / lesson_text / lesson_series
   row_key 文本 行业务键（不用自增 id）：知识点/条目 code、题号 question_no、科目编码 code
   field 文本 字段名：title / name / stem / options / explain / intro（选项整串存，^ 分隔与原文同序同数）
   lang 文本 语言代码，目前只有 ja
@@ -448,6 +448,7 @@
 公开 函数 译文 tbl row_key field lang
   返回 {text}；K182 科目内容日语替换的取译文口子，只给展示路径用（编辑/管理/提示词路径不调）：text 是译文，查不到为空串
   伪代码 lang 不等于 ja 直接返回 {"text": ""}（zh 路径不查表，行为与改前一致）
+  伪代码 若 subject_content_translation 表不存在（用 subject_table_exists name=subject_content_translation 查），返回 {"text": ""}；只有表存在且 lang=ja 才查询。保留所有原字段与错误行为。
   伪代码 查 subject_content_translation 里 tbl、row_key、field、lang 四键都相等的一行，查不到返回 {"text": ""}；查到返回 {"text": 该行 text}
 
  公开 函数 取界面语言 username
@@ -1736,6 +1737,10 @@ POST /subject/manage/disable -> 设科目状态页面 动作 subject_disable 模
   先 数据 subject_content_translation tbl=kg_point row_key=python.list field=title lang=ja text=リスト updated_at=2026-01-01
   调用 译文 tbl=kg_point row_key=python.list field=title lang=ja
   得 text=リスト
+
+用例 译文_无表回退
+  调用 译文 tbl=lesson_text row_key=NOPE field=title lang=ja
+  得 text=
 
 用例 取界面语言_无表视为zh
   调用 取界面语言 username=nobody

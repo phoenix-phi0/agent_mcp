@@ -1,0 +1,59 @@
+# 课文查看（教师端只读，K187）：教师看本科目已导入的课文，不改数据、不写学习偏好。
+#
+#   #课文查看              选系列 → 课文表（点标题进详情）；没选系列时表是空的
+#   #课文查看?code=python.lesson01   读这一课：讲解（Markdown）、挂接条目、知识点
+#
+# 接口 lesson_teacher_list / lesson_teacher_one 都是 角色 teacher，服务端再查任教权限；
+# 这里的显隐不当权限用。跟学生教材页分开：学生的 lesson_list 会写 lesson_pref。
+# 「当」的条件里不能有空格。
+
+界面 自定义 课文查看 端 教师 侧 管理 载入 lesson_teacher_one
+  动作 lesson_teacher_list 远程 进入时 隐藏 刷新
+
+  分组 顶栏 横排 顶栏 间距 12px 对齐 center 当 !params.code
+    字段 series_code 控件 下拉 选项来自 series_options 改时 lesson_teacher_list 宽 220px 系列
+    动作 lesson_teacher_list 提交 远程 查看课文
+  结束
+
+  布局 占满 当 !params.code
+    区域 课文
+      文案 当 lists.lessons&&!lists.lessons.length 选一个系列查看课文；系列里还没有课文时这里是空的。
+      列表 课文表 绑 lessons 当 lists.lessons&&lists.lessons.length
+        列 seq 课序
+        列 level 等级
+        列 title 地址 href 标题
+        列 summary 一句话
+      结束
+    结束
+  结束
+
+  分组 阅读顶栏 横排 顶栏 间距 12px 对齐 center 当 params.code
+    链接 back 绑 lesson.back 次要 ← 回课文表
+    显示 lesson.code 当 shared.lesson&&shared.lesson.code===params.code
+    显示 lesson.level 当 shared.lesson&&shared.lesson.code===params.code
+  结束
+
+  布局 占满 当 params.code&&shared.lesson&&shared.lesson.code===params.code
+    区域 一句话
+      显示 lesson.title 正文
+      显示 lesson.orig_title 当 shared.lesson.orig_title 原标题
+      显示 lesson.summary 正文
+    结束
+    区域 讲解
+      显示 lesson.explain 正文 Markdown
+    结束
+    区域 挂接条目 当 lists.items&&lists.items.length
+      列表 条目表 绑 items
+        列 code 编号
+        列 name 条目
+        列 point_code 所属知识点
+      结束
+    结束
+    区域 挂接知识点 当 lists.points&&lists.points.length
+      列表 知识点表 绑 points
+        列 code 编号
+        列 title 知识点
+      结束
+    结束
+  结束
+结束

@@ -210,7 +210,17 @@ try:
     shutil.copy("/workspace/dslagent_exp/kg_v4_data/app.db", tmpdb)
     M = ROOT / "kg_v4" / "scripts"
     subprocess.run([sys.executable, str(M / "migrate_subject_content_translation.py"), "--db", str(tmpdb)], check=True, capture_output=True)
-    JA = "/workspace/dslagent_exp/content/python_v1/ja"
+    # 源统一用仓库内 content/python_v1；lesson.tsv 要等课文导入后才能预检，这里只验图谱/题库 442 行
+    JA = str(tmp2 / "ja")
+    Path(JA).mkdir()
+    for f in (ROOT / "content" / "python_v1" / "ja").glob("*.tsv"):
+        if f.name != "lesson.tsv":
+            shutil.copy(f, JA)
+    # 正式库拷贝里可能已有译文（含 K187 的课文译文），清掉才能数导入行数
+    c0 = sqlite3.connect(tmpdb)
+    c0.execute("DELETE FROM subject_content_translation WHERE lang='ja'")
+    c0.commit()
+    c0.close()
     imp = str(M / "import_content_ja.py")
     r1 = subprocess.run([sys.executable, imp, "--db", str(tmpdb), "--dir", JA], capture_output=True, text=True)
     check("预检通过：442 行" in r1.stdout, "预检通过 442 行", r1.stdout[-300:] + r1.stderr[-200:])

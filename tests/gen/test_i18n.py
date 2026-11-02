@@ -18,6 +18,7 @@
 import hashlib
 import json
 import shutil
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -125,6 +126,9 @@ def main() -> int:
             if src == "kg_v4":
                 ui = proj / "ui/textbook.ui"
                 ui.write_text(ui.read_text(encoding="utf-8").replace("显示 reading.explanation 正文 Markdown", "显示 reading.explanation 正文"), encoding="utf-8")
+                (proj / "ui/teacher_lesson.ui").unlink()  # K187 新界面不在基线 golden 里
+                routes = proj / "routes/lesson.zs"  # K187 只读接口也是新增，同样不在基线里
+                routes.write_text(re.sub(r"\n接口 POST /lesson/teacher/\w+ .*?\n结束\n", "\n", routes.read_text(encoding="utf-8"), flags=re.S), encoding="utf-8")
             build(proj)
             n_i18n = sorted(f.name for f in (proj / "web").glob("i18n.*"))
             check(not n_i18n, f"{src} 副本没有 i18n.*.js：{n_i18n}")

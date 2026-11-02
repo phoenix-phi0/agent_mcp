@@ -863,6 +863,10 @@
     如果 {lang} 不等于 ja
       返回 {"text": ""}
     结束
+    设 te = 查一值 app.db subject_table_exists name=subject_content_translation
+    如果 {te} 不大于 0
+      返回 {"text": ""}
+    结束
     设 tx = 查一值 app.db subject_content_translation_text tbl={tbl} row_key={row_key} field={field} lang={lang}
     设 t = {tx 或}
     返回 {"text": "{t}"}

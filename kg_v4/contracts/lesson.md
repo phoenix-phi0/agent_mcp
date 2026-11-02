@@ -55,6 +55,8 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
+  伪代码 语言：调用 subject.取界面语言 username=learner，lang=返回的 lang 或 zh；lang 不为 ja 时原字段逐字保留；为 ja 时依次调用 subject.译文，按 tbl、row_key、field、lang=ja 取译文，有非空译文才覆盖显示字段，缺失/空值回退数据库原字段。只替换返回值，绝不修改数据库原值、编号、关联、过滤条件和排序。
+  伪代码 列系列及取当前系列：lesson_series 的 row_key 为系列 code；替换 name、intro（取当前系列只替换其返回的 name）。
   伪代码 查 lesson_series 中 subject_id 等于本科目且 sort_order 不小于 0 的行，按 sort_order 升序、id 升序（别的科目的系列不出现）
   伪代码 返回 {"total": 行数, "series": 列表}
 
@@ -65,6 +67,8 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
+  伪代码 语言：调用 subject.取界面语言 username=learner，lang=返回的 lang 或 zh；lang 不为 ja 时原字段逐字保留；为 ja 时依次调用 subject.译文，按 tbl、row_key、field、lang=ja 取译文，有非空译文才覆盖显示字段，缺失/空值回退数据库原字段。只替换返回值，绝不修改数据库原值、编号、关联、过滤条件和排序。
+  伪代码 列系列及取当前系列：lesson_series 的 row_key 为系列 code；替换 name、intro（取当前系列只替换其返回的 name，所有返回 name 的分支都替换，默认系列也一样）。
   伪代码 按 learner 和当前科目 subject_id（本科目 得到的 subject_id）查 lesson_pref 一行
   伪代码 有记录时，按其 series_code 查 lesson_series，存在且属于本科目（subject_id 等于本科目）且 sort_order 不小于 0，则返回 {"learner": learner, "series_code": 该编号, "name": 该系列 name, "is_default": 0}
   伪代码 否则：本科目 subject_id 等于 1 时按 hanabira 查 lesson_series（subject_id 等于 1 的行），name 取其 name，没有这行时 name 取 "hanabira"（日语行为同旧）；本科目不等于 1 时取本科目 sort_order 不小于 0 的第一个系列（sort_order 升序、id 升序），有则按它的 code、name 走下面的默认返回，一个系列也没有则返回 {"learner": learner, "series_code": "", "name": "", "is_default": 1}
@@ -89,6 +93,8 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
+  伪代码 语言：调用 subject.取界面语言 username=learner，lang=返回的 lang 或 zh；lang 不为 ja 时原字段逐字保留；为 ja 时依次调用 subject.译文，按 tbl、row_key、field、lang=ja 取译文，有非空译文才覆盖显示字段，缺失/空值回退数据库原字段。只替换返回值，绝不修改数据库原值、编号、关联、过滤条件和排序。
+  伪代码 列课文及按条目列课文：lesson_text 的 row_key 为课文 code；替换 title、summary。
   伪代码 查 lesson_text 中 subject_id 等于本科目的行
   伪代码 series_code 不为空时只留 series_code 相等的行
   伪代码 level 不为空时只留 level 相等的行
@@ -103,6 +109,8 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
+  伪代码 语言：调用 subject.取界面语言 username=learner，lang=返回的 lang 或 zh；lang 不为 ja 时原字段逐字保留；为 ja 时依次调用 subject.译文，按 tbl、row_key、field、lang=ja 取译文，有非空译文才覆盖显示字段，缺失/空值回退数据库原字段。只替换返回值，绝不修改数据库原值、编号、关联、过滤条件和排序。
+  伪代码 取课文：lesson_text 的 row_key 为课文 code；替换 title、summary、explain、orig_title。
   伪代码 按 code 和本科目 subject_id 查 lesson_text 一行，查不到（包括属于别的科目）则返回空，文案与「不存在」相同
   伪代码 查 lesson_point_link 中 subject_id 等于本科目且 lesson_code=code 的行，按 id 升序，取 point_code 用英文逗号连接成 point_codes
   伪代码 返回该行各字段加 point_codes
@@ -115,6 +123,8 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
+  伪代码 语言：调用 subject.取界面语言 username=learner，lang=返回的 lang 或 zh；lang 不为 ja 时原字段逐字保留；为 ja 时依次调用 subject.译文，按 tbl、row_key、field、lang=ja 取译文，有非空译文才覆盖显示字段，缺失/空值回退数据库原字段。只替换返回值，绝不修改数据库原值、编号、关联、过滤条件和排序。
+  伪代码 列课文及按条目列课文：lesson_text 的 row_key 为课文 code；替换 title、summary。
   伪代码 调用 kg.取条目 code=item_code subject=subject_id，取不到（包括属于别的科目）报错 404 没有这个条目
   伪代码 查 lesson_item_link 中 subject_id 等于本科目且 item_code 相等的行，连 lesson_text（subject_id 也等于本科目）取课文，同一课只算一次，按 seq 升序、id 升序
   伪代码 返回 {"item_code": item_code, "total": 个数, "lessons": 列表}
@@ -245,6 +255,9 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
+  伪代码 调用 subject.取界面语言 username=learner，取 lang 或 zh；无账号表时回退 zh。zh 输出逐字不变。
+  伪代码 lang=ja 时 lesson_count 为「全{total}課」，否则为「共{total}课」。
+  伪代码 传 learner 给上述读函数（调用 列系列、取当前系列、列课文 时带 learner=learner subject=subject_id）；页面的系列标签、列表和阅读详情使用这些返回的语言化字段，课号、挂接与题数不变。非本人或跨科目访问仍先执行原权限检查。
   伪代码 调用 列系列 得可用系列列表（本科目的）；调用 题数表 subject_id=subject_id 得题数表（qcount 只数本科目的题）
   伪代码 series 不为空且在可用系列里：调用 选择系列 learner=learner series_code=series subject=subject_id，当前系列=该系列（编号、name）；否则（series 为空或不在可用系列里，不改偏好）调用 取当前系列 learner=learner subject=subject_id，当前系列取其 series_code、name
   伪代码 调用 列课文 series_code=当前系列编号 level=（lesson_level 为空或「全部」传空串，否则原值） keyword=keyword 或空串，得 {total, lessons}
@@ -260,11 +273,40 @@
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 lesson 为空，报错 400 lesson 不能为空
-  伪代码 调用 取当前系列 learner=learner subject=subject_id 得当前系列；调用 取课文 code=lesson subject=subject_id，查不到（返回空，包括属于别的科目的课，文案与不存在相同）则返回 {"reading": {"code": lesson, "missing": "没有这一课（{lesson}），回课文表重新选。", "back": "#%E6%95%99%E6%9D%90"}, "form": {"series": 当前系列编号, "lesson_level": "全部", "keyword": ""}, "level_options": 科目等级 options}，不报错
+  伪代码 调用 subject.取界面语言 username=learner，取 lang 或 zh；无账号表时回退 zh。zh 输出逐字不变。
+  伪代码 传 learner 给上述读函数（调用 列系列、取当前系列、取课文 时带 learner=learner subject=subject_id）；页面的系列标签、列表和阅读详情使用这些返回的语言化字段，课号、挂接与题数不变。非本人或跨科目访问仍先执行原权限检查。
+  伪代码 调用 取当前系列 learner=learner subject=subject_id 得当前系列；调用 取课文 code=lesson learner=learner subject=subject_id，查不到（返回空，包括属于别的科目的课，文案与不存在相同）则返回 {"reading": {"code": lesson, "missing": "没有这一课（{lesson}），回课文表重新选。", "back": "#%E6%95%99%E6%9D%90"}, "form": {"series": 当前系列编号, "lesson_level": "全部", "keyword": ""}, "level_options": 科目等级 options}，不报错
   伪代码 有这一课：题数 n 取题数表（题数表 subject_id=subject_id）中 lesson_code 相等的 n（没有为 0）；reading={"code": code, "level": level, "title": title, "summary": summary 或空串, "formation": connection 或空串, "explanation": explain 或空串, "qcount": n, "head": "《{title}》　{level}　第{N}课（{code}）", "series": series_code, "series_label": 系列名（调 列系列 找 series_code 的 name，找不到用 series_code）, "practice": n 大于 0 则 #%E5%81%9A%E9%A2%98?lesson={code} 否则空串, "quiz_note": n 大于 0 则「这一课有 {n} 道题」否则「这一课还没有题，可以先问老师」, "ask": "#%E9%97%AE%E8%80%81%E5%B8%88", "explain": "#%E9%97%AE%E8%80%81%E5%B8%88?lesson={code}", "back": "#%E6%95%99%E6%9D%90", "missing": 空串}；N 为 seq 不为 0 时取 seq，否则取课号末三位转成整数（不足三位按整体数字）
+  伪代码 lang=ja 时 missing 为「そのような課はありません（{lesson}）。テキスト一覧に戻って選び直してください。」；head 为「《{title}》　{level}　第{N}課（{code}）」；n 大于 0 时 quiz_note 为「この課には {n} 問あります」，否则为「この課にはまだ問題がありません。まず先生に質問してみましょう。」。zh 原文逐字保持。
+  伪代码 lang=ja 时 head 里的 {level} 显示日文等级：入门→入門、基础→基礎、进阶→応用，其他等级（如 N5）原样；reading.level 字段本身不变。
   伪代码 examples：该课 examples 字段（日语^^中文@@日语^^中文）按 @@ 拆句、每句按 ^^ 拆，恰好两段收 {jp, zh}，拆不出两段的跳过（坏了当没有例句，不报错）
   伪代码 lesson_items：调用 取课文关联条目 lesson_code=lesson 得 items，逐条转 {code, label: name, point_label: 调用 kg.取知识点 code=point_code subject=subject_id 取 title（取不到用 point_code）}；再把 point_codes 按英文逗号拆开的每个直接挂知识点追加 {code: 点编号, label: （整个知识点）, point_label: 该点 title（取不到用编号）}（旧口径：排在条目后面）
+  伪代码 lesson_items 关联名语言：lang=ja 时 label（条目名）用 subject.译文 tbl=kg_item row_key=条目编号 field=name lang=ja，point_label 用 subject.译文 tbl=kg_point row_key=知识点编号 field=title lang=ja，非空才覆盖，缺失回退原名；zh 逐字不变；「（整个知识点）」这个固定文案不动。
   伪代码 lessons/series_options/series_head/lesson_count/form 按 教材页面 的默认形态拼（series 入参为空、lesson_level=「全部」、keyword 空串）；返回 {"reading": reading, "examples": 例句列表, "lesson_items": 条目列表, "lessons": 行列表, "series_options": 选项列表, "level_options": 科目等级 options, "series_head": 当前系列 name, "lesson_count": "共{total}课", "form": {"series": 当前系列编号, "lesson_level": "全部", "keyword": ""}}
+
+公开 函数 教师课文列表 learner series_code? current_role? auth_mode? subject?
+  返回 {series, series_options, lessons, form}；series 为当前教师可读本科目系列 [{code,name,intro}]，series_options 是同一批系列的 [{value: code, label: name}]，lessons 为所选系列 [{code,level,title,summary,seq,href}]（href=#%E8%AF%BE%E6%96%87%E6%9F%A5%E7%9C%8B?code={code}）；未选时列表为空；form 回填 {series_code: 所选或空串}
+  报错 400 subject 不对
+  报错 403 不是教师或无本科目任教权限
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  伪代码 校验登录身份、教师角色、科目任教权限：auth_mode 等于 on 且 current_role 不等于 teacher，报错 403 不是教师或无本科目任教权限；调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；auth_mode 等于 on 时再调用 subject.科目访问 learner=learner current_role=current_role subject_id=subject_id need=write auth_mode=auth_mode，ok 等于 0 报错 403 不是教师或无本科目任教权限（任教即 owner/editor；公共科目对非任教教师不放行，不扩大权限）
+  伪代码 严格按 subject_id 限定系列及课文：调用 列系列 learner=learner subject=subject_id 得语言化的系列，逐行只留 code、name、intro；series_code 不为空且在这批系列里时，调用 列课文 series_code=series_code learner=learner subject=subject_id，按 seq、id 排序；不在这批系列里（含其他科目的系列）或为空，lessons 为空列表，form.series_code 为空串
+  伪代码 不读其他科目，不改偏好或数据：不调用 选择系列、教材页面、课文页面，不写 lesson_pref
+
+公开 函数 教师课文详情 learner code current_role? auth_mode? subject?
+  返回 {lesson, items, points}；lesson 含 code、title、summary、explain、orig_title、level、seq、series_code、back（back=#%E8%AF%BE%E6%96%87%E6%9F%A5%E7%9C%8B）；items 是 [{code,name,point_code}]，points 是 [{code,title}]；不存在或非本科目报错 404 没有这课
+  报错 400 subject 不对
+  报错 403 不是教师或无本科目任教权限
+  报错 403 该科目未分配给你
+  报错 403 没有权限访问该科目
+  报错 404 没有这个科目
+  报错 404 没有这课
+  伪代码 校验教师与科目任教权限：同 教师课文列表 的校验。
+  伪代码 调用 取课文 code=code learner=learner subject=subject_id 得语言化的课文，查不到（含其他科目的课）报错 404 没有这课
+  伪代码 items：调用 取课文关联条目 lesson_code=code subject=subject_id，逐条收 {code,name,point_code}；points：point_codes 按英文逗号拆开，每个调用 kg.取知识点 code=该编号 subject=subject_id，收 {code,title}（取不到用编号做 title）。只返回本科目挂接的条目和知识点，不写库。
+  伪代码 关联名语言：调用 subject.取界面语言 username=learner，lang=ja 时 item 的 name 用 subject.译文 tbl=kg_item row_key=条目编号 field=name lang=ja，point 的 title 用 subject.译文 tbl=kg_point row_key=知识点编号 field=title lang=ja，非空才覆盖，缺失回退原名。
 
 函数 本科目 learner current_role auth_mode subject need?
   返回 {subject_id}；本次请求用哪个科目
@@ -291,6 +333,8 @@ GET /lesson/items -> 取课文关联条目
 GET /lesson/point-level -> 取知识点等级
 POST /lesson/import -> 导入课文 上传 file 类型 md,txt 上限 20MB 角色 teacher
 POST /lesson/series/withdraw -> 撤下系列 角色 teacher
+POST /lesson/teacher/list -> 教师课文列表 动作 lesson_teacher_list 模板 页面状态 表单=form 角色 teacher
+POST /lesson/teacher/one -> 教师课文详情 动作 lesson_teacher_one 模板 页面状态 角色 teacher
 
 ## 内容文件
 content/lesson/series/{series_code}.jsonl 字段 code,level,title,summary,explain,connection,examples,examples_edited,orig_title,seq,item_codes,point_codes；写：本模块函数 写入系列课文并重灌；读：本模块函数 写入系列课文并重灌；系列课文的源数据，库按它重灌
@@ -903,6 +947,42 @@ content/lesson/series/{series_code}.withdrawn.jsonl 字段 code,level,title,summ
   调用 导入课文 series_code=a file_path=imports/a.md
   得 ok=1 total=1
   库 lesson_text 含 code=L1 level=入门
+
+用例 教师课文列表_未选为空
+  先 数据 lesson_series code=a name=甲 sort_order=1
+  先 数据 lesson_text code=L1 level=N5 title=第一课 examples_edited=0 series_code=a seq=1
+  调用 教师课文列表 learner=t1
+  得 有返回
+  库 lesson_pref 共 0 行
+
+用例 教师课文列表_选系列不写偏好
+  先 数据 lesson_series code=a name=甲 sort_order=1
+  先 数据 lesson_text code=L1 level=N5 title=第一课 examples_edited=0 series_code=a seq=1
+  调用 教师课文列表 learner=t1 series_code=a
+  得 有返回
+  库 lesson_pref 共 0 行
+
+用例 教师课文列表_学生403
+  调用 教师课文列表 learner=s1 current_role=student auth_mode=on subject=1
+  报错 403
+
+用例 教师课文列表_公共科目非任教403
+  先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01
+  调用 教师课文列表 learner=t2 current_role=teacher auth_mode=on subject=1
+  报错 403
+
+用例 教师课文详情_正常
+  先 数据 kg_point code=P1 title=助词
+  先 数据 kg_item code=I1 name=は point_code=P1
+  先 数据 lesson_text code=L1 level=N5 title=第一课 explain=讲解 examples_edited=0 series_code=a seq=1
+  先 数据 lesson_item_link lesson_code=L1 item_code=I1
+  先 数据 lesson_point_link lesson_code=L1 point_code=P1
+  调用 教师课文详情 learner=t1 code=L1
+  得 有返回
+
+用例 教师课文详情_不存在404
+  调用 教师课文详情 learner=t1 code=NOPE
+  报错 404
 
 用例 写入系列课文并重灌_等级不在本科目里400
   先 数据 subject_info code=py name=编程 levels=入门,基础,进阶 kind=general caps=x qtypes=choice visibility=public owner=t1 status=active created_at=2026-01-01 updated_at=2026-01-01

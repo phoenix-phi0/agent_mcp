@@ -26,6 +26,46 @@
     报错 400 编号要以「{sc}.」开头
   结束
 
+  函数 界面语言 learner?
+    如果 {learner} 为空
+      设 o.lang = zh
+      返回 {o}
+    结束
+    设 l = 调用 subject.取界面语言 username={learner}
+    设 o.lang = {l.lang 或 zh}
+    返回 {o}
+  结束
+
+  函数 译字段 lang tbl row_key field orig?
+    设 o.text = {orig 或}
+    如果 {lang} 等于 ja
+      设 t = 调用 subject.译文 tbl={tbl} row_key={row_key} field={field} lang=ja
+      如果 {t.text 或} 不为空
+        设 o.text = {t.text}
+      结束
+    结束
+    返回 {o}
+  结束
+
+  函数 译课文列表 lang rows?
+    如果 {lang} 不等于 ja
+      返回 {rows}
+    结束
+    设 lst = 解析JSON []
+    遍历 x 于 {rows}
+      设 a = 调用 译字段 lang={lang} tbl=lesson_text row_key={x.code} field=title orig={x.title 或}
+      设 b = 调用 译字段 lang={lang} tbl=lesson_text row_key={x.code} field=summary orig={x.summary 或}
+      设 e.code = {x.code}
+      设 e.level = {x.level}
+      设 e.title = {a.text}
+      设 e.summary = {b.text}
+      设 e.series_code = {x.series_code}
+      设 e.seq = {x.seq}
+      设 lst = 列表加项 {lst} {e}
+    结束
+    返回 {lst}
+  结束
+
   公开 函数 列系列 learner? current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
     # 返回 {total, series}，series 是 [{code, name, intro, source, license, sort_order}]，只含 sort_order 不小于 0 的系列，按 sort_order 升序、id 升序
@@ -33,7 +73,23 @@
     设 rows = 查询 app.db lesson_series_list subject_id={sj.subject_id}
     设 n = 列表长度 {rows}
     设 out.total = {n}
-    设 out.series = {rows}
+    设 lg = 调用 界面语言 learner={learner 或}
+    设 sl2 = {rows}
+    如果 {lg.lang} 等于 ja
+      设 sl2 = 解析JSON []
+      遍历 x 于 {rows}
+        设 a = 调用 译字段 lang=ja tbl=lesson_series row_key={x.code} field=name orig={x.name 或}
+        设 b = 调用 译字段 lang=ja tbl=lesson_series row_key={x.code} field=intro orig={x.intro 或}
+        设 e.code = {x.code}
+        设 e.name = {a.text}
+        设 e.intro = {b.text}
+        设 e.source = {x.source 或}
+        设 e.license = {x.license 或}
+        设 e.sort_order = {x.sort_order}
+        设 sl2 = 列表加项 {sl2} {e}
+      结束
+    结束
+    设 out.series = {sl2}
     返回 {out}
   结束
 
@@ -51,7 +107,9 @@
         如果 {s.sort_order} 不小于 0
           设 out.learner = {learner}
           设 out.series_code = {s.code}
-          设 out.name = {s.name}
+          设 lg = 调用 界面语言 learner={learner}
+          设 tn = 调用 译字段 lang={lg.lang} tbl=lesson_series row_key={s.code} field=name orig={s.name 或}
+          设 out.name = {tn.text}
           设 out.is_default = 0
           返回 {out}
         结束
@@ -78,7 +136,9 @@
     结束
     设 out.learner = {learner}
     设 out.series_code = {dcode}
-    设 out.name = {dname}
+    设 lg = 调用 界面语言 learner={learner}
+    设 tn = 调用 译字段 lang={lg.lang} tbl=lesson_series row_key={dcode} field=name orig={dname 或}
+    设 out.name = {tn.text}
     设 out.is_default = 1
     返回 {out}
   结束
@@ -122,8 +182,10 @@
     设 q.subject_id = {sj.subject_id}
     设 rows = 查询表 app.db lesson_text_list {q}
     设 n = 列表长度 {rows}
+    设 lg = 调用 界面语言 learner={learner 或}
+    设 tl = 调用 译课文列表 lang={lg.lang} rows={rows}
     设 out.total = {n}
-    设 out.lessons = {rows}
+    设 out.lessons = {tl}
     返回 {out}
   结束
 
@@ -146,6 +208,17 @@
         设 pc = {pc},{x.point_code}
       结束
     结束
+    设 lg = 调用 界面语言 learner={learner 或}
+    如果 {lg.lang} 等于 ja
+      设 a1 = 调用 译字段 lang=ja tbl=lesson_text row_key={code} field=title orig={r.title 或}
+      设 r.title = {a1.text}
+      设 a2 = 调用 译字段 lang=ja tbl=lesson_text row_key={code} field=summary orig={r.summary 或}
+      设 r.summary = {a2.text}
+      设 a3 = 调用 译字段 lang=ja tbl=lesson_text row_key={code} field=explain orig={r.explain 或}
+      设 r.explain = {a3.text}
+      设 a4 = 调用 译字段 lang=ja tbl=lesson_text row_key={code} field=orig_title orig={r.orig_title 或}
+      设 r.orig_title = {a4.text}
+    结束
     设 r.point_codes = {pc}
     返回 {r}
   结束
@@ -163,9 +236,11 @@
     结束
     设 rows = 查询 app.db lesson_by_item item_code={item_code} subject_id={sid}
     设 n = 列表长度 {rows}
+    设 lg = 调用 界面语言 learner={learner 或}
+    设 tl = 调用 译课文列表 lang={lg.lang} rows={rows}
     设 out.item_code = {item_code}
     设 out.total = {n}
-    设 out.lessons = {rows}
+    设 out.lessons = {tl}
     返回 {out}
   结束
 
@@ -804,7 +879,7 @@
   公开 函数 教材页面 learner series? lesson_level? keyword? current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
     设 sid = {sj.subject_id}
-    设 sl = 调用 列系列 subject={sid}
+    设 sl = 调用 列系列 learner={learner} subject={sid}
     设 qt = 调用 题数表 subject_id={sid}
     设 found = 0
     设 cur_code = {zz 或}
@@ -830,7 +905,7 @@
       设 lv = {zz 或}
     结束
     设 kw = {keyword 或}
-    设 ls = 调用 列课文 series_code={cur_code} level={lv} keyword={kw} subject={sid}
+    设 ls = 调用 列课文 series_code={cur_code} level={lv} keyword={kw} learner={learner} subject={sid}
     设 rows = 解析JSON []
     遍历 r 于 {ls.lessons}
       设 qn = 转数字 0
@@ -859,7 +934,11 @@
     设 out.lessons = {rows}
     设 out.series_options = {opts}
     设 out.series_head = {cur_name}
+    设 lgp = 调用 界面语言 learner={learner}
     设 out.lesson_count = 共{ls.total}课
+    如果 {lgp.lang} 等于 ja
+      设 out.lesson_count = 全{ls.total}課
+    结束
     设 out.form.series = {cur_code}
     设 out.form.lesson_level = {fl}
     设 out.form.keyword = {kw}
@@ -873,10 +952,14 @@
     设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
     设 sid = {sj.subject_id}
     设 pg = 调用 教材页面 learner={learner} subject={sid}
-    设 lt = 调用 取课文 code={lesson} subject={sid}
+    设 lt = 调用 取课文 code={lesson} learner={learner} subject={sid}
     如果 {lt} 为空
+      设 lgm = 调用 界面语言 learner={learner}
       设 o1.reading.code = {lesson}
       设 o1.reading.missing = 没有这一课（{lesson}），回课文表重新选。
+      如果 {lgm.lang} 等于 ja
+        设 o1.reading.missing = そのような課はありません（{lesson}）。テキスト一覧に戻って選び直してください。
+      结束
       设 o1.reading.back = #%E6%95%99%E6%9D%90
       设 o1.form = {pg.form}
       设 o1.level_options = {pg.level_options}
@@ -892,7 +975,7 @@
     设 qq.code = {lesson}
     设 qn1 = 查一行表 app.db lesson_seq_no {qq}
     设 nn = {qn1.nn}
-    设 sl = 调用 列系列 subject={sid}
+    设 sl = 调用 列系列 learner={learner} subject={sid}
     设 slabel = {lt.series_code}
     遍历 s 于 {sl.series}
       如果 {s.code} 等于 {lt.series_code}
@@ -906,15 +989,36 @@
     设 rd.formation = {lt.connection 或}
     设 rd.explanation = {lt.explain 或}
     设 rd.qcount = {n}
+    设 lgr = 调用 界面语言 learner={learner}
     设 rd.head = 《{lt.title}》　{lt.level}　第{nn}课（{lt.code}）
+    如果 {lgr.lang} 等于 ja
+      设 lvj = {lt.level}
+      如果 {lt.level} 等于 入门
+        设 lvj = 入門
+      结束
+      如果 {lt.level} 等于 基础
+        设 lvj = 基礎
+      结束
+      如果 {lt.level} 等于 进阶
+        设 lvj = 応用
+      结束
+      设 rd.head = 《{lt.title}》　{lvj}　第{nn}課（{lt.code}）
+    结束
     设 rd.series = {lt.series_code}
     设 rd.series_label = {slabel}
     设 rd.practice = {zz 或}
     设 rd.quiz_note = 这一课还没有题，可以先问老师
+    如果 {lgr.lang} 等于 ja
+      设 rd.quiz_note = この課にはまだ問題がありません。まず先生に質問してみましょう。
+    结束
     如果 {n} 大于 0
       设 rd.practice = #%E5%81%9A%E9%A2%98?lesson={lt.code}
       设 文案 = 这一课有
       设 rd.quiz_note = {文案} {n} 道题
+      如果 {lgr.lang} 等于 ja
+        设 文案 = この課には
+        设 rd.quiz_note = {文案} {n} 問あります
+      结束
     结束
     设 rd.ask = #%E9%97%AE%E8%80%81%E5%B8%88
     设 rd.explain = #%E9%97%AE%E8%80%81%E5%B8%88?lesson={lt.code}
@@ -951,9 +1055,17 @@
       如果 {pk} 不为空
         设 pl = {pk.title}
       结束
+      设 lbl = {it.name}
+      设 pll = {pl}
+      如果 {lgr.lang} 等于 ja
+        设 t1 = 调用 译字段 lang=ja tbl=kg_item row_key={it.code} field=name orig={it.name}
+        设 lbl = {t1.text}
+        设 t2 = 调用 译字段 lang=ja tbl=kg_point row_key={it.point_code} field=title orig={pl}
+        设 pll = {t2.text}
+      结束
       设 li.code = {it.code}
-      设 li.label = {it.name}
-      设 li.point_label = {pl}
+      设 li.label = {lbl}
+      设 li.point_label = {pll}
       设 lis = 列表加项 {lis} {li}
     结束
     设 pcs = 按正则切分 {lt.point_codes} ,
@@ -964,9 +1076,14 @@
         如果 {pk} 不为空
           设 pl = {pk.title}
         结束
+        设 pll2 = {pl}
+        如果 {lgr.lang} 等于 ja
+          设 t3 = 调用 译字段 lang=ja tbl=kg_point row_key={pc} field=title orig={pl}
+          设 pll2 = {t3.text}
+        结束
         设 lp.code = {pc}
         设 lp.label = （整个知识点）
-        设 lp.point_label = {pl}
+        设 lp.point_label = {pll2}
         设 lis = 列表加项 {lis} {lp}
       结束
     结束
@@ -980,6 +1097,123 @@
     设 o2.form = {pg.form}
     设 o2.level_options = {pg.level_options}
     返回 {o2}
+  结束
+
+  公开 函数 教师课文列表 learner series_code? current_role? auth_mode? subject?
+    设 am = {auth_mode 或}
+    设 cr = {current_role 或}
+    如果 {am} 等于 on 且 {cr} 不等于 teacher
+      报错 403 不是教师或无本科目任教权限
+    结束
+    设 sj = 调用 本科目 learner={learner} current_role={cr} auth_mode={am} subject={subject 或}
+    设 sid = {sj.subject_id}
+    如果 {am} 等于 on
+      设 acc = 调用 subject.科目访问 learner={learner} current_role={cr} subject_id={sid} need=write auth_mode={am}
+      如果 {acc.ok} 等于 0
+        报错 403 不是教师或无本科目任教权限
+      结束
+    结束
+    设 sl = 调用 列系列 learner={learner} subject={sid}
+    设 ser = 解析JSON []
+    设 opts = 解析JSON []
+    设 found = 0
+    遍历 s 于 {sl.series}
+      设 se.code = {s.code}
+      设 se.name = {s.name}
+      设 se.intro = {s.intro 或}
+      设 ser = 列表加项 {ser} {se}
+      设 op.value = {s.code}
+      设 op.label = {s.name}
+      设 opts = 列表加项 {opts} {op}
+      如果 {series_code} 不为空 且 {s.code} 等于 {series_code}
+        设 found = 1
+      结束
+    结束
+    设 rows = 解析JSON []
+    设 sel = {zz 或}
+    如果 {found} 等于 1
+      设 sel = {series_code}
+      设 ls = 调用 列课文 series_code={series_code} learner={learner} subject={sid}
+      遍历 x 于 {ls.lessons}
+        设 ro.code = {x.code}
+        设 ro.level = {x.level}
+        设 ro.title = {x.title}
+        设 ro.summary = {x.summary 或}
+        设 ro.seq = {x.seq}
+        设 ro.href = #%E8%AF%BE%E6%96%87%E6%9F%A5%E7%9C%8B?code={x.code}
+        设 rows = 列表加项 {rows} {ro}
+      结束
+    结束
+    设 out.series = {ser}
+    设 out.series_options = {opts}
+    设 out.lessons = {rows}
+    设 out.form.series_code = {sel}
+    返回 {out}
+  结束
+
+  公开 函数 教师课文详情 learner code current_role? auth_mode? subject?
+    设 am = {auth_mode 或}
+    设 cr = {current_role 或}
+    如果 {am} 等于 on 且 {cr} 不等于 teacher
+      报错 403 不是教师或无本科目任教权限
+    结束
+    设 sj = 调用 本科目 learner={learner} current_role={cr} auth_mode={am} subject={subject 或}
+    设 sid = {sj.subject_id}
+    如果 {am} 等于 on
+      设 acc = 调用 subject.科目访问 learner={learner} current_role={cr} subject_id={sid} need=write auth_mode={am}
+      如果 {acc.ok} 等于 0
+        报错 403 不是教师或无本科目任教权限
+      结束
+    结束
+    设 lt = 调用 取课文 code={code} learner={learner} subject={sid}
+    如果 {lt} 为空
+      报错 404 没有这课
+    结束
+    设 lg = 调用 界面语言 learner={learner}
+    设 gi = 调用 取课文关联条目 lesson_code={code} subject={sid}
+    设 its = 解析JSON []
+    遍历 it 于 {gi.items}
+      设 nm = {it.name}
+      如果 {lg.lang} 等于 ja
+        设 t1 = 调用 译字段 lang=ja tbl=kg_item row_key={it.code} field=name orig={it.name}
+        设 nm = {t1.text}
+      结束
+      设 ie.code = {it.code}
+      设 ie.name = {nm}
+      设 ie.point_code = {it.point_code}
+      设 its = 列表加项 {its} {ie}
+    结束
+    设 pts = 解析JSON []
+    设 pcs = 按正则切分 {lt.point_codes} ,
+    遍历 pc 于 {pcs}
+      如果 {pc} 不为空
+        设 ttl = {pc}
+        设 pk = 调用 kg.取知识点 code={pc} subject={sid}
+        如果 {pk} 不为空
+          设 ttl = {pk.title}
+        结束
+        如果 {lg.lang} 等于 ja
+          设 t2 = 调用 译字段 lang=ja tbl=kg_point row_key={pc} field=title orig={ttl}
+          设 ttl = {t2.text}
+        结束
+        设 pe.code = {pc}
+        设 pe.title = {ttl}
+        设 pts = 列表加项 {pts} {pe}
+      结束
+    结束
+    设 lo.code = {lt.code}
+    设 lo.title = {lt.title}
+    设 lo.summary = {lt.summary 或}
+    设 lo.explain = {lt.explain 或}
+    设 lo.orig_title = {lt.orig_title 或}
+    设 lo.level = {lt.level}
+    设 lo.seq = {lt.seq}
+    设 lo.series_code = {lt.series_code}
+    设 lo.back = #%E8%AF%BE%E6%96%87%E6%9F%A5%E7%9C%8B
+    设 out.lesson = {lo}
+    设 out.items = {its}
+    设 out.points = {pts}
+    返回 {out}
   结束
 
 结束

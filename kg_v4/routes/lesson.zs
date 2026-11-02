@@ -68,3 +68,14 @@
   设 r = 调用 lesson.撤下系列 series_code={series_code} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   返回 {r}
 结束
+
+接口 POST /lesson/teacher/list 动作 lesson_teacher_list 角色 teacher
+  设 r = 调用 lesson.教师课文列表 learner={learner} series_code={series_code 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  响应 state {r}
+  响应 form {r.form}
+结束
+
+接口 POST /lesson/teacher/one 动作 lesson_teacher_one 角色 teacher
+  设 r = 调用 lesson.教师课文详情 learner={learner} code={code} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  响应 state {r}
+结束

@@ -115,6 +115,8 @@ fi
 run 模板命名    $PY tests/gen/test_templates.py
 run 按端拆页面  $PY tests/gen/test_ends.py
 run 界面多语言  $PY tests/gen/test_i18n.py
+run 安全Markdown $PY tests/gen/test_markdown.py
+run 课文导入脚本 $PY tests/kg_v4/test_k187_import_adapter.py
 run 界面序      $PY tests/gen/test_order.py
 run 只加迁移    $PY tests/gen/test_migrate.py
 run 显式重建表  $PY tests/gen/test_migrate_rebuild.py

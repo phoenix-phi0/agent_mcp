@@ -51,6 +51,7 @@ import os
 import shutil
 import socket
 import sqlite3
+from urllib.parse import quote
 import subprocess
 import sys
 import tempfile
@@ -69,7 +70,7 @@ IGNORE_CONSOLE = ("production is not defined",)   # unpkg vue-flow 的兼容告�
 STUDENT_PAGES = ["问老师", "做题", "默写", "教材", "知识图谱", "学习进度"]
 SUBJ_INTRO = "走查用的科目说明\n第二行"
 SUBJ_PERSONA = "你是走查科目的老师，说话简洁。"
-TEACHER_PAGES = ["学情", "教师助手", "学生管理", "科目管理", "AI老师设定", "教材导入", "教学材料"]
+TEACHER_PAGES = ["学情", "教师助手", "学生管理", "科目管理", "AI老师设定", "教材导入", "课文查看", "教学材料"]
 TEACHER_USER = "t1"
 STUDENT_NAME = "s1"
 # 图谱管理段（K99b）自建的编号/名称：断言只认这些，与种子数据内容无关
@@ -557,7 +558,7 @@ def ja_textbook_login_flow(browser, base, proj, ck, marks, new_page):
        登录页有「中文 / 日本語」切换（auth-lang，不在顶栏），点了只写本机 localStorage
        不调接口，整页刷新后保持；登录后以账号 lang 为准（s1 账号 lang=zh → 登录后中文）。
     ② s1 lang=ja 顶栏切到 Python 科目（夹具同 ja_quiz_flow，自建的行结束时删净）→
-       #教材：空态页（a 类词表全覆盖），「共0课」是报告列明的保留项（b 类带插值遗留）。"""
+       #教材：空态页（a 类词表全覆盖），课数插值 K187 起也是日文。"""
 
     def ja_login(page, user):
         page.locator('form.screen input:not([type="password"])').first.fill(user)
@@ -656,7 +657,7 @@ def ja_textbook_login_flow(browser, base, proj, ck, marks, new_page):
         wait_screen(p2, "教材")
         p2.wait_for_timeout(1500)
         body = p2.inner_text("body")
-        ck("共0课" in body, f"{name2}：「共0课」可见——b 类带插值遗留，报告列明的保留项", body[:160])
+        ck("全0課" in body and "共0课" not in body, f"{name2}：课数插值为日文（K187 补上 K184 的 b 类遗留）", body[:160])
         ck("条件に合うテキストがありません" in body, f"{name2}：空态文案日文")
         opts = p2.evaluate(
             "() => { for (const s of document.querySelectorAll('select')) {"
@@ -665,8 +666,8 @@ def ja_textbook_login_flow(browser, base, proj, ck, marks, new_page):
         ck([o["t"] for o in opts] == ["すべて", "入門", "基礎", "応用"]
            and [o["v"] for o in opts] == ["全部", "入门", "基础", "进阶"],
            f"{name2}：等级下拉选项日文、value 不变（a 类词表）", opts)
-        resid = sorted({c for c in body.replace("共0课", "") if c in "课级习题请说这输试关键搜换"})
-        ck(not resid, f"{name2}：正文无简体残留（共0课为列明保留项）", resid)
+        resid = sorted({c for c in body if c in "课级习题请说这输试关键搜换"})
+        ck(not resid, f"{name2}：正文无简体残留", resid)
         err = drain_errors(marks)
         ck(not err, f"{name2}：无 JS 错误", err)
     except Exception as e:
@@ -691,6 +692,181 @@ def ja_textbook_login_flow(browser, base, proj, ck, marks, new_page):
         finally:
             con.close()
         ctx2.close()
+
+
+K187_MD = "## 小标题 **粗体**\n\n说明 `a<b`\n\n```python\n  print(\"<x>&|\\n\")  \nif x:\n    y = 1   \n```\n\n<img src=x onerror=window.__xss=1>\n[点我](javascript:window.__xss=2)\n"
+K187_MD_JA = "## 見出し **太字**\n\n説明 `a<b`\n\n```python\n  print(\"<x>&|\\n\")  \nif x:\n    y = 1   \n```\n\n<img src=x onerror=window.__xss=1>\n[クリック](javascript:window.__xss=2)\n"
+K187_CODE = "  print(\"<x>&|\\n\")  \nif x:\n    y = 1   \n"
+
+
+def k187_lesson_flow(browser, base, proj, ck, marks, new_page):
+    """K187：Python 课文的 Markdown/代码块、ja 译文与回退、ja 插值文案、教师只读、日语科目不变。
+    夹具自建自删：python 科目（t1 负责）、两课（walk187.a 有译文 / walk187.b 缺译文）、日语科目一课。"""
+    name = "K187课文"
+    tx = [("lesson_series", "walk187.s", "name", "ウォーク系列"), ("lesson_text", "walk187.a", "title", "日本語タイトル"),
+          ("lesson_text", "walk187.a", "summary", "日本語の一言"), ("lesson_text", "walk187.a", "explain", K187_MD_JA)]
+    con = sqlite3.connect(proj / "app.db")
+    made_subject = False
+    try:
+        row = con.execute("SELECT id FROM subject_info WHERE code='python'").fetchone()
+        if row is None:
+            con.execute("INSERT INTO subject_info(code,name,kind,caps,levels,qtypes,visibility,owner,status,created_at,updated_at)"
+                        " VALUES('python','Python 编程','general','x','入门,基础,进阶','choice','public','t1','active','2026-01-01','2026-01-01')")
+            made_subject = True
+        sid = con.execute("SELECT id FROM subject_info WHERE code='python'").fetchone()[0]
+        made_student = con.execute("SELECT 1 FROM subject_student WHERE subject_id=? AND learner=?", (sid, STUDENT_NAME)).fetchone() is None
+        if made_student:
+            con.execute("INSERT INTO subject_student(subject_id,learner,assigned_by,status,created_at) VALUES(?,?,'t1','active','2026-01-01')", (sid, STUDENT_NAME))
+        old_pref = con.execute("SELECT learner,subject_id FROM subject_pref WHERE learner IN (?,?)", (STUDENT_NAME, TEACHER_USER)).fetchall()
+        con.execute("INSERT INTO lesson_series(code,name,intro,sort_order,subject_id) VALUES('walk187.s','走查系列','',100,?)", (sid,))
+        for code, title, seq, level in (("walk187.a", "中文标题甲", 1, "进阶"), ("walk187.b", "中文标题乙", 2, "入门")):
+            con.execute("INSERT INTO lesson_text(code,level,title,summary,explain,examples_edited,series_code,seq,subject_id)"
+                        " VALUES(?,?,?,?,?,0,'walk187.s',?,?)", (code, level, title, "中文一句话", K187_MD, seq, sid))
+        con.execute("INSERT INTO lesson_series(code,name,intro,sort_order,subject_id) VALUES('wk187j','走查日语系列','',100,1)")
+        con.execute("INSERT INTO lesson_text(code,level,title,summary,explain,examples_edited,series_code,seq,subject_id)"
+                    " VALUES('wk187j1','N5','日语科目课','日语科目一句话','讲解',0,'wk187j',1,1)")
+        con.executemany("INSERT INTO subject_content_translation(tbl,row_key,field,lang,text,updated_at) VALUES(?,?,?,'ja',?,'2026-01-01')", tx)
+        con.execute("UPDATE account_user SET lang='ja' WHERE username=?", (STUDENT_NAME,))
+        con.commit()
+    finally:
+        con.close()
+
+    def open_python(p):
+        sw = p.locator("select.nav-subject")
+        sw.wait_for(timeout=10000)
+        if sw.input_value() != str(sid):
+            with p.expect_navigation(timeout=20000):
+                sw.select_option(value=str(sid))
+            p.wait_for_load_state("domcontentloaded")
+
+    def go(p, hash_):
+        p.evaluate("h => { location.hash = h; }", hash_)
+        p.wait_for_timeout(1500)
+
+    def code_ok(p, label):
+        got = p.evaluate("() => { const c = document.querySelector('.markdown pre code'); return c ? c.textContent : null; }")
+        ck(got == K187_CODE, f"{name}：{label}代码块缩进、行尾空格、特殊字符逐字保留", repr(got))
+        ck(p.locator(".markdown h2").count() == 1, f"{name}：{label}Markdown 标题渲染")
+        ck(p.locator(".markdown img").count() == 0 and p.locator(".markdown a").count() == 0
+           and p.evaluate("() => window.__xss === undefined"), f"{name}：{label}原始 HTML 和 javascript 链接不生效")
+
+    def pref_rows():
+        c = sqlite3.connect(proj / "app.db")
+        try:
+            return c.execute("SELECT learner,subject_id,series_code FROM lesson_pref ORDER BY 1,2,3").fetchall()
+        finally:
+            c.close()
+
+    tb = "#" + quote("教材")
+    view = "#" + quote("课文查看")
+    ctx = browser.new_context(locale="ja-JP")
+    p = new_page(ctx, "k187-ja")
+    ctx_t = browser.new_context()
+    t = new_page(ctx_t, "k187-t1")
+    ctx_zh = browser.new_context()
+    z = new_page(ctx_zh, "k187-zh")
+    try:
+        # ---- ja 学生 ----
+        p._allowed_status = (401,)
+        p.goto(base, wait_until="domcontentloaded")
+        p.wait_for_selector("form.screen", timeout=20000)
+        p.locator('form.screen input:not([type="password"])').first.fill(STUDENT_NAME)
+        p.locator('form.screen input[type="password"]').first.fill(TEST_PASSWORD)
+        p.locator("form.screen button", has_text="ログイン").first.click()
+        p.wait_for_function("u => { const el = document.querySelector('.nav-user-name'); return el && el.textContent.trim() === u; }",
+                            arg=STUDENT_NAME, timeout=20000)
+        open_python(p)
+        go(p, tb)
+        body = p.inner_text("body")
+        ck("全2課" in body and "ウォーク系列" in body, f"{name}：ja 列表课数插值和系列名为日文", body[:200])
+        ck("日本語タイトル" in body and "中文标题甲" not in body, f"{name}：ja 列表标题用译文", body[:200])
+        ck("中文标题乙" in body, f"{name}：缺译文的课回退中文", body[:200])
+        go(p, tb + "?lesson=walk187.a")
+        p.get_by_text("見出し").first.wait_for(timeout=15000)
+        body = p.inner_text("body")
+        ck("第1課" in body and "応用" in body and "《日本語タイトル》" in body, f"{name}：ja 抬头课序和等级为日文", body[:200])
+        ck("この課にはまだ問題がありません" in body, f"{name}：ja 0 题提示为日文", body[:300])
+        code_ok(p, "ja ")
+        go(p, tb + "?lesson=walk187.nope")
+        p.get_by_text("そのような課はありません").first.wait_for(timeout=15000)
+        ck("walk187.nope" in p.inner_text("body"), f"{name}：ja 缺课提示带课号插值")
+        # ---- zh 同课不串值 ----
+        c = sqlite3.connect(proj / "app.db")
+        c.execute("UPDATE account_user SET lang='zh' WHERE username=?", (STUDENT_NAME,))
+        c.commit()
+        c.close()
+        login(z, base, STUDENT_NAME)
+        open_python(z)
+        go(z, tb + "?lesson=walk187.a")
+        z.get_by_text("小标题").first.wait_for(timeout=15000)
+        body = z.inner_text("body")
+        ck("第1课" in body and "《中文标题甲》" in body and "日本語タイトル" not in body, f"{name}：zh 原文、不串日文", body[:200])
+        code_ok(z, "zh ")
+        c = sqlite3.connect(proj / "app.db")
+        db_title = c.execute("SELECT title FROM lesson_text WHERE code='walk187.a'").fetchone()[0]
+        c.close()
+        ck(db_title == "中文标题甲", f"{name}：库里原文没被改")
+        # ---- 日语科目行为不变：同一个学生、ja，日语科目的课仍是原文 ----
+        c = sqlite3.connect(proj / "app.db")
+        c.execute("UPDATE account_user SET lang='ja' WHERE username=?", (STUDENT_NAME,))
+        c.commit()
+        c.close()
+        r = ctx.request.post(base + "/lesson/one?subject=1", data={"lesson": "wk187j1"})
+        d = r.json()
+        rd = (d.get("state") or d).get("reading") or {}
+        ck(r.status == 200 and rd.get("title") == "日语科目课" and rd.get("explanation") == "讲解",
+           f"{name}：日语科目课文无译文时内容不变", str(d)[:200])
+        # ---- 教师只读 ----
+        before = pref_rows()
+        login(t, base, TEACHER_USER, end="/teacher")
+        snapshot(marks)
+        open_python(t)
+        go(t, view)
+        sel = t.locator("select").filter(has=t.locator("option[value='walk187.s']")).first
+        sel.select_option(value="walk187.s")
+        t.get_by_text("中文标题甲").first.wait_for(timeout=15000)
+        t.locator("a", has_text="中文标题甲").first.click()
+        t.get_by_text("小标题").first.wait_for(timeout=15000)
+        code_ok(t, "教师 ")
+        ck(pref_rows() == before, f"{name}：教师查看不写 lesson_pref", pref_rows())
+        # ---- 权限 ----
+        def status(req, path, **data):
+            return req.post(base + path, data=data).status
+        ck(status(ctx.request, f"/lesson/teacher/list?subject={sid}", series_code="walk187.s") == 403, f"{name}：学生调教师列表 403")
+        ck(status(ctx.request, f"/lesson/teacher/one?subject={sid}", code="walk187.a") == 403, f"{name}：学生调教师详情 403")
+        anon = browser.new_context()
+        ck(status(anon.request, f"/lesson/teacher/list?subject={sid}") == 401, f"{name}：未登录 401")
+        anon.close()
+        t2c = browser.new_context()
+        t2 = new_page(t2c, "k187-t2")
+        login(t2, base, "t2", end="/teacher")
+        ck(status(t2c.request, f"/lesson/teacher/list?subject={sid}", series_code="walk187.s") == 403, f"{name}：非任教教师（公共科目）403")
+        ck(status(t2c.request, f"/lesson/teacher/one?subject={sid}", code="walk187.a") == 403, f"{name}：非任教教师看详情 403")
+        ck(status(t2c.request, "/lesson/teacher/one?subject=1", code="walk187.a") == 404, f"{name}：跨科目课号 404")
+        t2c.close()
+        err = drain_errors(marks)
+        err = [e for e in err if "status of 40" not in e]
+        ck(not err, f"{name}：无 JS 错误", err)
+    except Exception as e:
+        ck(False, f"{name}：走查失败", f"{type(e).__name__}: {e}")
+    finally:
+        con = sqlite3.connect(proj / "app.db")
+        try:
+            con.execute("DELETE FROM subject_content_translation WHERE row_key IN ('walk187.s','walk187.a')")
+            con.execute("DELETE FROM lesson_text WHERE code IN ('walk187.a','walk187.b','wk187j1')")
+            con.execute("DELETE FROM lesson_series WHERE code IN ('walk187.s','wk187j')")
+            con.execute("DELETE FROM lesson_pref WHERE series_code IN ('walk187.s','wk187j')")
+            con.execute("DELETE FROM subject_pref WHERE learner IN (?,?)", (STUDENT_NAME, TEACHER_USER))
+            con.executemany("INSERT INTO subject_pref(learner, subject_id) VALUES(?,?)", old_pref)
+            if made_student:
+                con.execute("DELETE FROM subject_student WHERE subject_id=? AND learner=?", (sid, STUDENT_NAME))
+            if made_subject:
+                con.execute("DELETE FROM subject_info WHERE code='python'")
+            con.execute("UPDATE account_user SET lang='zh' WHERE username=?", (STUDENT_NAME,))
+            con.commit()
+        finally:
+            con.close()
+        ctx.close(); ctx_t.close(); ctx_zh.close()
 
 
 def write_assist_mock(proj, tmp):
@@ -1553,6 +1729,7 @@ def main(argv=None):
                 ja_tutor_flow(browser, base, proj, ck, marks, new_page)
                 ja_quiz_flow(browser, base, proj, ck, marks, new_page)
                 ja_textbook_login_flow(browser, base, proj, ck, marks, new_page)   # K184：登录页跟浏览器 + Python 教材空态页 ja
+                k187_lesson_flow(browser, base, proj, ck, marks, new_page)   # K187：课文 Markdown、ja 译文、教师只读
 
                 # ---- 390px 视口 ----
                 m = new_page(browser.new_context(viewport={"width": 390, "height": 844}),
