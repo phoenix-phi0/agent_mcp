@@ -398,6 +398,17 @@
     如果 {sname 或} 为空
       设 sname = 科目{sid}
     结束
+    设 lg = 调用 account.取语言 username={learner}
+    如果 {lg.lang 或 zh} 等于 ja
+      设 scode = 查一值 app.db teacher_rules_subject_code id={sid}
+      如果 {scode 或} 不为空
+        设 tr = 调用 subject.译文 tbl=subject_info row_key={scode} field=name lang=ja
+        如果 {tr.text 或} 不为空
+          设 sname = {tr.text}
+        结束
+      结束
+    结束
+    设 na.lang = {lg.lang 或 zh}
     设 na.student = {student}
     设 na.subj = {sid}
     设 na.sname = {sname}
@@ -443,6 +454,17 @@
     如果 {sname 或} 为空
       设 sname = 科目{sid}
     结束
+    设 lg = 调用 account.取语言 username={learner}
+    如果 {lg.lang 或 zh} 等于 ja
+      设 scode = 查一值 app.db teacher_rules_subject_code id={sid}
+      如果 {scode 或} 不为空
+        设 tr = 调用 subject.译文 tbl=subject_info row_key={scode} field=name lang=ja
+        如果 {tr.text 或} 不为空
+          设 sname = {tr.text}
+        结束
+      结束
+    结束
+    设 ra.lang = {lg.lang 或 zh}
     设 ra.student = {student}
     设 ra.today = {today}
     设 ra.studs = {studs}
@@ -487,11 +509,11 @@
     返回 {out}
   结束
 
-  公开 函数 取回复用到 reply_id learner? current_role? auth_mode? subject?
+  公开 函数 取回复用到 reply_id lang? learner? current_role? auth_mode? subject?
     设 sr = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 sid = {sr.subject_id}
-    设 a = 查一值 app.db teacher_rules_reply_setting_text reply_id={reply_id} subj={sid}
-    设 b = 查一值 app.db teacher_rules_reply_relay_text reply_id={reply_id} subj={sid}
+    设 a = 查一值 app.db teacher_rules_reply_setting_text reply_id={reply_id} subj={sid} lang={lang}
+    设 b = 查一值 app.db teacher_rules_reply_relay_text reply_id={reply_id} subj={sid} lang={lang}
     设 text = {a 或}
     如果 {a 或} 不为空 且 {b 或} 不为空
       设 text = {a}、{b}

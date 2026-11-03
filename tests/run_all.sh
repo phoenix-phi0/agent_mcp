@@ -116,6 +116,7 @@ run 模板命名    $PY tests/gen/test_templates.py
 run 按端拆页面  $PY tests/gen/test_ends.py
 run 界面多语言  $PY tests/gen/test_i18n.py
 run 安全Markdown $PY tests/gen/test_markdown.py
+run 浮层关后不载入 $PY tests/gen/test_ui_keep_page.py
 run 课文导入脚本 $PY tests/kg_v4/test_k187_import_adapter.py
 run 界面序      $PY tests/gen/test_order.py
 run 只加迁移    $PY tests/gen/test_migrate.py
@@ -164,6 +165,7 @@ run 字符串动词  $PY tests/dsl/test_text_verbs.py
 run 读csv       $PY tests/dsl/test_doc_csv.py
 run 参数或默认  $PY tests/dsl/test_alt_args.py
 run 条件计算正则 $PY tests/dsl/test_cond_calc_regex.py
+run 花括号值判空 $PY tests/dsl/test_brace_value.py
 run 循环        $PY tests/dsl/test_loop_while.py
 run 业务层        $PY tests/dsl/test_service_layer.py
 run 终止与派任务 $PY tests/dsl/test_halt_task.py

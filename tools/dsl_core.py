@@ -107,7 +107,7 @@ ESC_OR_VAR_RE = re.compile(r"\{\{([^{}]*)\}\}|\{([^{}]+)\}")
 # 里面的空格和「或」（{x 或 默认}）不切
 BRACE_RE = re.compile(r"\{\{[^{}]*\}\}|\{[^{}]+\}")
 # 整个值就是一个没展开的 {变量}。未定义变量会原样保留成这个样子，
-# 判空时要当成「没有值」。
+# expand 据此打 Unexpanded 记号，判空时当成「没有值」。
 # 开头不能是引号：{"id":1} 这种只有一层的 JSON 对象不是没展开的变量（否则「如果 {p} 为空」
 # 对一个有内容的扁平结构也成立）
 UNEXPANDED_RE = re.compile(r'^\{(?!\s*")[^{}]+\}$')
@@ -301,15 +301,27 @@ def split_items(text: str) -> list:
     return [x.strip() for x in re.split(r"[,，]", text) if x.strip()]
 
 
+class Unexpanded(str):
+    """没展开的 {变量}：取不到值、原样留下来的那串字。
+
+    和用户真的输入了「{name}」这几个字（搜索词、Python 课的 f-string）长得一样，
+    只看文字分不开，所以由 expand 在取不到值时打这个记号，判空只认记号。
+    「设 a = {没定义}」「调用 f x={没定义}」传下去记号还在，子函数里判空仍是空。
+    """
+    __slots__ = ()
+
+
 def is_empty(value: str) -> bool:
     """判空。空串、空列表、空对象，以及没展开的 {变量} 都算空。
 
     最后一条是关键：未定义变量原样保留成 {名} 这个字面量，那在语义上
     就是「没有值」。不这么算的话，「如果 {session.code} 为空」在字段还
     不存在时会判成「不为空」，一路走进处理已有值的分支。
+
+    注意是看 Unexpanded 记号，不是看形状：变量的值恰好是「{name}」时它有值，
+    不能当成没展开（K190，早先按形状判，搜 {name} 时筛选被静默跳过）。
     """
-    s = value.strip()
-    return s in EMPTY_FORMS or bool(UNEXPANDED_RE.fullmatch(s))
+    return isinstance(value, Unexpanded) or value.strip() in EMPTY_FORMS
 
 
 def to_text(value) -> str:

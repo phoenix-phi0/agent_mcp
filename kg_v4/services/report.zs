@@ -505,16 +505,18 @@
     返回 {o}
   结束
 
-  函数 学生对话地址 student chat_page? chat_kw? chat_start? chat_end? chat_kind?
+  函数 学生对话地址 student chat_before? chat_after? chat_kw? chat_start? chat_end? chat_kind?
     设 sa = 调用 地址段 text={student}
     设 hf = #%E5%AD%A6%E6%83%85?student={sa.v}
-    如果 {chat_page} 不为空 且 {chat_page} 不等于 1
-      设 hf = {hf}&chat_page={chat_page}
+    如果 {chat_before} 不为空
+      设 hf = {hf}&chat_before={chat_before}
     结束
-    设 ka = 调用 地址段 text={chat_kw}
-    设 kav = {ka.v 或}
-    如果 {kav} 不为空
-      设 hf = {hf}&chat_kw={kav}
+    如果 {chat_after} 不为空
+      设 hf = {hf}&chat_after={chat_after}
+    结束
+    如果 {chat_kw} 不为空
+      设 kc = 调用 地址段 text={chat_kw}
+      设 hf = {hf}&chat_kw={kc.v 或}
     结束
     如果 {chat_start} 不为空
       设 hf = {hf}&chat_start={chat_start}
@@ -611,7 +613,8 @@
     设 t = 调用 tutor.取问答轮 learner={student} round_id={chat_id} subject={subject_id}
     设 nt = {zz 或}
     如果 {t.reply_id} 大于 0
-      设 nr = 调用 teacher_rules.取回复用到 reply_id={t.reply_id} subject={subject_id}
+      设 lgn = 调用 account.取语言 username={learner}
+      设 nr = 调用 teacher_rules.取回复用到 reply_id={t.reply_id} lang={lgn.lang 或} subject={subject_id}
       设 nt = {nr.text 或}
     结束
     设 lt = {zz 或}
@@ -706,10 +709,18 @@
       设 k = 0
       遍历 w 于 {s.weak_points}
         如果 {k} 小于 3
+          设 wti = {w.title}
+          如果 {lang} 等于 ja
+            设 trw = 调用 subject.译文 tbl=kg_point row_key={w.point_code} field=title lang=ja
+            设 trwt = {trw.text 或}
+            如果 {trwt} 不为空
+              设 wti = {trwt}
+            结束
+          结束
           如果 {wt} 为空
-            设 wt = {w.title}
+            设 wt = {wti}
           否则
-            设 wt = {wt}、{w.title}
+            设 wt = {wt}、{wti}
           结束
         结束
         设 k = 计算 {k} + 1
@@ -864,6 +875,10 @@
     结束
     设 cn = 列表长度 {rows}
     设 cc = 共{cn}个学生
+    如果 {lang} 等于 ja
+      设 w5 = 学生
+      设 cc = {w5} {cn} 人
+    结束
     设 fm.report_sort = {sel}
     设 out.class_rows = {rows}
     设 out.class_weak_points = {cwp}
@@ -873,7 +888,7 @@
     返回 {out}
   结束
 
-  公开 函数 学生页面 student chat_page? chat_kw? chat_start? chat_end? chat_kind? learner? current_role? auth_mode? subject?
+  公开 函数 学生页面 student chat_before? chat_after? chat_kw? chat_start? chat_end? chat_kind? learner? current_role? auth_mode? subject?
     如果 {student} 为空
       报错 400 student 不能为空
     结束
@@ -919,6 +934,9 @@
     设 bk = #%E5%AD%A6%E6%83%85
     如果 {bad} 等于 1
       设 mt = 没有这个学生（{student}），回全班表重新选。
+      如果 {lang} 等于 ja
+        设 mt = この学生はいません（{student}）。クラス全体の一覧に戻って選び直してください。
+      结束
       设 so.username = {student}
       设 so.missing = {mt}
       设 so.back = {bk}
@@ -970,6 +988,22 @@
     如果 {dict.total} 大于 0
       设 dc = {w2} {dict.total} 次，正确率 {dict.accuracy}%，错词本 {g.wrong_book_count} 个
     结束
+    如果 {lang} 等于 ja
+      如果 {last} 等于 还没有
+        设 last = まだありません
+      结束
+      设 head = {g.display_name}（{student}）　教材：{ser.name 或}　最近の学習：{last}
+      设 ov = まだ解答がありません
+      如果 {g.answer_total} 大于 0
+        设 w1j = 習得済み
+        设 ov = {w1j} {g.mastered_count} 個の知識ポイント　解答 {g.answer_total} 問　直近の正答率 {g.recent_accuracy}%　平均スコア {g.avg_score}
+      结束
+      设 dc = 単語の書き取り：まだ解答がありません
+      如果 {dict.total} 大于 0
+        设 w2j = 単語の書き取り：解答
+        设 dc = {w2j} {dict.total} 回、正答率 {dict.accuracy}%、間違えた単語帳 {g.wrong_book_count} 個
+      结束
+    结束
     设 so.username = {student}
     设 so.head = {head}
     设 so.overview = {ov}
@@ -980,6 +1014,10 @@
     设 sh = {zz 或}
     如果 {g.has_summary} 等于 1
       设 sh = {wa} 学情总结（{g.summary_at}，{g.summary_author} 请的）
+      如果 {lang} 等于 ja
+        设 waj = AI
+        设 sh = {waj} 学習状況のまとめ（{g.summary_at}、{g.summary_author} が依頼）
+      结束
     结束
     设 ssm.student = {student}
     设 ssm.head = {sh}
@@ -1188,6 +1226,12 @@
       如果 {a.correct} 等于 1
         设 rs = 对
       结束
+      如果 {lang} 等于 ja
+        设 rs = 不正解
+        如果 {a.correct} 等于 1
+          设 rs = 正解
+        结束
+      结束
       设 ro.at = {a.at 或}
       设 ro.point_label = {pt}
       设 ro.stem_brief = {sb2}
@@ -1210,17 +1254,17 @@
       设 bo.last_wrong = {bw.last_at 或}
       设 sbk = 列表加项 {sbk} {bo}
     结束
-    设 ch = 调用 tutor.列问答轮 learner={student} page={chat_page} page_size=20 keyword={kw2} date_from={chat_start} date_to={chat_end} intent={chat_kind} subject={subject_id}
+    设 ch = 调用 tutor.列问答轮 learner={student} before={chat_before} after={chat_after} page_size=20 keyword={kw2} date_from={chat_start} date_to={chat_end} intent={chat_kind} subject={subject_id}
     设 sch = 解析JSON []
     遍历 rd 于 {ch.rounds}
       设 il2 = 调用 意图标签 code={rd.intent}
       设 nt = {zz 或}
       如果 {rd.reply_id} 大于 0
-        设 nr2 = 调用 teacher_rules.取回复用到 reply_id={rd.reply_id} subject={subject_id}
+        设 nr2 = 调用 teacher_rules.取回复用到 reply_id={rd.reply_id} lang={lang} subject={subject_id}
         设 nt = {nr2.text 或}
       结束
-      设 ca2 = 调用 缩略 text={rd.ask} n=120
-      设 cr2 = 调用 缩略 text={rd.reply} n=120
+      设 ca2 = 调用 缩略 text={rd.ask} n=60
+      设 cr2 = 调用 缩略 text={rd.reply} n=60
       设 co.chat_id = {rd.id}
       设 co.chat_at = {rd.at 或}
       设 co.chat_intent_label = {il2.label 或}
@@ -1237,9 +1281,7 @@
     设 pgc = {ch.page_count 或}
     设 ctot = {ch.total 或}
     设 filt = 0
-    设 kwa = 调用 地址段 text={kw2}
-    设 kwv = {kwa.v 或}
-    如果 {kwv} 不为空 或 {chat_start} 不为空 或 {chat_end} 不为空 或 {chat_kind} 不为空
+    如果 {kw2} 不为空 或 {chat_start} 不为空 或 {chat_end} 不为空 或 {chat_kind} 不为空
       设 filt = 1
     结束
     设 w3 = 共
@@ -1249,15 +1291,15 @@
       设 info = {w4} {ctot} 件、{pg}/{pgc} ページ
     结束
     设 olh = {zz 或}
-    如果 {pg} 小于 {pgc}
-      设 pn = 计算 {pg} + 1
-      设 oh = 调用 学生对话地址 student={student} chat_page={pn} chat_kw={kw2} chat_start={chat_start} chat_end={chat_end} chat_kind={chat_kind}
+    如果 {ch.older_id 或} 不为空
+      设 oid = {ch.older_id}
+      设 oh = 调用 学生对话地址 student={student} chat_before={oid} chat_kw={kw2} chat_start={chat_start} chat_end={chat_end} chat_kind={chat_kind}
       设 olh = {oh.href}
     结束
     设 nwh = {zz 或}
-    如果 {pg} 大于 1
-      设 pp = 计算 {pg} - 1
-      设 nh = 调用 学生对话地址 student={student} chat_page={pp} chat_kw={kw2} chat_start={chat_start} chat_end={chat_end} chat_kind={chat_kind}
+    如果 {ch.newer_id 或} 不为空
+      设 nid2 = {ch.newer_id}
+      设 nh = 调用 学生对话地址 student={student} chat_after={nid2} chat_kw={kw2} chat_start={chat_start} chat_end={chat_end} chat_kind={chat_kind}
       设 nwh = {nh.href}
     结束
     设 clh = {zz 或}
@@ -1295,6 +1337,10 @@
     设 sm = 调用 取最近总结 student={student} subject={subject_id}
     设 wa = AI
     设 hd = {wa} 学情总结（{sm.created_at}，{sm.author} 请的）
+    设 lgx = 调用 account.取语言 username={current_user}
+    如果 {lgx.lang} 等于 ja
+      设 hd = {wa} 学習状況のまとめ（{sm.created_at}、{sm.author} が依頼）
+    结束
     设 so.student = {student}
     设 so.head = {hd}
     设 so.text = {sm.summary}

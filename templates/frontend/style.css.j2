@@ -489,6 +489,10 @@ html[lang="ja"] body { font-family:-apple-system,"Hiragino Kaku Gothic ProN",
   html[lang="ja"] nav.nav-role-teacher .nav-subject { max-width:84px; }
 }
 <% endif %>
+<% if has_nowrap_cols is defined and has_nowrap_cols %>
+/* 「列 … 不折行」：短列不被长文本列挤成竖排（K190） */
+.cell-nowrap { white-space:nowrap; }
+<% endif %>
 <% if has_markdown %>
 .markdown { white-space:normal; }
 .markdown pre { white-space:pre; overflow-x:auto; font-family:monospace; }

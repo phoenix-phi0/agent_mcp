@@ -505,7 +505,7 @@
     返回 {out}
   结束
 
-  公开 函数 列问答轮 learner page? page_size? keyword? date_from? date_to? intent? current_role? auth_mode? subject?
+  公开 函数 列问答轮 learner before? after? page_size? keyword? date_from? date_to? intent? current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 subject_id = {sj.subject_id}
     设 ps = 20
@@ -546,26 +546,72 @@
     设 q.date_to = {dt}
     设 q.intent = {it0}
     设 q.ps = {ps}
+    设 bf = {zz 或}
+    设 af = {zz 或}
+    如果 {before} 不为空
+      设 bm = 匹配 {before} ^[0-9]+$
+      如果 {bm.matched} 等于 是
+        如果 {before} 大于 0
+          设 bf = {before}
+        结束
+      结束
+    结束
+    如果 {after} 不为空
+      设 am = 匹配 {after} ^[0-9]+$
+      如果 {am.matched} 等于 是
+        如果 {after} 大于 0
+          设 af = {after}
+        结束
+      结束
+    结束
+    如果 {bf} 不为空
+      设 af = {zz 或}
+    结束
+    设 q.lim = {ps}
+    设 q.before_id = {zz 或}
+    设 q.after_id = 0
+    如果 {bf} 不为空
+      设 q.before_id = {bf}
+      设 rows = 查询表 app.db tutor_round_page {q}
+      设 rn = 列表长度 {rows}
+      如果 {rn} 等于 0
+        设 q.before_id = {zz 或}
+        设 q.after_id = 0
+        设 rows = 查询表 app.db tutor_round_page_after {q}
+      结束
+    否则如果 {af} 不为空
+      设 q.after_id = {af}
+      设 rows = 查询表 app.db tutor_round_page_after {q}
+      设 rn = 列表长度 {rows}
+      如果 {rn} 等于 0
+        设 q.before_id = {zz 或}
+        设 rows = 查询表 app.db tutor_round_page {q}
+      结束
+    否则
+      设 rows = 查询表 app.db tutor_round_page {q}
+    结束
+    设 first_id = 0
+    设 last_id = 0
+    遍历 fr 于 {rows}
+      如果 {first_id} 等于 0
+        设 first_id = {fr.id}
+      结束
+      设 last_id = {fr.id}
+    结束
+    设 q.first_id = {first_id}
+    设 q.last_id = {last_id}
     设 cr = 查一行表 app.db tutor_round_count {q}
     设 total = {cr.total}
     设 pc = {cr.page_count}
-    设 pg = 1
-    如果 {page} 不为空
-      设 gm = 匹配 {page} ^[0-9]+$
-      如果 {gm.matched} 等于 是
-        设 pg = {page}
-      结束
+    设 pg = {cr.page}
+    设 oid = {zz 或}
+    设 nid = {zz 或}
+    如果 {cr.older_n} 大于 0
+      设 oid = {last_id}
     结束
-    如果 {pg} 小于 1
-      设 pg = 1
+    如果 {cr.newer_n} 大于 0
+      设 nid = {first_id}
     结束
-    如果 {pg} 大于 {pc}
-      设 pg = {pc}
-    结束
-    设 off = 计算 ({pg} - 1) * {ps}
-    设 q.lim = {ps}
-    设 q.off = {off}
-    设 rows = 查询表 app.db tutor_round_page {q}
     设 rounds = 解析JSON []
     遍历 r 于 {rows}
       设 it = {r}
@@ -582,6 +628,8 @@
     设 out.page_count = {pc}
     设 out.page_size = {ps}
     设 out.rounds = {rounds}
+    设 out.older_id = {oid}
+    设 out.newer_id = {nid}
     返回 {out}
   结束
 

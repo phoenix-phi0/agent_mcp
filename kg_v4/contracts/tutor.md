@@ -143,8 +143,8 @@
   伪代码 查 tutor_message 中该 learner 且 subject_id 等于本科目的行（别的科目的对话不出现），按 id 降序取前 limit 条，再翻成升序
   伪代码 返回 {"learner": learner, "total": 条数, "messages": 列表}
 
-公开 函数 列问答轮 learner page? page_size? keyword? date_from? date_to? intent? current_role? auth_mode? subject?
-  返回 {learner, total, page, page_count, page_size, rounds}；教师看学情用的只读分页。rounds 是 [{id, ask, reply, reply_id, intent, lesson_code, link, links, at}]，新的在前（id 降序）；total 是符合筛选条件的轮数；page_count 至少是 1；links 是解析后的列表（没有为空列表）；reply_id 没有回复时为 0
+公开 函数 列问答轮 learner before? after? page_size? keyword? date_from? date_to? intent? current_role? auth_mode? subject?
+  返回 {learner, total, page, page_count, page_size, rounds, older_id, newer_id}；教师看学情用的只读分页，按编号游标翻页（K190：翻页期间有新提问不错行）。older_id 是本页最早一轮的编号，还有更早的才有值，否则空串；newer_id 是本页最新一轮的编号，还有更新的才有值，否则空串。rounds 是 [{id, ask, reply, reply_id, intent, lesson_code, link, links, at}]，新的在前（id 降序）；total 是符合筛选条件的轮数；page_count 至少是 1；links 是解析后的列表（没有为空列表）；reply_id 没有回复时为 0
   报错 400 page_size 不合法
   报错 400 日期要写成 YYYY-MM-DD
   报错 400 意图不对
@@ -156,12 +156,16 @@
   伪代码 一轮的定义（写在查询里）：同一 learner、同一科目的消息按 id 排序；老师那条（role=teacher）的前一条不是老师、且 intent 不是 summary 时，它是前一条学生消息的回复，两条合成一轮，编号取学生那条的 id；其余的行各自单独成一轮（学生单独一条没有回复：reply 空、reply_id=0；老师单独一条比如本轮总结：ask 空、reply_id=自己的 id）。一轮的 at 取编号那一行的 at
   伪代码 page_size 为空取 20；不是 1 到 100 的整数，报错 400 page_size 不合法
   伪代码 date_from、date_to 不为空且不匹配 ^[0-9]{4}-[0-9]{2}-[0-9]{2}$，报错 400 日期要写成 YYYY-MM-DD；intent 不为空且不是 quiz、progress、textbook、explain、summary 之一，报错 400 意图不对
-  伪代码 用 查一行 tutor_round_count 取 total、page_count（筛选条件都在 SQL 里）；page 为空、不是正整数都当 1；大于 page_count 时取 page_count
-  伪代码 用 查询 tutor_round_page（LIMIT、OFFSET 都在 SQL 里，不取全量再截）得当前页；每行 links 为空当 []，解析成列表
-  伪代码 引擎事实：值恰好形如 {name} 时「如果 {x} 不为空」判成空（当成没展开的变量），所以 keyword 不用「如果」判断，直接作绑定参数传给查询，去空白和判空都在 SQL 里做（trim(:keyword) = ''）
+  伪代码 游标：before、after 不是正整数都当没给；两个都给时只看 before
+  伪代码 给了 before：用 查询 tutor_round_page（before_id=before）取编号小于 before 的最新 page_size 轮；一轮都没有时用 查询 tutor_round_page_after（after_id=0）取最早的 page_size 轮（游标超出取最后一页）
+  伪代码 给了 after：用 查询 tutor_round_page_after（after_id=after）取编号大于 after 的最早 page_size 轮（查询里已翻成新的在前）；一轮都没有时用 查询 tutor_round_page（before_id 空串）取最新一页
+  伪代码 都没给：用 查询 tutor_round_page（before_id 空串）取最新一页。LIMIT 都在 SQL 里，不取全量再截；每行 links 为空当 []，解析成列表
+  伪代码 位置：first_id 是本页第一行（最新）的编号，last_id 是本页最后一行（最早）的编号，本页没有行时都是 0；用 查一行 tutor_round_count（first_id、last_id 加筛选条件）取 total、newer_n、older_n、page、page_count。page = newer_n 按每页条数向上取整 + 1，page_count = page + older_n 按每页条数向上取整（都在 SQL 里算，新提问使页不对齐时页码也不会超过总页数）
+  伪代码 older_id：older_n 大于 0 时是 last_id，否则空串；newer_id：newer_n 大于 0 时是 first_id，否则空串
+  伪代码 keyword 不用「如果」判断，直接作绑定参数传给查询，去空白和判空都在 SQL 里做（trim(:keyword) = ''）。K190：引擎判空已修好（值恰好形如 {name} 时算有值），这里仍这样写是因为 SQL 里的 trim 本来就要做，写法最短，不是绕行
   伪代码 筛选：keyword 去首尾空白后不为空时，在 ask 和 reply 里按字面找、不区分大小写（用 instr(lower(..), lower(..))，不用 LIKE，% _ ' 都按普通字符）；date_from、date_to 按 at 的前 10 个字符比较，含两端；intent 不为空时只留这种意图
   伪代码 只读：不写任何表
-  伪代码 返回 {"learner": learner, "total": total, "page": page, "page_count": page_count, "page_size": page_size, "rounds": 列表}
+  伪代码 返回 {"learner": learner, "total": total, "page": page, "page_count": page_count, "page_size": page_size, "rounds": 列表, "older_id": older_id, "newer_id": newer_id}
 
 公开 函数 取问答轮 learner round_id current_role? auth_mode? subject?
   返回 {id, ask, reply, reply_id, intent, lesson_code, link, links, at}；一轮的全文，形状同 列问答轮 的 rounds 每项；只读
@@ -462,16 +466,52 @@ POST /tutor/summarize-round -> 总结本轮 角色 student
   调用 列问答轮 learner=u1
   得 total=2
 
-用例 列问答轮_页码超出取最后一页
+用例 列问答轮_第一页带更早游标
   先 数据 tutor_message learner=u1 role=user content=问一 at=2026-01-01_09:00:00
   先 数据 tutor_message learner=u1 role=user content=问二 at=2026-01-01_09:00:00
   先 数据 tutor_message learner=u1 role=user content=问三 at=2026-01-01_09:00:00
-  调用 列问答轮 learner=u1 page=9 page_size=2
-  得 total=3 page=2 page_count=2 page_size=2
+  调用 列问答轮 learner=u1 page_size=2
+  得 total=3 page=1 page_count=2 page_size=2 older_id=2
 
-用例 列问答轮_页码非法当第一页
+用例 列问答轮_更早游标
   先 数据 tutor_message learner=u1 role=user content=问一 at=2026-01-01_09:00:00
-  调用 列问答轮 learner=u1 page=abc
+  先 数据 tutor_message learner=u1 role=user content=问二 at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=user content=问三 at=2026-01-01_09:00:00
+  调用 列问答轮 learner=u1 before=2 page_size=2
+  得 total=3 page=2 page_count=2 newer_id=1
+
+用例 列问答轮_更新游标
+  先 数据 tutor_message learner=u1 role=user content=问一 at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=user content=问二 at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=user content=问三 at=2026-01-01_09:00:00
+  调用 列问答轮 learner=u1 after=1 page_size=2
+  得 total=3 page=1 page_count=2 older_id=2
+
+用例 列问答轮_更早游标超出取最后一页
+  先 数据 tutor_message learner=u1 role=user content=问一 at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=user content=问二 at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=user content=问三 at=2026-01-01_09:00:00
+  调用 列问答轮 learner=u1 before=1 page_size=2
+  得 total=3 page=2 page_count=2 newer_id=2
+
+用例 列问答轮_更新游标超出取第一页
+  先 数据 tutor_message learner=u1 role=user content=问一 at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=user content=问二 at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=user content=问三 at=2026-01-01_09:00:00
+  调用 列问答轮 learner=u1 after=99 page_size=2
+  得 total=3 page=1 page_count=2 older_id=2
+
+用例 列问答轮_页不对齐时页码不超过总页数
+  先 数据 tutor_message learner=u1 role=user content=问一 at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=user content=问二 at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=user content=问三 at=2026-01-01_09:00:00
+  先 数据 tutor_message learner=u1 role=user content=问四 at=2026-01-01_09:00:00
+  调用 列问答轮 learner=u1 before=2 page_size=3
+  得 total=4 page=2 page_count=2 newer_id=1
+
+用例 列问答轮_游标非法当第一页
+  先 数据 tutor_message learner=u1 role=user content=问一 at=2026-01-01_09:00:00
+  调用 列问答轮 learner=u1 before=abc after=x
   得 total=1 page=1 page_count=1
 
 用例 列问答轮_没有记录

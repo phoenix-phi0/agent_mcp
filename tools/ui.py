@@ -376,6 +376,10 @@ FLAG_MODIFIERS = FLAG_MODIFIERS | {"隐藏"}
 # 值一变卡片就整个重建、播一次翻入动画——换题时看得出是新的一张。
 # 「正文」：「显示」按正文排（大字、保留换行），不是顶栏那种小号灰字。
 FLAG_MODIFIERS = FLAG_MODIFIERS | {"卡片", "正文", "Markdown"}
+# 「列 x 不折行 标题」：这一列不换行，短列（时间、状态）不被长文本列挤成竖排。
+# 「浮层 x 关后不载入」：只读的浮层，关上时界面自己的「载入」不再重跑——后面的页面
+# 没变，重拉只会把人刚在表单里输入的字盖掉（K190）。没用的项目生成物一个字节不变。
+FLAG_MODIFIERS = FLAG_MODIFIERS | {"不折行", "关后不载入"}
 KEYED_MODIFIERS = KEYED_MODIFIERS | {"交给", "翻页"}
 
 # 列「地址 <键>」：这一格画成链接，见上面「链接」的说明
@@ -1395,6 +1399,13 @@ def render_vue(screens, title="UI", options_map=None, rows=None,
         "overlay_loaders_json": json.dumps(
             {o.name: o.load for s in screens for o in s.overlays() if o.load},
             ensure_ascii=False),
+        # 标了「关后不载入」的浮层。没有就是空串，模板里一行相关代码都不生成。
+        # 值是「带」的参数名：刷新后 overlayBase 没了，关的时候靠它从地址算回界面自己的参数
+        "keep_page_overlays_json": json.dumps(
+            {o.name: sorted({a.carry for a in s.actions() if a.opens == o.name and a.carry})
+             for s in screens for o in s.overlays() if o.has("关后不载入")},
+            ensure_ascii=False) if any(o.has("关后不载入") for s in screens for o in s.overlays()) else "",
+        "has_nowrap_cols": any(n.kind == "列" and n.has("不折行") for s in screens for n in s.walk()),
         # 顶部导航，由项目编译时算好传进来（见 gen/project.py 的 build）。
         # 传了就用它，不管有没有「切到」；没传照旧按 has_goto 决定。
         "nav": bool(nav),

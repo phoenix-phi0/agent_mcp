@@ -25,7 +25,7 @@
 结束
 
 接口 POST /report/one 动作 report_one 角色 teacher
-  设 r = 调用 report.学生页面 student={student} chat_page={chat_page 或} chat_kw={chat_kw 或} chat_start={chat_start 或} chat_end={chat_end 或} chat_kind={chat_kind 或} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  设 r = 调用 report.学生页面 student={student} chat_before={chat_before 或} chat_after={chat_after 或} chat_kw={chat_kw 或} chat_start={chat_start 或} chat_end={chat_end 或} chat_kind={chat_kind 或} learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   响应 state {r}
   响应 form {r.form}
 结束

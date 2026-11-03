@@ -16,7 +16,8 @@
 #                      在）、各知识点得分与掌握、常错条目、最近作答、默写错词本、
 #                      问老师记录（只读，老师的回答带着当时用了的 AI 老师设定；K189：
 #                      按「一轮问答」每页 20 轮，新的在前，因为教师打开学情先要看最近问了什么；
-#                      页码和筛选条件都放地址 chat_page / chat_kw / chat_start / chat_end /
+#                      K190：游标（chat_before 更早、chat_after 更新）和筛选条件都放地址
+#                      chat_kw / chat_start / chat_end /
 #                      chat_kind，翻页是链接，「筛选」由接口算地址回 go，「看全文」是行上打开
 #                      浮层。放地址是因为行上打开浮层会清空表单，放表单里筛选条件就丢了；
 #                      筛选框名字故意和地址参数不同，否则输入框会被引擎设成只读）、
@@ -136,8 +137,8 @@
       文案 当 lists.student_chat&&!lists.student_chat.length&&shared.student_chat_page&&shared.student_chat_page.filtered!=1 还没有问老师记录。
       文案 当 lists.student_chat&&!lists.student_chat.length&&shared.student_chat_page&&shared.student_chat_page.filtered==1 没有符合筛选条件的记录。
       列表 问老师表 绑 student_chat 当 lists.student_chat&&lists.student_chat.length
-        列 chat_at 时间
-        列 chat_intent_label 意图
+        列 chat_at 不折行 时间
+        列 chat_intent_label 不折行 意图
         列 chat_ask 学生问
         列 chat_reply AI老师答
         列 chat_notes 用了的设定
@@ -220,7 +221,7 @@
     结束
   结束
 
-  浮层 问老师全文 宽 720px 载入 report_chat_full
+  浮层 问老师全文 宽 720px 关后不载入 载入 report_chat_full
     分组 这一轮 竖排 间距 12px 当 shared.chat_full&&shared.chat_full.id==params.chat_id
       显示 chat_full.at 时间
       显示 chat_full.intent_label 当 shared.chat_full.intent_label 意图

@@ -279,7 +279,7 @@ from .dsl_core import (  # noqa: F401
     HALT_STATES, ScriptHalt, IN_WORDS, KEYWORDS, LOOP_HEADS, LOOP_MAX, LoopBreak, LoopContinue,
     LoopControl, MAX_CALL_DEPTH, REPEAT_RE, WHILE_LIMIT_RE, PACK_SEP_RE, RESERVED, RET_STATUS_RE,
     BizError, ScriptReturn, TX_BEGIN, TX_COMMIT, TX_ROLLBACK, VAR_RE, VERB_LIKE_RE,
-    as_number, check_name, dig, index_of, eval_cond_expr, eval_parts, is_empty,
+    UNEXPANDED_RE, Unexpanded, as_number, check_name, dig, index_of, eval_cond_expr, eval_parts, is_empty,
     iter_items, msg_size, normalize, parse_cond_expr, parse_condition, put, split_args,
     split_alt, split_condition_tail, split_head, split_items, split_ws_once, to_text,
 )
@@ -524,8 +524,14 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
         就原样留着（{4} 不是变量），要转义的是花括号里恰好是个已定义变量名
         的时候：正则要找文本里的「{name}」而 name 又是变量，写 {{name}}。
         只认成对的 {{…}}，JSON 结尾的 }} 不受影响。
+
+        替换只扫一遍，换进去的值不再当占位符解析。整个结果是一个取不到值的 {名}
+        时返回 Unexpanded，判空靠它和「值恰好是 {名}」区分（见 dsl_core.is_empty）。
         """
+        missing = False
+
         def repl(m):
+            nonlocal missing
             if m.group(1) is not None:
                 return "{" + m.group(1) + "}"
             body = m.group(2)
@@ -538,13 +544,18 @@ class DSLEngine(ModelMixin, HistoryMixin, ServiceMixin):
                 # 取不到（None）、空串、空列表、空字典都算「没有」，用默认值。
                 # 不走 is_empty：那个函数是给字符串用的，拿到 None 会炸。
                 blank = got is None or (hasattr(got, "__len__") and not len(got))
+                missing = missing or isinstance(got, Unexpanded)
                 out = alt.strip() if blank else to_text(got)
             elif got is None:
+                missing = True
                 return m.group(0)
             else:
+                # 变量里存的是上游传下来的「没展开」（设 a = {没定义}），记号接着传
+                missing = missing or isinstance(got, Unexpanded)
                 out = to_text(got)
             return json.dumps(out, ensure_ascii=False)[1:-1] if esc else out
-        return ESC_OR_VAR_RE.sub(repl, text)
+        res = ESC_OR_VAR_RE.sub(repl, text)
+        return Unexpanded(res) if missing and UNEXPANDED_RE.fullmatch(res.strip()) else res
 
     def _resolve_items(self, raw: str, literal: bool = False):
         """整个就是一个变量引用时取原始值，否则展开成文本。

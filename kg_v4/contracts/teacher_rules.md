@@ -364,6 +364,8 @@
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
   伪代码 读 teacher_rules_setting 中 subject_id 等于本科目或等于 0 的行；student 为空只留 student 为空的行，否则只留 student 为空或等于入参 student 的行
   伪代码 排序：kind 按 memory、note、card，再全班（student 为空）在前个人在后，再按 id 升序
+  伪代码 K190 科目名：lang 为 ja 时，查到本科目显示名 sname 后，用 查一值 teacher_rules_subject_code id=本科目 取科目 code，调用 subject.译文 tbl=subject_info row_key=code field=name lang=ja，取 text 非空才替换 sname（传达列表同样）
+  伪代码 K190 日语：lang = 调用 account.取语言 username=learner 取 lang，放进查询参数（teacher_rules_note_rows 的 lang）；lang 为 ja 时 note_state 带数字或说明的几种写日文：「次の返信のみ·この学生は使用済み」「次の返信のみ·未使用」「次の返信のみ·{n}人の学生が使用済み」；停用、启用 仍是这两个词（界面的「当」要比较，显示由词表换）；别的语言都是中文，一字不改
   伪代码 note_id=id；note_kind 转中文（memory→记忆、note→作者注、card→关键词卡）；note_scope 为「全班」或「个人」；note_keywords 原样；note_brief 是 content 超过 60 个字时取前 60 个字加「…」，否则原文；note_updated=updated_at；note_by=author；note_content 是完整内容；student 原样
   伪代码 mine：该行的 student 等于入参 student（入参为空时按空串比）为 1，否则 0——这一页能改的才是 1，行上编辑/停用/启用/删除按钮看它
   伪代码 note_subject_label：该行 subject_id 等于 0 为「全部科目」，否则为本科目的显示名（按 subject_id 查 subject_info 的 name，查询 teacher_rules_subject_name；查不到或为空写「科目{subject_id}」）；传参（K170）：科目显示名 sname 是库里的自由文本，查 teacher_rules_note_rows 的参数（student、subj、sname、own、wr）一律装进对象用 查询表 传，不得按位置 sname={…} 传（显示名首尾有空白时按位置传引擎直接报错）；note_subject_scope：该行 subject_id 等于 0 为「全部科目」，否则「当前科目」（行上点「编辑」整行拷进表单时，适用范围下拉回填用）
@@ -379,6 +381,7 @@
   报错 404 没有这个科目
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
   伪代码 读 teacher_rules_relay 中 subject_id 等于本科目或等于 0 的行；student 为空只留 student 为空的行，否则只留 student 为空或等于入参 student 的行；全班在前个人在后，再按 id 升序
+  伪代码 K190 日语：lang = 调用 account.取语言 username=learner 取 lang，放进查询参数（teacher_rules_relay_rows 的 lang）；lang 为 ja 时 relay_done 写「伝達済み {done}/全 {total}」，再接「、期限切れ {total-done}」；student 入参不为空时 relay_state_text 写「伝達済み（{updated_at}）」「期限切れ（期限 {deadline}、未伝達）」「未伝達（{rounds_done} 回組み込み済み）」，已带满再接「·上限到達」，已停用的前面接「無効·」；student 入参为空的 relay_state_text、relay_enabled_text 仍是 启用、停用（界面的「当」要比较，显示由词表换）；别的语言都是中文，一字不改
   伪代码 relay_id=id；relay_scope 为「全班」或「个人」；relay_urgency 中文（urgent→立即、normal→尽快、low→顺便）；relay_voice=tone（可空）；relay_brief 是 must_info 超过 60 个字时取前 60 个字加「…」；relay_point 是完整 must_info；relay_facts=facts（可空取空串）；relay_keywords=keywords（可空取空串）；relay_due=deadline（可空取空串）；relay_rounds=rounds；relay_updated=updated_at；relay_by=author；relay_enabled_text 为「启用」或「停用」；mine 为该行 student 等于入参 student（入参为空按空串比）则 1 否则 0；student 原样
   伪代码 relay_excerpt 恒为「（暂不记录原话）」（v4 不存 AI 原话，列保留、值给占位，后续单独立项）
   伪代码 relay_done：只在 student 入参为空时有值，否则空串。调用 account.列学生 得学生总数 total；done 是该传达在 teacher_rules_relay_state 里 confirmed 等于 1 且 student 属于这些学生的行数；文本「已传达 {done}/总 {total}」；deadline 不为空且小于今天（取运行时当前日期）且 done 小于 total，再接「，已过期 {total-done}」
@@ -397,7 +400,7 @@
   伪代码 relay_brief 是 must_info 超过 30 个字时取前 30 个字加「…」；relay_student_label 是「显示名（用户名）」，显示名为空只写用户名（传参（K170）：显示名是建号时老师填的原文、没去空白，「 小明」拼出的 label 以空格开头；取这一行的 teacher_rules_relay_pair 的参数（relay_id、student、today、label）一律装进对象用 查一行表 传，不得按位置 label={…} 传，显示名原样保留）；relay_excerpt 恒为「（暂不记录原话）」；message_id 是该 (传达, 学生) 的 teacher_rules_relay_state 行 id，没有行为 0
   伪代码 relay_state_text：停用的传达前缀「停用·」；该 (传达, 学生) 有状态行且 confirmed 等于 1：「已传达（{状态行 updated_at}）」；否则 deadline 不为空且小于今天：「已过期（截止 {deadline}，没传达到）」；否则「待传达（已带入 {rounds_done，没状态行为 0} 轮）」，状态行 finished 等于 1 的再接「·已带满」
 
-公开 函数 取回复用到 reply_id learner? current_role? auth_mode? subject?
+公开 函数 取回复用到 reply_id lang? learner? current_role? auth_mode? subject?
   返回 {text}；学情学生页「问老师记录」里老师那条回答当时用到的设定和传达，写成「记忆#3、作者注#5、传达#2」，没有为空串；本函数按 reply_id 关联，两张 use 表都带 subject_id，只认本科目的记录（别科目的回复编号取不到，得空串）；设定、传达按编号查时只认「当前科目 ∪ 0」，别的科目的或已被删的都写成「已删#…」，不漏出别科目的内容
   报错 400 subject 不对
   报错 403 该科目未分配给你
@@ -406,6 +409,7 @@
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
   伪代码 查 teacher_rules_setting_use 中 reply_id 相等且 subject_id 等于本科目的行（取 id 最大的一行）：setting_ids 按逗号拆开，每个编号按 id 查 teacher_rules_setting（只认 subject_id 等于本科目或 0 的行），查到的写「{种类中文}#{编号}」，设定后来被删了或属于别的科目的写「已删#{编号}」
   伪代码 查 teacher_rules_relay_use 中 reply_id 相等且 subject_id 等于本科目的行（取 id 最大的一行）：relay_ids 按逗号拆开，每个编号查 teacher_rules_relay（只认 subject_id 等于本科目或 0 的行），查到的写「传达#{编号}」，被删了或属于别的科目的写「已删传达#{编号}」
+  伪代码 K190 日语：lang 等于 ja 时（参数由调用方给，不给就是中文）种类写 記憶、作者メモ、キーワードカード，「已删#{编号}」写「削除済み#{编号}」，「传达#{编号}」写「伝達#{编号}」，「已删传达#{编号}」写「削除済み伝達#{编号}」；两个查询都加 lang 参数
   伪代码 把设定的写法和传达的写法按顺序用「、」连接得 text；两处都没有为空串
 
 公开 函数 设定首页页面 learner? current_role? auth_mode? subject?

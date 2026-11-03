@@ -328,6 +328,17 @@ const _app = createApp({
       go(route.value, Object.assign({}, overlayBase || {}, { "浮层": name }, p || {}));
     }
     function closeOverlay() {
+<% if keep_page_overlays_json is defined and keep_page_overlays_json %>
+      const closing = openOverlay.value;
+      if (closing && closing in keepPageOverlays) {
+        // 开了马上关时 hashchange 还没跑，runLoader 看不到开过，这里先记下
+        prevOverlay = closing;
+        if (!overlayBase) {
+          const left = Object.entries(params.value || {}).filter(([k]) => k !== "浮层" && !keepPageOverlays[closing].includes(k));
+          if (left.length) overlayBase = Object.fromEntries(left);
+        }
+      }
+<% endif %>
       openOverlay.value = null;
       const base = overlayBase;
       overlayBase = null;
@@ -1060,6 +1071,15 @@ const _app = createApp({
     //
     // 返回发出去的那个动作名（没发就是 undefined），runTrigger 据此不再重复发。
     let enterSeq = 0;
+<% if keep_page_overlays_json is defined and keep_page_overlays_json %>
+    // 「关后不载入」的浮层（K190）：关上回到的还是上次载入过的那组地址参数时，页面
+    // 没变，不重拉——重拉要先清空表单、响应再回填，这一秒里输入的字会被盖掉。
+    // 没载入过（带浮层刷新进来的，后面的页面还是空的）、地址变了，都照常载入。
+    const keepPageOverlays = <%= keep_page_overlays_json %>;
+    const pageLoaded = {};
+    const pageForm = {};
+    let prevOverlay = null;
+<% endif %>
     async function runLoader(name) {
       const all = params.value || {};
       const ov = all["浮层"];
@@ -1067,6 +1087,20 @@ const _app = createApp({
       // 地址里的「浮层」是开关，不是给接口的参数——不滤掉的话，拿它跟表单
       // 比永远对不上，每次都会重新拉一遍
       const p = Object.fromEntries(Object.entries(all).filter(([k]) => k !== "浮层"));
+<% if keep_page_overlays_json is defined and keep_page_overlays_json %>
+      const closedFrom = prevOverlay;
+      prevOverlay = ov || null;
+      const pageKey = JSON.stringify(Object.entries(p).sort());
+      if (!ov && closedFrom in keepPageOverlays && pageLoaded[name] === pageKey) {
+        // 开了又关地址可能变两次，hashchange 来两趟，都不重拉
+        prevOverlay = closedFrom;
+        // 行上打开时表单清过；浮层的响应没等到就关了，空着的字段按上次载入的填回去
+        const cur = forms.value[name] || {};
+        const back = Object.entries(pageForm[name] || {}).filter(([k]) => String(cur[k] ?? "") === "");
+        if (back.length) fillForm(name, Object.fromEntries(back));
+        return;
+      }
+<% endif %>
       if (!loader || !Object.keys(p).length) return;
       const ep = typeof endpoints !== "undefined" ? endpoints[loader] : null;
       if (!ep) return;
@@ -1075,6 +1109,19 @@ const _app = createApp({
       reset(name);
       const seq = ++enterSeq;
       const resp = await postTo(ep, { action: loader, form: p });
+<% if keep_page_overlays_json is defined and keep_page_overlays_json %>
+      // 响应回来时浮层已经关了：表单里已有内容的字段不盖（关得快、接着就在输入）
+      if (ov && (params.value || {})["浮层"] !== ov && resp && resp.form) {
+        const cur = forms.value[name] || {};
+        for (const k of Object.keys(resp.form)) {
+          if (String(cur[k] ?? "") !== "") delete resp.form[k];
+        }
+      }
+      if (seq === enterSeq && route.value === name && !ov) {
+        pageLoaded[name] = pageKey;
+        pageForm[name] = resp && resp.form;
+      }
+<% endif %>
       if (seq === enterSeq && route.value === name) applyResponse(resp);
       return loader;
     }
