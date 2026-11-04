@@ -1,0 +1,2019 @@
+{
+  "schema": "python-dictation-v1",
+  "questions": [
+    {
+      "id": "python.dict.001",
+      "point_code": "python.env",
+      "type": "term",
+      "prompt_zh": "向屏幕输出文本的内置函数？",
+      "prompt_ja": "画面にテキストを出力する組み込み関数は何ですか。",
+      "answer": "print",
+      "accepted": [
+        "print",
+        "print()"
+      ],
+      "explain_zh": "向屏幕输出文本的内置函数使用 `print`。",
+      "explain_ja": "画面にテキストを出力する組み込み関数には `print` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.002",
+      "point_code": "python.env",
+      "type": "term",
+      "prompt_zh": "编写说明文字且不执行的行以什么符号开头？",
+      "prompt_ja": "実行されない説明行はどの記号で始まるかは何ですか。",
+      "answer": "#",
+      "accepted": [
+        "#"
+      ],
+      "explain_zh": "编写说明文字且不执行的行以什么符号开头使用 `#`。",
+      "explain_ja": "実行されない説明行はどの記号で始まるかには `#` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.003",
+      "point_code": "python.env",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(\"Hello\")\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(\"Hello\")\n```",
+      "code": "print(\"Hello\")",
+      "answer": "Hello\n",
+      "accepted": [
+        "Hello\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `Hello\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `Hello\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.004",
+      "point_code": "python.env",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(2 + 3)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(2 + 3)\n```",
+      "code": "print(2 + 3)",
+      "answer": "5\n",
+      "accepted": [
+        "5\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `5\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `5\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.005",
+      "point_code": "python.var",
+      "type": "term",
+      "prompt_zh": "给变量赋值的运算符？",
+      "prompt_ja": "変数に値を代入する演算子は何ですか。",
+      "answer": "=",
+      "accepted": [
+        "="
+      ],
+      "explain_zh": "给变量赋值的运算符使用 `=`。",
+      "explain_ja": "変数に値を代入する演算子には `=` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.006",
+      "point_code": "python.var",
+      "type": "term",
+      "prompt_zh": "删除变量绑定的关键字？",
+      "prompt_ja": "変数の束縛を削除するキーワードは何ですか。",
+      "answer": "del",
+      "accepted": [
+        "del"
+      ],
+      "explain_zh": "删除变量绑定的关键字使用 `del`。",
+      "explain_ja": "変数の束縛を削除するキーワードには `del` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.007",
+      "point_code": "python.var",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nx = 3\ny = x\nx = 4\nprint(y)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nx = 3\ny = x\nx = 4\nprint(y)\n```",
+      "code": "x = 3\ny = x\nx = 4\nprint(y)",
+      "answer": "3\n",
+      "accepted": [
+        "3\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `3\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `3\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.008",
+      "point_code": "python.var",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\na, b = 1, 2\nprint(a, b)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\na, b = 1, 2\nprint(a, b)\n```",
+      "code": "a, b = 1, 2\nprint(a, b)",
+      "answer": "1 2\n",
+      "accepted": [
+        "1 2\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `1 2\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `1 2\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.009",
+      "point_code": "python.num",
+      "type": "term",
+      "prompt_zh": "整数类型的名称？",
+      "prompt_ja": "整数型の名前は何ですか。",
+      "answer": "int",
+      "accepted": [
+        "int",
+        "int()"
+      ],
+      "explain_zh": "整数类型的名称使用 `int`。",
+      "explain_ja": "整数型の名前には `int` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.010",
+      "point_code": "python.num",
+      "type": "term",
+      "prompt_zh": "浮点数类型的名称？",
+      "prompt_ja": "浮動小数点数型の名前は何ですか。",
+      "answer": "float",
+      "accepted": [
+        "float",
+        "float()"
+      ],
+      "explain_zh": "浮点数类型的名称使用 `float`。",
+      "explain_ja": "浮動小数点数型の名前には `float` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.011",
+      "point_code": "python.num",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(type(3).__name__)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(type(3).__name__)\n```",
+      "code": "print(type(3).__name__)",
+      "answer": "int\n",
+      "accepted": [
+        "int\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `int\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `int\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.012",
+      "point_code": "python.num",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(1.5 + 0.5)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(1.5 + 0.5)\n```",
+      "code": "print(1.5 + 0.5)",
+      "answer": "2.0\n",
+      "accepted": [
+        "2.0\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `2.0\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `2.0\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.013",
+      "point_code": "python.op",
+      "type": "term",
+      "prompt_zh": "整除运算符？",
+      "prompt_ja": "切り捨て除算の演算子は何ですか。",
+      "answer": "//",
+      "accepted": [
+        "//"
+      ],
+      "explain_zh": "整除运算符使用 `//`。",
+      "explain_ja": "切り捨て除算の演算子には `//` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.014",
+      "point_code": "python.op",
+      "type": "term",
+      "prompt_zh": "求余数的运算符？",
+      "prompt_ja": "剰余を求める演算子は何ですか。",
+      "answer": "%",
+      "accepted": [
+        "%"
+      ],
+      "explain_zh": "求余数的运算符使用 `%`。",
+      "explain_ja": "剰余を求める演算子には `%` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.015",
+      "point_code": "python.op",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(7 // 2)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(7 // 2)\n```",
+      "code": "print(7 // 2)",
+      "answer": "3\n",
+      "accepted": [
+        "3\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `3\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `3\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.016",
+      "point_code": "python.op",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(2 ** 3)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(2 ** 3)\n```",
+      "code": "print(2 ** 3)",
+      "answer": "8\n",
+      "accepted": [
+        "8\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `8\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `8\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.017",
+      "point_code": "python.str",
+      "type": "term",
+      "prompt_zh": "计算字符串长度的内置函数？",
+      "prompt_ja": "文字列の長さを返す組み込み関数は何ですか。",
+      "answer": "len",
+      "accepted": [
+        "len",
+        "len()"
+      ],
+      "explain_zh": "计算字符串长度的内置函数使用 `len`。",
+      "explain_ja": "文字列の長さを返す組み込み関数には `len` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.018",
+      "point_code": "python.str",
+      "type": "term",
+      "prompt_zh": "将对象转换为字符串的内置函数？",
+      "prompt_ja": "オブジェクトを文字列に変換する組み込み関数は何ですか。",
+      "answer": "str",
+      "accepted": [
+        "str",
+        "str()"
+      ],
+      "explain_zh": "将对象转换为字符串的内置函数使用 `str`。",
+      "explain_ja": "オブジェクトを文字列に変換する組み込み関数には `str` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.019",
+      "point_code": "python.str",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(\"abc\"[1])\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(\"abc\"[1])\n```",
+      "code": "print(\"abc\"[1])",
+      "answer": "b\n",
+      "accepted": [
+        "b\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `b\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `b\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.020",
+      "point_code": "python.str",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(\"ab\" * 2)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(\"ab\" * 2)\n```",
+      "code": "print(\"ab\" * 2)",
+      "answer": "abab\n",
+      "accepted": [
+        "abab\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `abab\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `abab\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.021",
+      "point_code": "python.strm",
+      "type": "term",
+      "prompt_zh": "把字符串按分隔符拆成列表的方法名？",
+      "prompt_ja": "文字列を区切り文字でリストに分割するメソッド名は何ですか。",
+      "answer": "split",
+      "accepted": [
+        "split",
+        "split()",
+        "str.split",
+        "str.split()"
+      ],
+      "explain_zh": "把字符串按分隔符拆成列表的方法名使用 `split`。",
+      "explain_ja": "文字列を区切り文字でリストに分割するメソッド名には `split` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.022",
+      "point_code": "python.strm",
+      "type": "term",
+      "prompt_zh": "去除字符串两端空白的方法名？",
+      "prompt_ja": "文字列の両端の空白を取り除くメソッド名は何ですか。",
+      "answer": "strip",
+      "accepted": [
+        "strip",
+        "strip()",
+        "str.strip",
+        "str.strip()"
+      ],
+      "explain_zh": "去除字符串两端空白的方法名使用 `strip`。",
+      "explain_ja": "文字列の両端の空白を取り除くメソッド名には `strip` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.023",
+      "point_code": "python.strm",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(\"a,b\".split(\",\"))\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(\"a,b\".split(\",\"))\n```",
+      "code": "print(\"a,b\".split(\",\"))",
+      "answer": "['a', 'b']\n",
+      "accepted": [
+        "['a', 'b']\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `['a', 'b']\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `['a', 'b']\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.024",
+      "point_code": "python.strm",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(\"  hi  \".strip())\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(\"  hi  \".strip())\n```",
+      "code": "print(\"  hi  \".strip())",
+      "answer": "hi\n",
+      "accepted": [
+        "hi\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `hi\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `hi\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.025",
+      "point_code": "python.fstr",
+      "type": "term",
+      "prompt_zh": "格式化字符串字面量前使用的字母？",
+      "prompt_ja": "フォーマット済み文字列リテラルの前に置く文字は何ですか。",
+      "answer": "f",
+      "accepted": [
+        "f"
+      ],
+      "explain_zh": "格式化字符串字面量前使用的字母使用 `f`。",
+      "explain_ja": "フォーマット済み文字列リテラルの前に置く文字には `f` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.026",
+      "point_code": "python.fstr",
+      "type": "term",
+      "prompt_zh": "f-string 中包围表达式的一对符号？",
+      "prompt_ja": "f-string で式を囲む記号の組は何ですか。",
+      "answer": "{}",
+      "accepted": [
+        "{}"
+      ],
+      "explain_zh": "f-string 中包围表达式的一对符号使用 `{}`。",
+      "explain_ja": "f-string で式を囲む記号の組には `{}` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.027",
+      "point_code": "python.fstr",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nx = 4\nprint(f\"x={x}\")\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nx = 4\nprint(f\"x={x}\")\n```",
+      "code": "x = 4\nprint(f\"x={x}\")",
+      "answer": "x=4\n",
+      "accepted": [
+        "x=4\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `x=4\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `x=4\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.028",
+      "point_code": "python.fstr",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(f\"{7:03d}\")\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(f\"{7:03d}\")\n```",
+      "code": "print(f\"{7:03d}\")",
+      "answer": "007\n",
+      "accepted": [
+        "007\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `007\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `007\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.029",
+      "point_code": "python.io",
+      "type": "term",
+      "prompt_zh": "读取一行用户输入的内置函数？",
+      "prompt_ja": "ユーザー入力を一行読み取る組み込み関数は何ですか。",
+      "answer": "input",
+      "accepted": [
+        "input",
+        "input()"
+      ],
+      "explain_zh": "读取一行用户输入的内置函数使用 `input`。",
+      "explain_ja": "ユーザー入力を一行読み取る組み込み関数には `input` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.030",
+      "point_code": "python.io",
+      "type": "term",
+      "prompt_zh": "print 中指定元素分隔符的关键字参数？",
+      "prompt_ja": "print で要素の区切りを指定するキーワード引数は何ですか。",
+      "answer": "sep",
+      "accepted": [
+        "sep"
+      ],
+      "explain_zh": "print 中指定元素分隔符的关键字参数使用 `sep`。",
+      "explain_ja": "print で要素の区切りを指定するキーワード引数には `sep` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.031",
+      "point_code": "python.io",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(\"a\", \"b\", sep=\"-\")\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(\"a\", \"b\", sep=\"-\")\n```",
+      "code": "print(\"a\", \"b\", sep=\"-\")",
+      "answer": "a-b\n",
+      "accepted": [
+        "a-b\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `a-b\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `a-b\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.032",
+      "point_code": "python.io",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(\"A\", end=\"!\")\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(\"A\", end=\"!\")\n```",
+      "code": "print(\"A\", end=\"!\")",
+      "answer": "A!",
+      "accepted": [
+        "A!"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `A!`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `A!` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.033",
+      "point_code": "python.bool",
+      "type": "term",
+      "prompt_zh": "比较两个值是否相等的运算符？",
+      "prompt_ja": "二つの値が等しいか比較する演算子は何ですか。",
+      "answer": "==",
+      "accepted": [
+        "=="
+      ],
+      "explain_zh": "比较两个值是否相等的运算符使用 `==`。",
+      "explain_ja": "二つの値が等しいか比較する演算子には `==` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.034",
+      "point_code": "python.bool",
+      "type": "term",
+      "prompt_zh": "Python 真值的名称？",
+      "prompt_ja": "Python の真を表す名前は何ですか。",
+      "answer": "True",
+      "accepted": [
+        "True"
+      ],
+      "explain_zh": "Python 真值的名称使用 `True`。",
+      "explain_ja": "Python の真を表す名前には `True` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.035",
+      "point_code": "python.bool",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(3 > 2)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(3 > 2)\n```",
+      "code": "print(3 > 2)",
+      "answer": "True\n",
+      "accepted": [
+        "True\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `True\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `True\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.036",
+      "point_code": "python.bool",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(2 == 3)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(2 == 3)\n```",
+      "code": "print(2 == 3)",
+      "answer": "False\n",
+      "accepted": [
+        "False\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `False\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `False\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.037",
+      "point_code": "python.logic",
+      "type": "term",
+      "prompt_zh": "逻辑与运算符关键字？",
+      "prompt_ja": "論理積を表すキーワードは何ですか。",
+      "answer": "and",
+      "accepted": [
+        "and"
+      ],
+      "explain_zh": "逻辑与运算符关键字使用 `and`。",
+      "explain_ja": "論理積を表すキーワードには `and` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.038",
+      "point_code": "python.logic",
+      "type": "term",
+      "prompt_zh": "逻辑非运算符关键字？",
+      "prompt_ja": "否定を表すキーワードは何ですか。",
+      "answer": "not",
+      "accepted": [
+        "not"
+      ],
+      "explain_zh": "逻辑非运算符关键字使用 `not`。",
+      "explain_ja": "否定を表すキーワードには `not` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.039",
+      "point_code": "python.logic",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(True and False)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(True and False)\n```",
+      "code": "print(True and False)",
+      "answer": "False\n",
+      "accepted": [
+        "False\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `False\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `False\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.040",
+      "point_code": "python.logic",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(not False)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(not False)\n```",
+      "code": "print(not False)",
+      "answer": "True\n",
+      "accepted": [
+        "True\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `True\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `True\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.041",
+      "point_code": "python.if",
+      "type": "term",
+      "prompt_zh": "引入条件分支的关键字？",
+      "prompt_ja": "条件分岐を始めるキーワードは何ですか。",
+      "answer": "if",
+      "accepted": [
+        "if"
+      ],
+      "explain_zh": "引入条件分支的关键字使用 `if`。",
+      "explain_ja": "条件分岐を始めるキーワードには `if` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.042",
+      "point_code": "python.if",
+      "type": "term",
+      "prompt_zh": "前面的条件均不成立时使用的分支关键字？",
+      "prompt_ja": "前の条件がすべて不成立の場合の分岐キーワードは何ですか。",
+      "answer": "else",
+      "accepted": [
+        "else"
+      ],
+      "explain_zh": "前面的条件均不成立时使用的分支关键字使用 `else`。",
+      "explain_ja": "前の条件がすべて不成立の場合の分岐キーワードには `else` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.043",
+      "point_code": "python.if",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nx = 2\nif x > 1:\n    print(\"yes\")\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nx = 2\nif x > 1:\n    print(\"yes\")\n```",
+      "code": "x = 2\nif x > 1:\n    print(\"yes\")",
+      "answer": "yes\n",
+      "accepted": [
+        "yes\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `yes\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `yes\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.044",
+      "point_code": "python.if",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nx = 0\nif x:\n    print(\"yes\")\nelse:\n    print(\"no\")\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nx = 0\nif x:\n    print(\"yes\")\nelse:\n    print(\"no\")\n```",
+      "code": "x = 0\nif x:\n    print(\"yes\")\nelse:\n    print(\"no\")",
+      "answer": "no\n",
+      "accepted": [
+        "no\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `no\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `no\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.045",
+      "point_code": "python.while",
+      "type": "term",
+      "prompt_zh": "按条件重复执行的循环关键字？",
+      "prompt_ja": "条件に従って繰り返すループのキーワードは何ですか。",
+      "answer": "while",
+      "accepted": [
+        "while"
+      ],
+      "explain_zh": "按条件重复执行的循环关键字使用 `while`。",
+      "explain_ja": "条件に従って繰り返すループのキーワードには `while` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.046",
+      "point_code": "python.while",
+      "type": "term",
+      "prompt_zh": "立即结束当前循环的关键字？",
+      "prompt_ja": "現在のループを直ちに終了するキーワードは何ですか。",
+      "answer": "break",
+      "accepted": [
+        "break"
+      ],
+      "explain_zh": "立即结束当前循环的关键字使用 `break`。",
+      "explain_ja": "現在のループを直ちに終了するキーワードには `break` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.047",
+      "point_code": "python.while",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nn = 0\nwhile n < 2:\n    print(n)\n    n += 1\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nn = 0\nwhile n < 2:\n    print(n)\n    n += 1\n```",
+      "code": "n = 0\nwhile n < 2:\n    print(n)\n    n += 1",
+      "answer": "0\n1\n",
+      "accepted": [
+        "0\n1\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `0\\n1\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `0\\n1\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.048",
+      "point_code": "python.while",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nn = 0\nwhile True:\n    n += 1\n    if n == 2:\n        break\nprint(n)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nn = 0\nwhile True:\n    n += 1\n    if n == 2:\n        break\nprint(n)\n```",
+      "code": "n = 0\nwhile True:\n    n += 1\n    if n == 2:\n        break\nprint(n)",
+      "answer": "2\n",
+      "accepted": [
+        "2\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `2\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `2\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.049",
+      "point_code": "python.for",
+      "type": "term",
+      "prompt_zh": "遍历可迭代对象的循环关键字？",
+      "prompt_ja": "イテラブルを走査するループのキーワードは何ですか。",
+      "answer": "for",
+      "accepted": [
+        "for"
+      ],
+      "explain_zh": "遍历可迭代对象的循环关键字使用 `for`。",
+      "explain_ja": "イテラブルを走査するループのキーワードには `for` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.050",
+      "point_code": "python.for",
+      "type": "term",
+      "prompt_zh": "生成整数序列的内置类型名？",
+      "prompt_ja": "整数の列を生成する組み込み型の名前は何ですか。",
+      "answer": "range",
+      "accepted": [
+        "range",
+        "range()"
+      ],
+      "explain_zh": "生成整数序列的内置类型名使用 `range`。",
+      "explain_ja": "整数の列を生成する組み込み型の名前には `range` を使います。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.051",
+      "point_code": "python.for",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nfor i in range(2):\n    print(i)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nfor i in range(2):\n    print(i)\n```",
+      "code": "for i in range(2):\n    print(i)",
+      "answer": "0\n1\n",
+      "accepted": [
+        "0\n1\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `0\\n1\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `0\\n1\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.052",
+      "point_code": "python.for",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(list(range(1, 5, 2)))\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(list(range(1, 5, 2)))\n```",
+      "code": "print(list(range(1, 5, 2)))",
+      "answer": "[1, 3]\n",
+      "accepted": [
+        "[1, 3]\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `[1, 3]\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `[1, 3]\\n` です（\\n は改行）。",
+      "difficulty": "入门"
+    },
+    {
+      "id": "python.dict.053",
+      "point_code": "python.list",
+      "type": "term",
+      "prompt_zh": "创建空列表的一对符号？",
+      "prompt_ja": "空のリストを作る記号の組は何ですか。",
+      "answer": "[]",
+      "accepted": [
+        "[]"
+      ],
+      "explain_zh": "创建空列表的一对符号使用 `[]`。",
+      "explain_ja": "空のリストを作る記号の組には `[]` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.054",
+      "point_code": "python.list",
+      "type": "term",
+      "prompt_zh": "在列表末尾增加一个元素的方法名？",
+      "prompt_ja": "リストの末尾に要素を一つ追加するメソッド名は何ですか。",
+      "answer": "append",
+      "accepted": [
+        "append",
+        "append()",
+        "list.append",
+        "list.append()"
+      ],
+      "explain_zh": "在列表末尾增加一个元素的方法名使用 `append`。",
+      "explain_ja": "リストの末尾に要素を一つ追加するメソッド名には `append` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.055",
+      "point_code": "python.list",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\na = [1, 2]\na.append(3)\nprint(a)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\na = [1, 2]\na.append(3)\nprint(a)\n```",
+      "code": "a = [1, 2]\na.append(3)\nprint(a)",
+      "answer": "[1, 2, 3]\n",
+      "accepted": [
+        "[1, 2, 3]\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `[1, 2, 3]\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `[1, 2, 3]\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.056",
+      "point_code": "python.list",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint([4, 5][-1])\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint([4, 5][-1])\n```",
+      "code": "print([4, 5][-1])",
+      "answer": "5\n",
+      "accepted": [
+        "5\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `5\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `5\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.057",
+      "point_code": "python.listop",
+      "type": "term",
+      "prompt_zh": "删除并返回列表指定位置元素的方法名？",
+      "prompt_ja": "リストの指定位置の要素を削除して返すメソッド名は何ですか。",
+      "answer": "pop",
+      "accepted": [
+        "pop",
+        "pop()",
+        "list.pop",
+        "list.pop()"
+      ],
+      "explain_zh": "删除并返回列表指定位置元素的方法名使用 `pop`。",
+      "explain_ja": "リストの指定位置の要素を削除して返すメソッド名には `pop` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.058",
+      "point_code": "python.listop",
+      "type": "term",
+      "prompt_zh": "原地排序列表的方法名？",
+      "prompt_ja": "リストをその場で並べ替えるメソッド名は何ですか。",
+      "answer": "sort",
+      "accepted": [
+        "sort",
+        "sort()",
+        "list.sort",
+        "list.sort()"
+      ],
+      "explain_zh": "原地排序列表的方法名使用 `sort`。",
+      "explain_ja": "リストをその場で並べ替えるメソッド名には `sort` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.059",
+      "point_code": "python.listop",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\na = [3, 1]\na.sort()\nprint(a)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\na = [3, 1]\na.sort()\nprint(a)\n```",
+      "code": "a = [3, 1]\na.sort()\nprint(a)",
+      "answer": "[1, 3]\n",
+      "accepted": [
+        "[1, 3]\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `[1, 3]\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `[1, 3]\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.060",
+      "point_code": "python.listop",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\na = [1, 2]\nprint(a.pop())\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\na = [1, 2]\nprint(a.pop())\n```",
+      "code": "a = [1, 2]\nprint(a.pop())",
+      "answer": "2\n",
+      "accepted": [
+        "2\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `2\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `2\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.061",
+      "point_code": "python.slice",
+      "type": "term",
+      "prompt_zh": "切片中分隔起点和终点的符号？",
+      "prompt_ja": "スライスで開始と終了を区切る記号は何ですか。",
+      "answer": ":",
+      "accepted": [
+        ":"
+      ],
+      "explain_zh": "切片中分隔起点和终点的符号使用 `:`。",
+      "explain_ja": "スライスで開始と終了を区切る記号には `:` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.062",
+      "point_code": "python.slice",
+      "type": "term",
+      "prompt_zh": "取序列长度的内置函数？",
+      "prompt_ja": "シーケンスの長さを返す組み込み関数は何ですか。",
+      "answer": "len",
+      "accepted": [
+        "len",
+        "len()"
+      ],
+      "explain_zh": "取序列长度的内置函数使用 `len`。",
+      "explain_ja": "シーケンスの長さを返す組み込み関数には `len` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.063",
+      "point_code": "python.slice",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(\"abcd\"[1:3])\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(\"abcd\"[1:3])\n```",
+      "code": "print(\"abcd\"[1:3])",
+      "answer": "bc\n",
+      "accepted": [
+        "bc\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `bc\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `bc\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.064",
+      "point_code": "python.slice",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint([0, 1, 2, 3][::2])\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint([0, 1, 2, 3][::2])\n```",
+      "code": "print([0, 1, 2, 3][::2])",
+      "answer": "[0, 2]\n",
+      "accepted": [
+        "[0, 2]\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `[0, 2]\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `[0, 2]\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.065",
+      "point_code": "python.tuple",
+      "type": "term",
+      "prompt_zh": "创建元组的内置类型名？",
+      "prompt_ja": "タプルを作る組み込み型の名前は何ですか。",
+      "answer": "tuple",
+      "accepted": [
+        "tuple",
+        "tuple()"
+      ],
+      "explain_zh": "创建元组的内置类型名使用 `tuple`。",
+      "explain_ja": "タプルを作る組み込み型の名前には `tuple` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.066",
+      "point_code": "python.tuple",
+      "type": "term",
+      "prompt_zh": "一个元素的元组中消除歧义所需的符号？",
+      "prompt_ja": "要素が一つのタプルで曖昧さをなくすために必要な記号は何ですか。",
+      "answer": ",",
+      "accepted": [
+        ","
+      ],
+      "explain_zh": "一个元素的元组中消除歧义所需的符号使用 `,`。",
+      "explain_ja": "要素が一つのタプルで曖昧さをなくすために必要な記号には `,` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.067",
+      "point_code": "python.tuple",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint((1, 2)[0])\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint((1, 2)[0])\n```",
+      "code": "print((1, 2)[0])",
+      "answer": "1\n",
+      "accepted": [
+        "1\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `1\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `1\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.068",
+      "point_code": "python.tuple",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(len((3,)))\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(len((3,)))\n```",
+      "code": "print(len((3,)))",
+      "answer": "1\n",
+      "accepted": [
+        "1\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `1\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `1\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.069",
+      "point_code": "python.dict",
+      "type": "term",
+      "prompt_zh": "创建字典的内置类型名？",
+      "prompt_ja": "辞書を作る組み込み型の名前は何ですか。",
+      "answer": "dict",
+      "accepted": [
+        "dict",
+        "dict()"
+      ],
+      "explain_zh": "创建字典的内置类型名使用 `dict`。",
+      "explain_ja": "辞書を作る組み込み型の名前には `dict` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.070",
+      "point_code": "python.dict",
+      "type": "term",
+      "prompt_zh": "获取字典键视图的方法名？",
+      "prompt_ja": "辞書のキーのビューを取得するメソッド名は何ですか。",
+      "answer": "keys",
+      "accepted": [
+        "keys",
+        "keys()",
+        "dict.keys",
+        "dict.keys()"
+      ],
+      "explain_zh": "获取字典键视图的方法名使用 `keys`。",
+      "explain_ja": "辞書のキーのビューを取得するメソッド名には `keys` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.071",
+      "point_code": "python.dict",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nd = {\"x\": 2}\nprint(d[\"x\"])\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nd = {\"x\": 2}\nprint(d[\"x\"])\n```",
+      "code": "d = {\"x\": 2}\nprint(d[\"x\"])",
+      "answer": "2\n",
+      "accepted": [
+        "2\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `2\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `2\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.072",
+      "point_code": "python.dict",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint({\"a\": 1}.get(\"b\", 0))\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint({\"a\": 1}.get(\"b\", 0))\n```",
+      "code": "print({\"a\": 1}.get(\"b\", 0))",
+      "answer": "0\n",
+      "accepted": [
+        "0\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `0\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `0\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.073",
+      "point_code": "python.set",
+      "type": "term",
+      "prompt_zh": "创建空集合的内置类型名？",
+      "prompt_ja": "空の集合を作る組み込み型の名前は何ですか。",
+      "answer": "set",
+      "accepted": [
+        "set",
+        "set()"
+      ],
+      "explain_zh": "创建空集合的内置类型名使用 `set`。",
+      "explain_ja": "空の集合を作る組み込み型の名前には `set` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.074",
+      "point_code": "python.set",
+      "type": "term",
+      "prompt_zh": "向集合添加一个元素的方法名？",
+      "prompt_ja": "集合に要素を一つ追加するメソッド名は何ですか。",
+      "answer": "add",
+      "accepted": [
+        "add",
+        "add()",
+        "set.add",
+        "set.add()"
+      ],
+      "explain_zh": "向集合添加一个元素的方法名使用 `add`。",
+      "explain_ja": "集合に要素を一つ追加するメソッド名には `add` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.075",
+      "point_code": "python.set",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(len({1, 1, 2}))\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(len({1, 1, 2}))\n```",
+      "code": "print(len({1, 1, 2}))",
+      "answer": "2\n",
+      "accepted": [
+        "2\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `2\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `2\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.076",
+      "point_code": "python.set",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(2 in {1, 2})\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(2 in {1, 2})\n```",
+      "code": "print(2 in {1, 2})",
+      "answer": "True\n",
+      "accepted": [
+        "True\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `True\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `True\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.077",
+      "point_code": "python.nest",
+      "type": "term",
+      "prompt_zh": "测试某个值是否属于容器的运算符关键字？",
+      "prompt_ja": "値がコンテナに含まれるか調べる演算子のキーワードは何ですか。",
+      "answer": "in",
+      "accepted": [
+        "in"
+      ],
+      "explain_zh": "测试某个值是否属于容器的运算符关键字使用 `in`。",
+      "explain_ja": "値がコンテナに含まれるか調べる演算子のキーワードには `in` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.078",
+      "point_code": "python.nest",
+      "type": "term",
+      "prompt_zh": "获取字典中键对应值且可指定默认值的方法名？",
+      "prompt_ja": "辞書のキーに対応する値をデフォルト値付きで取得するメソッド名は何ですか。",
+      "answer": "get",
+      "accepted": [
+        "get",
+        "get()",
+        "dict.get",
+        "dict.get()"
+      ],
+      "explain_zh": "获取字典中键对应值且可指定默认值的方法名使用 `get`。",
+      "explain_ja": "辞書のキーに対応する値をデフォルト値付きで取得するメソッド名には `get` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.079",
+      "point_code": "python.nest",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\na = [[1, 2], [3, 4]]\nprint(a[1][0])\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\na = [[1, 2], [3, 4]]\nprint(a[1][0])\n```",
+      "code": "a = [[1, 2], [3, 4]]\nprint(a[1][0])",
+      "answer": "3\n",
+      "accepted": [
+        "3\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `3\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `3\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.080",
+      "point_code": "python.nest",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nd = {\"a\": [4, 5]}\nprint(d[\"a\"][1])\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nd = {\"a\": [4, 5]}\nprint(d[\"a\"][1])\n```",
+      "code": "d = {\"a\": [4, 5]}\nprint(d[\"a\"][1])",
+      "answer": "5\n",
+      "accepted": [
+        "5\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `5\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `5\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.081",
+      "point_code": "python.func",
+      "type": "term",
+      "prompt_zh": "定义函数的关键字？",
+      "prompt_ja": "関数を定義するキーワードは何ですか。",
+      "answer": "def",
+      "accepted": [
+        "def"
+      ],
+      "explain_zh": "定义函数的关键字使用 `def`。",
+      "explain_ja": "関数を定義するキーワードには `def` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.082",
+      "point_code": "python.func",
+      "type": "term",
+      "prompt_zh": "从函数返回结果的关键字？",
+      "prompt_ja": "関数から結果を返すキーワードは何ですか。",
+      "answer": "return",
+      "accepted": [
+        "return"
+      ],
+      "explain_zh": "从函数返回结果的关键字使用 `return`。",
+      "explain_ja": "関数から結果を返すキーワードには `return` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.083",
+      "point_code": "python.func",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\ndef f():\n    print(\"hi\")\nf()\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\ndef f():\n    print(\"hi\")\nf()\n```",
+      "code": "def f():\n    print(\"hi\")\nf()",
+      "answer": "hi\n",
+      "accepted": [
+        "hi\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `hi\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `hi\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.084",
+      "point_code": "python.func",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\ndef f(x):\n    return x + 1\nprint(f(2))\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\ndef f(x):\n    return x + 1\nprint(f(2))\n```",
+      "code": "def f(x):\n    return x + 1\nprint(f(2))",
+      "answer": "3\n",
+      "accepted": [
+        "3\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `3\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `3\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.085",
+      "point_code": "python.param",
+      "type": "term",
+      "prompt_zh": "传递任意数量位置参数时参数名前的符号？",
+      "prompt_ja": "任意個の位置引数を受け取る仮引数名の前の記号は何ですか。",
+      "answer": "*",
+      "accepted": [
+        "*"
+      ],
+      "explain_zh": "传递任意数量位置参数时参数名前的符号使用 `*`。",
+      "explain_ja": "任意個の位置引数を受け取る仮引数名の前の記号には `*` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.086",
+      "point_code": "python.param",
+      "type": "term",
+      "prompt_zh": "传递任意数量关键字参数时参数名前的符号？",
+      "prompt_ja": "任意個のキーワード引数を受け取る仮引数名の前の記号は何ですか。",
+      "answer": "**",
+      "accepted": [
+        "**"
+      ],
+      "explain_zh": "传递任意数量关键字参数时参数名前的符号使用 `**`。",
+      "explain_ja": "任意個のキーワード引数を受け取る仮引数名の前の記号には `**` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.087",
+      "point_code": "python.param",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\ndef f(x=3):\n    print(x)\nf()\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\ndef f(x=3):\n    print(x)\nf()\n```",
+      "code": "def f(x=3):\n    print(x)\nf()",
+      "answer": "3\n",
+      "accepted": [
+        "3\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `3\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `3\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.088",
+      "point_code": "python.param",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\ndef f(a, b):\n    print(a - b)\nf(b=1, a=4)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\ndef f(a, b):\n    print(a - b)\nf(b=1, a=4)\n```",
+      "code": "def f(a, b):\n    print(a - b)\nf(b=1, a=4)",
+      "answer": "3\n",
+      "accepted": [
+        "3\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `3\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `3\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.089",
+      "point_code": "python.ret",
+      "type": "term",
+      "prompt_zh": "结束函数并返回值的关键字？",
+      "prompt_ja": "関数を終了して値を返すキーワードは何ですか。",
+      "answer": "return",
+      "accepted": [
+        "return"
+      ],
+      "explain_zh": "结束函数并返回值的关键字使用 `return`。",
+      "explain_ja": "関数を終了して値を返すキーワードには `return` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.090",
+      "point_code": "python.ret",
+      "type": "term",
+      "prompt_zh": "函数没有显式返回值时得到的对象？",
+      "prompt_ja": "関数が明示的に値を返さないときに得られるオブジェクトは何ですか。",
+      "answer": "None",
+      "accepted": [
+        "None"
+      ],
+      "explain_zh": "函数没有显式返回值时得到的对象使用 `None`。",
+      "explain_ja": "関数が明示的に値を返さないときに得られるオブジェクトには `None` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.091",
+      "point_code": "python.ret",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\ndef f():\n    return 2\nprint(f())\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\ndef f():\n    return 2\nprint(f())\n```",
+      "code": "def f():\n    return 2\nprint(f())",
+      "answer": "2\n",
+      "accepted": [
+        "2\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `2\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `2\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.092",
+      "point_code": "python.ret",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\ndef f():\n    pass\nprint(f())\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\ndef f():\n    pass\nprint(f())\n```",
+      "code": "def f():\n    pass\nprint(f())",
+      "answer": "None\n",
+      "accepted": [
+        "None\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `None\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `None\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.093",
+      "point_code": "python.scope",
+      "type": "term",
+      "prompt_zh": "声明函数内使用模块全局变量的关键字？",
+      "prompt_ja": "関数内でモジュールのグローバル変数を使う宣言のキーワードは何ですか。",
+      "answer": "global",
+      "accepted": [
+        "global"
+      ],
+      "explain_zh": "声明函数内使用模块全局变量的关键字使用 `global`。",
+      "explain_ja": "関数内でモジュールのグローバル変数を使う宣言のキーワードには `global` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.094",
+      "point_code": "python.scope",
+      "type": "term",
+      "prompt_zh": "声明使用外层函数变量的关键字？",
+      "prompt_ja": "外側の関数の変数を使う宣言のキーワードは何ですか。",
+      "answer": "nonlocal",
+      "accepted": [
+        "nonlocal"
+      ],
+      "explain_zh": "声明使用外层函数变量的关键字使用 `nonlocal`。",
+      "explain_ja": "外側の関数の変数を使う宣言のキーワードには `nonlocal` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.095",
+      "point_code": "python.scope",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nx = 1\ndef f():\n    x = 2\n    print(x)\nf()\nprint(x)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nx = 1\ndef f():\n    x = 2\n    print(x)\nf()\nprint(x)\n```",
+      "code": "x = 1\ndef f():\n    x = 2\n    print(x)\nf()\nprint(x)",
+      "answer": "2\n1\n",
+      "accepted": [
+        "2\n1\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `2\\n1\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `2\\n1\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.096",
+      "point_code": "python.scope",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nx = 1\ndef f():\n    global x\n    x = 3\nf()\nprint(x)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nx = 1\ndef f():\n    global x\n    x = 3\nf()\nprint(x)\n```",
+      "code": "x = 1\ndef f():\n    global x\n    x = 3\nf()\nprint(x)",
+      "answer": "3\n",
+      "accepted": [
+        "3\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `3\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `3\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.097",
+      "point_code": "python.lambda",
+      "type": "term",
+      "prompt_zh": "创建匿名函数的关键字？",
+      "prompt_ja": "無名関数を作るキーワードは何ですか。",
+      "answer": "lambda",
+      "accepted": [
+        "lambda"
+      ],
+      "explain_zh": "创建匿名函数的关键字使用 `lambda`。",
+      "explain_ja": "無名関数を作るキーワードには `lambda` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.098",
+      "point_code": "python.lambda",
+      "type": "term",
+      "prompt_zh": "将可迭代对象的每项传给函数的内置函数？",
+      "prompt_ja": "イテラブルの各要素に関数を適用する組み込み関数は何ですか。",
+      "answer": "map",
+      "accepted": [
+        "map",
+        "map()"
+      ],
+      "explain_zh": "将可迭代对象的每项传给函数的内置函数使用 `map`。",
+      "explain_ja": "イテラブルの各要素に関数を適用する組み込み関数には `map` を使います。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.099",
+      "point_code": "python.lambda",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nf = lambda x: x * 2\nprint(f(3))\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nf = lambda x: x * 2\nprint(f(3))\n```",
+      "code": "f = lambda x: x * 2\nprint(f(3))",
+      "answer": "6\n",
+      "accepted": [
+        "6\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `6\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `6\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.100",
+      "point_code": "python.lambda",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(list(map(lambda x: x + 1, [1, 2])))\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(list(map(lambda x: x + 1, [1, 2])))\n```",
+      "code": "print(list(map(lambda x: x + 1, [1, 2])))",
+      "answer": "[2, 3]\n",
+      "accepted": [
+        "[2, 3]\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `[2, 3]\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `[2, 3]\\n` です（\\n は改行）。",
+      "difficulty": "基础"
+    },
+    {
+      "id": "python.dict.101",
+      "point_code": "python.module",
+      "type": "term",
+      "prompt_zh": "导入模块的关键字？",
+      "prompt_ja": "モジュールを読み込むキーワードは何ですか。",
+      "answer": "import",
+      "accepted": [
+        "import"
+      ],
+      "explain_zh": "导入模块的关键字使用 `import`。",
+      "explain_ja": "モジュールを読み込むキーワードには `import` を使います。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.102",
+      "point_code": "python.module",
+      "type": "term",
+      "prompt_zh": "给导入名称指定别名的关键字？",
+      "prompt_ja": "インポート名に別名を付けるキーワードは何ですか。",
+      "answer": "as",
+      "accepted": [
+        "as"
+      ],
+      "explain_zh": "给导入名称指定别名的关键字使用 `as`。",
+      "explain_ja": "インポート名に別名を付けるキーワードには `as` を使います。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.103",
+      "point_code": "python.module",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nimport math\nprint(math.isqrt(9))\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nimport math\nprint(math.isqrt(9))\n```",
+      "code": "import math\nprint(math.isqrt(9))",
+      "answer": "3\n",
+      "accepted": [
+        "3\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `3\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `3\\n` です（\\n は改行）。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.104",
+      "point_code": "python.module",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nfrom math import ceil\nprint(ceil(1.2))\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nfrom math import ceil\nprint(ceil(1.2))\n```",
+      "code": "from math import ceil\nprint(ceil(1.2))",
+      "answer": "2\n",
+      "accepted": [
+        "2\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `2\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `2\\n` です（\\n は改行）。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.105",
+      "point_code": "python.exc",
+      "type": "term",
+      "prompt_zh": "捕获异常的关键字？",
+      "prompt_ja": "例外を捕捉するキーワードは何ですか。",
+      "answer": "except",
+      "accepted": [
+        "except"
+      ],
+      "explain_zh": "捕获异常的关键字使用 `except`。",
+      "explain_ja": "例外を捕捉するキーワードには `except` を使います。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.106",
+      "point_code": "python.exc",
+      "type": "term",
+      "prompt_zh": "主动抛出异常的关键字？",
+      "prompt_ja": "例外を明示的に送出するキーワードは何ですか。",
+      "answer": "raise",
+      "accepted": [
+        "raise"
+      ],
+      "explain_zh": "主动抛出异常的关键字使用 `raise`。",
+      "explain_ja": "例外を明示的に送出するキーワードには `raise` を使います。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.107",
+      "point_code": "python.exc",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\ntry:\n    int(\"x\")\nexcept ValueError:\n    print(\"bad\")\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\ntry:\n    int(\"x\")\nexcept ValueError:\n    print(\"bad\")\n```",
+      "code": "try:\n    int(\"x\")\nexcept ValueError:\n    print(\"bad\")",
+      "answer": "bad\n",
+      "accepted": [
+        "bad\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `bad\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `bad\\n` です（\\n は改行）。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.108",
+      "point_code": "python.exc",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\ntry:\n    print(1 // 0)\nexcept ZeroDivisionError:\n    print(\"zero\")\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\ntry:\n    print(1 // 0)\nexcept ZeroDivisionError:\n    print(\"zero\")\n```",
+      "code": "try:\n    print(1 // 0)\nexcept ZeroDivisionError:\n    print(\"zero\")",
+      "answer": "zero\n",
+      "accepted": [
+        "zero\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `zero\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `zero\\n` です（\\n は改行）。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.109",
+      "point_code": "python.file",
+      "type": "term",
+      "prompt_zh": "打开文件的内置函数？",
+      "prompt_ja": "ファイルを開く組み込み関数は何ですか。",
+      "answer": "open",
+      "accepted": [
+        "open",
+        "open()"
+      ],
+      "explain_zh": "打开文件的内置函数使用 `open`。",
+      "explain_ja": "ファイルを開く組み込み関数には `open` を使います。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.110",
+      "point_code": "python.file",
+      "type": "term",
+      "prompt_zh": "在上下文管理器中安全管理文件的关键字？",
+      "prompt_ja": "コンテキストマネージャーでファイルを管理するキーワードは何ですか。",
+      "answer": "with",
+      "accepted": [
+        "with"
+      ],
+      "explain_zh": "在上下文管理器中安全管理文件的关键字使用 `with`。",
+      "explain_ja": "コンテキストマネージャーでファイルを管理するキーワードには `with` を使います。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.111",
+      "point_code": "python.file",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nimport io\nf = io.StringIO(\"hi\")\nprint(f.read())\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nimport io\nf = io.StringIO(\"hi\")\nprint(f.read())\n```",
+      "code": "import io\nf = io.StringIO(\"hi\")\nprint(f.read())",
+      "answer": "hi\n",
+      "accepted": [
+        "hi\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `hi\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `hi\\n` です（\\n は改行）。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.112",
+      "point_code": "python.file",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nimport io\nf = io.StringIO()\nf.write(\"ok\")\nprint(f.getvalue())\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nimport io\nf = io.StringIO()\nf.write(\"ok\")\nprint(f.getvalue())\n```",
+      "code": "import io\nf = io.StringIO()\nf.write(\"ok\")\nprint(f.getvalue())",
+      "answer": "ok\n",
+      "accepted": [
+        "ok\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `ok\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `ok\\n` です（\\n は改行）。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.113",
+      "point_code": "python.comp",
+      "type": "term",
+      "prompt_zh": "列表推导式中表示遍历的关键字？",
+      "prompt_ja": "リスト内包表記で走査を表すキーワードは何ですか。",
+      "answer": "for",
+      "accepted": [
+        "for"
+      ],
+      "explain_zh": "列表推导式中表示遍历的关键字使用 `for`。",
+      "explain_ja": "リスト内包表記で走査を表すキーワードには `for` を使います。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.114",
+      "point_code": "python.comp",
+      "type": "term",
+      "prompt_zh": "列表推导式中表示筛选条件的关键字？",
+      "prompt_ja": "リスト内包表記で絞り込み条件を表すキーワードは何ですか。",
+      "answer": "if",
+      "accepted": [
+        "if"
+      ],
+      "explain_zh": "列表推导式中表示筛选条件的关键字使用 `if`。",
+      "explain_ja": "リスト内包表記で絞り込み条件を表すキーワードには `if` を使います。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.115",
+      "point_code": "python.comp",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint([x * 2 for x in range(3)])\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint([x * 2 for x in range(3)])\n```",
+      "code": "print([x * 2 for x in range(3)])",
+      "answer": "[0, 2, 4]\n",
+      "accepted": [
+        "[0, 2, 4]\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `[0, 2, 4]\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `[0, 2, 4]\\n` です（\\n は改行）。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.116",
+      "point_code": "python.comp",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint([x for x in range(4) if x % 2 == 0])\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint([x for x in range(4) if x % 2 == 0])\n```",
+      "code": "print([x for x in range(4) if x % 2 == 0])",
+      "answer": "[0, 2]\n",
+      "accepted": [
+        "[0, 2]\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `[0, 2]\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `[0, 2]\\n` です（\\n は改行）。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.117",
+      "point_code": "python.builtin",
+      "type": "term",
+      "prompt_zh": "返回可迭代对象元素总和的内置函数？",
+      "prompt_ja": "イテラブルの要素の合計を返す組み込み関数は何ですか。",
+      "answer": "sum",
+      "accepted": [
+        "sum",
+        "sum()"
+      ],
+      "explain_zh": "返回可迭代对象元素总和的内置函数使用 `sum`。",
+      "explain_ja": "イテラブルの要素の合計を返す組み込み関数には `sum` を使います。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.118",
+      "point_code": "python.builtin",
+      "type": "term",
+      "prompt_zh": "返回可迭代对象最大值的内置函数？",
+      "prompt_ja": "イテラブルの最大値を返す組み込み関数は何ですか。",
+      "answer": "max",
+      "accepted": [
+        "max",
+        "max()"
+      ],
+      "explain_zh": "返回可迭代对象最大值的内置函数使用 `max`。",
+      "explain_ja": "イテラブルの最大値を返す組み込み関数には `max` を使います。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.119",
+      "point_code": "python.builtin",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(sum([1, 2, 3]))\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(sum([1, 2, 3]))\n```",
+      "code": "print(sum([1, 2, 3]))",
+      "answer": "6\n",
+      "accepted": [
+        "6\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `6\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `6\\n` です（\\n は改行）。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.120",
+      "point_code": "python.builtin",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(max(2, 5, 1))\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(max(2, 5, 1))\n```",
+      "code": "print(max(2, 5, 1))",
+      "answer": "5\n",
+      "accepted": [
+        "5\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `5\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `5\\n` です（\\n は改行）。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.121",
+      "point_code": "python.type",
+      "type": "term",
+      "prompt_zh": "判断对象是否为指定类型实例的内置函数？",
+      "prompt_ja": "オブジェクトが指定した型のインスタンスか調べる組み込み関数は何ですか。",
+      "answer": "isinstance",
+      "accepted": [
+        "isinstance",
+        "isinstance()"
+      ],
+      "explain_zh": "判断对象是否为指定类型实例的内置函数使用 `isinstance`。",
+      "explain_ja": "オブジェクトが指定した型のインスタンスか調べる組み込み関数には `isinstance` を使います。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.122",
+      "point_code": "python.type",
+      "type": "term",
+      "prompt_zh": "表示没有值的单例对象名称？",
+      "prompt_ja": "値がないことを表す唯一のオブジェクトの名前は何ですか。",
+      "answer": "None",
+      "accepted": [
+        "None"
+      ],
+      "explain_zh": "表示没有值的单例对象名称使用 `None`。",
+      "explain_ja": "値がないことを表す唯一のオブジェクトの名前には `None` を使います。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.123",
+      "point_code": "python.type",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(isinstance(3, int))\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(isinstance(3, int))\n```",
+      "code": "print(isinstance(3, int))",
+      "answer": "True\n",
+      "accepted": [
+        "True\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `True\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `True\\n` です（\\n は改行）。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.124",
+      "point_code": "python.type",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nprint(None is None)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nprint(None is None)\n```",
+      "code": "print(None is None)",
+      "answer": "True\n",
+      "accepted": [
+        "True\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `True\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `True\\n` です（\\n は改行）。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.125",
+      "point_code": "python.class",
+      "type": "term",
+      "prompt_zh": "定义类的关键字？",
+      "prompt_ja": "クラスを定義するキーワードは何ですか。",
+      "answer": "class",
+      "accepted": [
+        "class"
+      ],
+      "explain_zh": "定义类的关键字使用 `class`。",
+      "explain_ja": "クラスを定義するキーワードには `class` を使います。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.126",
+      "point_code": "python.class",
+      "type": "term",
+      "prompt_zh": "创建实例后常用于初始化的特殊方法名？",
+      "prompt_ja": "インスタンス作成後に初期化によく使う特殊メソッド名は何ですか。",
+      "answer": "__init__",
+      "accepted": [
+        "__init__"
+      ],
+      "explain_zh": "创建实例后常用于初始化的特殊方法名使用 `__init__`。",
+      "explain_ja": "インスタンス作成後に初期化によく使う特殊メソッド名には `__init__` を使います。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.127",
+      "point_code": "python.class",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nclass A:\n    pass\na = A()\nprint(type(a).__name__)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nclass A:\n    pass\na = A()\nprint(type(a).__name__)\n```",
+      "code": "class A:\n    pass\na = A()\nprint(type(a).__name__)",
+      "answer": "A\n",
+      "accepted": [
+        "A\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `A\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `A\\n` です（\\n は改行）。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.128",
+      "point_code": "python.class",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nclass A:\n    x = 3\nprint(A.x)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nclass A:\n    x = 3\nprint(A.x)\n```",
+      "code": "class A:\n    x = 3\nprint(A.x)",
+      "answer": "3\n",
+      "accepted": [
+        "3\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `3\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `3\\n` です（\\n は改行）。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.129",
+      "point_code": "python.method",
+      "type": "term",
+      "prompt_zh": "实例方法中惯用的首个参数名？",
+      "prompt_ja": "インスタンスメソッドで慣例として使う最初の仮引数名は何ですか。",
+      "answer": "self",
+      "accepted": [
+        "self"
+      ],
+      "explain_zh": "实例方法中惯用的首个参数名使用 `self`。",
+      "explain_ja": "インスタンスメソッドで慣例として使う最初の仮引数名には `self` を使います。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.130",
+      "point_code": "python.method",
+      "type": "term",
+      "prompt_zh": "访问对象属性的符号？",
+      "prompt_ja": "オブジェクトの属性にアクセスする記号は何ですか。",
+      "answer": ".",
+      "accepted": [
+        "."
+      ],
+      "explain_zh": "访问对象属性的符号使用 `.`。",
+      "explain_ja": "オブジェクトの属性にアクセスする記号には `.` を使います。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.131",
+      "point_code": "python.method",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nclass A:\n    def f(self):\n        return 4\nprint(A().f())\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nclass A:\n    def f(self):\n        return 4\nprint(A().f())\n```",
+      "code": "class A:\n    def f(self):\n        return 4\nprint(A().f())",
+      "answer": "4\n",
+      "accepted": [
+        "4\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `4\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `4\\n` です（\\n は改行）。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.132",
+      "point_code": "python.method",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nclass A:\n    pass\na = A()\na.x = 7\nprint(a.x)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nclass A:\n    pass\na = A()\na.x = 7\nprint(a.x)\n```",
+      "code": "class A:\n    pass\na = A()\na.x = 7\nprint(a.x)",
+      "answer": "7\n",
+      "accepted": [
+        "7\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `7\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `7\\n` です（\\n は改行）。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.133",
+      "point_code": "python.inherit",
+      "type": "term",
+      "prompt_zh": "判断一个类是否为另一个类子类的内置函数？",
+      "prompt_ja": "あるクラスが別のクラスのサブクラスか調べる組み込み関数は何ですか。",
+      "answer": "issubclass",
+      "accepted": [
+        "issubclass",
+        "issubclass()"
+      ],
+      "explain_zh": "判断一个类是否为另一个类子类的内置函数使用 `issubclass`。",
+      "explain_ja": "あるクラスが別のクラスのサブクラスか調べる組み込み関数には `issubclass` を使います。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.134",
+      "point_code": "python.inherit",
+      "type": "term",
+      "prompt_zh": "访问父类方法常用的内置函数？",
+      "prompt_ja": "親クラスのメソッドへのアクセスによく使う組み込み関数は何ですか。",
+      "answer": "super",
+      "accepted": [
+        "super",
+        "super()"
+      ],
+      "explain_zh": "访问父类方法常用的内置函数使用 `super`。",
+      "explain_ja": "親クラスのメソッドへのアクセスによく使う組み込み関数には `super` を使います。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.135",
+      "point_code": "python.inherit",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nclass A:\n    x = 2\nclass B(A):\n    pass\nprint(B().x)\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nclass A:\n    x = 2\nclass B(A):\n    pass\nprint(B().x)\n```",
+      "code": "class A:\n    x = 2\nclass B(A):\n    pass\nprint(B().x)",
+      "answer": "2\n",
+      "accepted": [
+        "2\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `2\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `2\\n` です（\\n は改行）。",
+      "difficulty": "进阶"
+    },
+    {
+      "id": "python.dict.136",
+      "point_code": "python.inherit",
+      "type": "output",
+      "prompt_zh": "写出以下代码的标准输出：\n```python\nclass A:\n    pass\nclass B(A):\n    pass\nprint(issubclass(B, A))\n```",
+      "prompt_ja": "次のコードの標準出力を書いてください。\n```python\nclass A:\n    pass\nclass B(A):\n    pass\nprint(issubclass(B, A))\n```",
+      "code": "class A:\n    pass\nclass B(A):\n    pass\nprint(issubclass(B, A))",
+      "answer": "True\n",
+      "accepted": [
+        "True\n"
+      ],
+      "explain_zh": "按代码顺序执行，标准输出为 `True\\n`（\\n 表示换行）。",
+      "explain_ja": "コードを順に実行すると、標準出力は `True\\n` です（\\n は改行）。",
+      "difficulty": "进阶"
+    }
+  ]
+}
