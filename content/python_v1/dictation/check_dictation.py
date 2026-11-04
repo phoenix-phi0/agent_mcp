@@ -2,6 +2,7 @@
 """Validate the bilingual bank and execute each trusted output example offline."""
 import collections
 import csv
+import difflib
 import json
 from pathlib import Path
 import re
@@ -29,6 +30,16 @@ def check():
         kinds[kind] += 1
         for field in ('prompt_zh', 'prompt_ja', 'explain_zh', 'explain_ja'):
             assert isinstance(q[field], str) and q[field].strip(), (ident, field)
+        for lang in ('zh', 'ja'):
+            explanation = q['explain_' + lang]
+            assert len(explanation.strip()) >= 35, (ident, lang, 'explanation too short')
+            # Exclude fenced code: it is intentionally shared by the two prompts.
+            prompt = re.sub(r'```.*?```', '', q['prompt_' + lang], flags=re.S)
+            normalize = lambda value: ''.join(ch.lower() for ch in value if ch.isalnum())
+            prompt, explanation = normalize(prompt), normalize(explanation)
+            match = difflib.SequenceMatcher(None, prompt, explanation, autojunk=False).find_longest_match()
+            assert not (len(prompt) >= 8 and prompt in explanation), (ident, lang, 'prompt repeated')
+            assert not (match.size >= 12 and match.size / max(len(prompt), 1) >= 0.65), (ident, lang, 'prompt repeated')
         assert q['difficulty'] in ('入门', '基础', '进阶'), ident
         assert isinstance(q['answer'], str) and q['answer'] in q['accepted'], ident
         assert len(set(q['accepted'])) == len(q['accepted']) and all(isinstance(x, str) and x for x in q['accepted']), ident
@@ -42,7 +53,7 @@ def check():
         else:
             assert 'code' not in q and q['answer'].strip(), ident
     assert set(counts) == points and all(3 <= n <= 5 for n in counts.values()), counts
-    assert 120 <= len(questions) <= 160 and all(kinds[k] for k in ('term','output'))
+    assert 120 <= len(questions) <= 170 and all(kinds[k] for k in ('term','output'))
     print(f"PASS: {len(counts)}/34 points; {len(questions)} questions; term={kinds['term']}, output={kinds['output']}; executed={kinds['output']}/{kinds['output']} byte-exact")
 
 if __name__ == '__main__':
