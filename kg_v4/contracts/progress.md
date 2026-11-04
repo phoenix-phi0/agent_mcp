@@ -269,6 +269,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：lang 为 ja 时 head 写「習得済み {mastered_count} / 全知識ポイント {point_total}」；answers_text 写「累計解答 {n}」；rate_text 写「正答率 {x}」；score_text 写「平均スコア {x}」；verdict 写「まだ採点されていません」「達成（スコア {score}）」「スコア {score}、あと {gap} 点」；recent 的 result 写 正解、不正解；scores 的 delta 首次写「初回」；dictation.text 写「練習した単語 {words} 個、書き取り {total} 回、正答率 {drate}、間違えた単語帳 {wrong_book_count} 個」。中文分支一字不改。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 learner 和 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询都只限这个 subject_id；本函数在本模块内调用其它公开函数、调用 kg./lesson./dictation. 的函数时一律只传 subject=subject_id（已解析，不再校验）
   伪代码 learner 为空，报错 400 learner 不能为空
   伪代码 调用 取概览 learner=learner subject=subject_id 得 ov；调用 列得分 learner=learner subject=subject_id 得 sc（各点当前分与上一次）；用 得分视图 learner=learner subject_id=subject_id 得最新分/最近打分时间/是否只有一行
@@ -288,6 +289,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：lang 为 ja 时 desc 的（起点）写（起点）不变（日中同形）；节点的 kind「对照」是内部值不改。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 learner 和 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询都只限这个 subject_id；本函数在本模块内调用其它公开函数、调用 kg. 的函数时一律只传 subject=subject_id（已解析，不再校验）
   伪代码 调用 取状态 learner=learner subject=subject_id 得每点 mastered（right/total 顺带不用）；调用 kg.列知识点 subject=subject_id 得本科目全部点；badge 对每点调用 kg.列后代 code=该点编号 subject=subject_id 取 total；desc 对每点调用 kg.列前置 code=该点编号 subject=subject_id 拼 title
   伪代码 edges 直读 kg_edge 与 kg_contrast（两张表都带 subject_id 列，按本科目过滤，只取 subject_id 等于本科目的行）；对照两端各是知识点或条目，要通过 kg_point（带 subject_id 列，等于本科目）确认两端都是本科目的知识点才收，条目端丢掉（kg_point 的 code 全局唯一，不会误认别科目的点）
@@ -302,6 +304,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：lang 为 ja 时 node_tally 写「正解 {right} / 解答 {total}」，已掌握写「（習得済み）」，没做过写「まだ解いていません」；forms 的 label、point 里的标题走已有的译文。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 learner 和 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询都只限这个 subject_id；本函数在本模块内调用其它公开函数、调用 kg./vocab. 的函数时一律只传 subject=subject_id（已解析，不再校验）
   伪代码 code 为空，报错 400 code 不能为空；调用 kg.取知识点 code=code subject=subject_id，取不到（包括编号属于别的科目）报错 404 没有这个知识点
   伪代码 调用 取状态 learner=learner point_code=code subject=subject_id 得该点 right/total/mastered：total 大于 0 时 node_tally=「答对 {right} / 答题 {total}」加 mastered=1 时的「（已掌握）」，否则「还没做过」

@@ -63,8 +63,9 @@
   伪代码 mat_id 不是大于等于 1 的整数，报错 400 mat_id 不合法
   伪代码 按 id 查 teacher_assist_material；查不到、teacher 不等于 current_user、或 subject_id 不等于入参 subject_id，一律报错 404 没有这份材料（不泄露别人或别的科目有这份材料）
 
-函数 材料行 mat
+函数 材料行 mat lang?
   返回 {mat_id, mat_title, mat_kind, mat_state, mat_updated, mat_content, mat_export_head, mat_export_text}：材料表的一行（键名就是 .ui 列名；用户批准：列表行带正文，修「表格行点编辑时引擎认为表单已是这条而跳过载入，编辑浮层正文为空」。导出浮层同样依赖行数据——先编辑再导出时导出浮层的载入也会被跳过——所以导出用的两个键同口径一并带上，与 导出材料 的结果完全一致）
+  伪代码 K191 日语：加可选入参 lang。lang 为 ja 时 导出 head 写「{k} · {s} · {n} 文字 · 更新 {u}。下の文章を全選択してコピーしてください」；mat_kind、mat_state 是界面判断用的中文原值不改（词表翻显示）。
   伪代码 mat_id=mat.id；mat_title=mat.title；mat_kind=类型名 kind=mat.kind；mat_state=状态名 status=mat.status；mat_updated=mat.updated_at 的前 16 个字符
   伪代码 mat_content=mat.content 全文（不截断）；mat_export_text=mat.title + 换行 + 换行 + mat.content；mat_export_head=「类型名 · 状态名 · n 字 · 更新于 updated_at 前 16 个字符。全选下面的文字复制即可」（n 是 content 的字数，口径同 导出材料）
 
@@ -195,6 +196,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=current_user 取 lang；head 同 材料行 的 K191 日语。
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id
   伪代码 调用 本人材料 current_user=current_user mat_id=mat_id subject_id=subject_id（400/404 原样抛）
   伪代码 返回 {"mat_id": mat_id, "mat_export_head": …, "mat_export_text": …}
@@ -249,6 +251,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=current_user 取 lang；lang 为 ja 时 mat_note 写「全 {total} 件」，有未保存的加「、未保存 {drafts} 件（7 日後に自動で削除）」。
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；本函数调用本模块函数时一律带 subject=subject_id
   伪代码 调用 列材料 current_user=current_user kind=mat_filter subject=subject_id 得 l（mat_filter 为空或「全部」不筛）
   伪代码 mat_note（不带空格）：l.total 等于 0 时空串；否则「共{l.total}份」，l.drafts 大于 0 时再接「，未保存{l.drafts}份（7天后自动清掉）」
@@ -330,6 +333,7 @@
   报错 403 没有权限访问该科目
   报错 403 没有权限修改该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=current_user 取 lang；lang 为 ja 时 note 写「出題の下書きを作成しました #{draft_id}：{title}。「教師アシスタント」右側の「確認待ち」で確認すると問題バンクに入ります。」。
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id
   伪代码 调用 练习转出题草稿 current_user=current_user mat_id=mat_id subject=subject_id 得 r（错误原样抛）
   伪代码 page = 调用 材料页面 current_user=current_user subject=subject_id

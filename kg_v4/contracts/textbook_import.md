@@ -267,7 +267,7 @@
   伪代码 skipped = 该任务仍为 待审 的草稿课数
   伪代码 返回 {"ok": 1, "approved": approved, "skipped": skipped}
 
-公开 函数 确认导入 task_id learner? current_role? auth_mode? subject?
+公开 函数 确认导入 task_id learner? lang? current_role? auth_mode? subject?
   返回 {ok, series_code, total, imported, rejected_count, rejected, item_links, point_links, file_rows}；total、imported、item_links、point_links、file_rows、rejected 取自 lesson.写入系列课文并重灌 的返回，rejected 是 [{code, reason}]，rejected_count 是 rejected 的个数
   报错 404 没有这个任务
   报错 400 已导入的课不能再改
@@ -281,6 +281,7 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  伪代码 K191 日语：加可选入参 lang，传给 lesson.写入系列课文并重灌；确认导入页面 取语言后传。不要因此给 确认导入 或 写入系列课文并重灌 多传 learner（权限校验不变）。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；任务、块、草稿都属于所属任务的 subject_id（块、草稿经所属任务判断），下面所有查询和写入都只限这个 subject_id；按 id 取到别的科目的任务、块、草稿，一律当不存在（包括属于别的科目），报错或返回与「不存在」完全相同；本函数是写内容操作，auth_mode 等于 on 时只有负责/协作教师可写（公开科目的其他教师只读）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 按 task_id 和本科目 subject_id 查 textbook_import_task，查不到（包括属于别的科目）报错 404 没有这个任务；status 等于 已导入，报错 400 已导入的课不能再改
   伪代码 任务 series_code 等于 hanabira，报错 400 hanabira 是主教材，不能用导入覆盖它；任务 overwrite 不等于 1（空按 0）且 lesson_series 或 lesson_text 里已有这个系列（查询 textbook_import_series_exists），报错 400 系列已经有了，这个任务没勾覆盖已有系列（旧 kg：覆盖要明确勾选）
@@ -362,6 +363,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang，传给 任务进度文本。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；任务、块、草稿都属于所属任务的 subject_id（块、草稿经所属任务判断），下面所有查询和写入都只限这个 subject_id；按 id 取到别的科目的任务、块、草稿，一律当不存在（包括属于别的科目），报错或返回与「不存在」完全相同；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 调用 列任务 subject=subject_id 得 tasks，逐个任务 job_state 用 任务进度文本 task_id subject_id=subject_id 取；调用 列已导入系列 subject=subject_id 得 series，去掉 code 等于 hanabira 的，lesson_n 取 lesson_count
   伪代码 返回 {"import_jobs": 行列表, "import_series": 行列表, "form": {"lesson_level": "全部", "rewrite": "true", "overwrite": "false"}}
@@ -372,6 +374,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang；lang 为 ja 时：hd2 写「講義と例文はモデルが書き直します」「原文の講義を残します（書き直しなし）」；head 写「シリーズ{series_code}（{series_name}）· 課番号プレフィックス {code_prefix} · ファイル {file_name} · {hd2}」；解析中的 extra 写「、エラー {cf} ブロック」，progress 写「解析中：{fin}/{chunk_total} ブロック完了{extra}。このページは自動で更新されます。先に他のページへ移動しても大丈夫です。」；失败 progress 写「解析に失敗しました：{fail_reason}」；完成时 extra 写「、エラー {cf} ブロック（ブロック一覧で再試行できます）」，done 写「インポート済み。」，progress 写「解析完了：{chunk_total} ブロック、{nd} 課を抽出{extra}。承認 {np} 課、差し戻し {nr} 課。{done}」；report_note 写「インポートレポート：{imported} 課をインポート、項目 {item_links} 件・知識ポイント {point_links} 件にマッピング、{rejected} 行を拒否。」；missing 写「このインポートタスクはありません（{task_id}）。削除された可能性があります。」。中文分支一字不改；status 比较用的中文原值不改。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；任务、块、草稿都属于所属任务的 subject_id（块、草稿经所属任务判断），下面所有查询和写入都只限这个 subject_id；按 id 取到别的科目的任务、块、草稿，一律当不存在（包括属于别的科目），报错或返回与「不存在」完全相同；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 task_id 用查询 textbook_import_task_by_id 先查（查不到、或任务的 subject_id 不等于本科目即属于别的科目，都走 missing，不调 取任务，免得报 404；文案与不存在相同）；查到调用 取任务 task_id=task_id subject=subject_id 得 t
   伪代码 job = {id: t.task_id, series: t.series_code, label: t.series_name, running, passed, head, progress, report_note, textbook, missing: 空串, back: #%E6%95%99%E6%9D%90%E5%AF%BC%E5%85%A5}；running 在 t.status 等于 处理中 时为 1 否则 0（页面据此每隔 2 秒轮询）；passed 是 status 为 通过 的草稿课数
@@ -387,6 +390,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang；lang 为 ja 时：from_chunk 写「第{seq}ブロック「{title}」」（块不存在写「第?ブロック「?」」）；head 写「シリーズ{series_code} · 第{seq}課 · {状态}」，状态 待审、通过、驳回 写 レビュー待ち、承認、差し戻し；missing 写「この課の下書きはありません（{draft_id}）。タスクが削除された可能性があります。」；映射表的 label 写「{name}（{title} に属する）」；map_options 的 label 写「{name}（項目、{code}）」和「〔{title}〕（知識ポイント、{code}）」。map_kind 的 条目、知识点 由词表翻，值不改。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；任务、块、草稿都属于所属任务的 subject_id（块、草稿经所属任务判断），下面所有查询和写入都只限这个 subject_id；按 id 取到别的科目的任务、块、草稿，一律当不存在（包括属于别的科目），报错或返回与「不存在」完全相同；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 draft_id 用查询 textbook_import_draft_by_id 先查（查不到、或所属任务的 subject_id 不等于本科目即属于别的科目，都走 missing，不调 取草稿课；文案与不存在相同）；查到调用 取草稿课 draft_id=draft_id subject=subject_id 得 d，再取所属任务（series_code）和来源块（seq、title）
   伪代码 draft = {draft: d.id, job: d.task_id, seq, title, draft_level: d.level, summary, explanation: d.explain, formation: d.connection, examples（空填 [] ，页面仍按 JSON 数组编辑，库里存的是什么就给什么）, dropped: d.dropped_codes（没有为空串）, issues: 问题文本, reason: d.reason（没有为空串）, confidence: 有值写成「{n}%」否则空串, review: d.status, series: series_code, head: 「系列 {series_code} · 第 {seq} 课 · {status}」, from_chunk: 「第 {块序} 块「{块标题}」」（来源块已不在填「?」）, back: #%E6%95%99%E6%9D%90%E5%AF%BC%E5%85%A5?job={d.task_id}, missing: 空串}
@@ -395,8 +399,9 @@
   伪代码 form：with_form 为「是」 {title, draft_level, seq, summary, formation: connection, explanation: explain, examples（空填 []）, map_add: 空串, map_typed: 空串}；否则只 {map_add: 空串, map_typed: 空串}
   伪代码 返回 {"draft": draft, "draft_note": "", "draft_maps": 映射行, "map_options": 选项, "form": form}（draft_note 清空，「保存了。」由调用方另放）
 
-函数 系列视图 series_code subject_id
+函数 系列视图 series_code subject_id lang?
   返回 教材导入页系列块的状态 {series_view}；series_view = {code, head, note, can_withdraw, back}；没有这个系列（或已撤下）为 {code, head: 「没有这个系列（{series_code}），可能已经撤下了。」, note, can_withdraw: 0, back}，note 在本科目存在 series_code 相等且 status=已撤下 的 textbook_import_task 时为「撤下了：这个系列已经撤下，教材页的下拉里不再有它。」（撤下后重新载入页面，不能把撤下的提示丢掉），否则（从没导入过、没有这个系列）为空串
+  伪代码 K191 日语：加可选入参 lang。lang 为 ja 时 head 写「シリーズ{series_code}（{name}）：{n} 課。使用中で、教材ページのプルダウンから選べます。」；没有时写「このシリーズはありません（{series_code}）。取り下げられた可能性があります。」；note 写「取り下げ済み：このシリーズは取り下げられ、教材ページのプルダウンには表示されません。」；name 调用 subject.译文 tbl=lesson_series row_key=series_code field=name lang=ja，非空才替换。
   伪代码 找不到系列时：在 textbook_import_task 里查 series_code 相等、subject_id 等于 subject_id 且 status 等于 已撤下 的行，有则 note 为上面那句「撤下了：…」，没有则 note 为空串；找到系列（在用）时 note 为空串，不查任务表
   伪代码 调用 列已导入系列 series_code=series_code subject=subject_id 得 s，在 series 里找 code 相等的；找到 head = 「系列 {code}（{name}）：{lesson_count} 课。在用，教材页的下拉里能选到。」，note 空串，can_withdraw 在 code 不等于 hanabira 时为 1 否则 0，back = #%E6%95%99%E6%9D%90%E5%AF%BC%E5%85%A5
 
@@ -419,6 +424,7 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang；lang 为 ja 时 job_note 写「承認しました：{approved} 課（マッピングありでレビュー待ちのもの）。」。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；任务、块、草稿都属于所属任务的 subject_id（块、草稿经所属任务判断），下面所有查询和写入都只限这个 subject_id；按 id 取到别的科目的任务、块、草稿，一律当不存在（包括属于别的科目），报错或返回与「不存在」完全相同；本函数是写内容操作，auth_mode 等于 on 时只有负责/协作教师可写（公开科目的其他教师只读）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 调用 一键通过 task_id=task_id subject=subject_id 得 r（报错原样向上抛）；调用 任务视图 task_id=task_id subject=subject_id 得 v；v 的 job_note 换成上面那句
 
@@ -464,6 +470,7 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang；lang 为 ja 时 draft_note 写「保存しました。」。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；任务、块、草稿都属于所属任务的 subject_id（块、草稿经所属任务判断），下面所有查询和写入都只限这个 subject_id；按 id 取到别的科目的任务、块、草稿，一律当不存在（包括属于别的科目），报错或返回与「不存在」完全相同；本函数是写内容操作，auth_mode 等于 on 时只有负责/协作教师可写（公开科目的其他教师只读）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 examples 不为空且与库里原 examples 不同时，必须是 JSON 数组文本，否则报错 400 例句要写成 JSON 数组，每句一个对象（jp 日语、zh 中文）（判断用 SQL json_valid 加 json_type 等于 array 或 DSL 的解析JSON，两种都行）
   伪代码 调用 修改草稿课 draft_id=draft_id title=title level=draft_level summary=summary 或空串 explain=explanation 或空串 connection=formation 或空串 examples=examples 或空串 seq=seq subject=subject_id（报错原样向上抛）；调用 草稿视图 draft_id=draft_id with_form=是 subject=subject_id 得 v；v 的 draft_note 换成「保存了。」
@@ -479,6 +486,7 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang；lang 为 ja 时报错 400 写「番号「{code}」はデータベースにありません。既存の項目・知識ポイントのみ選べます（新規作成はできません）」。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；任务、块、草稿都属于所属任务的 subject_id（块、草稿经所属任务判断），下面所有查询和写入都只限这个 subject_id；按 id 取到别的科目的任务、块、草稿，一律当不存在（包括属于别的科目），报错或返回与「不存在」完全相同；本函数是写内容操作，auth_mode 等于 on 时只有负责/协作教师可写（公开科目的其他教师只读）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 code 取 map_typed（优先），为空取 map_add；code 为空报错 400 从下拉里选一个条目或知识点，或者输入编号
   伪代码 kind 推断：调用 kg.取条目 code=code subject=subject_id 有则 item；否则调用 kg.取知识点 code=code subject=subject_id 有则 point；都没有报错 400 库里没有编号「{code}」，只能挑已有的条目、知识点（不新建）
@@ -518,6 +526,7 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang；lang 为 ja 时 note 写「取り下げました：{removed_lessons} 課（マッピングを含む）を削除し、教材ページのプルダウンには表示されません。テキストファイルは content/lesson/series/{series_code}.withdrawn.jsonl に残しています。」；head 写「シリーズ{series_code}（{nm}）：0 課。取り下げ済みで、教材ページのプルダウンには表示されません。」。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；任务、块、草稿都属于所属任务的 subject_id（块、草稿经所属任务判断），下面所有查询和写入都只限这个 subject_id；按 id 取到别的科目的任务、块、草稿，一律当不存在（包括属于别的科目），报错或返回与「不存在」完全相同；本函数是写内容操作，auth_mode 等于 on 时只有负责/协作教师可写（公开科目的其他教师只读）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 先调用 列已导入系列 subject=subject_id 取这个系列的 name（撤下后就查不到了；找不到则交给 撤下已导入系列 报 404）；调用 撤下已导入系列 series_code=series_code subject=subject_id 得 r（报错原样向上抛）；再按 导入首页 的口径取两张表
 
@@ -529,25 +538,28 @@
   伪代码 空数组、或每一项都是坏项，返回空串
   伪代码 例：[{"jp":"A","zh":"甲"},{"jp":"B","zh":"乙"}] 返回 A^^甲@@B^^乙
 
-函数 任务进度文本 task_id subject_id
+函数 任务进度文本 task_id subject_id lang?
   返回 任务表「进度」列的一句话：处理中为「解析中 {完成加失败的块数}/{块总数} 块」；失败为「失败：{fail_reason}」；已导入为「已导入」；已撤下为「已撤下」；其他（待审阅）为「待审 {草稿课数} 课（通过 {x}、驳回 {y}）」；块里有失败的再加「，出错 {n} 块」
+  伪代码 K191 日语：加可选入参 lang。lang 为 ja 时 extra 写「、エラー {cf} ブロック」；解析中写「解析中 {fin}/{chunk_total} ブロック{extra}」；失败写「失敗：{fail_reason}」；已导入写 インポート済み；已撤下写 取り下げ済み；其余写「レビュー待ち {nd} 課（承認 {np}、差し戻し {nr}）{extra}」。
   伪代码 调用 取任务 task_id=task_id subject=subject_id，从 chunks、drafts 的 status 数出各数
 
 函数 映射文本 item_codes point_codes subject_id
   返回 草稿课表「映射」列：条目名用「、」连起来；条目和知识点都有时中间加「 / 」；知识点写成「〔title〕」用「、」连起来；一个都没有（或编号库里已不存在）为「（没有）」
   伪代码 编号都是英文逗号连接的文本；条目调用 kg.取条目 code=编号 subject=subject_id 取 name，知识点调用 kg.取知识点 code=编号 subject=subject_id 取 title，取不到（包括属于别的科目）的跳过
 
-函数 问题文本 draft task_drafts
+函数 问题文本 draft task_drafts lang?
   返回 审阅要看的问题，用「；」连接（末尾不带），没有为空串；draft 是 取草稿课 的结果，task_drafts 是同任务全部草稿课
+  伪代码 K191 日语：加可选入参 lang。lang 为 ja 时 等级没认出、没映射到已有条目或知识点、讲解是空的 以及函数里其余问题文字都写日文：レベルを認識できません、既存の項目・知識ポイントにマッピングされていません、講義が空です；分隔符「；」不变；其余按中文语义翻成自然的日语。
   伪代码 依次判：level 不是 N5 N4 N3 N2 N1 之一 →「等级没认出」；item_codes 和 point_codes 都为空 →「没映射到已有条目或知识点」；explain 去空白后为空 →「讲解是空的」；summary 去空白后为空 →「一句话是空的」；draft.status 不是 驳回 且同任务有别的草稿课 seq 相同且 status 不是 驳回 →「课序跟别的课重复」
 
 函数 本科目 learner current_role auth_mode subject need?
   返回 {subject_id}；本次请求用哪个科目
   伪代码 调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=need，原样返回它的 subject_id（四个入参都是空串时得 1；显式 subject 无权时 解析科目 报 403/404、不是数字报 400，need=write 无权报 403 没有权限修改该科目，原样抛出）
 
-函数 编号前缀检查 subject_id code
+函数 编号前缀检查 subject_id code lang?
   返回 {ok}
   报错 400 编号要以「<编码>.」开头
+  伪代码 K191 日语：加可选入参 lang，调用方有 learner 的先取语言再传。lang 为 ja 时报错 400 写「番号は「{sc}.」で始めてください」。
   伪代码 subject_id 等于 1（日语）：直接返回 {"ok": 1}，旧编号不动
   伪代码 否则按 subject_id 查 subject_info 的 code（科目编码，查询 textbook_import_subject_code）；编码为空、或 code 不匹配 ^[a-z][a-z0-9_]*\.[A-Za-z0-9_-]+$、或 code 不以「<编码>.」开头，报错 400 编号要以「<编码>.」开头（文案里的 <编码> 换成真实编码）
   伪代码 返回 {"ok": 1}

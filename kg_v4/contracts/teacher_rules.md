@@ -418,6 +418,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：lang 同 设定列表；lang 为 ja 时 subject_head 写「{科目名}のAI先生設定（全科目の設定を含む）」，科目名调用 subject.译文 tbl=subject_info row_key=code field=name lang=ja，非空才替换；取不到科目写「科目{sid}」。设定列表、传达列表（student 为空时也一样）的 note_state、relay_state_text、relay_done、note_subject_label、relay_subject_label 按语言出日文，语言取 account.取语言 username=learner。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
   伪代码 class_notes=调用 设定列表 learner=learner current_role=current_role auth_mode=auth_mode subject=subject_id（student 空）；class_relays=调用 传达列表 learner=learner current_role=current_role auth_mode=auth_mode subject=subject_id（student 空）；class_relay_states=调用 传达状态列表 subject=subject_id（列表要带登录信息，行上 can_edit 才按当前登录的人算）
   伪代码 note_is_owner：auth_mode 不等于 on 为 1；否则调用 subject.科目访问 learner=learner current_role=current_role subject_id=subject_id need=settings auth_mode=auth_mode 取 ok（科目负责人 1，否则 0）；前端据此显示「全部科目的设定和传达只有科目负责人能改」的说明
@@ -568,6 +569,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：语言取 account.取语言 username=learner；lang 为 ja 时没有原话的 relay_msg_ask、relay_msg_reply、relay_excerpt 写「（原文は記録していません）」；queries/teacher_rules_relay_rows.sql、teacher_rules_relay_pair.sql 的 relay_excerpt 常量按 :lang 同样分支（relay_pair 没有 :lang 参数就加上，调用处传）。中文一字不改。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限「当前科目 ∪ 0」（设定和传达表的 subject_id 等于本科目或等于 0（0 是「全部科目」，所有科目都能看到））；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
   伪代码 message_id 就是 传达列表/传达状态列表 行上的 message_id（teacher_rules_relay_state 的行 id）；按 id 查 teacher_rules_relay_state，查不到报错 404 没有这条问老师记录；再按其 relay_id 查 teacher_rules_relay，传达不存在或其 subject_id 既不等于本科目也不是 0（包括属于别的科目），同样报错 404 没有这条问老师记录
   伪代码 返回 {"relay_msg_ask": "（暂不记录原话）", "relay_msg_reply": "（暂不记录原话）", "relay_excerpt": "（暂不记录原话）"}

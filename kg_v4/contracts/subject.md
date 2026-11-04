@@ -54,6 +54,7 @@
   subj_id 整数 科目表「编号」列，也是编辑/成员浮层地址里带的科目编号
   subj_code 文本 科目编码（新建时填，建后不可改）
   subj_name 文本 科目名称
+  subj_label 文本 科目表显示的名称（ja 下取译文）
   subj_intro 长文本 科目说明
   subj_kind 枚举 通用,语言 类型（页面值域中文；通用存 general、语言存 language）
   subj_levels 文本 本科目等级，英文逗号分隔、从易到难（新建时留空按类型取默认：通用 入门,基础,进阶，语言 N5,N4,N3,N2,N1）
@@ -244,6 +245,7 @@
   报错 400 科目名称最长40字
   报错 400 等级格式不对
   报错 400 等级「<等级>」还有<n>条记录在用，先改掉题目和课文的等级再删
+  伪代码 K191 日语：调用 取界面语言 username=learner 取 lang；lang 为 ja 时报错 400 写「レベル「{x}」はまだ {u.n} 件の記録で使われています。先に問題とテキストのレベルを変更してから削除してください」。
   伪代码 调用 管理校验 learner=learner subject_id=subject_id need=settings current_role=current_role auth_mode=auth_mode（400/404/403 由它报）
   伪代码 name 去掉首尾空白后为空：不改名；否则超过 40 个字报错 400 科目名称最长40字，不超过则改名
   伪代码 intro：按传入值原样写（不传或空串即清空说明；页面保存时名称和说明总是一起提交）
@@ -386,6 +388,7 @@
 公开 函数 科目管理页面 learner current_role? auth_mode?
   返回 {subjects, manage_head, can_create}；「科目管理」页「进入时」的整页状态（动作 subject_manage_home）；subjects 是表格行 [{subj_id, subj_code, subj_name, subj_intro, subj_kind, subj_levels, subj_persona, subj_visibility, subj_status, subj_owner, subj_my_role, subj_student_n, subj_teacher_n, can_manage, can_assign}]（编辑浮层里的字段 subj_intro、subj_levels、subj_persona 都要在行里：从行上点「编辑」时前端直接拿这一行填表单、不再发「载入」，行里没有的字段编辑框就是空的，直接保存会把说明或设定清空）
   报错 403 只有教师可以管理科目
+  伪代码 K191 日语：调用 取界面语言 username=learner 取 lang；lang 为 ja 时 manage_head 写「管理できる科目は全 {total} 件」；每行多给 subj_label：调用 译文 tbl=subject_info row_key=subj_code field=name lang=ja，非空用译文，否则用 subj_name；zh 时 subj_label 等于 subj_name。subj_name 保持原文（行上打开编辑浮层时会拷进表单，译文写回会盖掉原名）。
   伪代码 调用 列可管理科目 learner=learner current_role=current_role auth_mode=auth_mode（学生 403）
   伪代码 每行转页面口径：subj_id=id，subj_code=code，subj_name=name，subj_intro=intro（NULL 时空串），subj_kind：language 为「语言」否则「通用」，subj_levels=调用本模块 科目等级 subject_id=该科目 id 的 text（存库为空串时是 N5,N4,N3,N2,N1），subj_persona=subject_ai 该科目行的 persona（没有行或 NULL 时空串；两条行查询 subject_page_rows、subject_page_rows_all 都 LEFT JOIN subject_ai），subj_visibility：public 为「公共」否则「私有」，subj_status：active「启用」、disabled「停用」、draft「草稿」，subj_owner=owner，subj_my_role：owner「负责」、editor「协作」、public「公共只读」、single「单人」，subj_student_n=student_n，subj_teacher_n=teacher_n，can_manage：my_role 是 owner 或 single 为 1 否则 0，can_assign：status 不是 disabled 为 1 否则 0
   伪代码 manage_head：「我能管理的科目共{total}个」（不含空格）；can_create：auth_mode 等于 on 时 current_role 等于 teacher 为 1，否则 1（单人模式也能建）
@@ -431,6 +434,7 @@
   报错 403 只有科目负责人可以操作
   报错 409 日语科目必须是公共科目
   报错 409 还有其他教师分配的在册学生，不能改成私有
+  伪代码 K191 日语：返回 科目管理页面 的结果，同 科目管理页面 的 K191 日语。
   伪代码 调用 设科目可见性 learner=learner subject_id=subj_id visibility=visibility current_role=current_role auth_mode=auth_mode
   伪代码 返回 调用 科目管理页面 learner=learner current_role=current_role auth_mode=auth_mode 的结果
 
@@ -442,6 +446,7 @@
   报错 403 只有教师可以管理科目
   报错 403 只有科目负责人可以操作
   报错 409 日语科目不能停用
+  伪代码 K191 日语：返回 科目管理页面 的结果，同 科目管理页面 的 K191 日语。
   伪代码 调用 设科目状态 learner=learner subject_id=subj_id status=status current_role=current_role auth_mode=auth_mode
   伪代码 返回 调用 科目管理页面 learner=learner current_role=current_role auth_mode=auth_mode 的结果
 

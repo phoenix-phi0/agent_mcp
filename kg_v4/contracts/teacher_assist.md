@@ -129,6 +129,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：已有 lang。lang 为 ja 时给老师看的固定回复写日文：只读「この科目では閲覧権限のみのため、アシスタントに変更の下書き（出題、伝達、設定変更、知識ポイント追加）を作らせることはできません。学習状況の質問はできます。」；追问「出題、学生への伝達、AI先生設定の変更、知識ポイント・項目の追加のどれをご希望ですか？」；more30「（遅れている学生は全 {total} 人ですが、この下書きには先頭の 30 人のみ入っています）」；草稿回复「下書きを作成しました #{draft_id}：{title}{nl}{pv}{nl}「確認」を押すと書き込まれます。不要なら「破棄」を押してください。修正したい点を伝えていただければ修正版を作ります。{more30}」；没挂附件「まだ添付ファイルがありません。先に下の欄で txt、md、csv、pdf、docx のファイルを選び、「ファイルを添付」を押してから質問してください。」；材料只读「この科目では閲覧権限のみのため、アシスタントに教材を作らせることはできません。学習状況の質問はできます。」；材料追问「教案、授業の練習問題、講義資料、学習状況レポートのどれをご希望ですか？」；材料回复「教材を作成しました #{mat_id}：{title}（未保存）{nl}{preview}{nl}「保存」で残せます。保存しないものは 7 日後に自動で削除されます。「エクスポート」で全文の確認とコピーができます。授業の練習問題は「出題の下書きにする」もできます。文面の修正は「教材」ページで編集してください。」；分析追问「最近の傾向、誤答の原因、学生の比較、遅れている学生のどの分析をご希望ですか？」。给模型看的提示词和数据段不动。
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（用户名取 current_user；路由层注入角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用其它模块的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 current_user 为空，报错 400 current_user 不能为空；message 去首尾空白后为空，报错 400 消息不能为空
   伪代码 recent = 调用 取最近对话 current_user=current_user limit=6 subject_id=subject_id；focus = 调用 取上轮聚焦 current_user=current_user subject_id=subject_id，拼成 focus_text（「学生 显示名（用户名）；知识点 标题（编号）」，都没有写「无」）
@@ -188,6 +189,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=current_user 取 lang；lang 为 ja 时 att_note 写「保存済み {total} / {limit} 個の添付ファイル」；调用 assist_file 的列附件、取当前附件 传 lang。
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（用户名取 current_user；路由层注入角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），都不传得 1，行为同旧；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
   伪代码 调用 列对话 current_user=current_user limit=40 subject=subject_id，得 messages
   伪代码 逐条转换：role 等于 assistant 则 who=助手、kind=空串，否则 who=你、kind=user；text=content
@@ -289,6 +291,7 @@
   报错 403 没有权限访问该科目
   报错 403 没有权限修改该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=current_user 取 lang；lang 为 ja 时 sent 写「{label} を添付しました。これからの質問で参考にします。添付ファイルからの出題もできます。不要になったら添付バーの「添付を外す」を押してください。」，重复文件写「このファイルは以前アップロードされているので、{label} を再度添付しました。」。
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id（读权限；写权限由 assist_file 按 need=write 校验）；调用 assist_file 的写函数时带 current_role=current_role auth_mode=auth_mode subject=subject_id，其余调用带 subject=subject_id
   伪代码 a = 调用 assist_file.存附件 current_user=current_user file_path=assist_file_path file_name=file_name file_size=file_size file_ext=file_ext current_role=current_role auth_mode=auth_mode subject=subject_id（错误原样抛：类型、大小、读不出字、配额、只读老师 403 的原文都直接回给页面，不写对话）
   伪代码 调用 记一条 current_user=current_user content=句子 subject_id=subject_id intent=file_qa（句子见下）；句子：reused 为 0 时「已挂上a.label。接下来问的问题我会参考它；按附件出题也行；不用了点附件条上的「移除附件」。」，reused 为 1 时「这个文件之前传过，已重新挂上a.label。」
@@ -305,6 +308,7 @@
   报错 403 没有权限访问该科目
   报错 403 没有权限修改该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=current_user 取 lang；lang 为 ja 时 sent 写「{label} を添付しました。」。
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id（读权限；写权限由 assist_file 按 need=write 校验）；调用 assist_file 的写函数时带 current_role=current_role auth_mode=auth_mode subject=subject_id，其余调用带 subject=subject_id
   伪代码 a = 调用 assist_file.挂上附件 current_user=current_user file_id=file_id current_role=current_role auth_mode=auth_mode subject=subject_id（错误原样抛）
   伪代码 调用 记一条 current_user=current_user content=句子 subject_id=subject_id intent=file_qa（句子为「已挂上」+ a.label +「。」）
@@ -371,6 +375,7 @@
   报错 403 没有权限访问该科目
   报错 403 没有权限修改该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=current_user 取 lang；lang 为 ja 时 sent 写「授業の練習問題 #{mat_id} を出題の下書き #{draft_id} にしました：{title}{nl}{pv}{nl}「確認」を押すと問題バンクに書き込まれます。不要なら「破棄」を押してください。」。
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id（同 确认草稿页面：只读老师 403）；本函数调用本模块和 assist_material、assist_draft 的函数时一律带 subject=subject_id
   伪代码 r = 调用 assist_material.练习转出题草稿 current_user=current_user mat_id=mat_id subject=subject_id（错误原样抛，不写对话）
   伪代码 句子：r.status 等于 ok 时「已把课堂练习 #mat_id 做成出题草稿 #r.draft_id：r.title」+ 换行 + r.preview 的前 300 个字（截取用 teacher_assist_substr，t 装进对象用 查一值表 传，K166） + 换行 +「点「确认」才会写入题库；不要就点「放弃」。」；ask 时就是 r.hint

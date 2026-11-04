@@ -35,16 +35,19 @@ LIMIT=${LIMIT:-90}
 
 run() {
   local name=$1; shift
-  local out code last
+  local out code last tmo=$LIMIT
+  # 问老师E2E 每轮现搭 kg 项目、编页面、起服务再跑全场景（tests/e2e/teacher_run.js），
+  # 全局 90 秒在机器慢时不够（2026-11-04 K191 全量回归跑到最后一段被杀，单独跑 2.6 秒全过），单独放宽。
+  [ "$name" = 问老师E2E ] && tmo=300
   # --foreground 让 timeout 杀整个进程组，不只是它直接起的那个进程。
   #
   # 不加的话对 `bash -c "... node run.js"` 这种没用：timeout 杀掉 bash，
   # 而 node 起的服务是孙子进程，活着并且握着管道的写端，$(...) 就一直
   # 等管道关闭——脚本照样无限挂着，加了超时等于没加。实际撞上过：
   # 以为限住了，结果又跑了十几分钟。
-  out=$(setsid timeout --foreground --signal=TERM --kill-after=5 "$LIMIT" "$@" 2>&1); code=$?
+  out=$(setsid timeout --foreground --signal=TERM --kill-after=5 "$tmo" "$@" 2>&1); code=$?
   if [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; then
-    printf '%-12s 超时（%s 秒没跑完，已终止）\n' "$name" "$LIMIT"
+    printf '%-12s 超时（%s 秒没跑完，已终止）\n' "$name" "$tmo"
     FAILED=$((FAILED + 1))
     printf '%s\n' "$out" | tail -6 | sed 's/^/    /'
     return
@@ -109,6 +112,7 @@ run 选项解析拼JSON $PY tests/kg_v4/test_k173_json_literal.py
 # 解释器由 PW_PYTHON 指定（如 /tmp/k97_pw_venv/bin/python），不往 .venv 装 playwright。
 if [ -n "${PW_PYTHON:-}" ] && [ -x "$PW_PYTHON" ]; then
   LIMIT=600 run kg_v4走查  "$PW_PYTHON" tests/kg_v4/e2e_walk.py
+  LIMIT=600 run 日语残留检查 "$PW_PYTHON" tests/kg_v4/e2e_ja_residue.py
 else
   echo "kg_v4走查    跳过（未设 PW_PYTHON 或不可执行；设成装了 playwright 的 python 即可跑）"
 fi

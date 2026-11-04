@@ -472,6 +472,10 @@
         如果 {nk} 不包含 {key}
           设 u = 调用 等级在用数 subject_id={subject_id} level={x}
           如果 {u.n} 大于 0
+            设 lg = 调用 取界面语言 username={learner}
+            如果 {lg.lang} 等于 ja
+              报错 400 レベル「{x}」はまだ {u.n} 件の記録で使われています。先に問題とテキストのレベルを変更してから削除してください
+            结束
             报错 400 等级「{x}」还有{u.n}条记录在用，先改掉题目和课文的等级再删
           结束
         结束
@@ -800,7 +804,23 @@
     否则
       设 rows = 查询 app.db subject_page_rows_all
     结束
-    返回 {"subjects": {rows}, "manage_head": "我能管理的科目共{lm.total}个", "can_create": 1}
+    设 lg = 调用 取界面语言 username={learner}
+    设 out = 解析JSON []
+    遍历 s 于 {rows}
+      设 lb = {s.subj_name}
+      如果 {lg.lang} 等于 ja
+        设 tx = 调用 译文 tbl=subject_info row_key={s.subj_code} field=name lang=ja
+        如果 {tx.text} 不为空
+          设 lb = {tx.text}
+        结束
+      结束
+      设 o = {"subj_id": {s.subj_id}, "subj_code": "{s.subj_code}", "subj_name": "{s.subj_name}", "subj_label": "{lb}", "subj_intro": "{s.subj_intro}", "subj_persona": "{s.subj_persona}", "subj_kind": "{s.subj_kind}", "subj_levels": "{s.subj_levels}", "subj_visibility": "{s.subj_visibility}", "subj_status": "{s.subj_status}", "subj_owner": "{s.subj_owner}", "subj_my_role": "{s.subj_my_role}", "subj_student_n": {s.subj_student_n}, "subj_teacher_n": {s.subj_teacher_n}, "can_manage": {s.can_manage}, "can_assign": {s.can_assign}}
+      设 out = 列表加项 {out} {o}
+    结束
+    如果 {lg.lang} 等于 ja
+      返回 {"subjects": {out}, "manage_head": "管理できる科目は全 {lm.total} 件", "can_create": 1}
+    结束
+    返回 {"subjects": {out}, "manage_head": "我能管理的科目共{lm.total}个", "can_create": 1}
   结束
 
   公开 函数 载入科目页面 learner subj_id? current_role? auth_mode?

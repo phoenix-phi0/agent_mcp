@@ -37,6 +37,8 @@
     设 s.asked_count = {p.asked_count}
     设 s.right_count = {p.right_count}
     设 s.finished = {finished}
+    设 lgs = 调用 subject.取界面语言 username={learner}
+    设 s.lang = {lgs.lang 或}
     返回 {s}
   结束
 
@@ -491,6 +493,13 @@
     设 bare = 替换 {word.meaning} ^\[N[1-5]\]
     设 bare = 替换 {bare} ^\s+|\s+$
     设 dn = 调用 方向名 direction={direction}
+    设 lg = {word.lang 或}
+    如果 {lg} 等于 ja
+      设 dn = 漢字を見て読みを書く
+      如果 {direction} 等于 zh2jp
+        设 dn = 中国語を見て日本語を書く
+      结束
+    结束
     设 head = {dn}
     如果 {level} 不为空
       设 head = {level}・{dn}
@@ -500,6 +509,9 @@
     如果 {direction} 不等于 zh2jp
       设 stem = {word.kanji}
       设 sub = 意思：{bare}
+      如果 {lg} 等于 ja
+        设 sub = 意味：{bare}
+      结束
     结束
     设 hint = {zz 或}
     如果 {hinted} 等于 1
@@ -507,6 +519,9 @@
       设 chars = 找全部 {word.kana} .
       设 len = 列表长度 {chars}
       设 hint = 提示：第一个假名是「{fk}」，读音一共 {len} 个字
+      如果 {lg} 等于 ja
+        设 hint = ヒント：最初の仮名は「{fk}」、読みは全部で {len} 文字
+      结束
     结束
     设 card.code = {word.id}-{asked_count}
     设 card.head = {head}
@@ -548,6 +563,9 @@
         设 asked = 计算 {asked} - 1
       结束
       设 pre = 这一轮
+      如果 {s.lang 或} 等于 ja
+        设 pre = このセット
+      结束
       设 t = {pre} {s.right_count}/{asked}
     结束
     返回 {t}
@@ -579,6 +597,18 @@
     结束
     设 out.dphase = empty
     设 out.dempty = 「{dn}」这个方向（等级：{lv}）的错词本是空的——没有答错过的词，或者都已经连续答对两次了。先随机练一轮吧。
+    设 lgx = 调用 subject.取界面语言 username={learner}
+    如果 {lgx.lang} 等于 ja
+      设 dnj = 漢字を見て読みを書く
+      如果 {direction} 等于 zh2jp
+        设 dnj = 中国語を見て日本語を書く
+      结束
+      设 lvj = すべて
+      如果 {level} 不为空
+        设 lvj = {level}
+      结束
+      设 out.dempty = 「{dnj}」（レベル：{lvj}）の間違えた単語帳は空です。間違えた単語がないか、すべて2回連続で正解しています。まずランダムに1セット練習しましょう。
+    结束
     设 out.dcard = {zz 或}
     设 out.dstat = {zz 或}
     返回 {out}
@@ -596,6 +626,7 @@
     结束
     设 s = 调用 开始 learner={learner} direction={direction} level={level} source={source} subject={subject_id}
     设 w = 调用 vocab.取单词 word_id={s.word_id} subject={subject_id}
+    设 w.lang = {s.lang 或}
     设 card = 调用 拼词卡 direction={direction} word={w} asked_count={s.asked_count} hinted=0
     设 st = 调用 成绩文本 s={s}
     设 out.dphase = ask
@@ -745,28 +776,60 @@
     设 word.kanji = {r.kanji}
     设 word.kana = {r.kana}
     设 word.meaning = {r.meaning}
+    设 word.lang = {s.lang 或}
     设 card = 调用 拼词卡 direction={s.direction} word={word} asked_count={r.asked_count} hinted={r.hinted}
     设 bare = 替换 {r.meaning} ^\[N[1-5]\]
     设 bare = 替换 {bare} ^\s+|\s+$
+    设 lg = {s.lang 或}
     设 vd = ✗不对
+    如果 {lg} 等于 ja
+      设 vd = ✗不正解
+    结束
     如果 {r.correct} 等于 1
       设 vd = ○对了
+      如果 {lg} 等于 ja
+        设 vd = ○正解
+      结束
       如果 {r.hinted} 等于 1
         设 vd = ○对了（看了提示，不算进错词本的「连续答对」）
+        如果 {lg} 等于 ja
+          设 vd = ○正解（ヒントを見たので、間違えた単語帳の「連続正解」には数えません）
+        结束
       结束
     结束
     设 pre = 正确：
+    如果 {lg} 等于 ja
+      设 pre = 正解：
+    结束
     如果 {r.kanji} 为空 或 {r.kanji} 等于 {r.kana}
       设 rt = {pre}{r.kana} {bare}
     否则
       设 rt = {pre}{r.kanji}【{r.kana}】{bare}
     结束
     设 mp = 你写的：
+    如果 {lg} 等于 ja
+      设 mp = あなたの答え：
+    结束
+    设 nt = {r.note 或}
+    如果 {lg} 等于 ja 且 {nt} 不为空
+      设 nt0 = {nt}
+      设 nt = {nt0}
+      如果 {nt0} 包含 同义
+        设 nt = 同じ意味の単語も正解です
+      否则如果 {nt0} 包含 读音
+        设 nt = 同じ読みの別の単語です
+      否则如果 {nt0} 包含 读法
+        设 nt = 別の読み方です
+      结束
+    结束
     设 card.verdict = {vd}
     设 card.right = {rt}
     设 card.mine = {mp}{dict_answer}
-    设 card.note = {r.note 或}
+    设 card.note = {nt}
     设 pre2 = 这一轮
+    如果 {lg} 等于 ja
+      设 pre2 = このセット
+    结束
     设 st = {pre2} {r.right_count}/{r.asked_count}
     设 out.dphase = done
     设 out.dcard = {card}
@@ -779,6 +842,7 @@
     设 h = 调用 提示 learner={learner} subject={sb.subject_id}
     设 s = 调用 取状态 learner={learner} subject={sb.subject_id}
     设 w = 调用 vocab.取单词 word_id={s.word_id} subject={sb.subject_id}
+    设 w.lang = {s.lang 或}
     设 card = 调用 拼词卡 direction={s.direction} word={w} asked_count={s.asked_count} hinted=1
     设 st = 调用 成绩文本 s={s}
     设 out.dphase = ask
@@ -793,6 +857,7 @@
     设 st = 调用 成绩文本 s={s}
     如果 {s.finished} 等于 0
       设 w = 调用 vocab.取单词 word_id={s.word_id} subject={sb.subject_id}
+      设 w.lang = {s.lang 或}
       设 card = 调用 拼词卡 direction={s.direction} word={w} asked_count={s.asked_count} hinted=0
       设 out.dphase = ask
       设 out.dcard = {card}
@@ -802,6 +867,12 @@
     设 txt = 这一轮做完了：答对 {s.right_count} 个，共 {s.asked_count} 个。
     如果 {s.right_count} 等于 {s.asked_count}
       设 txt = 这一轮做完了：{s.asked_count} 个全对。
+    结束
+    如果 {s.lang 或} 等于 ja
+      设 txt = このセットが終わりました：{s.asked_count} 問中 {s.right_count} 問正解。
+      如果 {s.right_count} 等于 {s.asked_count}
+        设 txt = このセットが終わりました：{s.asked_count} 問すべて正解。
+      结束
     结束
     设 dr.text = {txt}
     设 lw = 调用 列本轮错词 learner={learner} subject={sb.subject_id}
@@ -843,6 +914,7 @@
     结束
     设 s2 = 调用 再来一轮 learner={learner} subject={sb.subject_id}
     设 w = 调用 vocab.取单词 word_id={s2.word_id} subject={sb.subject_id}
+    设 w.lang = {s2.lang 或}
     设 card = 调用 拼词卡 direction={s.direction} word={w} asked_count={s2.asked_count} hinted=0
     设 st = 调用 成绩文本 s={s2}
     设 out.dphase = ask

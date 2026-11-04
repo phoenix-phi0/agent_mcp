@@ -51,12 +51,14 @@
   伪代码 不看 rowcount（以 WITH 开头的语句 rowcount 为 -1，有静默失败的先例）：回查这一行，status 等于 to_state 并且 claim 等于 token 才返回 {"ok": 1, "status": to_state, "token": token}，否则返回 {"ok": 0, "status": 回查到的 status, "token": ""}
   伪代码 两个请求同时确认（或同时撤销、或撤销与进行中的确认交错）时只有一个 ok 为 1；另一个按调用方的规则报 409
 
-函数 草稿行 draft
+函数 草稿行 draft lang?
   返回 {draft_id, draft_kind, draft_brief, draft_state, draft_at, can_undo}：待确认表的一行（键名就是 .ui 列名）
+  伪代码 K191 日语：加可选入参 lang。lang 为 ja 时 draft_state 的 失败：{error} 写 失敗：{error}；draft_state 其余值给界面判断用不变，由词表翻显示。
   伪代码 draft_id=draft.id；draft_kind=类型名 kind=draft.kind；draft_brief=draft.title；draft_state=状态名 status=draft.status，partial 和 failed 后面加「：」和 error 的前 30 个字（截取用 assist_draft_substr，t 装进对象用 查一值表 传，K166：error 是报错原文，可能带换行）；draft_at=draft.created_at；can_undo=能撤销 status=draft.status decided_at=draft.decided_at
 
-函数 草稿按钮 draft
+函数 草稿按钮 draft lang?
   返回 {actions, links}：挂在生成这份草稿的那条助手消息上的按钮（E1，形状以 design.md §10 为准）
+  伪代码 K191 日语：加可选入参 lang。lang 为 ja 时 links 的 text 写「下書き #{id} を見る」；actions 的 label 确认、放弃、撤销 由前端词表翻，不改。
   伪代码 actions 是列表，每项 {label, action, carry, kind}：action 是本界面 teacher_assist.ui 里声明过的远程动作名（前端只认本界面声明过的动作），carry 是 {"draft_id": id}，kind 是按钮样式（空串=主按钮、次要、危险）
   伪代码 status 等于 pending：[{"label": "确认", "action": "assist_draft_confirm", "carry": {"draft_id": id}, "kind": ""}, {"label": "放弃", "action": "assist_draft_discard", "carry": {"draft_id": id}, "kind": "次要"}]
   伪代码 能撤销 status=draft.status decided_at=draft.decided_at 等于 1：[{"label": "撤销", "action": "assist_draft_undo", "carry": {"draft_id": id}, "kind": "危险"}]
@@ -106,6 +108,7 @@
   报错 403 没有权限访问该科目
   报错 403 没有权限修改该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=current_user 取 lang；lang 为 ja 时 hint「没生成成功：…」写「生成できませんでした：{lasterr}（言い方を変えるか、数を減らしてみてください）」；lasterr 的默认值 模型暂时无法回答 写「モデルが応答できません」。给模型看的提示词不动。
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id（只读老师、学生报 403 没有权限修改该科目；问助手 在调本函数前自己按 D14 转成模板话）；本函数在本模块内调用其它函数、调用其它模块的函数时一律带 subject=subject_id
   伪代码 current_user 为空报错 400 current_user 不能为空；message 去首尾空白后为空报错 400 消息不能为空；kind 不是 quiz_add、relay_add、setting_save、kg_add 之一报错 400 草稿类型不对
   伪代码 replaces_id 不为空（修订稿，D4：P1 不手改草稿，老师在对话里说哪里要改）：不是正整数报错 400 replaces_id 不合法；调用 取本人草稿 current_user=current_user draft_id=replaces_id subject_id=subject_id（404 原样抛）；旧草稿 status 不是 pending 或 kind 不等于本次 kind，报错 409 只能修订待确认的草稿
@@ -144,6 +147,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=current_user 取 lang；lang 为 ja 时 head 写「下書き #{id} · {类型} · {状态} · {created_at}」，类型 出题、发传达、改设定、加知识点 写 出題、伝達を送る、設定を変更、知識ポイントを追加，状态 待确认、执行中、已执行、部分执行、失败、已放弃、撤销中、已撤销、已替代 写 承認待ち、実行中、実行済み、一部実行、失敗、破棄済み、取り消し中、取り消しました、置き換え済み；result_text 的行写「書き込んだ問題番号：{question_nos}」「{display_name}：伝達 #{relay_id} を作成」「{display_name}：失敗：{error}」「{display_name}：削除しました」「{display_name}：無効にしました」「{label}：作成しました」「{label}：設定 #{setting_id} を変更」「{label}：設定 #{setting_id} を作成」「{label}：既に存在するため作成していません」「{label}：失敗：{error}」「{label}：削除しました」。draft_state、state 字段是界面判断用的中文原值，不改。
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id（读权限即可）
   伪代码 调用 取本人草稿 current_user=current_user draft_id=draft_id subject_id=subject_id（只有本人、本科目能看；404 原样抛）
   伪代码 拼 draft 并返回 {"draft": draft}；state=状态名 status=该行 status，can_undo=能撤销 status=该行 status decided_at=该行 decided_at
@@ -159,6 +163,8 @@
   报错 403 没有权限访问该科目
   报错 403 没有权限修改该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：lang 为 ja 时 summary 写「下書き #{draft_id} を実行しました：問題を {dn} 問書き込み（問題番号 {qnos}）」「下書き #{draft_id} を実行しました：{dn} 人の学生に伝達を作成」「下書き #{draft_id} を実行しました：AI先生設定を新規 {ca} 件、変更 {cb} 件」「下書き #{draft_id} を実行しました：知識ポイント {ca} 件、項目 {cb} 件、前提辺 {cc} 件を作成」「下書き #{draft_id} を一部実行しました：成功 {dn} / {total}、{failtxt}」「下書き #{draft_id} の実行に失敗しました：{err}」，failtxt 里写「{名字} 失敗：{error}」。
+  伪代码 K191 日语：调用 subject.取界面语言 username=current_user 取 lang；lang 为 ja 时报错 409 写「この下書きは処理済みです（現在の状態：{sn}）」，sn 用日文状态名。
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id（生成之后权限可能被收回，确认时重新校验；没有写权限报 403 没有权限修改该科目，草稿保持 pending 不动）；本函数调用其它模块的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 current_user 为空报错 400 current_user 不能为空；调用 取本人草稿 current_user=current_user draft_id=draft_id subject_id=subject_id（不是本人的、别的科目的 404 没有这份草稿）
   伪代码 调用 抢占草稿 draft_id=draft_id current_user=current_user from_states=pending to_state=running；ok 为 0：报错 409 这份草稿已处理（当前状态：<状态名 status=回查到的 status>）（重复确认、两个请求同时确认、已放弃/已替代/已执行/执行中都走这里，只有一个请求真正执行）
@@ -182,6 +188,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=current_user 取 lang；lang 为 ja 时报错 409 写「この下書きは処理済みです（現在の状態：{sn}）」，sn 用日文状态名。
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id（读权限即可：放弃不写业务表，权限被收回的老师也能清掉自己的待确认草稿；只能本人）
   伪代码 current_user 为空报错 400；调用 取本人草稿 current_user=current_user draft_id=draft_id subject_id=subject_id（404 原样抛）
   伪代码 调用 抢占草稿 draft_id=draft_id current_user=current_user from_states=pending to_state=discarded；ok 为 0 报错 409 这份草稿已处理（当前状态：<状态名>）
@@ -204,6 +211,8 @@
   报错 403 没有权限访问该科目
   报错 403 没有权限修改该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：lang 为 ja 时 summary 写「下書き #{draft_id} を取り消しました：問題を {undone} 問削除」「下書き #{draft_id} を取り消しました：伝達を {ca} 件削除、{cb} 件無効化（既に伝えた分は取り消せません）」「下書き #{draft_id} を取り消しました：新規の設定 {ca} 件を削除、変更前の内容 {cb} 件を復元」「下書き #{draft_id} を取り消しました：知識ポイント {ca} 件、項目 {cb} 件、前提辺 {cc} 件を削除」「下書き #{draft_id} は {undone} / {total} 件取り消しました、{failtxt}」。
+  伪代码 K191 日语：调用 subject.取界面语言 username=current_user 取 lang；lang 为 ja 时报错 409 写「この下書きは取り消せません（現在の状態：{sn}）」，sn 用日文状态名（同 取草稿 的 K191 日语）。
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id（撤销会删或停用业务数据，要写权限；只能本人）；本函数调用其它模块的函数时一律带 subject=subject_id
   伪代码 current_user 为空报错 400；调用 取本人草稿 current_user=current_user draft_id=draft_id subject_id=subject_id（404 原样抛）
   伪代码 status 是 done 或 partial 但 能撤销 为 0（decided_at 早于当前时间减 7 天），报错 409 已超过 7 天，不能撤销（D3）

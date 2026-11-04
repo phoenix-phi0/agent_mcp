@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # build_bundle.sh —— 把 kg_v4 项目 + 引擎最小运行集打包成可单独上线的文件夹
 # （K178 打中文包；K183 起本脚本打日文包 kg_v4_bundle_ja：project/i18n/ja.tsv 界面/消息词表、
-#   init_data.sh 按 DEFAULT_LANG（默认 ja）建账号、content/ 带 Python 科目内容包、课文 13 课与 496 条日文译文、
+#   init_data.sh 按 DEFAULT_LANG（默认 ja）建账号、content/ 带 Python 科目内容包、课文 13 课与 499 条日文译文、
 #   README.ja.md。最小运行集的分析与验证见 data/reports/kg_K178_glm.md（K178，前作 K123）；
 #   日文包的验证见 data/reports/kg_K183_glm.md（K183）。中文包目录 kg_v4_bundle 保留不动，脚本有护栏。）
 #
@@ -328,7 +328,7 @@ cat > "$OUT/scripts/load_python_content.sh" <<'XEOF_LOAD'
 #   → 题库导入（POST /quiz/import，清空本科目题库重灌）→ 日文译文导入（project/scripts/import_content_ja.py，
 #   先预检再 --apply）→ 中文课文 13 课（project/setup/import_lesson_rows.py，按条目/知识点挂接，所以在图谱之后）
 #   → 课文译文 54 行（ja_lesson/lesson.tsv，要在课文之后）。最后按库里的行数自检：图谱 34/49/110/13、题库 99、
-#   课文 13、挂接 110/34、译文 496（442+54）。
+#   课文 13、挂接 110/34、译文 499（442+54+3：K191 日语科目的名字）。
 # 前提：install.sh、init_data.sh 已跑，服务已在跑（bash scripts/start.sh）。
 # 可重复执行：图谱导入按编号「新增/更新」，题库重灌结果一致，译文 upsert；科目已存在则跳过建科目。
 # 用法：KG_PASSWORD='管理员口令' bash scripts/load_python_content.sh
@@ -431,7 +431,19 @@ say "课文译文预检"
 say "课文译文写入"
 "$PY" "$HERE/project/scripts/import_content_ja.py" --db "$DB" --dir "$C/ja_lesson" --apply
 
-say "自检行数（期望 图 34/49/110/13、题 99、课文 13、挂接 110/34、译文 496）"
+say "日语科目的名字译文（project/setup/names_ja.tsv，已有的不覆盖）"
+"$PY" - "$DB" "$HERE/project/setup/names_ja.tsv" <<'XNAMES'
+import sqlite3, sys, time
+con = sqlite3.connect(sys.argv[1]); now = time.strftime("%Y-%m-%d %H:%M:%S"); n = 0
+for line in open(sys.argv[2], encoding="utf-8").read().splitlines():
+    if line and not line.startswith("#"):
+        tbl, key, field, text = line.split("\t")
+        n += con.execute("INSERT OR IGNORE INTO subject_content_translation(tbl,row_key,field,lang,text,updated_at) "
+                         "VALUES(?,?,?,'ja',?,?)", (tbl, key, field, text, now)).rowcount
+con.commit(); con.close(); print("新增", n)
+XNAMES
+
+say "自检行数（期望 图 34/49/110/13、题 99、课文 13、挂接 110/34、译文 499）"
 "$PY" - "$DB" "$SID" <<'XPY'
 import sqlite3, sys
 con = sqlite3.connect(sys.argv[1]); sid = sys.argv[2]
@@ -446,7 +458,7 @@ got = [n("select count(*) from kg_point where subject_id=?"),
        n("select count(*) from lesson_item_link where subject_id=?"),
        n("select count(*) from lesson_point_link where subject_id=?"),
        con.execute("select count(*) from subject_content_translation where lang='ja'").fetchone()[0]]
-exp = [34, 49, 110, 13, 99, 13, 110, 34, 496]
+exp = [34, 49, 110, 13, 99, 13, 110, 34, 499]
 print("实际:", "/".join(map(str, got)))
 if got != exp:
     print("!! 行数和期望不符：期望 " + "/".join(map(str, exp)))

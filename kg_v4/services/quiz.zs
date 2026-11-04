@@ -7,13 +7,16 @@
     返回 {"subject_id": {r.subject_id}}
   结束
 
-  函数 编号前缀检查 subject_id code
+  函数 编号前缀检查 subject_id code lang?
     如果 {subject_id} 等于 1
       返回 {"ok": 1}
     结束
     设 sc = 查一值 app.db quiz_subject_code subject_id={subject_id}
     设 pre = {sc 或}
     如果 {pre} 为空
+      如果 {lang} 等于 ja
+        报错 400 番号は「{pre}.」で始めてください
+      结束
       报错 400 编号要以「{pre}.」开头
     结束
     设 pfx = {pre}.
@@ -23,6 +26,9 @@
       设 okp = 是
     结束
     如果 {mm.matched} 不等于 是 或 {okp} 不等于 是
+      如果 {lang} 等于 ja
+        报错 400 番号は「{pre}.」で始めてください
+      结束
       报错 400 编号要以「{pre}.」开头
     结束
     返回 {"ok": 1}
@@ -429,6 +435,7 @@
     设 skn = {zz 或}
     设 seen = ,
     设 kept = 0
+    设 lgi = 调用 subject.取界面语言 username={learner}
     事务 app.db
       设 allq = 查询 app.db quiz_q_nos subject_id={sj.subject_id}
       遍历 aq 于 {allq}
@@ -495,6 +502,9 @@
           结束
           设 lvP = ,{f3},
           如果 {f3} 为空 或 {lvS} 不包含 {lvP}
+            如果 {lgi.lang} 等于 ja
+              报错 400 問題バンクに不正な問題があります：{lnno} 行目のレベル {f3} はこの科目のレベル（{lvSlash}）にありません
+            结束
             报错 400 题库有坏题：第{lnno}行等级{f3}不在本科目等级（{lvSlash}）里
           结束
           设 pat = ,{f1},
@@ -506,7 +516,7 @@
           如果 {mc.matched} 等于 是
             报错 400 题号不能含逗号或空白
           结束
-          设 pc = 调用 编号前缀检查 subject_id={sj.subject_id} code={f1}
+          设 pc = 调用 编号前缀检查 subject_id={sj.subject_id} code={f1} lang={lgi.lang 或}
           设 tac = 调用 是助手题号 subject_id={sj.subject_id} code={f1}
           如果 {tac.is_ta} 等于 1
             报错 400 ta 格式的题号留给教师助手
@@ -1056,10 +1066,68 @@
     返回 {out}
   结束
 
+  函数 日文头 level category
+    设 lv = {level}
+    设 ct = {category}
+    如果 {level} 等于 入门
+      设 lv = 入門
+    否则如果 {level} 等于 基础
+      设 lv = 基礎
+    否则如果 {level} 等于 进阶
+      设 lv = 応用
+    结束
+    如果 {category} 等于 选择
+      设 ct = 選択
+    否则如果 {category} 等于 接续
+      设 ct = 接続
+    否则如果 {category} 等于 挖空
+      设 ct = 穴埋め
+    否则如果 {category} 等于 意思
+      设 ct = 意味
+    否则如果 {category} 等于 找错句
+      设 ct = 誤文訂正
+    结束
+    返回 {"head": "{lv}・{ct}"}
+  结束
+
+  函数 日文轮尾 mode stat asked_count
+    如果 {mode} 等于 lesson
+      设 t1 = このセットが終わりました（{stat}）。もう1セット選ぶと、この課の別の問題と対比問題が出ます。別の課を選ぶことも、教材に戻ってこの課を見直すこともできます。
+      返回 {"text": "{t1}"}
+    结束
+    如果 {mode} 等于 review
+      设 t2 = このセットの復習が終わりました（{stat}）。先生にまとめてもらうか、もう1セット挑戦できます。
+      返回 {"text": "{t2}"}
+    结束
+    设 t3 = このセットが終わりました（{stat}）。{asked_count} 問はそれぞれ異なる知識ポイントから出題しました。先生にまとめてもらうか、もう1セット挑戦できます。
+    返回 {"text": "{t3}"}
+  结束
+
+  函数 日文范围 learner mode lesson_code subject_id
+    设 sc = {zz 或}
+    如果 {mode} 等于 lesson
+      设 ls = 调用 lesson.取课文 code={lesson_code} subject={subject_id}
+      设 ttl = {ls.title 或}
+      设 trL = 调用 subject.译文 tbl=lesson_text row_key={lesson_code} field=title lang=ja
+      如果 {trL.text} 不为空
+        设 ttl = {trL.text}
+      结束
+      设 sc = この課《{ttl}》（対比問題を含む）
+    否则如果 {mode} 等于 review
+      设 sc0 = 调用 复习薄弱点文案 learner={learner} subject_id={subject_id}
+      设 sc = 替换 {sc0} ^复习薄弱点 弱点を復習
+    结束
+    返回 {"scope": "{sc}"}
+  结束
+
   公开 函数 做题页面 learner current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 st = 调用 取做题状态 learner={learner} subject={sj.subject_id}
     设 lbl = {zz 或 这一轮}
+    设 lgk = 调用 subject.取界面语言 username={learner}
+    如果 {lgk.lang} 等于 ja
+      设 lbl = このセット
+    结束
     设 stat = {zz 或}
     如果 {st.started} 等于 1
       设 stat = {lbl} {st.right_count}/{st.asked_count}
@@ -1079,6 +1147,10 @@
   公开 函数 开始页面 learner pick_level? pick_kind? current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 lbl = {zz 或 这一轮}
+    设 lgk = 调用 subject.取界面语言 username={learner}
+    如果 {lgk.lang} 等于 ja
+      设 lbl = このセット
+    结束
     设 pl = {pick_level 或 全部}
     设 pk = {pick_kind 或 全部}
     设 lv = {zz 或}
@@ -1098,6 +1170,10 @@
     设 qq = {res.question}
     设 tc = 调用 拼题卡 question={qq}
     设 card = {tc.card}
+    如果 {lgk.lang} 等于 ja
+      设 hj = 调用 日文头 level={qq.level} category={qq.category}
+      设 card.head = {hj.head}
+    结束
     设 rnd = {"text": "", "more": "", "back": "", "explain": ""}
     设 frm = {"pick_level": "{pl}", "pick_kind": "{pk}"}
     返回 {"phase": "ask", "qtype": "{tc.qtype}", "card": {card}, "scope": "", "stat": "{stat}", "cheer": "", "score_change": "", "round": {rnd}, "summary": "", "form": {frm}, "level_options": {sl.options}}
@@ -1106,6 +1182,10 @@
   公开 函数 判答案页面 learner choice? given? current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 lbl = {zz 或 这一轮}
+    设 lgk = 调用 subject.取界面语言 username={learner}
+    如果 {lgk.lang} 等于 ja
+      设 lbl = このセット
+    结束
     设 st = 调用 取做题状态 learner={learner} subject={sj.subject_id}
     设 qs = {st.question}
     设 isc = 0
@@ -1156,9 +1236,15 @@
     如果 {res.correct} 等于 1
       设 o1 = {zz 或 ○}
       设 vd = {o1} 答对了
+      如果 {lgk.lang} 等于 ja
+        设 vd = {o1} 正解です
+      结束
     否则
       设 x1 = {zz 或 ✗}
       设 vd = {x1} 正确答案是 {res.correct_answer}
+      如果 {lgk.lang} 等于 ja
+        设 vd = {x1} 正解は {res.correct_answer}
+      结束
     结束
     设 it2 = 查一行 app.db quiz_q_by_no question_no={res.question_no} subject_id={sj.subject_id}
     设 ik = 调用 kg.取条目 code={it2.item_code} subject={sj.subject_id}
@@ -1175,16 +1261,34 @@
     如果 {e} 为空
       遍历 l 于 {ll.lessons}
         如果 {ltail} 为空
-          设 ltail = 课文《{l.title}》{l.summary}
+          设 ltl = {l.title}
+          设 lsm = {l.summary}
+          设 ltail = 课文《{ltl}》{lsm}
+          如果 {lgk.lang} 等于 ja
+            设 trT = 调用 subject.译文 tbl=lesson_text row_key={l.code} field=title lang=ja
+            如果 {trT.text} 不为空
+              设 ltl = {trT.text}
+            结束
+            设 trM = 调用 subject.译文 tbl=lesson_text row_key={l.code} field=summary lang=ja
+            如果 {trM.text} 不为空
+              设 lsm = {trM.text}
+            结束
+            设 ltail = テキスト《{ltl}》{lsm}
+          结束
         结束
       结束
     结束
     设 tailp.expl = {res.explain}
     设 tailp.name = {nm}
     设 tailp.lt = {ltail}
+    设 tailp.lang = {lgk.lang 或 zh}
     设 ex2 = 查一值表 app.db quiz_explain_tail {tailp}
     设 card.code = {tc.card.code}
     设 card.head = {tc.card.head}
+    如果 {lgk.lang} 等于 ja
+      设 hj = 调用 日文头 level={qs.level} category={qs.category}
+      设 card.head = {hj.head}
+    结束
     设 card.stem = {tc.card.stem}
     设 card.options = {opts2}
     设 card.mine = {ans}
@@ -1202,6 +1306,17 @@
       如果 {prevs} 小于 80 且 {res.score} 不小于 80
         设 ch = 「{ttl}」达标了，图上它后面的知识点可能解锁了。
       结束
+      如果 {lgk.lang} 等于 ja
+        设 trK = 调用 subject.译文 tbl=kg_point row_key={res.point_code} field=title lang=ja
+        如果 {trK.text} 不为空
+          设 ttl = {trK.text}
+        结束
+        设 sc = {ttl} スコア {prevs} → {res.score}
+        设 ch = {zz 或}
+        如果 {prevs} 小于 80 且 {res.score} 不小于 80
+          设 ch = 「{ttl}」を達成しました。図でこの先の知識ポイントが解放されたかもしれません。
+        结束
+      结束
     结束
     设 stat = {lbl} {res.right_count}/{res.asked_count}
     设 out.phase = {zz 或 done}
@@ -1217,6 +1332,10 @@
   公开 函数 下一题页面 learner current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 lbl = {zz 或 这一轮}
+    设 lgk = 调用 subject.取界面语言 username={learner}
+    如果 {lgk.lang} 等于 ja
+      设 lbl = このセット
+    结束
     设 ri = 调用 取当前轮次信息 learner={learner} subject={sj.subject_id}
     设 scope = {zz 或}
     如果 {ri.mode} 等于 lesson
@@ -1224,6 +1343,10 @@
       设 scope = 本课《{ls.title}》（含对比题）
     否则如果 {ri.mode} 等于 review
       设 scope = 调用 复习薄弱点文案 learner={learner} subject_id={sj.subject_id}
+    结束
+    如果 {lgk.lang} 等于 ja
+      设 jsc = 调用 日文范围 learner={learner} mode={ri.mode} lesson_code={ri.lesson_code 或} subject_id={sj.subject_id}
+      设 scope = {jsc.scope}
     结束
     设 res = 调用 下一题 learner={learner} subject={sj.subject_id}
     设 sl = 调用 subject.科目等级 subject_id={sj.subject_id}
@@ -1233,16 +1356,32 @@
       设 qq = {res.question}
       设 tc = 调用 拼题卡 question={qq}
       设 card = {tc.card}
+      如果 {lgk.lang} 等于 ja
+        设 hj = 调用 日文头 level={qq.level} category={qq.category}
+        设 card.head = {hj.head}
+      结束
       返回 {"phase": "ask", "qtype": "{tc.qtype}", "card": {card}, "scope": "{scope}", "stat": "{stat}", "cheer": "", "score_change": "", "round": {rnd}, "summary": "", "level_options": {sl.options}}
     结束
     如果 {ri.mode} 等于 lesson
       设 rt = 调用 按课轮尾 lesson_code={ri.lesson_code} stat={stat} subject_id={sj.subject_id}
       设 rnd = {rt}
+      如果 {lgk.lang} 等于 ja
+        设 jt = 调用 日文轮尾 mode=lesson stat={stat} asked_count={res.asked_count}
+        设 rnd = {"text": "{jt.text}", "more": "{rt.more}", "back": "{rt.back}", "explain": "{rt.explain}"}
+      结束
     否则如果 {ri.mode} 等于 review
       设 txt = 这一轮复习做完了（{stat}）。可以请老师总结这一轮，或者再来一轮。
+      如果 {lgk.lang} 等于 ja
+        设 jt = 调用 日文轮尾 mode=review stat={stat} asked_count={res.asked_count}
+        设 txt = {jt.text}
+      结束
       设 rnd = {"text": "{txt}", "more": "", "back": "", "explain": ""}
     否则
       设 txt = 这一轮做完了（{stat}），{res.asked_count}道题各考一个不同的知识点。可以请老师总结这一轮，或者再来一轮。
+      如果 {lgk.lang} 等于 ja
+        设 jt = 调用 日文轮尾 mode=free stat={stat} asked_count={res.asked_count}
+        设 txt = {jt.text}
+      结束
       设 rnd = {"text": "{txt}", "more": "", "back": "", "explain": ""}
     结束
     返回 {"phase": "end", "scope": "{scope}", "stat": "{stat}", "round": {rnd}, "cheer": "", "score_change": "", "level_options": {sl.options}}
@@ -1251,6 +1390,10 @@
   公开 函数 再来一轮页面 learner current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 lbl = {zz 或 这一轮}
+    设 lgk = 调用 subject.取界面语言 username={learner}
+    如果 {lgk.lang} 等于 ja
+      设 lbl = このセット
+    结束
     设 ri = 调用 取当前轮次信息 learner={learner} subject={sj.subject_id}
     设 scope = {zz 或}
     如果 {ri.mode} 等于 lesson
@@ -1258,6 +1401,10 @@
       设 scope = 本课《{ls.title}》（含对比题）
     否则如果 {ri.mode} 等于 review
       设 scope = 调用 复习薄弱点文案 learner={learner} subject_id={sj.subject_id}
+    结束
+    如果 {lgk.lang} 等于 ja
+      设 jsc = 调用 日文范围 learner={learner} mode={ri.mode} lesson_code={ri.lesson_code 或} subject_id={sj.subject_id}
+      设 scope = {jsc.scope}
     结束
     设 res = 调用 再来一轮 learner={learner} subject={sj.subject_id}
     设 sl = 调用 subject.科目等级 subject_id={sj.subject_id}
@@ -1267,16 +1414,32 @@
       设 qq = {res.question}
       设 tc = 调用 拼题卡 question={qq}
       设 card = {tc.card}
+      如果 {lgk.lang} 等于 ja
+        设 hj = 调用 日文头 level={qq.level} category={qq.category}
+        设 card.head = {hj.head}
+      结束
       返回 {"phase": "ask", "qtype": "{tc.qtype}", "card": {card}, "scope": "{scope}", "stat": "{stat}", "cheer": "", "score_change": "", "round": {rnd}, "summary": "", "level_options": {sl.options}}
     结束
     如果 {ri.mode} 等于 lesson
       设 rt = 调用 按课轮尾 lesson_code={ri.lesson_code} stat={stat} subject_id={sj.subject_id}
       设 rnd = {rt}
+      如果 {lgk.lang} 等于 ja
+        设 jt = 调用 日文轮尾 mode=lesson stat={stat} asked_count={res.asked_count}
+        设 rnd = {"text": "{jt.text}", "more": "{rt.more}", "back": "{rt.back}", "explain": "{rt.explain}"}
+      结束
     否则如果 {ri.mode} 等于 review
       设 txt = 这一轮复习做完了（{stat}）。可以请老师总结这一轮，或者再来一轮。
+      如果 {lgk.lang} 等于 ja
+        设 jt = 调用 日文轮尾 mode=review stat={stat} asked_count={res.asked_count}
+        设 txt = {jt.text}
+      结束
       设 rnd = {"text": "{txt}", "more": "", "back": "", "explain": ""}
     否则
       设 txt = 这一轮做完了（{stat}），{res.asked_count}道题各考一个不同的知识点。可以请老师总结这一轮，或者再来一轮。
+      如果 {lgk.lang} 等于 ja
+        设 jt = 调用 日文轮尾 mode=free stat={stat} asked_count={res.asked_count}
+        设 txt = {jt.text}
+      结束
       设 rnd = {"text": "{txt}", "more": "", "back": "", "explain": ""}
     结束
     返回 {"phase": "end", "scope": "{scope}", "stat": "{stat}", "round": {rnd}, "cheer": "", "score_change": "", "level_options": {sl.options}}
@@ -1285,6 +1448,10 @@
   公开 函数 课文页面 learner lesson? mode? level? kind? current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 lbl = {zz 或 这一轮}
+    设 lgk = 调用 subject.取界面语言 username={learner}
+    如果 {lgk.lang} 等于 ja
+      设 lbl = このセット
+    结束
     设 res = {zz 或}
     设 scope = {zz 或}
     设 fl = {zz 或 全部}
@@ -1296,6 +1463,10 @@
       设 res = 调用 开始 learner={learner} mode=lesson lesson_code={lesson} subject={sj.subject_id}
       设 ls = 调用 lesson.取课文 code={lesson} subject={sj.subject_id}
       设 scope = 本课《{ls.title}》（含对比题）
+      如果 {lgk.lang} 等于 ja
+        设 jsc = 调用 日文范围 learner={learner} mode=lesson lesson_code={lesson} subject_id={sj.subject_id}
+        设 scope = {jsc.scope}
+      结束
       设 st = 调用 取做题状态 learner={learner} subject={sj.subject_id}
       设 fl = {st.level 或 全部}
       设 fk = {st.category 或 全部}
@@ -1315,6 +1486,10 @@
         设 res = 调用 开始 learner={learner} mode=review subject={sj.subject_id}
       结束
       设 scope = 调用 复习薄弱点文案 learner={learner} subject_id={sj.subject_id}
+      如果 {lgk.lang} 等于 ja
+        设 jsc = 调用 日文范围 learner={learner} mode=review lesson_code={zz 或} subject_id={sj.subject_id}
+        设 scope = {jsc.scope}
+      结束
       设 st = 调用 取做题状态 learner={learner} subject={sj.subject_id}
       设 fl = {st.level 或 全部}
       设 fk = {st.category 或 全部}
@@ -1347,16 +1522,32 @@
       设 qq = {res.question}
       设 tc = 调用 拼题卡 question={qq}
       设 card = {tc.card}
+      如果 {lgk.lang} 等于 ja
+        设 hj = 调用 日文头 level={qq.level} category={qq.category}
+        设 card.head = {hj.head}
+      结束
       返回 {"phase": "ask", "qtype": "{tc.qtype}", "card": {card}, "scope": "{scope}", "stat": "{stat}", "cheer": "", "score_change": "", "round": {rnd}, "summary": "", "form": {frm}, "level_options": {sl.options}}
     结束
     如果 {cm} 等于 lesson
       设 rt = 调用 按课轮尾 lesson_code={lcode} stat={stat} subject_id={sj.subject_id}
       设 rnd = {rt}
+      如果 {lgk.lang} 等于 ja
+        设 jt = 调用 日文轮尾 mode=lesson stat={stat} asked_count={res.asked_count}
+        设 rnd = {"text": "{jt.text}", "more": "{rt.more}", "back": "{rt.back}", "explain": "{rt.explain}"}
+      结束
     否则如果 {cm} 等于 review
       设 txt = 这一轮复习做完了（{stat}）。可以请老师总结这一轮，或者再来一轮。
+      如果 {lgk.lang} 等于 ja
+        设 jt = 调用 日文轮尾 mode=review stat={stat} asked_count={res.asked_count}
+        设 txt = {jt.text}
+      结束
       设 rnd = {"text": "{txt}", "more": "", "back": "", "explain": ""}
     否则
       设 txt = 这一轮做完了（{stat}），{res.asked_count}道题各考一个不同的知识点。可以请老师总结这一轮，或者再来一轮。
+      如果 {lgk.lang} 等于 ja
+        设 jt = 调用 日文轮尾 mode=free stat={stat} asked_count={res.asked_count}
+        设 txt = {jt.text}
+      结束
       设 rnd = {"text": "{txt}", "more": "", "back": "", "explain": ""}
     结束
     返回 {"phase": "end", "scope": "{scope}", "stat": "{stat}", "round": {rnd}, "cheer": "", "score_change": "", "form": {frm}, "level_options": {sl.options}}

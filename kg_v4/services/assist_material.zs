@@ -61,12 +61,15 @@
     返回 {row}
   结束
 
-  函数 材料行 mat
+  函数 材料行 mat lang?
     设 k = 调用 类型名 kind={mat.kind}
     设 s = 调用 状态名 status={mat.status}
     设 u = 截取 {mat.updated_at} 1 16
     设 n = 查一值 app.db assist_material_len id={mat.id}
     设 head = {k} · {s} · {n} 字 · 更新于 {u}。全选下面的文字复制即可
+    如果 {lang} 等于 ja
+      设 head = {k} · {s} · {n} 文字 · 更新 {u}。下の文章を全選択してコピーしてください
+    结束
     设 etext = 查一值 app.db assist_material_export_text id={mat.id}
     返回 {"mat_id": {mat.id}, "mat_title": "{mat.title}", "mat_kind": "{k}", "mat_state": "{s}", "mat_updated": "{u}", "mat_content": "{mat.content}", "mat_export_head": "{head}", "mat_export_text": "{etext}"}
   结束
@@ -453,6 +456,10 @@
     设 n = 查一值 app.db assist_material_len id={mat_id}
     设 u = 截取 {m.updated_at} 1 16
     设 head = {kl} · {sn} · {n} 字 · 更新于 {u}。全选下面的文字复制即可
+    设 lg = 调用 subject.取界面语言 username={current_user}
+    如果 {lg.lang} 等于 ja
+      设 head = {kl} · {sn} · {n} 文字 · 更新 {u}。下の文章を全選択してコピーしてください
+    结束
     设 etext = 查一值 app.db assist_material_export_text id={mat_id}
     返回 {"mat_id": {mat_id}, "mat_export_head": "{head}", "mat_export_text": "{etext}"}
   结束
@@ -523,11 +530,19 @@
   公开 函数 材料页面 current_user mat_filter? current_role? auth_mode? subject?
     设 sid = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 l = 调用 列材料 current_user={current_user} kind={mat_filter} subject={sid}
+    设 lg = 调用 subject.取界面语言 username={current_user}
     设 note = {空 或}
     如果 {l.total} 大于 0
-      设 note = 共{l.total}份
-      如果 {l.drafts} 大于 0
-        设 note = {note}，未保存{l.drafts}份（7天后自动清掉）
+      如果 {lg.lang} 等于 ja
+        设 note = 全{l.total}件
+        如果 {l.drafts} 大于 0
+          设 note = {note}、未保存{l.drafts}件（7日後に自動で削除）
+        结束
+      否则
+        设 note = 共{l.total}份
+        如果 {l.drafts} 大于 0
+          设 note = {note}，未保存{l.drafts}份（7天后自动清掉）
+        结束
       结束
     结束
     返回 {"materials": {l.materials}, "mat_note": "{note}"}
@@ -574,6 +589,11 @@
     如果 {r.status} 等于 ok
       设 pre = 已生成出题草稿
       设 note = {pre} #{r.draft_id}：{r.title}。去「教师助手」右边的「待确认」里确认后才进题库。
+    结束
+    设 lg = 调用 subject.取界面语言 username={current_user}
+    如果 {lg.lang} 等于 ja 且 {r.status} 等于 ok
+      设 prej = 出題の下書きを作成しました
+      设 note = {prej} #{r.draft_id}：{r.title}。「教師アシスタント」右側の「確認待ち」で確認すると問題バンクに入ります。
     结束
     返回 {"materials": {page.materials}, "mat_note": "{page.mat_note}", "note": "{note}"}
   结束

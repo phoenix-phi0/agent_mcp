@@ -488,6 +488,7 @@
     结束
     设 names = 查询 app.db teacher_rules_sorted_names studs={studs}
     设 rels = 查询 app.db teacher_rules_relay_list subj={sid}
+    设 lgp = 调用 account.取语言 username={learner}
     设 out = 解析JSON []
     遍历 rel 于 {rels}
       如果 {rel.student 或} 为空
@@ -501,6 +502,7 @@
           设 pa.student = {nm.username}
           设 pa.today = {today}
           设 pa.label = {label}
+          设 pa.lang = {lgp.lang 或 zh}
           设 p = 查一行表 app.db teacher_rules_relay_pair {pa}
           设 out = 列表加项 {out} {p}
         结束
@@ -530,7 +532,7 @@
     设 notes_r = 调用 设定列表 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
     设 notes = {notes_r}
     设 relays = 调用 传达列表 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
-    设 states = 调用 传达状态列表 subject={sid}
+    设 states = 调用 传达状态列表 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
     设 st = 调用 account.列学生
     设 studs = ,
     遍历 u 于 {st.students}
@@ -563,7 +565,20 @@
       设 sname = 科目{sid}
     结束
     设 out.note_is_owner = {own}
-    设 out.subject_head = {sname}的AI老师设定（含全部科目的）
+    设 lg = 调用 account.取语言 username={learner}
+    设 head = {sname}的AI老师设定（含全部科目的）
+    如果 {lg.lang 或 zh} 等于 ja
+      设 jname = 科目{sid}
+      设 scode = 查一值 app.db teacher_rules_subject_code id={sid}
+      如果 {scode 或} 不为空
+        设 tr = 调用 subject.译文 tbl=subject_info row_key={scode} field=name lang=ja
+        如果 {tr.text 或} 不为空
+          设 jname = {tr.text}
+        结束
+      结束
+      设 head = {jname}のAI先生設定（全科目の設定を含む）
+    结束
+    设 out.subject_head = {head}
     返回 {out}
   结束
 
@@ -806,7 +821,7 @@
     设 saved = 调用 保存传达 urgency={urg} must_info={relay_point} rounds={rounds_v} current_user={current_user} relay_id={relay_id} tone={relay_voice} deadline={relay_due} student={student} facts={relay_facts} keywords={relay_keywords} scope={scope_v} current_role={current_role} auth_mode={auth_mode} subject={sid}
     如果 {student} 为空
       设 rl = 调用 传达列表 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={sid}
-      设 rs = 调用 传达状态列表 subject={sid}
+      设 rs = 调用 传达状态列表 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={sid}
       设 out.class_relays = {rl}
       设 out.class_relay_states = {rs}
     否则
@@ -826,7 +841,7 @@
     设 u = 调用 设置传达启用 relay_id={relay_id} enabled={enabled} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
     如果 {student} 为空
       设 rl = 调用 传达列表 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
-      设 rs = 调用 传达状态列表 subject={sid}
+      设 rs = 调用 传达状态列表 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
       设 out.class_relays = {rl}
       设 out.class_relay_states = {rs}
     否则
@@ -846,7 +861,7 @@
     设 u = 调用 删除传达 relay_id={relay_id} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
     如果 {student} 为空
       设 rl = 调用 传达列表 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
-      设 rs = 调用 传达状态列表 subject={sid}
+      设 rs = 调用 传达状态列表 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={sid}
       设 out.class_relays = {rl}
       设 out.class_relay_states = {rs}
     否则
@@ -863,7 +878,12 @@
     如果 {mid 或} 为空
       报错 404 没有这条问老师记录
     结束
-    返回 {"relay_msg_ask": "（暂不记录原话）", "relay_msg_reply": "（暂不记录原话）", "relay_excerpt": "（暂不记录原话）"}
+    设 lgm = 调用 account.取语言 username={learner}
+    设 ph = （暂不记录原话）
+    如果 {lgm.lang 或 zh} 等于 ja
+      设 ph = （原文は記録していません）
+    结束
+    返回 {"relay_msg_ask": "{ph}", "relay_msg_reply": "{ph}", "relay_excerpt": "{ph}"}
   结束
 
 结束

@@ -206,6 +206,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：lang 为 ja 时 class_weak_points、class_weak_items 的 label、point_label 取译文（同 学生页面 的 K191 日语）。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用其它模块的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 调用 取全班学情 sort_by=（report_sort 为「平均得分」传 avg_score，否则传 last_at） subject=subject_id，得 students；report_sort 为「平均得分」时再整理一次顺序：answer_total 为 0（没打过分）的学生排到最后，其余保持 取全班学情 给的顺序（旧页行为：没打过分的排最后）
   伪代码 K190 日语：lang 为 ja 时 class_count 写「学生 {学生数} 人」；class_rows 的 weak_points 里每个 title 调用 subject.译文 tbl=kg_point row_key=该点 point_code field=title lang=ja，非空才替换
@@ -226,6 +227,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：lang 为 ja 时 head 的 教材 用系列译文：调用 subject.译文 tbl=lesson_series row_key=系列 code field=name lang=ja，非空才替换；student_points、student_wrong、student_recent、class_weak_points、class_weak_items 的 label、point_label 知识点调用 subject.译文 tbl=kg_point row_key=point_code field=title lang=ja，条目调用 subject.译文 tbl=kg_item row_key=item_code field=name lang=ja，非空才替换；tally、score_text 不变。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用其它模块的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 student 为空，报错 400 student 不能为空
   伪代码 form = 调用 问老师表单 chat_kw=chat_kw chat_start=chat_start chat_end=chat_end chat_kind=chat_kind（下面没有这个学生的分支也一起返回）

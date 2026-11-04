@@ -48,9 +48,10 @@
   伪代码 全都没有题，报错 404 没有可出的题
   伪代码 日语科目（或没有 subject_info 行、levels 为空串）等级是 N5,N4,N3,N2,N1，行为同旧
 
-函数 编号前缀检查 subject_id code
+函数 编号前缀检查 subject_id code lang?
   返回 {ok}
   报错 400 编号要以「<编码>.」开头
+  伪代码 K191 日语：加可选入参 lang，调用方有 learner 的先取语言再传。lang 为 ja 时报错 400 写「番号は「{pre}.」で始めてください」。
   伪代码 subject_id 等于 1（日语）：直接返回 {"ok": 1}，旧编号不动
   伪代码 否则按 subject_id 查 subject_info 的 code（科目编码，查询 quiz_subject_code）；编码为空、或 code 不匹配 ^[a-z][a-z0-9_]*\.[A-Za-z0-9_-]+$、或 code 不以「<编码>.」开头，报错 400 编号要以「<编码>.」开头（文案里的 <编码> 换成真实编码）
   伪代码 返回 {"ok": 1}
@@ -138,6 +139,7 @@
   报错 403 没有权限访问该科目
   报错 403 没有权限修改该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang；lang 为 ja 时报错 400 写「問題バンクに不正な問題があります：{lnno} 行目のレベル {f3} はこの科目のレベル（{lvSlash}）にありません」。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject），四个都不传得 1，行为同旧（init_data 固定导入 1 号科目）；写操作传 need=write，auth_mode 等于 on 时只有该科目的负责/协作教师可导入，公共科目的其他教师、学生报 403 没有权限修改该科目；下面所有查询和写入都只限这个 subject_id；调用 kg. 的函数时带 subject=subject_id（已解析，不再校验）
   伪代码 用 doc 包「读文档」读 file_path 取文本，按行拆开；空行和以 # 开头的行忽略；没有有效行报错 400 导入文件有错
   伪代码 每行格式「题号|课程|等级|考点类别|题干|选项|标准答案|可接受写法|解析|条目编号」，用 | 分隔；选项和可接受写法内部用 ^ 隔开；前 7 项必须出现，后 3 项可省略或为空
@@ -334,6 +336,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang；lang 为 ja 时成绩 stat 的前缀（中文「这一轮」）写「このセット」。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
   伪代码 调用 取做题状态 learner=learner subject=subject_id，得 started、right_count、asked_count、level、category
   伪代码 started 等于 1 则 stat=「这一轮 {right_count}/{asked_count}」否则空串；form 的 pick_level 取 level、pick_kind 取 category，为空填「全部」；level 不在本科目等级里（比如科目改过等级）时 pick_level 也填「全部」
@@ -347,6 +350,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang；lang 为 ja 时成绩 stat 的前缀（中文「这一轮」）写「このセット」；card.head 的 {level}・{category} 在 ja 下把 level 的 入门、基础、进阶 写成 入門、基礎、応用，category 的 选择、接续、挖空、意思、找错句 写成 選択、接続、穴埋め、意味、誤文訂正；一轮做完的文案写：复习模式「このセットの復習が終わりました（{stat}）。先生にまとめてもらうか、もう1セット挑戦できます。」；其他「このセットが終わりました（{stat}）。{asked_count} 問はそれぞれ異なる知識ポイントから出題しました。先生にまとめてもらうか、もう1セット挑戦できます。」；按课练的 round.text 写「このセットが終わりました（{stat}）。もう1セット選ぶと、この課の別の問題と対比問題が出ます。別の課を選ぶことも、教材に戻ってこの課を見直すこともできます。」；scope「この課《{课文标题}》（対比問題を含む）」，课文标题调用 subject.译文 tbl=lesson_text row_key=课号 field=title lang=ja，非空才替换；复习模式的 scope「弱点を復習：{names}」（names 已是译文）。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
   伪代码 pick_level 为空取「全部」、pick_kind 为空取「全部」（页面下拉默认就是全部）
   伪代码 等级确定：pick_level 不是「全部」直接用它（不在本科目等级里时由 开始 报 400 等级不在本科目里）；是「全部」则调用本模块 首个有题等级 pick_kind=pick_kind subject_id=subject_id（按 subject.科目等级 的 levels 顺序逐级找第一个有题的等级，全都没有报错 404 没有可出的题）
@@ -360,6 +364,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang；lang 为 ja 时成绩 stat 的前缀（中文「这一轮」）写「このセット」；card.head 的 {level}・{category} 在 ja 下把 level 的 入门、基础、进阶 写成 入門、基礎、応用，category 的 选择、接续、挖空、意思、找错句 写成 選択、接続、穴埋め、意味、誤文訂正；verdict 写「○ 正解です」「✗ 正解は {correct_answer}」；解析尾巴查询 quiz_explain_tail 多传 lang，ja 时把「考的是：」写成「ポイント：」；ltail 写「テキスト《{课文标题}》{一句话}」，课文标题调用 subject.译文 tbl=lesson_text row_key=课号 field=title lang=ja，一句话调用 subject.译文 tbl=lesson_text row_key=课号 field=summary lang=ja，非空才替换；score_change 写「{知识点标题} スコア {prevs} → {score}」，cheer 写「「{知识点标题}」を達成しました。図でこの先の知識ポイントが解放されたかもしれません。」；知识点标题调用 subject.译文 tbl=kg_point row_key=point_code field=title lang=ja，非空才替换。中文分支一字不改。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
   伪代码 调用 取做题状态 learner=learner subject=subject_id，得 started、question；作答取值同旧页：默认取 given，question 不为空且 is_choice 等于 1 则取 choice（两个键都可能留着旧值，按题型取才不会拿错）
   伪代码 取做题状态 得到的 question 为空（started 为 1 但题已不在库）时，跳过下面取旧分这一步（prev_score 不取），直接往下调 提交答案，由 提交答案 报 404（本页不自己报）
@@ -378,6 +383,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang；lang 为 ja 时成绩 stat 的前缀（中文「这一轮」）写「このセット」；card.head 的 {level}・{category} 在 ja 下把 level 的 入门、基础、进阶 写成 入門、基礎、応用，category 的 选择、接续、挖空、意思、找错句 写成 選択、接続、穴埋め、意味、誤文訂正；一轮做完的文案写：复习模式「このセットの復習が終わりました（{stat}）。先生にまとめてもらうか、もう1セット挑戦できます。」；其他「このセットが終わりました（{stat}）。{asked_count} 問はそれぞれ異なる知識ポイントから出題しました。先生にまとめてもらうか、もう1セット挑戦できます。」；按课练的 round.text 写「このセットが終わりました（{stat}）。もう1セット選ぶと、この課の別の問題と対比問題が出ます。別の課を選ぶことも、教材に戻ってこの課を見直すこともできます。」；scope「この課《{课文标题}》（対比問題を含む）」，课文标题调用 subject.译文 tbl=lesson_text row_key=课号 field=title lang=ja，非空才替换；复习模式的 scope「弱点を復習：{names}」（names 已是译文）。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
   伪代码 调用 取当前轮次信息 learner=learner subject=subject_id，得 mode、lesson_code
   伪代码 scope：lesson 模式=「本课《{title}》（含对比题）」（调 lesson.取课文 code=lesson_code subject=subject_id 取标题）；review 模式=调用 复习薄弱点文案 learner=learner subject_id=subject_id；自由练=空串
@@ -394,6 +400,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang；lang 为 ja 时成绩 stat 的前缀（中文「这一轮」）写「このセット」；card.head 的 {level}・{category} 在 ja 下把 level 的 入门、基础、进阶 写成 入門、基礎、応用，category 的 选择、接续、挖空、意思、找错句 写成 選択、接続、穴埋め、意味、誤文訂正；一轮做完的文案写：复习模式「このセットの復習が終わりました（{stat}）。先生にまとめてもらうか、もう1セット挑戦できます。」；其他「このセットが終わりました（{stat}）。{asked_count} 問はそれぞれ異なる知識ポイントから出題しました。先生にまとめてもらうか、もう1セット挑戦できます。」；按课练的 round.text 写「このセットが終わりました（{stat}）。もう1セット選ぶと、この課の別の問題と対比問題が出ます。別の課を選ぶことも、教材に戻ってこの課を見直すこともできます。」；scope「この課《{课文标题}》（対比問題を含む）」，课文标题调用 subject.译文 tbl=lesson_text row_key=课号 field=title lang=ja，非空才替换；复习模式的 scope「弱点を復習：{names}」（names 已是译文）。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），三个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id（quiz_question、quiz_progress 都带 subject_id 条件）；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson./progress. 的函数时一律带 subject=subject_id（已解析，不再校验）；调用本模块内部函数（组题面、选题、出下一题、开新轮 等）带 subject_id=subject_id
   伪代码 调用 取当前轮次信息 learner=learner subject=subject_id，得 mode、lesson_code；scope 同 下一题页面
   伪代码 调用 再来一轮 learner=learner subject=subject_id，得 finished、question、asked_count、right_count（400/404 原样向上抛）
@@ -405,6 +412,7 @@
   报错 400 等级不在本科目里
   报错 404 没有这课
   报错 404 没有可出的题
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang；lang 为 ja 时成绩 stat 的前缀（中文「这一轮」）写「このセット」；card.head 的 {level}・{category} 在 ja 下把 level 的 入门、基础、进阶 写成 入門、基礎、応用，category 的 选择、接续、挖空、意思、找错句 写成 選択、接続、穴埋め、意味、誤文訂正；一轮做完的文案写：复习模式「このセットの復習が終わりました（{stat}）。先生にまとめてもらうか、もう1セット挑戦できます。」；其他「このセットが終わりました（{stat}）。{asked_count} 問はそれぞれ異なる知識ポイントから出題しました。先生にまとめてもらうか、もう1セット挑戦できます。」；按课练的 round.text 写「このセットが終わりました（{stat}）。もう1セット選ぶと、この課の別の問題と対比問題が出ます。別の課を選ぶことも、教材に戻ってこの課を見直すこともできます。」；scope「この課《{课文标题}》（対比問題を含む）」，课文标题调用 subject.译文 tbl=lesson_text row_key=课号 field=title lang=ja，非空才替换；复习模式的 scope「弱点を復習：{names}」（names 已是译文）。
   伪代码 所有分支（含 noreview 轻状态、出题、end）的返回都带 level_options（subject.科目等级 subject_id=subject_id 的 options，同 做题页面）
   报错 400 subject 不对
   报错 403 该科目未分配给你

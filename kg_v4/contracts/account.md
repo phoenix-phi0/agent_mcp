@@ -215,6 +215,7 @@
   报错 404 没有这个科目
   报错 403 只有教师可以管理科目
   报错 403 没有权限访问该科目
+  伪代码 K191 日语：调用 取语言 username=learner 取 lang；lang 为 ja 时 member_head 写「{科目名}（{code}）·{状态}·私は{身份}」，科目名调用 subject.译文 tbl=subject_info row_key=code field=name lang=ja，非空才替换；状态 启用、停用、草稿 写 有効、無効、下書き；身份 单人、负责、协作、公共只读 写 シングル、担当、共同担当、公開（閲覧のみ）；没账号时的显示名写「{用户名}（アカウントなし）」。member_role、member_state、add_role 等是界面判断用的中文原值，不改（由词表翻显示）。
   伪代码 调用 subject.科目详情 learner=learner subject_id=subj_id current_role=current_role auth_mode=auth_mode 得 详情（400/404/403 由它报：学生、他人私有科目的教师进不来）
   伪代码 can_manage：详情 my_role 是 owner 或 single 为 1，否则 0；can_assign：详情 status 不等于 disabled 为 1，否则 0（能读到详情的教师都有分配权：负责、协作、公共科目其他教师）
   伪代码 显示名：按用户名查 account_user 的 display_name，查不到写「{用户名}（无账号）」

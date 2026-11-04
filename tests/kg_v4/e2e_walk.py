@@ -1395,6 +1395,11 @@ def k190_flow(browser, base, proj, ck, marks, new_page):
         ck(p.locator('a:has-text("更早 →")').count() == 0, f"{name}：最后一页没有更早")
         p.locator('a:has-text("← 更新")').click()
         settle()
+        # 只改地址 #…，networkidle 不会重新等，settle 实际只睡 600ms；机器忙时列表还没换（K191 跑 run_all 撞上过）。条件不放松，等到为止
+        for _ in range(75):
+            if row_ids() == second and "chat_after=" in hash_of(p):
+                break
+            p.wait_for_timeout(200)
         ck(row_ids() == second and "chat_after=" in hash_of(p), f"{name}：更新带游标回到上一页", str(row_ids()[:3]) + hash_of(p))
         p.go_back()
         settle()
@@ -1465,7 +1470,8 @@ def k190_flow(browser, base, proj, ck, marks, new_page):
         ck("没有这个学生" not in missing and "nobody190" in missing, f"{name}：ja 没有这个学生", missing)
         p.goto(base + "/teacher" + hash0, wait_until="domcontentloaded")
         p.reload(wait_until="domcontentloaded")
-        ck(has("全 47 件、1/3 ページ"), f"{name}：ja 列表")
+        # domcontentloaded 后 Vue 才挂载、列表接口要重查；机器忙时 15 秒不够（K191 全量回归撞过一次，单独跑 286/286）。条件不放松，等到为止
+        ck(has("全 47 件、1/3 ページ", timeout=45000), f"{name}：ja 列表")
         settle()
         p.wait_for_timeout(400)
         d = json.loads(nowrap_ok())

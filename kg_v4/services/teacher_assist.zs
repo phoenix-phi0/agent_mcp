@@ -747,6 +747,8 @@
     设 sj = 调用 本科目 learner={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 subject_id = {sj.subject_id}
     设 recent = 调用 取最近对话 current_user={current_user} limit=6 subject_id={subject_id}
+    设 lgx = 调用 subject.取界面语言 username={current_user}
+    设 lang = {lgx.lang 或 zh}
     设 f = 调用 取上轮聚焦 current_user={current_user} subject_id={subject_id}
     设 fs = {blank}
     如果 {f.student} 不为空
@@ -819,6 +821,9 @@
           报错 400 {we.error}
         结束
         设 reply = 你在这个科目只有读权限，不能让助手生成改动草稿（出题、发传达、改设定、加知识点）；学情照样可以问。
+        如果 {lang} 等于 ja
+          设 reply = この科目では閲覧権限のみのため、アシスタントに変更の下書き（出題、伝達、設定変更、知識ポイント追加）を作らせることはできません。学習状況の質問はできます。
+        结束
       否则
         如果 {d.revise} 等于 1 且 {pend_id} 不为空
           设 rep = {pend_id}
@@ -826,6 +831,9 @@
         结束
         如果 {dk} 为空
           设 reply = 你是想让我出题、给学生发传达、改AI老师设定，还是加知识点/条目？
+          如果 {lang} 等于 ja
+            设 reply = 出題、学生への伝達、AI先生設定の変更、知識ポイント・項目の追加のどれをご希望ですか？
+          结束
         否则
           设 st2 = {d.student}
           设 pt2 = {d.point}
@@ -867,6 +875,9 @@
               设 st2 = {jn}
               如果 {L.total} 大于 30
                 设 more30 = （掉队名单共{L.total} 人，这份草稿只带了前 30 位）
+                如果 {lang} 等于 ja
+                  设 more30 = （遅れている学生は全{L.total} 人ですが、この下書きには先頭の 30 人のみ入っています）
+                结束
               结束
             结束
           结束
@@ -883,6 +894,10 @@
             设 pv = 查一值表 app.db teacher_assist_substr {sg}
             设 pre = 已生成草稿
             设 reply = {pre} #{g.draft_id}：{g.title}{nl}{pv}{nl}点「确认」才会写入；不要就点「放弃」。也可以直接说哪里要改，我出一份修订稿。{more30}
+            如果 {lang} 等于 ja
+              设 pre = 下書きを作成しました
+              设 reply = {pre} #{g.draft_id}：{g.title}{nl}{pv}{nl}「確認」を押すと書き込まれます。不要なら「破棄」を押してください。修正したい点を伝えていただければ修正版を作ります。{more30}
+            结束
           结束
         结束
       结束
@@ -896,6 +911,9 @@
       设 nl = 查一值 app.db teacher_assist_nl
       如果 {cur.file_id} 为空
         设 reply0 = 你还没有挂附件。先在底栏选一个txt、md、csv、pdf或docx文件，点「传附件」，再问我。
+        如果 {lang} 等于 ja
+          设 reply0 = まだ添付ファイルがありません。先に下の欄でtxt、md、csv、pdf、docxのファイルを選び、「ファイルを添付」を押してから質問してください。
+        结束
         设 rid0 = 调用 写一轮 current_user={current_user} user_text={msg} reply={reply0} intent=file_qa student={blank} point={blank} status=ask subject_id={subject_id}
         返回 {"ok": 1, "reply_id": {rid0}, "reply": "{reply0}", "intent": "file_qa", "student": "", "point": "", "status": "ask", "draft_id": ""}
       结束
@@ -919,8 +937,14 @@
           报错 400 {we.error}
         结束
         设 reply = 你在这个科目只有读权限，不能让助手生成教学材料；学情照样可以问。
+        如果 {lang} 等于 ja
+          设 reply = この科目では閲覧権限のみのため、アシスタントに教材を作らせることはできません。学習状況の質問はできます。
+        结束
       否则如果 {mk} 为空
         设 reply = 你想要哪种材料：教案、课堂练习、讲义，还是学情报告？
+        如果 {lang} 等于 ja
+          设 reply = 教案、授業の練習問題、講義資料、学習状況レポートのどれをご希望ですか？
+        结束
       否则
         设 mpt = {d.point}
         如果 {mk} 不等于 report 且 {mpt} 为空 且 {f.point_title} 不为空
@@ -944,6 +968,10 @@
           设 mid2 = {mg.mat_id}
           设 pre = 已生成材料
           设 reply = {pre} #{mg.mat_id}：{mg.title}（未保存）{nl}{mg.preview}{nl}点「保存」留下，不保存的 7 天后自动清掉；「导出」看全文、复制；课堂练习还可以「做成出题草稿」。要改字句去「教学材料」页编辑。
+          如果 {lang} 等于 ja
+            设 pre = 教材を作成しました
+            设 reply = {pre} #{mg.mat_id}：{mg.title}（未保存）{nl}{mg.preview}{nl}「保存」で残せます。保存しないものは 7 日後に自動で削除されます。「エクスポート」で全文の確認とコピーができます。授業の練習問題は「出題の下書きにする」もできます。文面の修正は「教材」ページで編集してください。
+          结束
         结束
       结束
       设 ridm = 调用 写一轮 current_user={current_user} user_text={msg} reply={reply} intent=make_material student={blank} point={blank} status={mstatus} subject_id={subject_id}
@@ -956,6 +984,9 @@
       设 ak = {d.analysis_kind}
       如果 {ak} 为空
         设 repa = 你想看哪种分析：最近的趋势、错题归因、学生对比，还是掉队名单？
+        如果 {lang} 等于 ja
+          设 repa = 最近の傾向、誤答の原因、学生の比較、遅れている学生のどの分析をご希望ですか？
+        结束
         设 rida = 调用 写一轮 current_user={current_user} user_text={msg} reply={repa} intent=deep_analysis student={blank} point={blank} status=ask subject_id={subject_id}
         返回 {"ok": 1, "reply_id": {rida}, "reply": "{repa}", "intent": "deep_analysis", "student": "", "point": "", "status": "ask", "draft_id": "", "mat_id": ""}
       结束
@@ -1048,12 +1079,18 @@
     如果 {ac.ok} 等于 0
       设 ro = 1
     结束
+    设 lgp = 调用 subject.取界面语言 username={current_user}
+    设 lang = {lgp.lang 或 zh}
     设 acur = 调用 assist_file.取当前附件 current_user={current_user} subject={subject_id}
     设 fl = 调用 assist_file.列附件 current_user={current_user} subject={subject_id}
     设 att_note = {blank}
     如果 {fl.total} 大于 0
       设 pre = 已存
       设 att_note = {pre} {fl.total} / {fl.limit} 个附件
+      如果 {lang} 等于 ja
+        设 pj = 保存済み
+        设 att_note = {pj} {fl.total} / {fl.limit} 個の添付ファイル
+      结束
     结束
     返回 {"talk": [{talk}], "drafts": {dl.drafts}, "readonly": {ro}, "attach": {"file_id": "{acur.file_id}", "label": "{acur.label}"}, "files": {fl.files}, "att_note": "{att_note}"}
   结束
@@ -1084,6 +1121,14 @@
     如果 {a.reused} 等于 1
       设 sent = 这个文件之前传过，已重新挂上{a.label}。
     结束
+    设 lgf = 调用 subject.取界面语言 username={current_user}
+    设 lang = {lgf.lang 或 zh}
+    如果 {lang} 等于 ja
+      设 sent = {a.label} を添付しました。これからの質問で参考にします。添付ファイルからの出題もできます。不要になったら添付バーの「添付を外す」を押してください。
+      如果 {a.reused} 等于 1
+        设 sent = このファイルは以前アップロードされているので、{a.label} を再度添付しました。
+      结束
+    结束
     设 mid = 调用 记一条 current_user={current_user} content={sent} subject_id={subject_id} intent=file_qa
     设 msg = {message 或}
     设 reply = {blank}
@@ -1107,6 +1152,11 @@
     设 subject_id = {sj.subject_id}
     设 a = 调用 assist_file.挂上附件 current_user={current_user} file_id={file_id} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
     设 sent = 已挂上{a.label}。
+    设 lgf = 调用 subject.取界面语言 username={current_user}
+    设 lang = {lgf.lang 或 zh}
+    如果 {lang} 等于 ja
+      设 sent = {a.label} を添付しました。
+    结束
     设 mid = 调用 记一条 current_user={current_user} content={sent} subject_id={subject_id} intent=file_qa
     设 pg = 调用 列对话页面 current_user={current_user} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
     返回 {pg}
@@ -1193,6 +1243,12 @@
       设 pv = 查一值表 app.db teacher_assist_substr {sp}
       设 pre = 已把课堂练习
       设 sent = {pre} #{mat_id} 做成出题草稿 #{r.draft_id}：{r.title}{nl}{pv}{nl}点「确认」才会写入题库；不要就点「放弃」。
+      设 lgm = 调用 subject.取界面语言 username={current_user}
+      设 lang = {lgm.lang 或 zh}
+      如果 {lang} 等于 ja
+        设 pre = 授業の練習問題
+        设 sent = {pre} #{mat_id} を出題の下書き #{r.draft_id} にしました：{r.title}{nl}{pv}{nl}「確認」を押すと問題バンクに書き込まれます。不要なら「破棄」を押してください。
+      结束
       设 did = {r.draft_id}
     结束
     设 msgid = 调用 记一条 current_user={current_user} content={sent} subject_id={subject_id} intent=make_draft

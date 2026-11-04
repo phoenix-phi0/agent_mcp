@@ -146,6 +146,11 @@ def main() -> int:
                 t = re.sub(r"  字段 chat_intent_label .*?  字段 chat_notes ", "  字段 chat_notes ", t, flags=re.S)
                 t = re.sub(r"  字段 link_label .*?\n  字段 link_url .*?\n", "", t, flags=re.S)
                 ent.write_text(t, encoding="utf-8")
+                # K191 科目表显示列 subj_label 也不在基线里
+                ui = proj / "ui/subject.ui"
+                ui.write_text(ui.read_text(encoding="utf-8").replace("列 subj_label 名称", "列 subj_name 名称"), encoding="utf-8")
+                ent = proj / "entities/subject.entity"
+                ent.write_text(re.sub(r"  字段 subj_label .*?\n", "", ent.read_text(encoding="utf-8")), encoding="utf-8")
             build(proj)
             n_i18n = sorted(f.name for f in (proj / "web").glob("i18n.*"))
             check(not n_i18n, f"{src} 副本没有 i18n.*.js：{n_i18n}")

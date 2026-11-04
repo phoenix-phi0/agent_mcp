@@ -604,6 +604,10 @@
       结束
     结束
     如果 {reasons} 不为空
+      设 lg = 调用 subject.取界面语言 username={learner}
+      如果 {lg.lang 或} 等于 ja
+        报错 409 知識ポイントまたは項目が参照されているため取り消せません（{reasons}）
+      结束
       报错 409 知识点或条目已被引用，不能撤销（{reasons}）
     结束
     设 errl = 解析JSON []

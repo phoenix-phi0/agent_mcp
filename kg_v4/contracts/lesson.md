@@ -201,7 +201,7 @@
   伪代码 逐行插入 lesson_text（series_code 取入参，带 subject_id），对条目编号列表每个编号插入 lesson_item_link (lesson_code, item_code, subject_id)，对知识点编号列表每个编号插入 lesson_point_link (lesson_code, point_code, subject_id)，同一课内重复编号只插一次，统计 item_links、point_links
   伪代码 返回 {"ok": 1, "series_code": series_code, "total": 有效行数, "item_links": item_links, "point_links": point_links}
 
-公开 函数 写入系列课文并重灌 series_code rows_json series_name? source? license? intro? intro_given? sort_order? learner? current_role? auth_mode? subject?
+公开 函数 写入系列课文并重灌 series_code rows_json series_name? source? license? intro? intro_given? sort_order? learner? lang? current_role? auth_mode? subject?
   返回 {ok, series_code, total, imported, item_links, point_links, file_rows, rejected}
   报错 400 series_code 不能为空
   报错 400 series_code 格式不对
@@ -215,6 +215,7 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  伪代码 K191 日语：加可选入参 lang。给了就用它，没给才按 learner 取语言；传给 编号前缀检查。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 kg./lesson. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 series_code 为空，报错 400 series_code 不能为空
   伪代码 series_code 格式（它要拼进文件路径 content/lesson/series/{series_code}.jsonl，防路径穿越）：必须符合旧系列代号规则 ^[a-z][a-z0-9_-]{0,39}$（如 hanabira、s1、my-s_1），或符合科目编号规则 ^[a-z][a-z0-9_]*\.[A-Za-z0-9_-]+$（如 math.s）；两条都不符（含 /、\、..、空白、大写开头等）报错 400 series_code 格式不对，不写文件、不动库（在 rows_json 校验之前判）
@@ -314,9 +315,10 @@
   返回 {subject_id}；本次请求用哪个科目
   伪代码 调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=need，原样返回它的 subject_id（need 不传按 read；need=write 时登录模式下只有负责/协作教师通过，否则 解析科目 报 403 没有权限修改该科目、原样抛出；四个入参都是空串时得 1；显式 subject 无权时 解析科目 报 403/404、不是数字报 400，原样抛出）
 
-函数 编号前缀检查 subject_id code
+函数 编号前缀检查 subject_id code lang?
   返回 {ok}
   报错 400 编号要以「<编码>.」开头
+  伪代码 K191 日语：加可选入参 lang，调用方有 learner 的先取语言再传。lang 为 ja 时报错 400 写「番号は「{sc}.」で始めてください」；取不到科目编码（sc 为空）时写「番号は「科目コード.」で始めてください」。
   伪代码 subject_id 等于 1（日语）：直接返回 {"ok": 1}，旧编号不动
   伪代码 否则按 subject_id 查 subject_info 的 code（科目编码，查询 lesson_subject_code）；编码为空、或 code 不匹配 ^[a-z][a-z0-9_]*\.[A-Za-z0-9_-]+$、或 code 不以「<编码>.」开头，报错 400 编号要以「<编码>.」开头（文案里的 <编码> 换成真实编码）
   伪代码 返回 {"ok": 1}

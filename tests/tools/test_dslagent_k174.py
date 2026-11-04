@@ -22,6 +22,7 @@
 
     /workspace/agent_mcp/.venv/bin/python tests/tools/test_dslagent_k174.py
 """
+import re
 import difflib
 import io
 import json
@@ -131,8 +132,8 @@ def test_dep_body():
     check(B.deps_md(mb2).count("#### graph.取知识点 的伪代码") == 1, "同一上游函数被多个函数调用：模块里只附一次", B.deps_md(mb2))
     k = ROOT / "kg_v4"
     mdk = B.module_md(B.module_brief(k, "teacher_assist"))
-    check("#### assist_draft.生成草稿 的伪代码（共 15 行，超长截断了；全文见 contracts/assist_draft.md:96）" in mdk,
-          "kg_v4 实测：生成草稿 15 行超 1500 字，截断并注明全文位置", [l for l in mdk.split("\n") if "生成草稿 的伪代码" in l])
+    check(re.search(r"#### assist_draft\.生成草稿 的伪代码（共 \d+ 行，超长截断了；全文见 contracts/assist_draft\.md:\d+）", mdk),
+          "kg_v4 实测：生成草稿超 1500 字，截断并注明全文位置", [l for l in mdk.split("\n") if "生成草稿 的伪代码" in l])
     check(mdk.count("#### assist_draft.列草稿 的伪代码") == 1, "列草稿 被 问助手 / 列对话页面 都调用：只附一次", mdk.count("#### assist_draft.列草稿 的伪代码"))
 
 

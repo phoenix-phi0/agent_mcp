@@ -1,0 +1,5 @@
+# K191：1 号科目（日语语法）自身的名字译文。内容（讲解、题目）按设计 D3 不翻，只翻显示在顶栏、学情、下拉里的名字。
+# 四列：tbl、row_key、field、text（同 scripts/import_content_ja.py）。init_data 写入；已有的不覆盖。
+subject_info	jp_grammar	name	日本語文法
+lesson_series	hanabira	name	hanabira 文法
+lesson_series	hanabira	intro	hanabira.org の日本語文法ライブラリを中国語話者向けに書き直した解説です。N5〜N1 の全 125 課。

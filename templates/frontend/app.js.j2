@@ -210,12 +210,21 @@ const _app = createApp({
       if (i18nLang.value === "zh") return t;
       return ((window.I18N || {})[i18nLang.value] || {})[t] || t;
     }
+    // 引擎自己带插值的文案：词表键里写 {0} {1}，查到用译文，查不到用中文原文
+    function tfmt(s, ...args) {
+      return tmsg(s).replace(/\{(\d+)\}/g, (m, i) => String(args[+i]));
+    }
     function tdom() {
       if (i18nLang.value === "zh") return;
       const dict = (window.I18N || {})[i18nLang.value] || {};
+      // 标题形如「项目名·教师端」，按 · 分段查
+      const tt = document.title.split("·").map(x => dict[x] || x).join("·");
+      if (tt !== document.title) document.title = tt;
       const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       for (let n = walk.nextNode(); n; n = walk.nextNode()) {
-<% if has_markdown %>        if (n.parentElement && n.parentElement.closest(".markdown code")) continue;
+        // 语言切换里的「中文」是给看不懂日文的人用的，不翻；别处的「中文」（表头）照翻
+<% if has_lang_switch %>        if (n.parentElement && n.parentElement.closest(".nav-lang")) continue;
+<% endif %><% if has_markdown %>        if (n.parentElement && n.parentElement.closest(".markdown code")) continue;
 <% endif %>        const v = n.nodeValue;
         if (!v || !v.trim()) continue;
         const t = dict[v.trim()];
@@ -285,7 +294,7 @@ const _app = createApp({
         const tooBig = picked.find(f => f.size > limit);
         if (tooBig) {
           // 选完就拦，省得传上去才被拒。这只挡诚实的用户，后端还得再查。
-          alert(`${tooBig.name} 超过 ${maxsize}`);
+          alert(<% if i18n_langs %>tfmt("{0} 超过 {1}", tooBig.name, maxsize)<% else %>`${tooBig.name} 超过 ${maxsize}`<% endif %>);
           ev.target.value = "";
           return;
         }
@@ -436,7 +445,7 @@ const _app = createApp({
         return await afterFetch(r);
       } catch (e) {
         if (e && e.name === "AbortError")
-          return { error: `等了 ${FETCH_TIMEOUT_MS / 1000} 秒服务器还没回应，过一会儿再试` };
+          return { error: <% if i18n_langs %>tfmt("等了 {0} 秒服务器还没回应，过一会儿再试", FETCH_TIMEOUT_MS / 1000)<% else %>`等了 ${FETCH_TIMEOUT_MS / 1000} 秒服务器还没回应，过一会儿再试`<% endif %> };
         throw e;
       } finally {
         clearTimeout(timer);
@@ -451,7 +460,7 @@ const _app = createApp({
       try {
         data = await r.json();
       } catch (e) {
-        data = { error: `服务器返回的不是 JSON（${r.status}）` };
+        data = { error: <% if i18n_langs %>tfmt("服务器返回的不是 JSON（{0}）", r.status)<% else %>`服务器返回的不是 JSON（${r.status}）`<% endif %> };
       }
 <% if has_me %>
       if (r.status === 401) me.value = { ...NOBODY };
@@ -652,7 +661,7 @@ const _app = createApp({
       if (!there) return false;
       const theirs = m.roleLabel || m.role;
       if (there !== "/") {
-        showNotice(`这是${PAGE.end || "主"}页面，${theirs}请用${theirs}端，正在打开 ${there}`, "no");
+        showNotice(<% if i18n_langs %>tfmt("这是{0}页面，{1}请用{1}端，正在打开 {2}", tmsg(PAGE.end || "主"), tmsg(theirs), there)<% else %>`这是${PAGE.end || "主"}页面，${theirs}请用${theirs}端，正在打开 ${there}`<% endif %>, "no");
         leaving = true;
         leaveTo(there);
         return true;
@@ -665,10 +674,10 @@ const _app = createApp({
         } catch (e) { /* 退不掉也得拒：下面照样回登录页 */ }
         me.value = { ...NOBODY };
         go(LOGIN);
-        showNotice(`这是${PAGE.end}端，${theirs}账号不能在这里登录。请用${PAGE.end}账号；${theirs}请打开 ${there}`, "no");
+        showNotice(<% if i18n_langs %>tfmt("这是{0}端，{1}账号不能在这里登录。请用{0}账号；{1}请打开 {2}", tmsg(PAGE.end), tmsg(theirs), there)<% else %>`这是${PAGE.end}端，${theirs}账号不能在这里登录。请用${PAGE.end}账号；${theirs}请打开 ${there}`<% endif %>, "no");
       } else {
         go(LOGIN);
-        showNotice(`这是${PAGE.end}端，现在登录的是${theirs}账号（${m.label}）。请用${PAGE.end}账号登录；${theirs}请打开 ${there}`, "no");
+        showNotice(<% if i18n_langs %>tfmt("这是{0}端，现在登录的是{1}账号（{2}）。请用{0}账号登录；{1}请打开 {3}", tmsg(PAGE.end), tmsg(theirs), m.label, there)<% else %>`这是${PAGE.end}端，现在登录的是${theirs}账号（${m.label}）。请用${PAGE.end}账号登录；${theirs}请打开 ${there}`<% endif %>, "no");
       }
       return true;
     }
@@ -719,9 +728,15 @@ const _app = createApp({
         const s = screens.find(x => x.name === route.value);
         const end = s ? s.audience : PAGE.elsewhere[route.value];
         const there = s ? "" : PAGE.ends[end];
+<% if i18n_langs %>
+        showNotice(!s ? tfmt("「{0}」在{1}端{2}，这里打不开，已回到首页", tmsg(route.value), tmsg(end), there ? `（${there}）` : "")
+                   : end ? tfmt("没有权限打开这个页面（{0}端的），已回到首页", tmsg(end))
+                   : "没有权限打开这个页面", "no");
+<% else %>
         showNotice(!s ? `「${route.value}」在${end}端${there ? `（${there}）` : ""}，这里打不开，已回到首页`
                    : end ? `没有权限打开这个页面（${end}端的），已回到首页`
                    : "没有权限打开这个页面", "no");
+<% endif %>
       }
       go(firstAppScreen());
     }
@@ -1396,7 +1411,7 @@ const _app = createApp({
           const at = src.filter(n => depth[K(n)] === L).map(n => pos[K(n)]).filter(Boolean);
           if (!at.length) return;
           // 邻域图的层只叫 直接前置 / 当前 / 直接后续，不带层号
-          const text = (raw.layerTitles || {})[L] != null ? raw.layerTitles[L] : (names[L] != null ? L + '\u3000' + names[L] : '第 ' + L + ' 步');
+          const text = (raw.layerTitles || {})[L] != null ? raw.layerTitles[L] : (names[L] != null ? L + '\u3000' + names[L] : <% if i18n_langs %>tfmt('第 {0} 步', L)<% else %>'第 ' + L + ' 步'<% endif %>);
           const box = lr
             ? { x: Math.min(...at.map(c => c.x)) - BW / 2 - RANKSEP / 2, y: minY, w: Math.max(...at.map(c => c.x)) - Math.min(...at.map(c => c.x)) + BW + RANKSEP, h: maxY - minY }
             : { x: minX, y: Math.min(...at.map(c => c.y)) - BH / 2 - RANKSEP / 2, w: maxX - minX, h: Math.max(...at.map(c => c.y)) - Math.min(...at.map(c => c.y)) + BH + RANKSEP };
@@ -1415,13 +1430,17 @@ const _app = createApp({
         const bar = typeof n.progress === 'number' ? Math.max(0, Math.min(100, Math.round(n.progress * 100))) : null;
         let sub = n.sub != null ? String(n.sub) : '';
         if (n.sub == null) {
-          if (bar != null) sub = '学习中 ' + bar + '%';
+          if (bar != null) sub = <% if i18n_langs %>tfmt('学习中 {0}%', bar)<% else %>'学习中 ' + bar + '%'<% endif %>;
           else if (st === 'kg-done') sub = '已掌握';
           else if (st === 'kg-open') sub = '可学';
           else if (st === 'kg-locked') {
             const miss = pre[K(n)].filter(p => _kgState[(byId[p] || {}).state] !== 'kg-done')
               .map(p => byId[p] && byId[p].label != null ? String(byId[p].label) : p);
+<% if i18n_langs %>
+            sub = miss.length ? (miss.length > 2 ? tfmt('需要 {0} 等', miss.slice(0, 2).join('、')) : tfmt('需要 {0}', miss.join('、'))) : '未解锁';
+<% else %>
             sub = miss.length ? '需要 ' + miss.slice(0, 2).join('、') + (miss.length > 2 ? ' 等' : '') : '未解锁';
+<% endif %>
           }
         }
         const icon = n.icon != null ? _kgEsc(n.icon) : (_kgIcon[st] || '');
@@ -1461,8 +1480,12 @@ const _app = createApp({
         edges.push({ id: 'c:' + K(n) + '~' + c, source: s, target: t, type: 'straight', class: 'kg-contrast', sourceHandle: sh, targetHandle: th });
       }));
       const longest = src.length ? Math.max(...src.map(n => depth[K(n)])) + 1 : 0;
+<% if i18n_langs %>
+      const legend = tfmt('实心带勾=已掌握\u3000亮边=可学\u3000灰色带锁=未解锁\u3000角标=下游节点数\u3000虚线=对照关系\u3000共 {0} 个节点，最长链 {1} 步', src.length, longest);
+<% else %>
       const legend = '实心带勾=已掌握\u3000亮边=可学\u3000灰色带锁=未解锁\u3000角标=下游节点数\u3000虚线=对照关系\u3000共 '
         + src.length + ' 个节点，最长链 ' + longest + ' 步';
+<% endif %>
       // vkey：VueFlow 的 :key。数据或当前点一换就重建、重新取景
       const out = { nodes, edges, legend, vkey: nodes.length + ':' + edges.length + ':' + cid };
       _graphCache.set(path, { key, out });

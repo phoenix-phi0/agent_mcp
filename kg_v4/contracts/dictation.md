@@ -175,6 +175,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：成绩文本的前缀（中文「这一轮」）在 ja 下写「このセット」。词卡（拼词卡）在 ja 下：head 的方向写 中国語を見て日本語を書く（zh2jp）或 漢字を見て読みを書く（其他）；sub 写「意味：{bare}」；hint 写「ヒント：最初の仮名は「{fk}」、読みは全部で {len} 文字」。方向名 这个内部函数本身不改（表单回填和方向代号用它做下拉值），另外取日文名。lang 用 调用 subject.取界面语言 username=learner 取。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 vocab. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 调用 取状态 learner=learner subject=subject_id，得 s
   伪代码 返回 {"dstat": 成绩文本(s), "form": 表单回填(s)}
@@ -188,6 +189,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：dempty 在 ja 下写「「{方向日文名}」（レベル：{レベル}）の間違えた単語帳は空です。間違えた単語がないか、すべて2回連続で正解しています。まずランダムに1セット練習しましょう。」，レベル 为全部时写「すべて」。其余同 默写页面 的 K191 日语。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 vocab. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 dict_direction 为空取「看中文写日语」、dict_level 为空取「全部」、dict_source 为空取「随机」（页面下拉的默认）
   伪代码 值域转换：调用 方向代号 得 direction；dict_level 为「全部」时 level 取空串，否则原值；dict_source 为「随机」时 source 取空串，「错词复习」取 review，其余报错 400 题源不对
@@ -222,6 +224,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：同 开始页面 的 K191 日语。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 vocab. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 调用 取状态 learner=learner subject=subject_id，得 s；方向默认取库里的（没记过取 zh2jp），direction 参数 reading 换成 kanji2kana、meaning 换成 zh2jp，其他值不理；等级 level 参数不为空取参数（「全部」当空串）否则取库里的；题源默认取库里的（review 保持，其余空串），source 参数 review 换成 review、random 换成空串，其他值不理
   伪代码 调用 开轮页面 learner=learner direction=direction level=level source=source subject_id=subject_id，得 r，r 加上 form：方向转中文、等级空填「全部」、题源 review 回填「错词复习」否则「随机」
@@ -237,6 +240,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：lang 为 ja 时 verdict 写 ✗ 不正解、○ 正解、○ 正解（ヒントを見たので、間違えた単語帳の「連続正解」には数えません）；right 的前缀写「正解：」；mine 的前缀写「あなたの答え：」；stat 前缀写「このセット」。note（交答案 返回）在 ja 下也写日文：看 交答案 里 note 的几种取值，同义词也算对写「同じ意味の単語も正解です」，同读音的另一个词写「同じ読みの別の単語です」，另一个读法写「別の読み方です」，别的情形照中文语义翻成自然的日语。其余同 默写页面 的 K191 日语。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 vocab. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 调用 取状态 learner=learner subject=subject_id，得 s（要交之前的 word_id、direction、asked_count）；调用 交答案 learner=learner subject=subject_id answer=dict_answer，得 r（报错原样向上抛）
   伪代码 word 取 {id: s.word_id, kanji: r.kanji, kana: r.kana, meaning: r.meaning}；调用 拼词卡 direction=s.direction word=word asked_count=r.asked_count hinted=r.hinted，得 card，再填 verdict、right、mine、note
@@ -252,6 +256,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：同 默写页面 的 K191 日语。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 vocab. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 调用 提示 learner=learner subject=subject_id（报错原样向上抛）；调用 取状态 learner=learner subject=subject_id，得 s；调用 vocab.取单词 subject=subject_id word_id=s.word_id
   伪代码 调用 拼词卡 direction=s.direction word=该词 asked_count=s.asked_count hinted=1，得 card；返回 {"dphase": "ask", "dcard": card, "dstat": 成绩文本(s)}
@@ -264,6 +269,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：lang 为 ja 时 round 文案写「このセットが終わりました：{asked_count} 問中 {right_count} 問正解。」，全对写「このセットが終わりました：{asked_count} 問すべて正解。」。其余同 默写页面 的 K191 日语。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（路由层注入登录角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id；本函数在本模块内调用其它函数（含公开函数）、调用 vocab. 的函数时一律带 subject=subject_id（已解析，不再校验）
   伪代码 调用 下一个 learner=learner subject=subject_id，得 s（报错原样向上抛）
   伪代码 s.finished 等于 0：调用 vocab.取单词 subject=subject_id word_id=s.word_id，拼词卡 hinted=0，返回 {dphase: ask, dcard, dstat: 成绩文本(s)}

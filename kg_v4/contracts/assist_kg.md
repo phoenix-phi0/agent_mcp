@@ -59,6 +59,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang；lang 为 ja 时报错 409 写「知識ポイントまたは項目が参照されているため取り消せません（{reasons}）」。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；四个都不传得 1；assist_draft 调用时传 subject=已解析的科目编号（不再校验）；本函数调用其它函数时一律带 subject=subject_id
   伪代码 result_json 是草稿的 result 列（字典或 JSON 文本，先解析）；下面的 result.items 指它的 items
   伪代码 要撤的是 result.items 里 ok 等于 1 且 undo 为空的条目；type 等于 edge 的只撤 created 等于 1 的（created=0 的边不是本草稿建的，直接记 undo=gone，不删）

@@ -302,9 +302,10 @@
   返回 {subject_id}；本次请求用哪个科目
   伪代码 调用 subject.解析科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=need，原样返回它的 subject_id（need 不传按 read；need=write 时登录模式下只有负责/协作教师通过，否则 解析科目 报 403 没有权限修改该科目、原样抛出；四个入参都是空串时得 1；显式 subject 无权时 解析科目 报 403/404、不是数字报 400，原样抛出）
 
-函数 编号前缀检查 subject_id code
+函数 编号前缀检查 subject_id code lang?
   返回 {ok}
   报错 400 编号要以「<编码>.」开头
+  伪代码 K191 日语：加可选入参 lang，调用方有 learner 的先取语言再传。lang 为 ja 时报错 400 写「番号は「{sc}.」で始めてください」。
   伪代码 subject_id 等于 1（日语）：直接返回 {"ok": 1}，旧编号不动
   伪代码 否则按 subject_id 查 subject_info 的 code（科目编码，查询 kg_subject_code）；编码为空、或 code 不匹配 ^[a-z][a-z0-9_]*\.[A-Za-z0-9_-]+$、或 code 不以「<编码>.」开头，报错 400 编号要以「<编码>.」开头（文案里的 <编码> 换成真实编码）
   伪代码 返回 {"ok": 1}
@@ -393,6 +394,7 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang；lang 为 ja 时报错 409 写「知識ポイントはまだ参照されているため削除できません（{detail}）」，detail 的来源名同 载入知识点页面 的 K191 日语。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 code 去掉首尾空白后为空，报错 400 编号不能为空；按 code 和 subject_id 查 kg_point，查不到（包括属于别的科目）报错 404 没有这个知识点
   伪代码 调用本模块 查引用 code=code kind=point subject=subject_id 得 deletable 和 refs
@@ -475,6 +477,7 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang；lang 为 ja 时报错 409 写「項目はまだ参照されているため削除できません（{detail}）」，detail 的来源名同 载入知识点页面 的 K191 日语。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 code 去掉首尾空白后为空，报错 400 编号不能为空；按 code 和 subject_id 查 kg_item，查不到（包括属于别的科目）报错 404 没有这个条目
   伪代码 调用本模块 查引用 code=code kind=item subject=subject_id 得 deletable 和 refs
@@ -541,12 +544,13 @@
   伪代码 已到集合先放 start；反复扫一遍 edges，pre_code 已到而 point_code 未到的把 point_code 加进已到集合，直到一轮没有新加入（最多 500 轮）
   伪代码 target 在已到集合里返回 {"r": 1}，否则返回 {"r": 0}
 
-函数 读导入行 kind file_path
+函数 读导入行 kind file_path lang?
   返回 {rows}；导入预检的读文件段（私有）：rows 是 [{line, a, b, c, d, e, extra}]，a..e 按 kind 依次是 point（编号、名称）、item（编号、名称、知识点编号、接在哪个形式后、前一个条目编号）、edge（前置编号、后续编号）、contrast（一端、另一端），没有的项为空串；extra 为 1 表示 md、txt 该行项数超过该类型的项数（见下），csv、json 恒为 0
   报错 400 文件类型只能是 md、txt、csv、json
   报错 400 导入文件读不了
   报错 400 导入文件没有数据行
   报错 400 一次最多导入2000行
+  伪代码 K191 日语：加可选入参 lang，调用方有 learner 的先取语言再传。lang 为 ja 时报错 400 写「インポートファイルを読み込めません（{c1} がありません）」（c2、c3 同理）。
   伪代码 file_path 扩展名（不分大小写）是 md、txt：用 doc 包「读文档」取文本，error 不为空报错 400 导入文件读不了；按行拆，每行去首尾空白，空行和以 # 开头的行忽略；其余每行按 | 切成若干项，前 5 项依次放 a..e（不足的补空串）；项数（| 的个数加 1，行尾多余的 | 也算一项）超过该类型的项数——point、edge、contrast 2 项，item 5 项——时 extra 为 1；line 是原文件行号（含被忽略的行）
   伪代码 扩展名是 csv：用 data 包「读CSV」（首行是表头）；是 json：用「读JSON」语句，顶层要是对象列表，解析失败或顶层不是列表报错 400 导入文件读不了；line 是 csv 从 2 起、json 从 1 起
   伪代码 csv、json 的必需列：point 是 code、title；item 是 code、name、point_code（after_form、prev_code 可缺）；edge 是 pre_code、point_code；contrast 是 a_code、b_code。缺列＝csv 表头里没有这个列名（表头各列名去掉 UTF-8 BOM 和首尾空白后比较，同 读CSV 的 utf-8-sig 读法）、json 里没有一个对象带这个键；按上面的顺序找第一个缺的列，报错 400 导入文件读不了（缺<列名>）（整份不认，如「导入文件读不了（缺code）」）。列在、某行的值为空（json 某个对象缺这个键也算这一行为空）不在这里报，照常放进 rows 成空串，由 导入预检 按「缺编号」等记成该行报错。多出的列、键忽略
@@ -594,6 +598,7 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang；lang 为 ja 时报错 400 写「インポートファイルにエラーがあります（{msg}）」，msg 的每行前缀写「{line} 行目：{reason}」。
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject need=write 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 file_path 不符合 导入预检 的文件位置规则（必须以 uploads/ 开头、其后只有一段文件名不再含 /、整个路径不含 .. 和 \；以 / 开头的绝对路径、Windows 盘符路径都不以 uploads/ 开头），或扩展名不是 md、txt、csv、json 之一（不分大小写），报错 400 导入文件路径不对（页面回传的是预检时存下的路径 uploads/<哈希>.<扩展名>；限定在 uploads/ 内，防路径穿越、防拿工作目录里别的同扩展名文件来导入或借报错行号探测内容）
   伪代码 调用本模块 导入预检 kind=kind file_path=file_path subject=subject_id 得 error_count 和 rows（预检的报错原样抛出）；error_count 大于 0，报错 400 导入文件有错（文案后接第一条报错行「第N行：原因」）
@@ -639,6 +644,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=learner 取 lang；lang 为 ja 时 kgm_head 写「全 {point_count} 知識ポイント、前提辺 {edge_count} 本、項目 {total} 件、対照 {contrast_count} 件」。
   伪代码 教师校验：auth_mode 等于 on 且 current_role 不等于 teacher（学生、空角色），报错 403 只有教师可以管理图谱（先于科目解析；单人模式不校验）
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 调用本模块 页面身份 learner=learner current_role=current_role auth_mode=auth_mode subject_id=subject_id 得 can_write、kgm_role
@@ -660,6 +666,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：lang 同 图谱管理页面；lang 为 ja 时 kgp_refs：没被引用写「参照されていないので削除できます」；被引用写「参照：{det}。削除は拒否されます。名前は変更できます」，det 里来源名 下挂条目、前置边、对照、课文挂接、题目、单词、作答记录、掌握记录、得分记录、错题 等写 配下の項目、前提辺、対照、テキストの紐づけ、問題、単語、解答記録、習得記録、スコア記録 等。
   伪代码 教师校验：auth_mode 等于 on 且 current_role 不等于 teacher（学生、空角色），报错 403 只有教师可以管理图谱（先于科目解析；单人模式不校验）
   伪代码 编号取 kgp_orig，为空再取 code（节点图点开带的是 code，知识点表行上带的是 kgp_orig）；两个都为空（新建）返回 {"kgp_orig": "", "kgp_code": "", "kgp_title": "", "kgp_refs": ""}
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
@@ -834,6 +841,7 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  伪代码 K191 日语：lang 同 图谱管理页面；lang 为 ja 时 imp_head 写「全 {total} 行：新規 {created}、更新 {updated}、エラー {error_count}」；有错加「。ファイルを修正して再アップロードしてください。1 行も書き込まれません」。imp_rows 的 reason 里 已存在、内容相同 写 既に存在します、内容が同じです。
   伪代码 教师校验：auth_mode 等于 on 且 current_role 不等于 teacher（学生、空角色），报错 403 只有教师可以管理图谱（先于科目解析；单人模式不校验）
   伪代码 imp_kind 页面值转换：「知识点」point、「条目」item、「前置边」edge、「对照」contrast；其他（含空）报错 400 导入类型不对
   伪代码 调用本模块 导入预检 kind=转换后 file_path=imp_upload_path learner=learner current_role=current_role auth_mode=auth_mode subject=subject
@@ -856,6 +864,7 @@
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
   报错 403 没有权限修改该科目
+  伪代码 K191 日语：lang 同 图谱管理页面；lang 为 ja 时 export_head 或提示写「インポートしました：新規 {created}、更新 {updated}」。
   伪代码 教师校验：auth_mode 等于 on 且 current_role 不等于 teacher（学生、空角色），报错 403 只有教师可以管理图谱（先于科目解析；单人模式不校验）
   伪代码 imp_kind 页面值转换同 导入预检页面；其他（含空）报错 400 导入类型不对
   伪代码 调用本模块 确认导入 kind=转换后 file_path=imp_file learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 created、updated
@@ -869,6 +878,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：lang 同 图谱管理页面；lang 为 ja 时 export_head 写「全 {count} 行」，全部导出时加「。4 つのセクションは分けて個別にインポートしてください」。
   伪代码 教师校验：auth_mode 等于 on 且 current_role 不等于 teacher（学生、空角色），报错 403 只有教师可以管理图谱（先于科目解析；单人模式不校验）
   伪代码 科目：调用本模块 本科目 learner=learner current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；learner、current_role、auth_mode、subject 都可选（路由层注入登录用户、角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），四个都不传得 1，行为同旧；下面所有查询和写入都只限这个 subject_id
   伪代码 exp_kind 页面值转换：「全部」或空 all、「知识点」point、「条目」item、「前置边」edge、「对照」contrast；其他报错 400 导出类型不对

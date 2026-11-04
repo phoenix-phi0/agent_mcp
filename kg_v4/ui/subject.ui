@@ -53,7 +53,7 @@
 
   列表 科目表 绑 subjects
     列 subj_id 编号
-    列 subj_name 名称
+    列 subj_label 名称
     列 subj_code 编码
     列 subj_kind 类型
     列 subj_visibility 可见性

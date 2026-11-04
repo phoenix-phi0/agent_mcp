@@ -426,13 +426,41 @@
     如果 {d.status} 等于 disabled
       设 stz = 停用
     结束
-    设 head = {d.name}（{d.code}）·{stz}·我是{rl}
+    设 lgr = 调用 取语言 username={learner}
+    设 nm = {d.name}
+    设 nas = （无账号）
+    设 head = {nm}（{d.code}）·{stz}·我是{rl}
+    如果 {lgr.lang} 等于 ja
+      设 nas = （アカウントなし）
+      设 trj = 调用 subject.译文 tbl=subject_info row_key={d.code} field=name lang=ja
+      如果 {trj.text 或} 不为空
+        设 nm = {trj.text}
+      结束
+      设 stj = 下書き
+      如果 {d.status} 等于 active
+        设 stj = 有効
+      结束
+      如果 {d.status} 等于 disabled
+        设 stj = 無効
+      结束
+      设 rlj = シングル
+      如果 {d.my_role} 等于 owner
+        设 rlj = 担当
+      结束
+      如果 {d.my_role} 等于 editor
+        设 rlj = 共同担当
+      结束
+      如果 {d.my_role} 等于 public
+        设 rlj = 公開（閲覧のみ）
+      结束
+      设 head = {nm}（{d.code}）·{stj}·私は{rlj}
+    结束
     设 tl = 解析JSON []
     遍历 t 于 {d.teachers}
       设 tu = 查一行 app.db account_user_by_name username={t.teacher}
       设 tn = {tu.display_name 或}
       如果 {tu.username 或} 为空
-        设 tn = {t.teacher}（无账号）
+        设 tn = {t.teacher}{nas}
       结束
       设 mr = 协作
       如果 {t.role} 等于 owner
@@ -458,7 +486,7 @@
       设 su = 查一行 app.db account_user_by_name username={s.learner}
       设 sn = {su.display_name 或}
       如果 {su.username 或} 为空
-        设 sn = {s.learner}（无账号）
+        设 sn = {s.learner}{nas}
       结束
       设 ms = 已撤销
       如果 {s.status} 等于 active

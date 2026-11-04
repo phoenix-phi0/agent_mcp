@@ -227,6 +227,23 @@ class Importer:
         self.bad += bad
 
 
+def seed_names_ja(db):
+    """K191：1 号科目和它的系列的名字译文（setup/names_ja.tsv）。幂等，已有的不覆盖；只翻名字，不翻内容。"""
+    con = sqlite3.connect(db)
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    n = 0
+    for line in (Path(__file__).parent / "names_ja.tsv").read_text(encoding="utf-8").splitlines():
+        if not line or line.startswith("#"):
+            continue
+        tbl, key, field, text = line.split("\t")
+        cur = con.execute("INSERT OR IGNORE INTO subject_content_translation(tbl,row_key,field,lang,text,updated_at) "
+                          "VALUES(?,?,?,'ja',?,?)", (tbl, key, field, text, now))
+        n += cur.rowcount
+    con.commit()
+    con.close()
+    return n
+
+
 def make_teacher(root, user, display, pw):
     from tools.auth import hash_password
     con = sqlite3.connect(root / "app.db")
@@ -322,6 +339,7 @@ def main(argv=None):
             print("    跳过", s)
         imp.upload("/quiz/import", "quiz_import.txt", qtxt)
 
+    print("8 名字译文：新增", seed_names_ja(db))
     after = counts(db)
     print(f"\n各类条数（用时 {time.time() - t0:.1f}s）：")
     default_dirs = content.resolve() == DEFAULT_CONTENT.resolve() and quiz.resolve() == DEFAULT_QUIZ.resolve()

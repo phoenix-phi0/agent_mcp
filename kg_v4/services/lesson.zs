@@ -7,21 +7,30 @@
     返回 {"subject_id": {r.subject_id}}
   结束
 
-  函数 编号前缀检查 subject_id code
+  函数 编号前缀检查 subject_id code lang?
     如果 {subject_id} 等于 1
       返回 {"ok": 1}
     结束
     设 sc = 查一值 app.db lesson_subject_code subject_id={subject_id}
     如果 {sc} 为空
+      如果 {lang 或} 等于 ja
+        报错 400 番号は「科目コード.」で始めてください
+      结束
       报错 400 编号要以「<编码>.」开头
     结束
     设 m = 匹配 {code} ^[a-z][a-z0-9_]*\.[A-Za-z0-9_-]+$
     如果 {m.matched} 不等于 是
+      如果 {lang 或} 等于 ja
+        报错 400 番号は「{sc}.」で始めてください
+      结束
       报错 400 编号要以「{sc}.」开头
     结束
     设 pre = {sc}.
     如果 {code} 开头是 {pre}
       返回 {"ok": 1}
+    结束
+    如果 {lang 或} 等于 ja
+      报错 400 番号は「{sc}.」で始めてください
     结束
     报错 400 编号要以「{sc}.」开头
   结束
@@ -350,7 +359,7 @@
     返回 {out}
   结束
 
-  函数 校验行 line subject_id
+  函数 校验行 line subject_id lang?
     设 parts = 按正则切分 {line} \|
     设 n = 0
     设 code = {zz 或}
@@ -406,7 +415,7 @@
         报错 400 导入文件有错
       结束
     结束
-    设 pf = 调用 编号前缀检查 subject_id={subject_id} code={code}
+    设 pf = 调用 编号前缀检查 subject_id={subject_id} code={code} lang={lang 或}
     设 ics = 按正则切分 {items} \s*,\s*
     遍历 c 于 {ics}
       如果 {c} 不为空
@@ -533,11 +542,12 @@
       报错 400 导入文件有错
     结束
     设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
-    设 r = 调用 导入课文数据 series_code={series_code} lessons_text={doc.text} subject_id={sj.subject_id} series_name={series_name} intro={intro} source={source} license={license} sort_order={sort_order}
+    设 lgi = 调用 界面语言 learner={learner 或}
+    设 r = 调用 导入课文数据 series_code={series_code} lessons_text={doc.text} subject_id={sj.subject_id} series_name={series_name} intro={intro} source={source} license={license} sort_order={sort_order} lang={lgi.lang}
     返回 {r}
   结束
 
-  函数 导入课文数据 series_code lessons_text subject_id series_name? intro? source? license? sort_order?
+  函数 导入课文数据 series_code lessons_text subject_id series_name? intro? source? license? sort_order? lang?
     # 返回 {ok, series_code, total, item_links, point_links}
     # 报错 400 series_code 不能为空
     # 报错 400 导入文件有错
@@ -576,7 +586,7 @@
       如果 {mc.matched} 等于 是
         继续
       结束
-      设 r = 调用 校验行 line={line} subject_id={subject_id}
+      设 r = 调用 校验行 line={line} subject_id={subject_id} lang={lang 或}
       如果 {seen} 包含 @{r.code}@
         报错 400 课号重复
       结束
@@ -631,7 +641,7 @@
     返回 {"ok": 1, "series_code": "{series_code}", "total": {total}, "item_links": {il}, "point_links": {pl}}
   结束
 
-  公开 函数 写入系列课文并重灌 series_code rows_json series_name? source? license? intro? intro_given? sort_order? learner? current_role? auth_mode? subject?
+  公开 函数 写入系列课文并重灌 series_code rows_json series_name? source? license? intro? intro_given? sort_order? learner? lang? current_role? auth_mode? subject?
     如果 {series_code} 为空
       报错 400 series_code 不能为空
     结束
@@ -650,6 +660,11 @@
     结束
     设 sj = 调用 本科目 learner={learner 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或} need=write
     设 sid = {sj.subject_id}
+    设 lgw = 调用 界面语言 learner={learner 或}
+    设 wlang = {lgw.lang}
+    如果 {lang 或} 不为空
+      设 wlang = {lang}
+    结束
     如果 {sort_order} 不为空
       设 mso = 匹配 {sort_order} ^-?\d+$
       如果 {mso.matched} 不等于 是
@@ -710,7 +725,7 @@
       如果 {oc} 大于 0
         报错 400 课号重复
       结束
-      设 pf = 调用 编号前缀检查 subject_id={sid} code={c}
+      设 pf = 调用 编号前缀检查 subject_id={sid} code={c} lang={wlang}
       设 seen = {seen}{c}@
     结束
     设 sa = 查一行 app.db lesson_series_get code={series_code}

@@ -523,7 +523,15 @@
     设 w2 = 累计答题
     设 w3 = 正确率
     设 w4 = 平均得分
-    设 head = {w1} {ov.mastered_count} / 总知识点 {ov.point_total}
+    设 w1b = 总知识点
+    如果 {lang} 等于 ja
+      设 w1 = 習得済み
+      设 w2 = 累計解答
+      设 w3 = 正答率
+      设 w4 = 平均スコア
+      设 w1b = 全知識ポイント
+    结束
+    设 head = {w1} {ov.mastered_count} / {w1b} {ov.point_total}
     设 answers_text = {w2} {ov.answer_total}
     设 rate_text = {w3} —
     设 review_link = {review_link 或}
@@ -547,6 +555,18 @@
     设 doing = 解析JSON []
     设 wd = 达标（得分
     设 wf = 得分
+    设 wnone = 还没打分
+    设 wc1 = ，
+    设 wg1 = 差
+    设 wg2 = 分
+    如果 {lang} 等于 ja
+      设 wd = 達成（スコア
+      设 wf = スコア
+      设 wnone = まだ採点されていません
+      设 wc1 = 、
+      设 wg1 = あと
+      设 wg2 = 点
+    结束
     设 drows = 查询 app.db progress_doing_rows learner={learner} subject_id={sid}
     遍历 dr 于 {drows}
       设 tp = 调用 kg.取知识点 code={dr.point_code} subject={sid}
@@ -558,7 +578,7 @@
         结束
       结束
       设 sc = 查一行 app.db progress_score_latest learner={learner} point_code={dr.point_code} subject_id={sid}
-      设 verdict = 还没打分
+      设 verdict = {wnone}
       如果 {sc} 不为空
         设 okf = 0
         如果 {sc.score} 不小于 80
@@ -571,7 +591,7 @@
           设 verdict = {wd} {sc.score}）
         否则
           设 gap = 计算 80 - {sc.score}
-          设 verdict = {wf} {sc.score}，差 {gap} 分
+          设 verdict = {wf} {sc.score}{wc1}{wg1} {gap} {wg2}
         结束
       结束
       设 item = {"label": "{dtitle}", "tally": "{dr.right_count}/{dr.total_count}", "verdict": "{verdict}"}
@@ -619,8 +639,13 @@
         结束
       结束
       设 res_t = 错
+      设 res_ok = 对
+      如果 {lang} 等于 ja
+        设 res_t = 不正解
+        设 res_ok = 正解
+      结束
       如果 {ra.correct} 等于 1
-        设 res_t = 对
+        设 res_t = {res_ok}
       结束
       设 item = {"at": "{ra.at}", "label": "{rtitle}", "item_label": "", "result": "{res_t}"}
       设 rec = 列表加项 {rec} {item}
@@ -655,6 +680,9 @@
         结束
       结束
       设 dl = 首次
+      如果 {lang} 等于 ja
+        设 dl = 初回
+      结束
       如果 {vr2.n} 大于 1
         设 df = 计算 {vr2.score} - {vr2.prev_score}
         如果 {df} 大于 0
@@ -677,6 +705,10 @@
       设 drate = {d.accuracy}%
     结束
     设 dtext = {w5} {words} 个词，默写 {d.total} 次，正确率 {drate}，错词本 {d.wrong_book_count} 个
+    如果 {lang} 等于 ja
+      设 w5 = 練習した単語
+      设 dtext = {w5} {words} 個、書き取り {d.total} 回、正答率 {drate}、間違えた単語帳 {d.wrong_book_count} 個
+    结束
     设 dlink = #%E9%BB%98%E5%86%99
     如果 {d.wrong_book_count} 大于 0
       设 dlink = #%E9%BB%98%E5%86%99?source=review
@@ -759,11 +791,19 @@
     设 st = 调用 取状态 learner={learner} point_code={code} subject={sid}
     设 w6 = 答对
     设 nt = 还没做过
+    设 w7 = 答题
+    设 w8 = （已掌握）
+    如果 {lang} 等于 ja
+      设 w6 = 正解
+      设 w7 = 解答
+      设 w8 = （習得済み）
+      设 nt = まだ解いていません
+    结束
     遍历 pt 于 {st.points}
       如果 {pt.total} 大于 0
-        设 nt = {w6} {pt.right} / 答题 {pt.total}
+        设 nt = {w6} {pt.right} / {w7} {pt.total}
         如果 {pt.mastered} 等于 1
-          设 nt = {nt}（已掌握）
+          设 nt = {nt}{w8}
         结束
       结束
     结束

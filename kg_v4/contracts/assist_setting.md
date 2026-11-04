@@ -56,6 +56,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
+  伪代码 K191 日语：调用 subject.取界面语言 username=current_user 取 lang；lang 为 ja 时报错 409 写「設定が変更されているため取り消せません（{blocks}）」「設定が削除されているため復元できません（{blocks}）」。
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；四个都不传得 1；assist_draft 调用时传 subject=已解析的科目编号（不再校验）；本函数调用其它函数时一律带 subject=subject_id
   伪代码 result_json、snapshot_json 是草稿的 result、snapshot 列（字典或 JSON 文本，先解析；snapshot 为空串当没有修改条目）；current_user 是草稿所属教师（assist_draft.撤销草稿 只许本人撤，等于 draft.teacher）
   伪代码 要撤的是 result.items 里 ok 等于 1 且 undo 为空的条目（partial 里失败的不撤；上次没撤完的只处理剩下的）；改前值按 setting_id 从 snapshot_json 的 settings 取

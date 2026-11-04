@@ -52,7 +52,8 @@
         报错 400 课号前缀只能用小写字母开头，后面是小写字母、数字，不超过 20 个字
       结束
     否则
-      设 pk = 调用 编号前缀检查 subject_id={subject_id} code={code_prefix}1
+      设 lgp = 调用 subject.取界面语言 username={learner}
+      设 pk = 调用 编号前缀检查 subject_id={subject_id} code={code_prefix}1 lang={lgp.lang 或}
     结束
     设 px = 查一值 app.db textbook_import_prefix_taken series_code={series_code} code_prefix={code_prefix}
     如果 {px} 大于 0
@@ -672,7 +673,7 @@
     返回 {"ok": 1, "approved": {approved}, "skipped": {skipped}}
   结束
 
-  公开 函数 确认导入 task_id learner? current_role? auth_mode? subject?
+  公开 函数 确认导入 task_id learner? lang? current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
     设 subject_id = {sj.subject_id}
     设 t0x = 查一行 app.db textbook_import_task_by_id id={task_id}
@@ -737,7 +738,7 @@
       设 rw2.point_codes = {pa}
       设 rows = 列表加项 {rows} {rw2}
     结束
-    设 r = 调用 lesson.写入系列课文并重灌 series_code={t.series_code} rows_json={rows} series_name={t.series_name} source={t.source} license={t.license} subject={subject_id}
+    设 r = 调用 lesson.写入系列课文并重灌 series_code={t.series_code} rows_json={rows} series_name={t.series_name} source={t.source} license={t.license} lang={lang} subject={subject_id}
     设 rc = 列表长度 {r.rejected}
     设 rep = {"ok": {r.ok}, "series_code": "{r.series_code}", "total": {r.total}, "imported": {r.imported}, "item_links": {r.item_links}, "point_links": {r.point_links}, "file_rows": {r.file_rows}, "rejected": {r.rejected}}
     设 ip.id = {task_id}
@@ -899,11 +900,13 @@
   公开 函数 导入首页 learner? current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 subject_id = {sj.subject_id}
+    设 lgh = 调用 subject.取界面语言 username={learner}
+    设 langh = {lgh.lang 或}
     设 tl = 调用 列任务 subject={subject_id}
     设 jobs = 解析JSON []
     遍历 tk 于 {tl.tasks}
       设 tr0 = 查一行 app.db textbook_import_task_by_id id={tk.task_id}
-      设 js = 调用 任务进度文本 task_id={tk.task_id} subject_id={subject_id}
+      设 js = 调用 任务进度文本 task_id={tk.task_id} subject_id={subject_id} lang={langh}
       设 row = 解析JSON 空对象
       设 row.job = {tk.task_id}
       设 row.series = {tk.series_code}
@@ -921,6 +924,12 @@
         设 srow = 解析JSON 空对象
         设 srow.code = {sv.code}
         设 srow.label = {sv.name}
+        如果 {langh} 等于 ja
+          设 trs = 调用 subject.译文 tbl=lesson_series row_key={sv.code} field=name lang=ja
+          如果 {trs.text 或} 不为空
+            设 srow.label = {trs.text}
+          结束
+        结束
         设 srow.lesson_n = 转数字 {sv.lesson_count}
         设 srow.series_state = 在用
         设 srow.href = #%E6%95%99%E6%9D%90%E5%AF%BC%E5%85%A5?manage={sv.code}
@@ -955,9 +964,15 @@
   公开 函数 任务视图 task_id learner? current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 subject_id = {sj.subject_id}
+    设 lg = 调用 subject.取界面语言 username={learner}
+    设 lang0 = {lg.lang 或}
     设 tr = 查一行 app.db textbook_import_task_by_id id={task_id}
     如果 {tr} 为空 或 {tr.subject_id} 不等于 {subject_id}
-      返回 {"job": {"id": {task_id}, "missing": "没有这个导入任务（{task_id}），可能已经删了。", "running": 0, "back": "#%E6%95%99%E6%9D%90%E5%AF%BC%E5%85%A5"}}
+      设 ms0 = 没有这个导入任务（{task_id}），可能已经删了。
+      如果 {lang0} 等于 ja
+        设 ms0 = このインポートタスクはありません（{task_id}）。削除された可能性があります。
+      结束
+      返回 {"job": {"id": {task_id}, "missing": "{ms0}", "running": 0, "back": "#%E6%95%99%E6%9D%90%E5%AF%BC%E5%85%A5"}}
     结束
     设 t = 调用 取任务 task_id={task_id} subject={subject_id}
     设 running = 转数字 0
@@ -984,6 +999,13 @@
       设 hd2 = 保留原文讲解（没勾改写）
     结束
     设 head = 系列{t.series_code}（{t.series_name}）· 课号前缀 {t.code_prefix} · 文件 {t.file_name} · {hd2}
+    如果 {lang0} 等于 ja
+      设 hd2 = 講義と例文はモデルが書き直します
+      如果 {tr.rewrite} 等于 0
+        设 hd2 = 原文の講義を残します（書き直しなし）
+      结束
+      设 head = シリーズ{t.series_code}（{t.series_name}）· 課番号プレフィックス {t.code_prefix} · ファイル {t.file_name} · {hd2}
+    结束
     设 extra = {zz 或}
     如果 {t.status} 等于 处理中
       如果 {cf} 大于 0
@@ -1002,6 +1024,26 @@
       结束
       设 progress = 解析完了：{t.chunk_total}块，抽出{nd}课{extra}。通过{np}课、驳回{nr}课。{done}
     结束
+    如果 {lang0} 等于 ja
+      设 jx = {zz 或}
+      设 jx2 = {zz 或}
+      如果 {cf} 大于 0
+        设 ew = 、エラー
+        设 jx = {ew} {cf} ブロック
+        设 jx2 = {ew} {cf} ブロック（ブロック一覧で再試行できます）
+      结束
+      如果 {t.status} 等于 处理中
+        设 progress = 解析中：{fin}/{t.chunk_total} ブロック完了{jx}。このページは自動で更新されます。先に他のページへ移動しても大丈夫です。
+      否则如果 {t.status} 等于 失败
+        设 progress = 解析に失敗しました：{t.fail_reason}
+      否则
+        设 jd = {zz 或}
+        如果 {t.status} 等于 已导入
+          设 jd = インポート済み。
+        结束
+        设 progress = 解析完了：{t.chunk_total} ブロック、{nd} 課を抽出{jx2}。承認 {np} 課、差し戻し {nr} 課。{jd}
+      结束
+    结束
     设 report_note = {zz 或}
     设 textbook = {zz 或}
     设 rej = 解析JSON []
@@ -1010,6 +1052,9 @@
       设 rej = {rp.rejected}
       设 rc = 列表长度 {rej}
       设 report_note = 导入报告：导入{rp.imported}课，映射到条目{rp.item_links}条、知识点{rp.point_links}条，拒收{rc}行。
+      如果 {lang0} 等于 ja
+        设 report_note = インポートレポート：{rp.imported} 課をインポート、項目 {rp.item_links} 件・知識ポイント {rp.point_links} 件にマッピング、{rc} 行を拒否。
+      结束
       设 textbook = #%E6%95%99%E6%9D%90
     结束
     设 job = 解析JSON 空对象
@@ -1056,7 +1101,7 @@
       设 df = 查一行 app.db textbook_import_draft_by_id id={dd2.id}
       设 dx = 调用 取草稿课 draft_id={dd2.id} subject={subject_id}
       设 mp = 调用 映射文本 item_codes={df.item_codes} point_codes={df.point_codes} subject_id={subject_id}
-      设 iss = 调用 问题文本 draft={df} task_drafts={tds}
+      设 iss = 调用 问题文本 draft={df} task_drafts={tds} lang={lang0}
       设 dl = {df.level 或}
       如果 {dl} 为空
         设 dl = ?
@@ -1083,25 +1128,50 @@
   公开 函数 草稿视图 draft_id with_form? learner? current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 subject_id = {sj.subject_id}
+    设 lg = 调用 subject.取界面语言 username={learner}
+    设 lang0 = {lg.lang 或}
     设 ef = 解析JSON 空对象
     设 dr = 查一行 app.db textbook_import_draft_by_id id={draft_id}
     如果 {dr} 为空 或 {dr.subject_id} 不等于 {subject_id}
-      返回 {"draft": {"draft": {draft_id}, "missing": "没有这一课草稿（{draft_id}），可能任务已经删了。", "back": "#%E6%95%99%E6%9D%90%E5%AF%BC%E5%85%A5"}, "form": {ef}}
+      设 ms1 = 没有这一课草稿（{draft_id}），可能任务已经删了。
+      如果 {lang0} 等于 ja
+        设 ms1 = この課の下書きはありません（{draft_id}）。タスクが削除された可能性があります。
+      结束
+      返回 {"draft": {"draft": {draft_id}, "missing": "{ms1}", "back": "#%E6%95%99%E6%9D%90%E5%AF%BC%E5%85%A5"}, "form": {ef}}
     结束
     设 d = 调用 取草稿课 draft_id={draft_id} subject={subject_id}
     设 t = 查一行 app.db textbook_import_task_by_id id={d.task_id}
     设 ch = 查一行 app.db textbook_import_chunk_by_id id={d.chunk_id}
     设 fc = 第?块「?」
+    如果 {lang0} 等于 ja
+      设 fc = 第?ブロック「?」
+    结束
     如果 {ch} 不为空
       设 fc = 第{ch.seq}块「{ch.title}」
+      如果 {lang0} 等于 ja
+        设 fc = 第{ch.seq}ブロック「{ch.title}」
+      结束
     结束
     设 tds = 查询 app.db textbook_import_drafts_by_task task_id={d.task_id}
-    设 iss = 调用 问题文本 draft={dr} task_drafts={tds}
+    设 iss = 调用 问题文本 draft={dr} task_drafts={tds} lang={lang0}
     设 ex = {d.examples 或}
     如果 {ex} 为空
       设 ex = []
     结束
     设 head = 系列{t.series_code} · 第{d.seq}课 · {d.status}
+    如果 {lang0} 等于 ja
+      设 stj = {d.status}
+      如果 {d.status} 等于 待审
+        设 stj = レビュー待ち
+      结束
+      如果 {d.status} 等于 通过
+        设 stj = 承認
+      结束
+      如果 {d.status} 等于 驳回
+        设 stj = 差し戻し
+      结束
+      设 head = シリーズ{t.series_code} · 第{d.seq}課 · {stj}
+    结束
     设 draft = 解析JSON 空对象
     设 draft.draft = 转数字 {d.id}
     设 draft.job = 转数字 {d.task_id}
@@ -1140,6 +1210,9 @@
             设 pt0 = 调用 kg.取知识点 code={it.point_code} subject={subject_id}
             如果 {pt0} 不为空
               设 lab = {it.name}（属于 {pt0.title}）
+              如果 {lang0} 等于 ja
+                设 lab = {it.name}（{pt0.title} に属する）
+              结束
             结束
           结束
           设 mrow = 解析JSON 空对象
@@ -1172,6 +1245,9 @@
       设 orow = 解析JSON 空对象
       设 orow.value = {oi.code}
       设 orow.label = {oi.name}（条目，{oi.code}）
+      如果 {lang0} 等于 ja
+        设 orow.label = {oi.name}（項目、{oi.code}）
+      结束
       设 opts = 列表加项 {opts} {orow}
     结束
     设 opoints = 调用 kg.列知识点 subject={subject_id}
@@ -1179,6 +1255,9 @@
       设 prow = 解析JSON 空对象
       设 prow.value = {op.code}
       设 prow.label = 〔{op.title}〕（知识点，{op.code}）
+      如果 {lang0} 等于 ja
+        设 prow.label = 〔{op.title}〕（知識ポイント、{op.code}）
+      结束
       设 opts = 列表加项 {opts} {prow}
     结束
     如果 {with_form} 等于 是
@@ -1198,7 +1277,7 @@
     返回 {"draft": {draft}, "draft_note": "", "draft_maps": {maps}, "map_options": {opts}, "form": {form}}
   结束
 
-  函数 系列视图 series_code subject_id
+  函数 系列视图 series_code subject_id lang?
     设 sl = 调用 列已导入系列 series_code={series_code} subject={subject_id}
     设 found = 0
     设 fname = {zz 或}
@@ -1217,11 +1296,24 @@
         设 can = 转数字 1
       结束
       设 head = 系列{series_code}（{fname}）：{flc}课。在用，教材页的下拉里能选到。
+      如果 {lang} 等于 ja
+        设 trn = 调用 subject.译文 tbl=lesson_series row_key={series_code} field=name lang=ja
+        如果 {trn.text 或} 不为空
+          设 fname = {trn.text}
+        结束
+        设 head = シリーズ{series_code}（{fname}）：{flc} 課。使用中で、教材ページのプルダウンから選べます。
+      结束
     否则
       设 head = 没有这个系列（{series_code}），可能已经撤下了。
+      如果 {lang} 等于 ja
+        设 head = このシリーズはありません（{series_code}）。取り下げられた可能性があります。
+      结束
       设 wn = 查一值 app.db textbook_import_task_withdrawn_count series_code={series_code} subject_id={subject_id}
       如果 {wn} 大于 0
         设 note = 撤下了：这个系列已经撤下，教材页的下拉里不再有它。
+        如果 {lang} 等于 ja
+          设 note = 取り下げ済み：このシリーズは取り下げられ、教材ページのプルダウンには表示されません。
+        结束
       结束
     结束
     返回 {"series_view": {"code": "{series_code}", "head": "{head}", "note": "{note}", "can_withdraw": {can}, "back": "#%E6%95%99%E6%9D%90%E5%AF%BC%E5%85%A5"}}
@@ -1232,14 +1324,15 @@
     设 subject_id = {sj.subject_id}
     设 ef = 解析JSON 空对象
     如果 {task_id} 不为空
-      设 v = 调用 任务视图 task_id={task_id} subject={subject_id}
+      设 v = 调用 任务视图 task_id={task_id} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
       设 v.form = {ef}
       返回 {v}
     否则如果 {draft_id} 不为空
-      设 v = 调用 草稿视图 draft_id={draft_id} with_form=是 subject={subject_id}
+      设 v = 调用 草稿视图 draft_id={draft_id} with_form=是 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
       返回 {v}
     否则如果 {series_code} 不为空
-      设 v = 调用 系列视图 series_code={series_code} subject_id={subject_id}
+      设 lgx = 调用 subject.取界面语言 username={learner}
+      设 v = 调用 系列视图 series_code={series_code} subject_id={subject_id} lang={lgx.lang 或}
       设 v.form = {ef}
       返回 {v}
     结束
@@ -1250,16 +1343,21 @@
     设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
     设 subject_id = {sj.subject_id}
     设 r = 调用 一键通过 task_id={task_id} subject={subject_id}
-    设 v = 调用 任务视图 task_id={task_id} subject={subject_id}
+    设 v = 调用 任务视图 task_id={task_id} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
     设 v.job_note = 通过了：{r.approved}课（有映射、还待审的）。
+    设 lgq = 调用 subject.取界面语言 username={learner}
+    如果 {lgq.lang 或} 等于 ja
+      设 v.job_note = 承認しました：{r.approved} 課（マッピングありでレビュー待ちのもの）。
+    结束
     返回 {v}
   结束
 
   公开 函数 确认导入页面 task_id learner? current_role? auth_mode? subject?
     设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
     设 subject_id = {sj.subject_id}
-    设 r = 调用 确认导入 task_id={task_id} subject={subject_id}
-    设 v = 调用 任务视图 task_id={task_id} subject={subject_id}
+    设 lgc = 调用 subject.取界面语言 username={learner}
+    设 r = 调用 确认导入 task_id={task_id} lang={lgc.lang 或} subject={subject_id}
+    设 v = 调用 任务视图 task_id={task_id} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
     返回 {v}
   结束
 
@@ -1268,11 +1366,11 @@
     设 subject_id = {sj.subject_id}
     设 r = 调用 审核草稿课 draft_id={draft_id} decision={decision} subject={subject_id}
     如果 {job} 不为空
-      设 v = 调用 任务视图 task_id={job} subject={subject_id}
+      设 v = 调用 任务视图 task_id={job} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
       设 ef = 解析JSON 空对象
       设 v.form = {ef}
     否则
-      设 v = 调用 草稿视图 draft_id={draft_id} with_form=否 subject={subject_id}
+      设 v = 调用 草稿视图 draft_id={draft_id} with_form=否 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
     结束
     返回 {v}
   结束
@@ -1295,8 +1393,12 @@
       结束
     结束
     设 r = 调用 修改草稿课 draft_id={draft_id} title={title} level={draft_level} summary={summary 或} explain={explanation 或} connection={formation 或} examples={examples 或} seq={seq} subject={subject_id}
-    设 v = 调用 草稿视图 draft_id={draft_id} with_form=是 subject={subject_id}
+    设 v = 调用 草稿视图 draft_id={draft_id} with_form=是 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
     设 v.draft_note = 保存了。
+    设 lgs = 调用 subject.取界面语言 username={learner}
+    如果 {lgs.lang 或} 等于 ja
+      设 v.draft_note = 保存しました。
+    结束
     返回 {v}
   结束
 
@@ -1315,12 +1417,16 @@
     如果 {it} 为空
       设 pt = 调用 kg.取知识点 code={code} subject={subject_id}
       如果 {pt} 为空
+        设 lgm = 调用 subject.取界面语言 username={learner}
+        如果 {lgm.lang 或} 等于 ja
+          报错 400 番号「{code}」はデータベースにありません。既存の項目・知識ポイントのみ選べます（新規作成はできません）
+        结束
         报错 400 库里没有编号「{code}」，只能挑已有的条目、知识点（不新建）
       结束
       设 kind = point
     结束
     设 r = 调用 改映射 draft_id={draft_id} kind={kind} action=add code={code} subject={subject_id}
-    设 v = 调用 草稿视图 draft_id={draft_id} with_form=否 subject={subject_id}
+    设 v = 调用 草稿视图 draft_id={draft_id} with_form=否 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
     返回 {v}
   结束
 
@@ -1334,7 +1440,7 @@
       设 kind = item
     结束
     设 r = 调用 改映射 draft_id={draft_id} kind={kind} action=remove code={map_code} subject={subject_id}
-    设 v = 调用 草稿视图 draft_id={draft_id} with_form=否 subject={subject_id}
+    设 v = 调用 草稿视图 draft_id={draft_id} with_form=否 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
     返回 {v}
   结束
 
@@ -1342,7 +1448,7 @@
     设 sj = 调用 本科目 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject} need=write
     设 subject_id = {sj.subject_id}
     设 r = 调用 重试块 chunk_id={chunk_id} subject={subject_id}
-    设 v = 调用 任务视图 task_id={r.task_id} subject={subject_id}
+    设 v = 调用 任务视图 task_id={r.task_id} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
     返回 {v}
   结束
 
@@ -1357,16 +1463,24 @@
       结束
     结束
     设 r = 调用 撤下已导入系列 series_code={series_code} subject={subject_id}
-    设 h = 调用 导入首页 subject={subject_id}
+    设 h = 调用 导入首页 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject_id}
+    设 lgw = 调用 subject.取界面语言 username={learner}
     设 note = 撤下了：库里删掉{r.removed_lessons}课（连同映射），教材页的下拉里不再有它。
     如果 {r.moved} 不等于 0
       设 note = {note}课文文件留在 content/lesson/series/{series_code}.withdrawn.jsonl。
     结束
     设 head = 系列{series_code}（{nm}）：0课。已撤下，教材页的下拉里没有它。
+    如果 {lgw.lang 或} 等于 ja
+      设 note = 取り下げました：{r.removed_lessons} 課（マッピングを含む）を削除し、教材ページのプルダウンには表示されません。
+      如果 {r.moved} 不等于 0
+        设 note = {note}テキストファイルは content/lesson/series/{series_code}.withdrawn.jsonl に残しています。
+      结束
+      设 head = シリーズ{series_code}（{nm}）：0 課。取り下げ済みで、教材ページのプルダウンには表示されません。
+    结束
     返回 {"series_view": {"code": "{series_code}", "head": "{head}", "note": "{note}", "can_withdraw": 0, "back": "#%E6%95%99%E6%9D%90%E5%AF%BC%E5%85%A5"}, "import_jobs": {h.import_jobs}, "import_series": {h.import_series}}
   结束
 
-  函数 任务进度文本 task_id subject_id
+  函数 任务进度文本 task_id subject_id lang?
     设 t = 调用 取任务 task_id={task_id} subject={subject_id}
     设 cf = {t.chunk_failed}
     设 cdn = 查一值 app.db textbook_import_chunk_count_status task_id={task_id} status=完成
@@ -1374,15 +1488,32 @@
     设 extra = {zz 或}
     如果 {cf} 大于 0
       设 extra = ，出错{cf}块
+      如果 {lang} 等于 ja
+        设 ew = 、エラー
+        设 extra = {ew} {cf} ブロック
+      结束
     结束
+    设 w1 = 解析中
     如果 {t.status} 等于 处理中
       设 s = 解析中{fin}/{t.chunk_total}块{extra}
+      如果 {lang} 等于 ja
+        设 s = {w1} {fin}/{t.chunk_total} ブロック{extra}
+      结束
     否则如果 {t.status} 等于 失败
       设 s = 失败：{t.fail_reason}
+      如果 {lang} 等于 ja
+        设 s = 失敗：{t.fail_reason}
+      结束
     否则如果 {t.status} 等于 已导入
       设 s = 已导入
+      如果 {lang} 等于 ja
+        设 s = インポート済み
+      结束
     否则如果 {t.status} 等于 已撤下
       设 s = 已撤下
+      如果 {lang} 等于 ja
+        设 s = 取り下げ済み
+      结束
     否则
       设 nd = 列表长度 {t.drafts}
       设 np = 转数字 0
@@ -1396,6 +1527,10 @@
         结束
       结束
       设 s = 待审{nd}课（通过{np}、驳回{nr}）{extra}
+      如果 {lang} 等于 ja
+        设 w2 = レビュー待ち
+        设 s = {w2} {nd} 課（承認 {np}、差し戻し {nr}）{extra}
+      结束
     结束
     设 o.text = {s}
     返回 {o}
@@ -1448,16 +1583,28 @@
     返回 {o}
   结束
 
-  函数 问题文本 draft task_drafts
+  函数 问题文本 draft task_drafts lang?
+    设 m1 = 等级没认出
+    设 m2 = 没映射到已有条目或知识点
+    设 m3 = 讲解是空的
+    设 m4 = 一句话是空的
+    设 m5 = 课序跟别的课重复
+    如果 {lang} 等于 ja
+      设 m1 = レベルを認識できません
+      设 m2 = 既存の項目・知識ポイントにマッピングされていません
+      设 m3 = 講義が空です
+      设 m4 = 一文の要約が空です
+      设 m5 = 課の順序が他の課と重複しています
+    结束
     设 out = {zz 或}
     设 lv = {draft.level 或}
     如果 {lv} 不等于 N5 且 {lv} 不等于 N4 且 {lv} 不等于 N3 且 {lv} 不等于 N2 且 {lv} 不等于 N1
-      设 out = 等级没认出
+      设 out = {m1}
     结束
     设 ic0 = {draft.item_codes 或}
     设 pc0 = {draft.point_codes 或}
     如果 {ic0} 为空 且 {pc0} 为空
-      设 msg = 没映射到已有条目或知识点
+      设 msg = {m2}
       如果 {out} 为空
         设 out = {msg}
       否则
@@ -1470,7 +1617,7 @@
       设 e2 = 替换 {e1} \s
     结束
     如果 {e2} 为空
-      设 msg = 讲解是空的
+      设 msg = {m3}
       如果 {out} 为空
         设 out = {msg}
       否则
@@ -1483,7 +1630,7 @@
       设 s2 = 替换 {s1} \s
     结束
     如果 {s2} 为空
-      设 msg = 一句话是空的
+      设 msg = {m4}
       如果 {out} 为空
         设 out = {msg}
       否则
@@ -1499,7 +1646,7 @@
         结束
       结束
       如果 {dup} 等于 1
-        设 msg = 课序跟别的课重复
+        设 msg = {m5}
         如果 {out} 为空
           设 out = {msg}
         否则
@@ -1516,7 +1663,7 @@
     返回 {"subject_id": {r.subject_id}}
   结束
 
-  函数 编号前缀检查 subject_id code
+  函数 编号前缀检查 subject_id code lang?
     如果 {subject_id} 等于 1
       返回 {"ok": 1}
     结束
@@ -1528,6 +1675,9 @@
       设 okp = 1
     结束
     如果 {sc} 为空 或 {cm.matched} 不等于 是 或 {okp} 等于 0
+      如果 {lang} 等于 ja
+        报错 400 番号は「{sc}.」で始めてください
+      结束
       报错 400 编号要以「{sc}.」开头
     结束
     返回 {"ok": 1}

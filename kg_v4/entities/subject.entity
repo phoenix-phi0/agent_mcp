@@ -61,6 +61,7 @@
   字段 subj_id 整数 科目表编号列，也是编辑/成员浮层地址里带的科目编号
   字段 subj_code 文本 科目编码（新建时填，建后不可改）
   字段 subj_name 文本 科目名称
+  字段 subj_label 文本 科目表显示的名称（ja 下取译文）
   字段 subj_intro 长文本 科目说明
   字段 subj_kind 枚举 通用,语言 类型（页面值域中文；通用存 general、语言存 language）
   字段 subj_levels 文本 本科目等级（英文逗号分隔、从易到难；新建留空按类型取默认）

@@ -115,6 +115,15 @@ M4 拆模块（K133，约定先行，实现见 `plan/m4_split_impl.md`）：对�
 
 浏览器用 playwright + 系统 `/usr/bin/google-chrome`（作 executable_path，不 playwright install 下载浏览器）；playwright 装在仓库 venv 之外的临时 venv（`python3 -m venv /tmp/pw && /tmp/pw/bin/pip install playwright`），没装时打「跳过」退出码 2，不算走查失败。已知控制台噪音：unpkg 的 vue-flow 报 `production is not defined`（外链脚本与 vue.global.prod 的兼容提示，不影响使用），脚本忽略。`tests/run_all.sh` 里有「kg_v4走查」一组（时限 300 秒）。
 
+### 日语残留检查（K191）
+
+```
+/tmp/k97_pw_venv/bin/python tests/kg_v4/e2e_ja_residue.py     # 默认精简，进 run_all，约 5 分钟
+/tmp/k97_pw_venv/bin/python tests/kg_v4/e2e_ja_residue.py --data <数据目录> --port 8188 --full --out x.tsv   # 全量（--deep 再加非法值）
+```
+
+ja 账号遍历所有界面、浮层（从 .ui 读，新加的自动进）、空状态和报错，查还带中文的文字；同时静态查 services、routes 的「报错」和 .ui 标签都有日文。新页面漏翻会失败：整串文案补 `i18n/ja.tsv`，带插值的在服务里加 ja 分支；确实不该翻的进 `tests/kg_v4/ja_residue_whitelist.tsv`，每条写理由。1 号科目（日语语法）的讲解和题目按设计 D3 是中文数据，只翻名字（`setup/names_ja.tsv`，init_data 写入）。
+
 ## 已知限制（K58–K62 报告里没修的）
 
 数据与导入

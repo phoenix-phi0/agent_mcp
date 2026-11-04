@@ -401,9 +401,16 @@
       结束
     结束
     如果 {blocks} 不为空
+      设 lg = 调用 subject.取界面语言 username={current_user}
       如果 {nchg} 大于 0
+        如果 {lg.lang} 等于 ja
+          报错 409 設定が変更されているため取り消せません（{blocks}）
+        结束
         报错 409 设定已被改动，不能撤销（{blocks}）
       否则
+        如果 {lg.lang} 等于 ja
+          报错 409 設定が削除されているため復元できません（{blocks}）
+        结束
         报错 409 设定已被删除，不能恢复（{blocks}）
       结束
     结束

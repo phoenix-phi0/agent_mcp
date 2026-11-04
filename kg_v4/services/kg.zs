@@ -268,6 +268,8 @@
     结束
     设 lines = 按正则切分 {doc.text} \r?\n
     设 re = ^(?P<code>[^|]*)\|(?P<title>[^|]*)$
+    设 lgr = 调用 subject.取界面语言 username={learner 或}
+    设 lang = {lgr.lang}
     设 total = 0
     遍历 raw 于 {lines}
       设 line = 替换 {raw} ^\s+|\s+$
@@ -281,7 +283,7 @@
           报错 400 导入文件有错
         结束
         设 cd = {mm.named.code}
-        设 pc = 调用 编号前缀检查 subject_id={sb.subject_id} code={cd}
+        设 pc = 调用 编号前缀检查 subject_id={sb.subject_id} code={cd} lang={lang}
         设 oc = 查一值 app.db kg_point_other code={cd} subject_id={sb.subject_id}
         如果 {oc} 大于 0
           报错 400 编号已被其他科目使用
@@ -332,6 +334,8 @@
     结束
     设 lines = 按正则切分 {doc.text} \r?\n
     设 re = ^(?P<code>[^|]*)\|(?P<name>[^|]*)\|(?P<pc>[^|]*)\|(?P<af>[^|]*)\|(?P<pv>[^|]*)(?:\|.*)?$
+    设 lgr = 调用 subject.取界面语言 username={learner 或}
+    设 lang = {lgr.lang}
     设 total = 0
     遍历 raw 于 {lines}
       设 line = 替换 {raw} ^\s+|\s+$
@@ -346,7 +350,7 @@
           报错 400 导入文件有错
         结束
         设 cd = {mm.named.code}
-        设 pc = 调用 编号前缀检查 subject_id={sb.subject_id} code={cd}
+        设 pc = 调用 编号前缀检查 subject_id={sb.subject_id} code={cd} lang={lang}
         设 oc = 查一值 app.db kg_item_other code={cd} subject_id={sb.subject_id}
         如果 {oc} 大于 0
           报错 400 编号已被其他科目使用
@@ -403,6 +407,8 @@
     结束
     设 lines = 按正则切分 {doc.text} \r?\n
     设 re = ^(?P<ca>[^|]*)\|(?P<cb>[^|]*)$
+    设 lgr = 调用 subject.取界面语言 username={learner 或}
+    设 lang = {lgr.lang}
     设 total = 0
     遍历 raw 于 {lines}
       设 line = 替换 {raw} ^\s+|\s+$
@@ -417,8 +423,8 @@
         结束
         设 cda = {mm.named.ca}
         设 cdb = {mm.named.cb}
-        设 pc1 = 调用 编号前缀检查 subject_id={sb.subject_id} code={cda}
-        设 pc2 = 调用 编号前缀检查 subject_id={sb.subject_id} code={cdb}
+        设 pc1 = 调用 编号前缀检查 subject_id={sb.subject_id} code={cda} lang={lang}
+        设 pc2 = 调用 编号前缀检查 subject_id={sb.subject_id} code={cdb} lang={lang}
         设 total = 计算 {total} + 1
       结束
     结束
@@ -691,6 +697,10 @@
           结束
         结束
       结束
+      设 lgr = 调用 subject.取界面语言 username={learner 或}
+      如果 {lgr.lang} 等于 ja
+        报错 409 知識ポイントはまだ参照されているため削除できません（{detail}）
+      结束
       报错 409 知识点还被引用，不能删除（{detail}）
     结束
     设 er = 0
@@ -839,6 +849,10 @@
           结束
         结束
       结束
+      设 lgr = 调用 subject.取界面语言 username={learner 或}
+      如果 {lgr.lang} 等于 ja
+        报错 409 項目はまだ参照されているため削除できません（{detail}）
+      结束
       报错 409 条目还被引用，不能删除（{detail}）
     结束
     设 cr = 0
@@ -907,7 +921,7 @@
     返回 {"subject_id": {r.subject_id}}
   结束
 
-  函数 编号前缀检查 subject_id code
+  函数 编号前缀检查 subject_id code lang?
     # 返回 {ok}；日语（1）豁免
     如果 {subject_id} 等于 1
       返回 {"ok": 1}
@@ -922,6 +936,9 @@
       结束
     结束
     如果 {bad} 等于 1
+      如果 {lang} 等于 ja
+        报错 400 番号は「{sc}.」で始めてください
+      结束
       报错 400 编号要以「{sc}.」开头
     结束
     返回 {"ok": 1}
@@ -1013,7 +1030,7 @@
     返回 {"ok": 1, "total": {total}, "created": {created}, "updated": {updated}}
   结束
 
-  函数 读导入行 kind file_path
+  函数 读导入行 kind file_path lang?
     设 rows = 解析JSON []
     设 m1 = 匹配 {file_path} (?i)[.](md|txt)$
     设 m2 = 匹配 {file_path} (?i)[.]csv$
@@ -1152,12 +1169,21 @@
           结束
         结束
         如果 {ok1} 等于 0
+          如果 {lang} 等于 ja
+            报错 400 インポートファイルを読み込めません（{c1} がありません）
+          结束
           报错 400 导入文件读不了（缺{c1}）
         结束
         如果 {ok2} 等于 0
+          如果 {lang} 等于 ja
+            报错 400 インポートファイルを読み込めません（{c2} がありません）
+          结束
           报错 400 导入文件读不了（缺{c2}）
         结束
         如果 {ok3} 等于 0
+          如果 {lang} 等于 ja
+            报错 400 インポートファイルを読み込めません（{c3} がありません）
+          结束
           报错 400 导入文件读不了（缺{c3}）
         结束
       结束
@@ -1186,7 +1212,8 @@
     结束
     设 sid = {sb.subject_id}
     设 acts = {"e": "报错", "u": "更新", "n": "新增"}
-    设 rd = 调用 读导入行 kind={kind} file_path={file_path}
+    设 lgr = 调用 subject.取界面语言 username={learner 或}
+    设 rd = 调用 读导入行 kind={kind} file_path={file_path} lang={lgr.lang}
     设 fileitems = @
     如果 {kind} 等于 item
       遍历 x 于 {rd.rows}
@@ -1558,11 +1585,19 @@
     结束
     设 pv = 调用 导入预检 kind={kind} file_path={file_path} subject={sid}
     如果 {pv.error_count} 大于 0
+      设 lgr = 调用 subject.取界面语言 username={learner 或}
       设 msg = {nothing 或}
       遍历 x 于 {pv.rows}
         如果 {msg} 为空 且 {x.action} 等于 报错
-          设 msg = 第{x.line}行：{x.reason}
+          如果 {lgr.lang} 等于 ja
+            设 msg = {x.line} 行目：{x.reason}
+          否则
+            设 msg = 第{x.line}行：{x.reason}
+          结束
         结束
+      结束
+      如果 {lgr.lang} 等于 ja
+        报错 400 インポートファイルにエラーがあります（{msg}）
       结束
       报错 400 导入文件有错（{msg}）
     结束
@@ -1790,7 +1825,12 @@
       设 cr = {"ct_key": "{c.a_code}~{c.b_code}", "ct_a": "{c.a_code}", "ct_b": "{c.b_code}", "ct_a_label": "{la}", "ct_b_label": "{lb}"}
       设 kc = 列表加项 {kc} {cr}
     结束
+    设 lg = 调用 subject.取界面语言 username={learner}
     设 head = 共{g.point_count}个知识点、{g.edge_count}条前置边、{il.total}个条目、{g.contrast_count}条对照
+    如果 {lg.lang} 等于 ja
+      设 hj = {"h": "全 {g.point_count} 知識ポイント、前提辺 {g.edge_count} 本、項目 {il.total} 件、対照 {g.contrast_count} 件"}
+      设 head = {hj.h}
+    结束
     返回 {"graph": {"nodes": {nodes}, "edges": {gedges}}, "kgm_points": {kp}, "kgm_items": {ki}, "kgm_edges": {ke}, "kgm_contrasts": {kc}, "point_options": {opts}, "kgm_head": "{head}", "kgm_role": "{idn.kgm_role}", "can_write": {idn.can_write}}
   结束
 
@@ -1812,19 +1852,60 @@
     结束
     设 q = 调用 查引用 code={cd} kind=point subject={sb.subject_id}
     设 nrf = 列表长度 {q.refs}
+    设 lg = 调用 subject.取界面语言 username={learner}
     设 txt = 没有被引用，可以删除
+    如果 {lg.lang} 等于 ja
+      设 txt = 参照されていないので削除できます
+    结束
     如果 {nrf} 大于 0
       设 det = {nothing 或}
       遍历 x 于 {q.refs}
+        设 sn = {x.source}
+        如果 {lg.lang} 等于 ja
+          如果 {sn} 等于 下挂条目
+            设 sn = 配下の項目
+          否则如果 {sn} 等于 前置边
+            设 sn = 前提辺
+          否则如果 {sn} 等于 对照
+            设 sn = 対照
+          否则如果 {sn} 等于 课文挂接
+            设 sn = テキストの紐づけ
+          否则如果 {sn} 等于 题目
+            设 sn = 問題
+          否则如果 {sn} 等于 单词
+            设 sn = 単語
+          否则如果 {sn} 等于 作答记录
+            设 sn = 解答記録
+          否则如果 {sn} 等于 掌握记录
+            设 sn = 習得記録
+          否则如果 {sn} 等于 得分记录
+            设 sn = スコア記録
+          否则如果 {sn} 等于 错题
+            设 sn = 誤答
+          否则如果 {sn} 等于 默写进度
+            设 sn = 書き取り進捗
+          否则如果 {sn} 等于 后一个条目
+            设 sn = 次の項目
+          否则如果 {sn} 等于 教师助手对话
+            设 sn = 教師アシスタントの会話
+          结束
+        结束
         如果 {det} 为空
-          设 det = {x.source}{x.n}
+          设 det = {sn}{x.n}
         否则
-          设 det = {det}、{x.source}{x.n}
+          设 det = {det}、{sn}{x.n}
         结束
       结束
-      设 txt = 被引用：{det}
-      如果 {q.deletable} 等于 0
-        设 txt = {txt}。删除会被拒绝，可以改名
+      如果 {lg.lang} 等于 ja
+        设 txt = 参照：{det}
+        如果 {q.deletable} 等于 0
+          设 txt = {txt}。削除は拒否されます。名前は変更できます
+        结束
+      否则
+        设 txt = 被引用：{det}
+        如果 {q.deletable} 等于 0
+          设 txt = {txt}。删除会被拒绝，可以改名
+        结束
       结束
     结束
     返回 {"kgp_orig": "{cd}", "kgp_code": "{cd}", "kgp_title": "{p.title}", "kgp_refs": "{txt}"}
@@ -1951,9 +2032,15 @@
       报错 400 导入类型不对
     结束
     设 pv = 调用 导入预检 kind={kd} file_path={imp_upload_path} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 lg = 调用 subject.取界面语言 username={learner}
     设 rows = 解析JSON []
     遍历 x 于 {pv.rows}
-      设 ir = {"imp_line": {x.line}, "imp_code": "{x.code}", "imp_label": "{x.label}", "imp_action": "{x.action}", "imp_reason": "{x.reason 或}"}
+      设 rsn = {x.reason 或}
+      如果 {lg.lang} 等于 ja
+        设 rsn = 替换 {rsn} 已存在 既に存在します
+        设 rsn = 替换 {rsn} 内容相同 内容が同じです
+      结束
+      设 ir = {"imp_line": {x.line}, "imp_code": "{x.code}", "imp_label": "{x.label}", "imp_action": "{x.action}", "imp_reason": "{rsn}"}
       设 rows = 列表加项 {rows} {ir}
     结束
     设 head = 共{pv.total}行：新增{pv.created}、更新{pv.updated}、报错{pv.error_count}
@@ -1961,6 +2048,13 @@
     如果 {pv.error_count} 大于 0
       设 okv = 0
       设 head = {head}。改好文件重新上传，一行都不会写入
+    结束
+    如果 {lg.lang} 等于 ja
+      设 hj = {"h": "全 {pv.total} 行：新規 {pv.created}、更新 {pv.updated}、エラー {pv.error_count}"}
+      设 head = {hj.h}
+      如果 {pv.error_count} 大于 0
+        设 head = {head}。ファイルを修正して再アップロードしてください。1 行も書き込まれません
+      结束
     结束
     返回 {"imp_rows": {rows}, "imp_head": "{head}", "imp_ok": {okv}, "form": {"imp_kind": "{imp_kind}", "imp_file": "{imp_upload_path}"}}
   结束
@@ -1982,7 +2076,11 @@
     结束
     设 cf = 调用 确认导入 kind={kd} file_path={imp_file} learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
     设 r = 调用 图谱管理页面 learner={learner} current_role={current_role} auth_mode={auth_mode} subject={subject}
+    设 lg = 调用 subject.取界面语言 username={learner}
     设 head = 已导入：新增{cf.created}、更新{cf.updated}
+    如果 {lg.lang} 等于 ja
+      设 head = インポートしました：新規 {cf.created}、更新 {cf.updated}
+    结束
     返回 {"graph": {r.graph}, "kgm_points": {r.kgm_points}, "kgm_items": {r.kgm_items}, "kgm_edges": {r.kgm_edges}, "kgm_contrasts": {r.kgm_contrasts}, "point_options": {r.point_options}, "kgm_head": "{r.kgm_head}", "kgm_role": "{r.kgm_role}", "can_write": {r.can_write}, "imp_rows": [], "imp_ok": 0, "imp_head": "{head}"}
   结束
 
@@ -2005,9 +2103,17 @@
       报错 400 导出类型不对
     结束
     设 ex = 调用 导出文本 kind={kd} subject={sb.subject_id}
+    设 lg = 调用 subject.取界面语言 username={learner}
     设 head = 共{ex.count}行
     如果 {kd} 等于 all
       设 head = {head}。四段要按段拆开分别导入
+    结束
+    如果 {lg.lang} 等于 ja
+      设 hj = {"h": "全 {ex.count} 行"}
+      设 head = {hj.h}
+      如果 {kd} 等于 all
+        设 head = {head}。4 つのセクションは分けて個別にインポートしてください
+      结束
     结束
     返回 {"export_text": "{ex.text}", "export_head": "{head}"}
   结束

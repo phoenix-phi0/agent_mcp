@@ -58,8 +58,9 @@
   伪代码 file_id 不是正整数报错 400 file_id 不合法
   伪代码 查 teacher_assist_file 中 id=file_id、teacher=current_user、subject_id=subject_id、status=ok 的一行；没有（不存在、别人的、别的科目的、已删除的）报错 404 没有这个附件
 
-函数 附件标签 name ext pages chars rows
+函数 附件标签 name ext pages chars rows lang?
   返回 {label, info}；info 是「ext · 3 页 · 1234 字」（pdf）/「csv · 120 行 · 3456 字」（csv）/「ext · 1234 字」（其它）；label 是「附件：name（info）」，给附件条和对话里那句「已挂上」用
+  伪代码 K191 日语：加可选入参 lang。lang 为 ja 时 info 写「{ext} · {pages} ページ · {chars} 文字」「{ext} · {rows} 行 · {chars} 文字」「{ext} · {chars} 文字」，label 写「添付ファイル：{name}（{info}）」。给模型看的 附件： 前缀不走这个函数，不动。调用方（列附件、取当前附件、挂上附件、存附件）多传 lang，语言取法：调用 subject.取界面语言 username=current_user 取 lang。
 
 函数 判类型 file_name file_path file_ext
   返回 {ext, error}；error 为空表示可收
@@ -182,7 +183,7 @@
   伪代码 csv：表头一行加数据行，按顺序拼，行数到 200 行或再加一行就超过 M 字时停；没拼完所有行就在末尾加一行「（共 rows 行，只给了前 k 行；统计见上面，是按全部行算的）」，truncated=1，否则 0；mode=csv
   伪代码 其它类型，n 不超过 M 且 src 就是全文：text=src，mode=full，truncated=0
   伪代码 超过 M 且 question 不为空：关键词 = question 按空白和中英文标点（，。、？！；：,.?!;: 引号括号）切开、去空后长度 2 到 20 的片段，去重后最多 8 个；段落 = src 按空行切（没有空行时按换行切），去掉空段；按原顺序取包含任一关键词的段落拼起来（段之间空一行），拼到 M 字为止（最后一段放不下就截到正好 M 字）；至少命中一段时 text=「（按问题里的关键词摘了 k 段，全文 n 字）」+ 换行 + 拼好的段落，mode=keyword，truncated=1
-  伪代码 超过 M 且 question 为空，或一段都没命中：text = src 的前 (M − 1500 − 20) 字 + 换行 +「（中间省略，全文 n 字）」+ 换行 + src 的最后 1500 字（M=6000 时就是「开头 4480 字 + 结尾 1500 字」，总长不超过 M），mode=headtail，truncated=1；n 大于 50000（库里只存了前 50000 字，文件真正的结尾没有存）时不取结尾：text = src 的前 (M − 60) 字 + 换行 +「（只给了开头；全文 n 字，系统只保存了前 50000 字，结尾没有保存）」，mode=headtail，truncated=1（不把第 50000 字附近的内容当成文件结尾给模型）；关键词摘段同样只在前 50000 字里找，提示句里写「（按问题里的关键词从前 50000 字里摘了 k 段，全文 n 字）」
+  伪代码 超过 M 且 question 为空，或一段都没命中：结尾字数 T = min(取整(M/4), 1500)，text = src 的前 (M − T − 20) 字 + 换行 +「（中间省略，全文 n 字）」+ 换行 + src 的最后 T 字（M=6000 时就是「开头 4480 字 + 结尾 1500 字」，M=500 时是「开头 355 字 + 结尾 125 字」，总长不超过 M），mode=headtail，truncated=1；n 大于 50000（库里只存了前 50000 字，文件真正的结尾没有存）时不取结尾：text = src 的前 (M − 60) 字 + 换行 +「（只给了开头；全文 n 字，系统只保存了前 50000 字，结尾没有保存）」，mode=headtail，truncated=1（不把第 50000 字附近的内容当成文件结尾给模型）；关键词摘段同样只在前 50000 字里找，提示句里写「（按问题里的关键词从前 50000 字里摘了 k 段，全文 n 字）」
   伪代码 UPDATE 该行 SET last_used_at=当前时间
   伪代码 返回 {"file_id": file_id, "name", "ext", "chars": n, "pages", "rows", "text": text, "stats": 行的 stats, "mode": mode, "truncated": 0 或 1}
 

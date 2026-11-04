@@ -977,7 +977,15 @@
     如果 {last} 为空
       设 last = 还没有
     结束
-    设 head = {g.display_name}（{student}）　教材：{ser.name 或}　最近学习：{last}
+    设 sername = {ser.name 或}
+    如果 {lang} 等于 ja
+      设 trs = 调用 subject.译文 tbl=lesson_series row_key={ser.series_code 或} field=name lang=ja
+      设 trst = {trs.text 或}
+      如果 {trst} 不为空
+        设 sername = {trst}
+      结束
+    结束
+    设 head = {g.display_name}（{student}）　教材：{sername}　最近学习：{last}
     设 w1 = 已掌握
     设 ov = 还没有作答
     如果 {g.answer_total} 大于 0
@@ -992,7 +1000,7 @@
       如果 {last} 等于 还没有
         设 last = まだありません
       结束
-      设 head = {g.display_name}（{student}）　教材：{ser.name 或}　最近の学習：{last}
+      设 head = {g.display_name}（{student}）　教材：{sername}　最近の学習：{last}
       设 ov = まだ解答がありません
       如果 {g.answer_total} 大于 0
         设 w1j = 習得済み

@@ -31,6 +31,44 @@
     返回 {o}
   结束
 
+  函数 状态名日 status
+    设 o = {status}
+    如果 {status} 等于 pending
+      设 o = 承認待ち
+    否则如果 {status} 等于 running
+      设 o = 実行中
+    否则如果 {status} 等于 done
+      设 o = 実行済み
+    否则如果 {status} 等于 partial
+      设 o = 一部実行
+    否则如果 {status} 等于 failed
+      设 o = 失敗
+    否则如果 {status} 等于 discarded
+      设 o = 破棄済み
+    否则如果 {status} 等于 undoing
+      设 o = 取り消し中
+    否则如果 {status} 等于 undone
+      设 o = 取り消しました
+    否则如果 {status} 等于 superseded
+      设 o = 置き換え済み
+    结束
+    返回 {o}
+  结束
+
+  函数 类型名日 kind
+    设 o = {kind}
+    如果 {kind} 等于 quiz_add
+      设 o = 出題
+    否则如果 {kind} 等于 relay_add
+      设 o = 伝達を送る
+    否则如果 {kind} 等于 setting_save
+      设 o = 設定を変更
+    否则如果 {kind} 等于 kg_add
+      设 o = 知識ポイントを追加
+    结束
+    返回 {o}
+  结束
+
   函数 类型名 kind
     设 o = {kind}
     如果 {kind} 等于 quiz_add
@@ -85,7 +123,7 @@
     返回 {"ok": 0, "status": "{row.status 或}", "token": ""}
   结束
 
-  函数 草稿行 draft
+  函数 草稿行 draft lang?
     设 stn = 调用 状态名 status={draft.status}
     设 er = {draft.error 或}
     如果 {draft.status} 等于 partial 或 {draft.status} 等于 failed
@@ -93,6 +131,9 @@
         设 q30 = {"t": "{er}", "n": "30"}
         设 e30 = 查一值表 app.db assist_draft_substr {q30}
         设 stn = {stn}：{e30}
+        如果 {lang} 等于 ja 且 {draft.status} 等于 failed
+          设 stn = 失敗：{e30}
+        结束
       结束
     结束
     设 kn = 调用 类型名 kind={draft.kind}
@@ -100,9 +141,12 @@
     返回 {"draft_id": {draft.id}, "draft_kind": "{kn}", "draft_brief": "{draft.title}", "draft_state": "{stn}", "draft_at": "{draft.created_at}", "can_undo": {cu}}
   结束
 
-  函数 草稿按钮 draft
+  函数 草稿按钮 draft lang?
     设 id = {draft.id}
     设 links = [{"href": "#教师助手?浮层=草稿详情&draft_id={id}", "text": "查看草稿 #{id}"}]
+    如果 {lang} 等于 ja
+      设 links = [{"href": "#教师助手?浮层=草稿详情&draft_id={id}", "text": "下書き #{id} を見る"}]
+    结束
     设 actions = []
     设 cu = 调用 能撤销 status={draft.status} decided_at={draft.decided_at 或}
     如果 {draft.status} 等于 pending
@@ -835,6 +879,14 @@
       结束
     结束
     如果 {good} 等于 0
+      设 lg = 调用 subject.取界面语言 username={current_user}
+      如果 {lg.lang 或} 等于 ja
+        设 lje = {lasterr}
+        如果 {lje} 等于 模型暂时无法回答
+          设 lje = モデルが応答できません
+        结束
+        返回 {"ok": 1, "status": "ask", "draft_id": "", "title": "", "preview": "", "hint": "生成できませんでした：{lje}（言い方を変えるか、数を減らしてみてください）", "tries": {tries}}
+      结束
       返回 {"ok": 1, "status": "ask", "draft_id": "", "title": "", "preview": "", "hint": "没生成成功：{lasterr}（可以换个说法或少出几道）", "tries": {tries}}
     结束
     设 now = 当前时间
@@ -878,9 +930,10 @@
     结束
     设 q = {"teacher": "{current_user}", "subject_id": "{subject_id}", "status": "{st}", "n": "{lim}"}
     设 rows = 查询表 app.db assist_draft_list {q}
+    设 lgl = 调用 subject.取界面语言 username={current_user}
     设 out = []
     遍历 x 于 {rows}
-      设 hr = 调用 草稿行 draft={x}
+      设 hr = 调用 草稿行 draft={x} lang={lgl.lang 或}
       设 out = 列表加项 {out} {hr}
     结束
     设 total = 列表长度 {rows}
@@ -897,22 +950,46 @@
     设 cu = 调用 能撤销 status={row.status} decided_at={row.decided_at 或}
     设 pre = 草稿
     设 head = {pre} #{row.id} · {kn} · {stn} · {row.created_at}
+    设 lg = 调用 subject.取界面语言 username={current_user}
+    设 isja = 0
+    如果 {lg.lang 或} 等于 ja
+      设 isja = 1
+      设 jsn = 调用 状态名日 status={row.status}
+      设 jkn = 调用 类型名日 kind={row.kind}
+      设 jpre = 下書き
+      设 head = {jpre} #{row.id} · {jkn} · {jsn} · {row.created_at}
+    结束
     设 rt = {blank}
     设 rres = {row.result 或}
     如果 {rres} 不为空
       设 rj = 解析JSON {rres}
       如果 {row.kind} 等于 quiz_add
         设 rt = 写入题号：{rj.question_nos}
+        如果 {isja} 等于 1
+          设 rt = 書き込んだ問題番号：{rj.question_nos}
+        结束
       否则如果 {row.kind} 等于 relay_add
         遍历 x 于 {rj.items}
           设 ud = {x.undo 或}
           设 ln = {x.display_name}：已建传达 #{x.relay_id}
+          如果 {isja} 等于 1
+            设 ln = {x.display_name}：伝達 #{x.relay_id} を作成
+          结束
           如果 {x.ok} 不等于 1
             设 ln = {x.display_name}：失败：{x.error}
+            如果 {isja} 等于 1
+              设 ln = {x.display_name}：失敗：{x.error}
+            结束
           否则如果 {ud} 等于 deleted 或 {ud} 等于 gone
             设 ln = {x.display_name}：已删除
+            如果 {isja} 等于 1
+              设 ln = {x.display_name}：削除しました
+            结束
           否则如果 {ud} 等于 disabled
             设 ln = {x.display_name}：已停用
+            如果 {isja} 等于 1
+              设 ln = {x.display_name}：無効にしました
+            结束
           结束
           如果 {rt} 为空
             设 rt = {ln}
@@ -924,19 +1001,37 @@
         遍历 x 于 {rj.items}
           设 ud = {x.undo 或}
           设 ln = {x.label}：已建
+          如果 {isja} 等于 1
+            设 ln = {x.label}：作成しました
+          结束
           如果 {row.kind} 等于 setting_save
             如果 {x.op 或} 等于 edit
               设 ln = {x.label}：已改设定 #{x.setting_id}
+              如果 {isja} 等于 1
+                设 ln = {x.label}：設定 #{x.setting_id} を変更
+              结束
             否则
               设 ln = {x.label}：已建设定 #{x.setting_id}
+              如果 {isja} 等于 1
+                设 ln = {x.label}：設定 #{x.setting_id} を作成
+              结束
             结束
           否则如果 {x.type 或} 等于 edge 且 {x.created 或} 等于 0
             设 ln = {x.label}：已存在未新建
+            如果 {isja} 等于 1
+              设 ln = {x.label}：既に存在するため作成していません
+            结束
           结束
           如果 {x.ok} 不等于 1
             设 ln = {x.label}：失败：{x.error 或}
+            如果 {isja} 等于 1
+              设 ln = {x.label}：失敗：{x.error 或}
+            结束
           否则如果 {ud} 等于 deleted
             设 ln = {x.label}：已删除
+            如果 {isja} 等于 1
+              设 ln = {x.label}：削除しました
+            结束
           否则如果 {ud} 等于 restored
             设 ln = {x.label}：已恢复改前内容
           否则如果 {ud} 等于 gone
@@ -1028,8 +1123,19 @@
     设 dr = 调用 取本人草稿 current_user={current_user} draft_id={draft_id} subject_id={subject_id}
     设 cl = 调用 抢占草稿 draft_id={draft_id} current_user={current_user} from_states=pending to_state=running
     如果 {cl.ok} 不等于 1
+      设 lg = 调用 subject.取界面语言 username={current_user}
+      如果 {lg.lang 或} 等于 ja
+        设 sj2 = 调用 状态名日 status={cl.status}
+        报错 409 この下書きは処理済みです（現在の状態：{sj2}）
+      结束
       设 sn = 调用 状态名 status={cl.status}
       报错 409 这份草稿已处理（当前状态：{sn}）
+    结束
+    设 lgc = 调用 subject.取界面语言 username={current_user}
+    设 isja = 0
+    设 jpre = 下書き
+    如果 {lgc.lang 或} 等于 ja
+      设 isja = 1
     结束
     设 token = {cl.token}
     设 pl = 解析JSON {dr.payload}
@@ -1092,6 +1198,9 @@
           如果 {err} 为空
             设 err = {re.error}
             设 failtxt = {it.display_name} 失败：{re.error}
+            如果 {isja} 等于 1
+              设 failtxt = {it.display_name} 失敗：{re.error}
+            结束
           结束
         否则
           设 rec = {"student": "{it.student}", "display_name": "{it.display_name}", "relay_id": {sr.id}, "ok": 1, "error": "", "undo": ""}
@@ -1120,6 +1229,9 @@
       遍历 x 于 {recs}
         如果 {failtxt} 为空 且 {x.ok} 不等于 1
           设 failtxt = {x.label} 失败：{x.error 或}
+          如果 {isja} 等于 1
+            设 failtxt = {x.label} 失敗：{x.error 或}
+          结束
         结束
       结束
       如果 {dn} 等于 {total} 且 {total} 大于 0
@@ -1135,8 +1247,14 @@
     如果 {rs} 等于 done
       如果 {dr.kind} 等于 quiz_add
         设 summary = {pre} #{draft_id} 已执行：写入 {dn} 道题（题号{qnos}）
+        如果 {isja} 等于 1
+          设 summary = {jpre} #{draft_id} を実行しました：問題を {dn} 問書き込み（問題番号 {qnos}）
+        结束
       否则如果 {dr.kind} 等于 relay_add
         设 summary = {pre} #{draft_id} 已执行：给 {dn} 名学生建了传达
+        如果 {isja} 等于 1
+          设 summary = {jpre} #{draft_id} を実行しました：{dn} 人の学生に伝達を作成
+        结束
       否则
         设 ca = 0
         设 cb = 0
@@ -1158,14 +1276,26 @@
         结束
         如果 {dr.kind} 等于 setting_save
           设 summary = {pre} #{draft_id} 已执行：新建 {ca} 条、修改 {cb} 条 AI 老师设定
+          如果 {isja} 等于 1
+            设 summary = {jpre} #{draft_id} を実行しました：AI先生設定を新規 {ca} 件、変更 {cb} 件
+          结束
         否则
           设 summary = {pre} #{draft_id} 已执行：建了 {ca} 个知识点、{cb} 个条目、{cc} 条前置边
+          如果 {isja} 等于 1
+            设 summary = {jpre} #{draft_id} を実行しました：知識ポイント {ca} 件、項目 {cb} 件、前提辺 {cc} 件を作成
+          结束
         结束
       结束
     否则如果 {rs} 等于 partial
       设 summary = {pre} #{draft_id} 部分执行：成功 {dn} / {total}，{failtxt}
+      如果 {isja} 等于 1
+        设 summary = {jpre} #{draft_id} を一部実行しました：成功 {dn} / {total}、{failtxt}
+      结束
     否则
       设 summary = {pre} #{draft_id} 执行失败：{err}
+      如果 {isja} 等于 1
+        设 summary = {jpre} #{draft_id} の実行に失敗しました：{err}
+      结束
     结束
     设 sn = 调用 状态名 status={rs}
     返回 {"ok": 1, "draft_id": {draft_id}, "status": "{rs}", "state": "{sn}", "done": {dn}, "total": {total}, "error": "{err}", "summary": "{summary}"}
@@ -1180,6 +1310,11 @@
     设 dr = 调用 取本人草稿 current_user={current_user} draft_id={draft_id} subject_id={subject_id}
     设 cl = 调用 抢占草稿 draft_id={draft_id} current_user={current_user} from_states=pending to_state=discarded
     如果 {cl.ok} 不等于 1
+      设 lg = 调用 subject.取界面语言 username={current_user}
+      如果 {lg.lang 或} 等于 ja
+        设 sj2 = 调用 状态名日 status={cl.status}
+        报错 409 この下書きは処理済みです（現在の状態：{sj2}）
+      结束
       设 sn = 调用 状态名 status={cl.status}
       报错 409 这份草稿已处理（当前状态：{sn}）
     结束
@@ -1203,6 +1338,11 @@
     结束
     设 cl = 调用 抢占草稿 draft_id={draft_id} current_user={current_user} from_states=done,partial to_state=undoing
     如果 {cl.ok} 不等于 1
+      设 lg = 调用 subject.取界面语言 username={current_user}
+      如果 {lg.lang 或} 等于 ja
+        设 sj2 = 调用 状态名日 status={cl.status}
+        报错 409 この下書きは取り消せません（現在の状態：{sj2}）
+      结束
       设 sn = 调用 状态名 status={cl.status}
       报错 409 这份草稿不能撤销（当前状态：{sn}）
     结束
@@ -1217,6 +1357,12 @@
     设 total = 0
     设 summary = {blank}
     设 pre = 草稿
+    设 lgc = 调用 subject.取界面语言 username={current_user}
+    设 isja = 0
+    设 jpre = 下書き
+    如果 {lgc.lang 或} 等于 ja
+      设 isja = 1
+    结束
     如果 {dr.kind} 等于 quiz_add
       设 dq = 调用 quiz.删助手题目 question_nos={rj.question_nos} subject={subject_id} 出错时 qe
       如果 {qe} 不为空
@@ -1233,6 +1379,9 @@
       设 total = {dq.deleted}
       设 rs = undone
       设 summary = {pre} #{draft_id} 已撤销：删除 {undone} 道题
+      如果 {isja} 等于 1
+        设 summary = {jpre} #{draft_id} を取り消しました：問題を {undone} 問削除
+      结束
     否则如果 {dr.kind} 等于 relay_add
       设 ni = []
       设 okn = 0
@@ -1268,6 +1417,9 @@
                 如果 {err} 为空
                   设 err = {de.error}
                   设 failtxt = {x.display_name} 没撤成：{de.error}
+                  如果 {isja} 等于 1
+                    设 failtxt = {x.display_name} 取り消せませんでした：{de.error}
+                  结束
                 结束
               结束
             结束
@@ -1291,8 +1443,14 @@
       如果 {left} 等于 0
         设 rs = undone
         设 summary = {pre} #{draft_id} 已撤销：删除 {ca} 条传达，停用 {cb} 条（已带到过的话收不回来）
+        如果 {isja} 等于 1
+          设 summary = {jpre} #{draft_id} を取り消しました：伝達を {ca} 件削除、{cb} 件無効化（既に伝えた分は取り消せません）
+        结束
       否则
         设 summary = {pre} #{draft_id} 撤销了 {undone} / {total} 条，{failtxt}
+        如果 {isja} 等于 1
+          设 summary = {jpre} #{draft_id} は {undone} / {total} 件取り消しました、{failtxt}
+        结束
       结束
     否则
       如果 {dr.kind} 等于 setting_save
@@ -1324,6 +1482,9 @@
             设 left = 计算 {left} + 1
             如果 {failtxt} 为空
               设 failtxt = {x.label} 没撤成：{x.error 或}
+              如果 {isja} 等于 1
+                设 failtxt = {x.label} 取り消せませんでした：{x.error 或}
+              结束
             结束
           否则如果 {x.op 或} 等于 edit
             设 cb = 计算 {cb} + 1
@@ -1342,12 +1503,21 @@
         设 rs = undone
         如果 {dr.kind} 等于 setting_save
           设 summary = {pre} #{draft_id} 已撤销：删除 {ca} 条新建的设定，恢复 {cb} 条改前内容
+          如果 {isja} 等于 1
+            设 summary = {jpre} #{draft_id} を取り消しました：新規の設定 {ca} 件を削除、変更前の内容 {cb} 件を復元
+          结束
         否则
           设 summary = {pre} #{draft_id} 已撤销：删除 {ca} 个知识点、{cb} 个条目、{cc} 条前置边
+          如果 {isja} 等于 1
+            设 summary = {jpre} #{draft_id} を取り消しました：知識ポイント {ca} 件、項目 {cb} 件、前提辺 {cc} 件を削除
+          结束
         结束
       否则
         设 err = {ur.error 或}
         设 summary = {pre} #{draft_id} 撤销了 {undone} / {total} 条，{failtxt}
+        如果 {isja} 等于 1
+          设 summary = {jpre} #{draft_id} は {undone} / {total} 件取り消しました、{failtxt}
+        结束
       结束
     结束
     设 fq = {"id": "{draft_id}", "status": "{rs}", "result": "{resj}", "error": "{err}", "token": "{token}", "now": "{now}"}

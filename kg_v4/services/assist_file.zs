@@ -19,15 +19,26 @@
     返回 {row}
   结束
 
-  函数 附件标签 name ext pages chars rows
-    如果 {ext} 等于 pdf
-      设 info = {ext} · {pages} 页 · {chars} 字
-    否则如果 {ext} 等于 csv
-      设 info = {ext} · {rows} 行 · {chars} 字
+  函数 附件标签 name ext pages chars rows lang?
+    如果 {lang} 等于 ja
+      如果 {ext} 等于 pdf
+        设 info = {ext} · {pages} ページ · {chars} 文字
+      否则如果 {ext} 等于 csv
+        设 info = {ext} · {rows} 行 · {chars} 文字
+      否则
+        设 info = {ext} · {chars} 文字
+      结束
+      设 label = 添付ファイル：{name}（{info}）
     否则
-      设 info = {ext} · {chars} 字
+      如果 {ext} 等于 pdf
+        设 info = {ext} · {pages} 页 · {chars} 字
+      否则如果 {ext} 等于 csv
+        设 info = {ext} · {rows} 行 · {chars} 字
+      否则
+        设 info = {ext} · {chars} 字
+      结束
+      设 label = 附件：{name}（{info}）
     结束
-    设 label = 附件：{name}（{info}）
     返回 {"label": "{label}", "info": "{info}"}
   结束
 
@@ -242,7 +253,8 @@
         设 n1 = 写库 app.db assist_file_detach_all teacher={current_user} subject_id={subject_id}
         设 n2 = 写库 app.db assist_file_attach id={ex.id} now={now}
       结束
-      设 lb0 = 调用 附件标签 name={ex.name} ext={ex.ext} pages={ex.pages} chars={ex.chars} rows={ex.rows}
+      设 lg0 = 调用 subject.取界面语言 username={current_user}
+      设 lb0 = 调用 附件标签 name={ex.name} ext={ex.ext} pages={ex.pages} chars={ex.chars} rows={ex.rows} lang={lg0.lang}
       返回 {"ok": 1, "file_id": {ex.id}, "name": "{ex.name}", "ext": "{ex.ext}", "pages": {ex.pages}, "chars": {ex.chars}, "rows": {ex.rows}, "label": "{lb0.label}", "info": "{lb0.info}", "reused": 1}
     结束
     设 cnt = 查一值 app.db assist_file_count teacher={current_user} subject_id={subject_id}
@@ -277,7 +289,8 @@
       设 n2 = 写库表 app.db assist_file_insert {rec}
     结束
     设 fid = 查一值 app.db assist_file_latest_id teacher={current_user} subject_id={subject_id} path={fp}
-    设 lb = 调用 附件标签 name={name} ext={ext} pages={pages} chars={chars} rows={rowcnt}
+    设 lg = 调用 subject.取界面语言 username={current_user}
+    设 lb = 调用 附件标签 name={name} ext={ext} pages={pages} chars={chars} rows={rowcnt} lang={lg.lang}
     返回 {"ok": 1, "file_id": {fid}, "name": "{name}", "ext": "{ext}", "pages": {pages}, "chars": {chars}, "rows": {rowcnt}, "label": "{lb.label}", "info": "{lb.info}", "reused": 0}
   结束
 
@@ -287,7 +300,8 @@
     如果 {row.id} 为空
       返回 {"file_id": "", "name": "", "ext": "", "pages": "", "chars": "", "rows": "", "label": ""}
     结束
-    设 lb = 调用 附件标签 name={row.name} ext={row.ext} pages={row.pages} chars={row.chars} rows={row.rows}
+    设 lg = 调用 subject.取界面语言 username={current_user}
+    设 lb = 调用 附件标签 name={row.name} ext={row.ext} pages={row.pages} chars={row.chars} rows={row.rows} lang={lg.lang}
     返回 {"file_id": {row.id}, "name": "{row.name}", "ext": "{row.ext}", "pages": {row.pages}, "chars": {row.chars}, "rows": {row.rows}, "label": "{lb.label}"}
   结束
 
@@ -299,7 +313,8 @@
       设 n1 = 写库 app.db assist_file_detach_all teacher={current_user} subject_id={sr.subject_id}
       设 n2 = 写库 app.db assist_file_attach id={row.id} now={now}
     结束
-    设 lb = 调用 附件标签 name={row.name} ext={row.ext} pages={row.pages} chars={row.chars} rows={row.rows}
+    设 lg = 调用 subject.取界面语言 username={current_user}
+    设 lb = 调用 附件标签 name={row.name} ext={row.ext} pages={row.pages} chars={row.chars} rows={row.rows} lang={lg.lang}
     返回 {"ok": 1, "file_id": {row.id}, "label": "{lb.label}"}
   结束
 
@@ -331,8 +346,9 @@
     设 rs = 查询 app.db assist_file_list teacher={current_user} subject_id={sr.subject_id}
     设 total = 列表长度 {rs}
     设 files = []
+    设 lg = 调用 subject.取界面语言 username={current_user}
     遍历 it 于 {rs}
-      设 lb = 调用 附件标签 name={it.name} ext={it.ext} pages={it.pages} chars={it.chars} rows={it.rows}
+      设 lb = 调用 附件标签 name={it.name} ext={it.ext} pages={it.pages} chars={it.chars} rows={it.rows} lang={lg.lang}
       设 at = 截取 {it.created_at} 1 16
       设 item = {"att_id": {it.id}, "att_name": "{it.name}", "att_info": "{lb.info}", "att_at": "{at}", "att_on": {it.attached}}
       设 files = 列表加项 {files} {item}
