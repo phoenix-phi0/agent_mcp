@@ -98,7 +98,8 @@ for f in points.csv items.csv edges.csv contrasts.csv quiz_v2.txt; do cp "$CSRC/
 cp "$CSRC"/ja/*.tsv "$OUT/content/python_v1/ja/"
 # K192：Python 默写题库（136 题，中日双语字段在同一文件里；校验器只在开发机用，生产不执行题目代码）
 mkdir -p "$OUT/content/python_v1/dictation"
-cp "$CSRC/dictation/questions.json" "$CSRC/dictation/README.md" "$OUT/content/python_v1/dictation/"
+# README.md 里有开发机校验器的绝对路径，不进包；判题规则见服务约定
+cp "$CSRC/dictation/questions.json" "$OUT/content/python_v1/dictation/"
 
 # ---- 3 requirements.txt（版本钉开发机 .venv）----
 VENV_PY="$REPO/.venv/bin/python"; VENV_PIP="$REPO/.venv/bin/pip"
