@@ -28,19 +28,30 @@
 # （dictation_load），直接开一轮错词复习。
 #
 # 「当」的条件里不能有空格（修饰值按空格切）。
+#
+# K192 Python 默写：同一个界面、同一组动作。默写页面 回 dmode（python / jp），
+# shared.dmode==='python' 时换成 Python 的下拉（题型 术语默写 / 代码输出、等级
+# 全部 / 入门 / 基础 / 进阶、题源 随机 / 错题复习）和输入框：术语单行，Enter 交；
+# 代码输出多行等宽，Enter 换行，点「交」才交（「换行」修饰）。题面、标准答案、
+# 你写的都「等宽」显示，不过界面词表；解析按正文显示。Python 没有提示按钮。
+# 日语的每一行只多了 dmode!=='python' 这个条件，dmode 不是 python 时和原来一样。
 
 界面 自定义 默写 端 学生 序 3 载入 dictation_load
   动作 dictation_state 远程 进入时 隐藏 刷新
 
   分组 顶栏 横排 顶栏 间距 12px 对齐 center
-    字段 dict_direction 控件 下拉 宽 140px 方向
-    字段 dict_level 控件 下拉 宽 90px 等级
-    字段 dict_source 控件 下拉 宽 110px 题源
+    字段 dict_direction 控件 下拉 宽 140px 当 shared.dmode!=='python' 方向
+    字段 dict_level 控件 下拉 宽 90px 当 shared.dmode!=='python' 等级
+    字段 dict_source 控件 下拉 宽 110px 当 shared.dmode!=='python' 题源
+    字段 py_kind 控件 下拉 宽 140px 当 shared.dmode==='python' 题型
+    字段 py_level 控件 下拉 宽 90px 当 shared.dmode==='python' 等级
+    字段 py_source 控件 下拉 宽 110px 当 shared.dmode==='python' 题源
     动作 dictation_start 远程 开始
     显示 dstat
   结束
 
-  文案 当 !shared.dphase 选好方向、等级和题源，点上面的「开始」。一轮 10 个词，不重复；默写的记录单独记，不影响知识点得分。
+  文案 当 !shared.dphase&&shared.dmode!=='python' 选好方向、等级和题源，点上面的「开始」。一轮 10 个词，不重复；默写的记录单独记，不影响知识点得分。
+  文案 当 !shared.dphase&&shared.dmode==='python' 选好题型、等级和题源，点上面的「开始」。一轮最多 10 道题，不重复；默写的记录单独记，不影响知识点得分。
 
   分组 没错词 卡片 当 shared.dphase==='empty'
     显示 dempty 正文
@@ -49,24 +60,34 @@
 
   分组 词卡 卡片 翻页 dcard.code 当 shared.dphase==='ask'||shared.dphase==='done'
     显示 dcard.head
-    显示 dcard.stem 正文
+    显示 dcard.stem 正文 当 shared.dmode!=='python'
+    显示 dcard.stem 正文 等宽 当 shared.dmode==='python'
     显示 dcard.sub 当 shared.dcard&&shared.dcard.sub
     显示 dcard.hint 当 shared.dphase==='ask'&&shared.dcard&&shared.dcard.hint
-    字段 dict_answer 控件 多行 单行高 当 shared.dphase==='ask' 提示 写出来，Enter交（汉字、平假名、片假名都行）
+    字段 dict_answer 控件 多行 单行高 当 shared.dphase==='ask'&&shared.dmode!=='python' 提示 写出来，Enter交（汉字、平假名、片假名都行）
+    字段 py_term 控件 多行 单行高 等宽 当 shared.dphase==='ask'&&shared.dmode==='python'&&shared.dcard.kind==='term' 提示 写出术语，Enter交
+    字段 py_output 控件 多行 换行 等宽 当 shared.dphase==='ask'&&shared.dmode==='python'&&shared.dcard.kind==='output' 提示 写出标准输出，可换行
     动作 dictation_answer 提交 远程 清空 当 shared.dphase==='ask' 交
-    动作 dictation_hint 远程 当 shared.dphase==='ask'&&!shared.dcard.hint 提示
+    动作 dictation_hint 远程 当 shared.dphase==='ask'&&!shared.dcard.hint&&shared.dmode!=='python' 提示
     显示 dcard.verdict 正文 当 shared.dphase==='done'
     动作 dictation_next 远程 回车 当 shared.dphase==='done' 下一个
-    显示 dcard.right 当 shared.dphase==='done'
-    显示 dcard.mine 当 shared.dphase==='done'
+    显示 dcard.right 当 shared.dphase==='done'&&shared.dmode!=='python'
+    显示 dcard.mine 当 shared.dphase==='done'&&shared.dmode!=='python'
     显示 dcard.note 当 shared.dphase==='done'&&shared.dcard.note
+    显示 dcard.answer 等宽 当 shared.dphase==='done'&&shared.dmode==='python' 标准答案
+    显示 dcard.mine 等宽 当 shared.dphase==='done'&&shared.dmode==='python' 你写的
+    显示 dcard.explain 正文 当 shared.dphase==='done'&&shared.dmode==='python'&&shared.dcard.explain 解析
   结束
 
   分组 一轮 卡片 当 shared.dphase==='end'
     显示 dround.text 正文
   结束
-  列表 错词表 绑 round_wrong 当 shared.dphase==='end'&&lists.round_wrong&&lists.round_wrong.length
+  列表 错词表 绑 round_wrong 当 shared.dphase==='end'&&shared.dmode!=='python'&&lists.round_wrong&&lists.round_wrong.length
     列 label 这一轮错的词
+    列 answer 绑 mine 你写的
+  结束
+  列表 错题表 绑 round_wrong 当 shared.dphase==='end'&&shared.dmode==='python'&&lists.round_wrong&&lists.round_wrong.length
+    列 label 这一轮错的题
     列 answer 绑 mine 你写的
   结束
   分组 去处 横排 间距 12px 对齐 center 当 shared.dphase==='end'
@@ -74,5 +95,6 @@
     动作 dictation_wrong 远程 练错词
   结束
 
-  文案 看中文写日语：写汉字或假名都算对，意思完全一样的同义词也算对；看汉字写读音：写假名。
+  文案 当 shared.dmode!=='python' 看中文写日语：写汉字或假名都算对，意思完全一样的同义词也算对；看汉字写读音：写假名。
+  文案 当 shared.dmode==='python' 术语默写：首尾空白不算，大小写要一致，只认题目列出的写法；代码输出：写出程序打印的内容，行尾空格和末尾换行不算差别。
 结束

@@ -25,9 +25,56 @@
   唯一 learner subject_id
 结束
 
+实体 dictation_question dictation_question
+  字段 subject_id 整数 必填 索引 所属科目
+  字段 code 文本 必填 本科目稳定题号
+  字段 point_code 文本 必填 本科目知识点编号
+  字段 kind 文本 必填 题型：term 或 output
+  字段 level 文本 必填 等级：入门、基础或进阶
+  字段 prompt_zh 长文本 必填 中文题面
+  字段 prompt_ja 长文本 日文题面
+  字段 answer 长文本 必填 原始标准答案
+  字段 accepted_json 长文本 必填 可接受答案字符串数组的 JSON
+  字段 explain_zh 长文本 中文解析
+  字段 explain_ja 长文本 日文解析
+  字段 enabled 整数 必填 默认 1 1 为可出题
+  唯一 subject_id code
+结束
+
+实体 dictation_question_attempt dictation_question_attempt
+  字段 learner 文本 必填 索引 学习者
+  字段 subject_id 整数 必填 索引 所属科目
+  字段 question_id 整数 必填 dictation_question 的 id
+  字段 direction 文本 必填 题型：term 或 output
+  字段 answer 长文本 作答（代码输出题可以是空串）
+  字段 correct 整数 必填 对错（1/0）
+  字段 hinted 整数 必填 恒为 0
+  字段 at 文本 必填 作答时间
+结束
+
+实体 dictation_question_progress dictation_question_progress
+  字段 learner 文本 必填 学习者，每人每个科目一行
+  字段 subject_id 整数 必填 索引 所属科目
+  字段 direction 文本 必填 题型：term 或 output
+  字段 level 文本 空或本科目等级
+  字段 source 文本 空、review 或本科目知识点编号
+  字段 current_question_id 整数 必填 当前题，0 表示结束
+  字段 answered 整数 必填 是否已交
+  字段 asked_ids 长文本 本轮已出题 id，逗号分隔
+  字段 asked_count 整数 必填 本轮题数
+  字段 right_count 整数 必填 本轮正确数
+  字段 round_start 整数 必填 开轮时此学习者本科目新作答表最大 id，无则 0
+  唯一 learner subject_id
+结束
+
 页面 实体 dictation_view 默写页面
   字段 dict_direction 枚举 看中文写日语,看汉字写读音 方向
   字段 dict_level 枚举 全部,N5,N4,N3,N2,N1 等级
   字段 dict_source 枚举 随机,错词复习 题源
   字段 dict_answer 文本 写出来的答案
+  字段 py_kind 枚举 术语默写,代码输出 题型
+  字段 py_level 枚举 全部,入门,基础,进阶 等级
+  字段 py_source 枚举 随机,错题复习 题源
+  字段 py_term 文本 写出的术语
+  字段 py_output 长文本 写出的标准输出
 结束

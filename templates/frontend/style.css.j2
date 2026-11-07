@@ -492,6 +492,11 @@ html[lang="ja"] body { font-family:-apple-system,"Hiragino Kaku Gothic ProN",
   html[lang="ja"] nav.nav-role-teacher .nav-side, html[lang="ja"] nav.nav-role-teacher .nav-user { gap:2px; padding-left:3px; }
 }
 <% endif %>
+<% if has_mono is defined and has_mono %>
+/* 「等宽」：代码、程序输出（K192）。保留空格和换行，长行自己折 */
+.mono, textarea.mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace; white-space:pre-wrap; tab-size:4; }
+.dyn.mono .dyn-v { white-space:pre-wrap; }
+<% endif %>
 <% if has_nowrap_cols is defined and has_nowrap_cols %>
 /* 「列 … 不折行」：短列不被长文本列挤成竖排（K190） */
 .cell-nowrap { white-space:nowrap; }

@@ -98,6 +98,7 @@ run 设定行科目列  $PY tests/kg_v4/test_tr_rows.py
 run 学生页设定表  $PY tests/kg_v4/test_report_notes.py
 run 整库引用保护 $PY tests/kg_v4/test_kg_refs.py
 run 导入规则     $PY tests/kg_v4/test_kg_import_rules.py
+run 默写题库导入 $PY tests/kg_v4/test_import_python_dictation.py
 run 助手草稿     $PY tests/kg_v4/test_assist_drafts.py
 run 助手材料     $PY tests/kg_v4/test_assist_material.py
 run 助手学情     $PY tests/kg_v4/test_assist_insight.py

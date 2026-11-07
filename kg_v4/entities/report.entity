@@ -29,6 +29,7 @@
   字段 given_text 文本 作答列
   字段 result 文本 对错列
   字段 direction_label 文本 方向列
+  字段 last_answer 长文本 错题表最近答错写的列
   字段 chat_q 文本 问老师筛选关键词
   字段 chat_from 文本 问老师筛选起始日期
   字段 chat_to 文本 问老师筛选结束日期

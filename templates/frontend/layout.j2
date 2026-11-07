@@ -97,7 +97,7 @@
         <% elif c.href %>
         <td><a v-if="isHref(row.<%= c.href %>)" class="cell-link" :href="hrefOf(row.<%= c.href %>)" :target="targetOf(row.<%= c.href %>)">{{ row.<%= c.bind or c.name %> }}</a><template v-else>{{ row.<%= c.bind or c.name %> }}</template></td>
         <% else %>
-        <td<% if c.has("不折行") %> class="cell-nowrap"<% endif %>>{{ row.<%= c.bind or c.name %> }}</td>
+        <td<% if c.has("不折行") %> class="cell-nowrap"<% elif c.has("等宽") %> class="mono"<% endif %>>{{ row.<%= c.bind or c.name %> }}</td>
         <% endif %>
         <% endfor %>
         <% if node.of_kind("动作") %>

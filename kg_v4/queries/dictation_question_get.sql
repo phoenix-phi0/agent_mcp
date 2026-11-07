@@ -1,0 +1,1 @@
+SELECT id, code, point_code, kind, level, prompt_zh, COALESCE(prompt_ja, '') AS prompt_ja, answer, accepted_json, COALESCE(explain_zh, '') AS explain_zh, COALESCE(explain_ja, '') AS explain_ja, enabled FROM dictation_question WHERE id = CAST(:question_id AS INTEGER) AND subject_id = CAST(:subject_id AS INTEGER)

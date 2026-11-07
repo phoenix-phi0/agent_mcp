@@ -698,22 +698,33 @@
       设 scs = 列表加项 {scs} {item}
     结束
     设 d = 调用 dictation.取默写概况 learner={learner} subject={sid}
-    设 words = 查一值 app.db progress_dict_words learner={learner} subject_id={sid}
-    设 w5 = 练过
+    设 dmode = {d.mode 或 jp}
     设 drate = —
     如果 {d.total} 大于 0
       设 drate = {d.accuracy}%
     结束
-    设 dtext = {w5} {words} 个词，默写 {d.total} 次，正确率 {drate}，错词本 {d.wrong_book_count} 个
-    如果 {lang} 等于 ja
-      设 w5 = 練習した単語
-      设 dtext = {w5} {words} 個、書き取り {d.total} 回、正答率 {drate}、間違えた単語帳 {d.wrong_book_count} 個
+    设 w5 = 练过
+    设 dtext = {zz 或}
+    如果 {dmode} 等于 python
+      设 w5 = 默写
+      设 dtext = {w5} {d.total} 次，正确率 {drate}，错题 {d.wrong_book_count} 道
+      如果 {lang} 等于 ja
+        设 w5 = 書き取り
+        设 dtext = {w5} {d.total} 回、正答率 {drate}、間違えた問題 {d.wrong_book_count} 問
+      结束
+    否则
+      设 words = 查一值 app.db progress_dict_words learner={learner} subject_id={sid}
+      设 dtext = {w5} {words} 个词，默写 {d.total} 次，正确率 {drate}，错词本 {d.wrong_book_count} 个
+      如果 {lang} 等于 ja
+        设 w5 = 練習した単語
+        设 dtext = {w5} {words} 個、書き取り {d.total} 回、正答率 {drate}、間違えた単語帳 {d.wrong_book_count} 個
+      结束
     结束
     设 dlink = #%E9%BB%98%E5%86%99
     如果 {d.wrong_book_count} 大于 0
       设 dlink = #%E9%BB%98%E5%86%99?source=review
     结束
-    返回 {"prog": {prog}, "doing": {doing}, "next": {nxt}, "recent": {rec}, "levels": {lvs}, "scores": {scs}, "dictation": {"text": "{dtext}", "link": "{dlink}"}}
+    返回 {"prog": {prog}, "doing": {doing}, "next": {nxt}, "recent": {rec}, "levels": {lvs}, "scores": {scs}, "dictation": {"text": "{dtext}", "link": "{dlink}", "mode": "{dmode}"}}
   结束
 
   公开 函数 图谱页面 learner current_role? auth_mode? subject?

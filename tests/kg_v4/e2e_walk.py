@@ -2245,6 +2245,287 @@ def kg_mgmt_flow(t1, t2, t3, ck, marks, tmp):
         ck(False, "t3 页面有「公共只读」说明", "15 秒没出现（can_write 没到 0？）")
 
 
+def k192_flow(browser, base, proj, ck, marks, new_page):
+    """K192：Python 默写。夹具自建自删：Python 科目（没有就建）caps 合并 dictation=1、
+    专用学生 walk192s、两道题（术语 + 多行代码输出），结束时删净、caps 和语言改回。
+    覆盖：出题、术语等价写法判对、大小写判错、代码题 Enter 换行不提交、行尾空格和末尾换行容差、
+    答后标准答案和解析、ja 题面和解析日文且代码不过词表、错题本记录与两次答对移出、
+    学生进度页和教师学情页 Python 默写栏（zh/ja）、不泄答案、越权拒绝、日语默写照旧。"""
+    name = "K192"
+    stu = "walk192s"
+    made_subject = False
+    con = sqlite3.connect(proj / "app.db")
+    try:
+        row = con.execute("SELECT id, caps FROM subject_info WHERE code='python'").fetchone()
+        if row is None:
+            con.execute("INSERT INTO subject_info(code,name,kind,caps,levels,qtypes,visibility,owner,status,created_at,updated_at)"
+                        " VALUES('python','Python 编程','general','{}','入门,基础,进阶','choice','public','t1','active','2026-01-01','2026-01-01')")
+            row = con.execute("SELECT id, caps FROM subject_info WHERE code='python'").fetchone()
+            made_subject = True
+        sid, old_caps = row
+        try:
+            caps = json.loads(old_caps or "{}")
+            if not isinstance(caps, dict):
+                caps = {}
+        except ValueError:
+            caps = {}
+        caps["dictation"] = 1
+        con.execute("UPDATE subject_info SET caps=? WHERE id=?", (json.dumps(caps), sid))
+        h = con.execute("SELECT password_hash FROM account_user WHERE username=?", (STUDENT_NAME,)).fetchone()[0]
+        con.execute("INSERT INTO account_user(username,password_hash,display_name,role,disabled,created_at,lang)"
+                    " VALUES(?,?,?,'student',0,'2026-01-01','zh')", (stu, h, stu))
+        for s in (1, sid):
+            con.execute("INSERT INTO subject_student(subject_id,learner,assigned_by,status,created_at) VALUES(?,?,'t1','active','2026-01-01')", (s, stu))
+        if con.execute("SELECT 1 FROM subject_teacher WHERE subject_id=? AND teacher='t1'", (sid,)).fetchone() is None:
+            con.execute("INSERT INTO subject_teacher(subject_id,teacher,role,created_at) VALUES(?,'t1','owner','2026-01-01')", (sid,))
+        ins = ("INSERT INTO dictation_question(subject_id,code,point_code,kind,level,prompt_zh,prompt_ja,answer,accepted_json,"
+               "explain_zh,explain_ja,enabled) VALUES(?,?,?,?,?,?,?,?,?,?,?,1)")
+        con.execute(ins, (sid, "walk192.t1", "walk192.p", "term", "入门", "walk192 向屏幕输出文本的内置函数？",
+                          "walk192 画面に出力する組み込み関数は？", "print", json.dumps(["print", "print()"]),
+                          "walk192 中文解析：用 print 输出", "walk192 日本語の解説：print で出力します"))
+        con.execute(ins, (sid, "walk192.o1", "walk192.p", "output", "基础",
+                          "walk192 写出以下代码的标准输出：\n```python\nfor i in range(2):\n    print(i)\n```",
+                          "walk192 次のコードの標準出力を書いてください。\n```python\nfor i in range(2):\n    print(i)\n```",
+                          "0\n1\n", json.dumps(["0\n1\n"]), "walk192 中文解析：循环两次", "walk192 日本語の解説：2 回ループ"))
+        old_tpref = con.execute("SELECT subject_id FROM subject_pref WHERE learner=?", (TEACHER_USER,)).fetchone()
+        con.commit()
+    finally:
+        con.close()
+
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    p = new_page(ctx, "k192-s")
+    tctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    t = new_page(tctx, "k192-t")
+
+    def has(pg, text, timeout=15000):
+        try:
+            pg.wait_for_function("t => document.body.innerText.includes(t)", arg=text, timeout=timeout)
+            return True
+        except Exception:
+            return False
+
+    def settle(pg):
+        pg.wait_for_timeout(300)
+        pg.wait_for_load_state("networkidle")
+        pg.wait_for_timeout(300)
+
+    def api(c, path, data=None, get=False):
+        r = c.request.get(base + path) if get else c.request.post(base + path, data=data or {})
+        try:
+            return r.status, r.json()
+        except Exception:
+            return r.status, {}
+
+    def switch(pg, user, s):
+        sw = pg.locator("select.nav-subject")
+        sw.wait_for(timeout=10000)
+        with pg.expect_navigation(timeout=20000):
+            sw.select_option(value=str(s))
+        pg.wait_for_load_state("domcontentloaded")
+        pg.wait_for_function("u => { const el = document.querySelector('.nav-user-name'); return el && el.textContent.trim() === u; }",
+                             arg=user, timeout=20000)
+
+    def go(pg, h):
+        pg.evaluate("h => { location.hash = h; }", h)
+        settle(pg)
+
+    def dict_page(pg):
+        go(pg, "#" + quote("默写"))
+        pg.wait_for_function("() => true")
+
+    def start(pg, kind_label):
+        pg.locator("label.field:has(select) select").first.wait_for(timeout=10000)
+        sel = pg.locator("select:has(option[value='术语默写'])")
+        sel.first.select_option(value=kind_label)
+        pg.locator(".screen button", has_text=re.compile("^(开始|スタート)$")).first.click()
+        settle(pg)
+
+    def body(pg):
+        return pg.inner_text("body")
+
+    def set_lang(user, lang):
+        c = sqlite3.connect(proj / "app.db")
+        c.execute("UPDATE account_user SET lang=? WHERE username=?", (lang, user))
+        c.commit()
+        c.close()
+
+    def wb_total():
+        st, j = api(ctx, "/dictation/wrong-book/count", get=True)
+        return st, int(j.get("total") or 0)
+
+    try:
+        p._allowed_status = (401, 400, 403, 404)
+        login(p, base, stu)
+        switch(p, stu, sid)
+        dict_page(p)
+        ck(p.locator("select:has(option[value='术语默写'])").count() == 1
+           and p.locator("select:has(option[value='看中文写日语'])").count() == 0,
+           f"{name}：Python 科目默写页是题型下拉（术语默写/代码输出），日语方向下拉不出现")
+        # 不泄答案：开始的响应里没有标准答案、可接受答案、解析
+        st, j = api(ctx, "/dictation/start", {"py_kind": "术语默写", "py_level": "全部", "py_source": "随机"})
+        card = (j.get("state") or {}).get("dcard") or {}
+        blob = json.dumps(j, ensure_ascii=False)
+        ck(st == 200 and "walk192 向屏幕输出" in (card.get("stem") or ""), f"{name}：出术语题", blob[:300])
+        ck("print()" not in blob and "walk192 中文解析" not in blob and not card.get("answer") and not card.get("explain"),
+           f"{name}：询问时不发标准答案、可接受答案和解析", blob[:400])
+        st, j = api(ctx, "/dictation/hint", {})
+        ck(st == 400, f"{name}：Python 默写伪造提示请求 400", f"{st} {j}")
+        dict_page(p)
+        start(p, "术语默写")
+        ck(has(p, "walk192 向屏幕输出文本的内置函数？"), f"{name}：页面出术语题题面")
+        ck(p.locator(".screen button", has_text=re.compile("^提示$")).count() == 0, f"{name}：Python 没有提示按钮")
+        box = p.locator("textarea.mono").first
+        ck(box.count() == 1 and (box.get_attribute("rows") == "1"), f"{name}：术语是单行等宽输入框")
+        box.fill("Print")
+        box.press("Enter")
+        ck(has(p, "✗不对"), f"{name}：术语大小写不同（Print）判错，Enter 交")
+        txt = body(p)
+        ck("标准答案" in txt and "walk192 中文解析：用 print 输出" in txt, f"{name}：答后显示标准答案和解析", txt[-400:])
+        ck(p.locator("p.dyn.mono", has_text="print").count() >= 1, f"{name}：标准答案等宽显示")
+        st, n = wb_total()
+        ck(n == 1, f"{name}：答错进错题本（1 道）", f"{st} {n}")
+        p.locator(".screen button", has_text="下一个").first.click()
+        settle(p)
+        ck(has(p, "这一轮做完了"), f"{name}：只有一道术语题时一轮结束")
+        ck(has(p, "这一轮错的题") and "walk192 向屏幕输出" in body(p), f"{name}：一轮结束列出错题")
+        p.locator(".screen button", has_text="再来一轮").first.click()
+        settle(p)
+        box = p.locator("textarea.mono").first
+        box.fill("  print()  ")
+        box.press("Enter")
+        ck(has(p, "○对了"), f"{name}：等价写法 print()（首尾空白不算）判对")
+        st, n = wb_total()
+        ck(n == 1, f"{name}：错后只答对一次仍在错题本", f"{st} {n}")
+        # 代码输出：多行、Enter 换行不提交、行尾空格和末尾换行容差
+        start(p, "代码输出")
+        ck(has(p, "for i in range(2):"), f"{name}：出代码输出题（题面保留代码）")
+        ind = p.evaluate("() => { const e=[...document.querySelectorAll('p.dyn.mono')].find(x=>x.innerText.includes('range(2)'));"
+                         " return e ? getComputedStyle(e.querySelector('.dyn-v')||e).whiteSpace + '|' + e.innerText.includes('    print(i)') : 'none'; }")
+        ck(str(ind).startswith("pre-wrap") and str(ind).endswith("true"), f"{name}：代码题面等宽、保留缩进", str(ind))
+        out = p.locator("textarea.mono").first
+        ck(out.get_attribute("rows") == "8", f"{name}：代码输出是多行输入框")
+        out.click()
+        out.type("0")
+        out.press("Enter")
+        out.type("1   ")
+        p.wait_for_timeout(500)
+        val = out.input_value()
+        ck(val == "0\n1   " and "✗" not in body(p) and "○" not in body(p), f"{name}：Enter 换行、不提交", repr(val))
+        p.locator(".screen button", has_text=re.compile("^交$")).first.click()
+        settle(p)
+        ck(has(p, "○对了"), f"{name}：行尾空格、缺末尾换行判对")
+        mine = p.evaluate("() => [...document.querySelectorAll('p.dyn.mono')].map(x=>x.innerText).join('|')")
+        ck("0\n1" in mine, f"{name}：你写的多行原样显示", repr(mine[:200]))
+        # 行内差异判错（API）
+        api(ctx, "/dictation/start", {"py_kind": "代码输出"})
+        st, j = api(ctx, "/dictation/answer", {"py_output": "0 1"})
+        ck(st == 200 and "✗" in json.dumps(j, ensure_ascii=False), f"{name}：代码输出行内不同判错", f"{st}")
+        # 错题复习：再答对一次（共两次无提示答对）移出错题本
+        st, j = api(ctx, "/dictation/start", {"py_kind": "术语默写", "py_source": "错题复习"})
+        ck(st == 200 and (j.get("state") or {}).get("dphase") == "ask", f"{name}：错题复习出题", f"{st} {json.dumps(j, ensure_ascii=False)[:200]}")
+        api(ctx, "/dictation/answer", {"py_term": "print"})
+        st, j = api(ctx, "/dictation/wrong-book", get=True)
+        terms = [w for w in (j.get("words") or []) if w.get("direction") == "term"]
+        ck(not terms, f"{name}：最后一次错后两次无提示答对，术语题移出错题本", json.dumps(j, ensure_ascii=False)[:300])
+        # 再造一个错，供进度页、学情页
+        api(ctx, "/dictation/start", {"py_kind": "术语默写"})
+        api(ctx, "/dictation/answer", {"py_term": "PRINT"})
+        st, ov = api(ctx, "/dictation/overview", get=True)
+        ck(st == 200 and ov.get("total", 0) >= 5 and ov.get("mode") == "python", f"{name}：默写概况按新作答表", json.dumps(ov, ensure_ascii=False))
+        # 越权：别的科目号
+        st, _ = api(ctx, "/dictation/start?subject=999", {"py_kind": "术语默写"})
+        ck(st in (403, 404), f"{name}：没有的科目 403/404", str(st))
+        # 学生进度页
+        go(p, "#" + quote("学习进度"))
+        ck(re.search(r"默写 \d+ 次，正确率 \d+%，错题 2 道", body(p)) is not None, f"{name}：学习进度页 Python 默写栏（错题计数 2：术语 PRINT、代码 0 1）", body(p)[-500:])
+        href = p.evaluate("() => { const a=[...document.querySelectorAll('a')].find(x=>x.textContent.trim()==='去默写'); return a ? a.getAttribute('href') : ''; }")
+        ck("source=review" in (href or ""), f"{name}：有错题时链接 #默写?source=review", href)
+        # ja 学生
+        set_lang(stu, "ja")
+        p.reload(wait_until="domcontentloaded")
+        settle(p)
+        dict_page(p)
+        ck(has(p, "用語の書き取り"), f"{name}：ja 题型下拉是日文")
+        start(p, "术语默写")
+        ck(has(p, "walk192 画面に出力する組み込み関数は？") and "walk192 向屏幕输出" not in body(p), f"{name}：ja 题面是日文")
+        box = p.locator("textarea.mono").first
+        box.fill("prin")
+        box.press("Enter")
+        ck(has(p, "不正解") and has(p, "walk192 日本語の解説：print で出力します") and "walk192 中文解析" not in body(p),
+           f"{name}：ja 判错文案和解析是日文", body(p)[-400:])
+        ck(has(p, "模範解答"), f"{name}：ja 标准答案标签日文")
+        ck(p.locator("p.dyn.mono", has_text="print").count() >= 1, f"{name}：ja 下代码答案原样（不过词表）")
+        go(p, "#" + quote("学习进度"))
+        ck(has(p, "書き取り ") and has(p, "間違えた問題"), f"{name}：ja 学习进度页 Python 默写栏", body(p)[-400:])
+        set_lang(stu, "zh")
+        # 教师学情页 zh / ja
+        t._allowed_status = (401,)
+        login(t, base, TEACHER_USER, "/teacher")
+        t._allowed_status = ()
+        switch(t, TEACHER_USER, sid)
+        go(t, "#" + quote("学情") + "?student=" + stu)
+        ck(has(t, "默写：作答 ") and has(t, "错题本 "), f"{name}：教师学情 Python 默写栏（zh）", body(t)[-600:])
+        ck(has(t, "默写错题本") and has(t, "题面") and has(t, "题型") and "walk192 向屏幕输出" in body(t),
+           f"{name}：教师学情 默写错题本 列题面、题型、最近答错")
+        ck(t.locator("td.mono", has_text="PRINT").count() >= 1, f"{name}：错题本里答错时写的原样等宽")
+        set_lang(TEACHER_USER, "ja")
+        t.reload(wait_until="domcontentloaded")
+        settle(t)
+        go(t, "#" + quote("学情") + "?student=" + stu)
+        ck(has(t, "書き取り：解答 ") and has(t, "間違いノート") and has(t, "書き取りの間違いノート"),
+           f"{name}：教师学情 Python 默写栏（ja）", body(t)[-600:])
+        ck("walk192 画面に出力する組み込み関数は？" in body(t), f"{name}：ja 教师看错题本题面是日文")
+        set_lang(TEACHER_USER, "zh")
+        # 日语默写照旧：同一学生切回 1 号科目
+        set_lang(stu, "zh")
+        p.reload(wait_until="domcontentloaded")
+        switch(p, stu, 1)
+        dict_page(p)
+        ck(p.locator("select:has(option[value='看中文写日语'])").count() == 1
+           and p.locator("select:has(option[value='术语默写'])").count() == 0, f"{name}：日语科目默写页仍是方向下拉")
+        p.locator(".screen button", has_text=re.compile("^开始$")).first.click()
+        settle(p)
+        ck(p.locator(".screen button", has_text=re.compile("^提示$")).count() == 1, f"{name}：日语默写仍有提示按钮")
+        jb = p.locator("textarea").first
+        ck(jb.get_attribute("class") != "mono" and jb.get_attribute("rows") == "1", f"{name}：日语输入框照旧（单行、非等宽）")
+        jb.fill("ぜったいちがう")
+        jb.press("Enter")
+        ck(has(p, "✗不对") and has(p, "正确："), f"{name}：日语 Enter 交、判错文案照旧")
+        con = sqlite3.connect(proj / "app.db")
+        nq = con.execute("SELECT COUNT(*) FROM dictation_question_attempt WHERE learner=? AND subject_id=1", (stu,)).fetchone()[0]
+        nj = con.execute("SELECT COUNT(*) FROM dictation_attempt WHERE learner=? AND subject_id=?", (stu, sid)).fetchone()[0]
+        con.close()
+        ck(nq == 0 and nj == 0, f"{name}：日语作答不进新表、Python 作答不进日语表", f"{nq} {nj}")
+        err = drain_errors(marks)
+        ck(not err, f"{name}：无 JS 错误", err)
+    finally:
+        con = sqlite3.connect(proj / "app.db")
+        try:
+            for sql in ("DELETE FROM dictation_question_attempt WHERE learner=?", "DELETE FROM dictation_question_progress WHERE learner=?",
+                        "DELETE FROM dictation_attempt WHERE learner=?", "DELETE FROM dictation_progress WHERE learner=?",
+                        "DELETE FROM subject_student WHERE learner=?", "DELETE FROM subject_pref WHERE learner=?",
+                        "DELETE FROM account_user WHERE username=?"):
+                con.execute(sql, (stu,))
+            con.execute("DELETE FROM dictation_question WHERE code LIKE 'walk192.%'")
+            con.execute("UPDATE account_user SET lang='zh' WHERE username=?", (TEACHER_USER,))
+            con.execute("DELETE FROM subject_pref WHERE learner=?", (TEACHER_USER,))
+            if old_tpref:
+                con.execute("INSERT INTO subject_pref(learner,subject_id) VALUES(?,?)", (TEACHER_USER, old_tpref[0]))
+            if made_subject:
+                con.execute("DELETE FROM subject_teacher WHERE subject_id=?", (sid,))
+                con.execute("DELETE FROM subject_info WHERE id=?", (sid,))
+            else:
+                con.execute("UPDATE subject_info SET caps=? WHERE id=?", (old_caps, sid))
+            con.commit()
+        finally:
+            con.close()
+        for c in (ctx, tctx):
+            try:
+                c.close()
+            except Exception:
+                pass
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="kg_v4 浏览器走查（真浏览器，自己起服务）")
     ap.add_argument("--no-subject-mgmt", dest="no_subject", action="store_true",
@@ -2361,6 +2642,7 @@ def main(argv=None):
                 k188_nav_flow(browser, base, proj, ck, marks, new_page)   # K188：教师端顶栏不折行
                 k190_flow(browser, base, proj, ck, marks, new_page)   # K190：游标分页、关浮层不盖筛选框、ja 残留、花括号值
                 k189_chat_flow(browser, base, proj, ck, marks, new_page)   # K189：问老师记录分页、看全文、筛选
+                k192_flow(browser, base, proj, ck, marks, new_page)   # K192：Python 默写（术语/代码输出、错题本、学情、ja），日语默写照旧
 
                 # ---- 390px 视口 ----
                 m = new_page(browser.new_context(viewport={"width": 390, "height": 844}),

@@ -124,6 +124,27 @@ def main() -> int:
             # 目录名与源同名：build 不传 title 时标题取目录名，要进 <title>
             proj = proj_copy(tmp, src, src)
             if src == "kg_v4":
+                # K192 Python 默写（题型下拉、术语/代码输入框、错题表、学情和进度的 Python 栏）不在基线 golden 里，还原成基线写法
+                ui = proj / "ui/quiz_dictation.ui"
+                t = ui.read_text(encoding="utf-8")
+                t = re.sub(r"#\n# K192 Python 默写：.*?dmode 不是 python 时和原来一样。\n", "", t, flags=re.S)
+                t = re.sub(r"  列表 错题表 .*?\n  结束\n", "", t, flags=re.S)
+                t = "".join(ln for ln in t.splitlines(True) if "dmode==='python'" not in ln)
+                t = t.replace("&&shared.dmode!=='python'", "").replace(" 当 shared.dmode!=='python'", "")
+                ui.write_text(t, encoding="utf-8")
+                ui = proj / "ui/report.ui"
+                t = ui.read_text(encoding="utf-8")
+                t = re.sub(r"    # K192：Python 科目的默写错题本.*?\n    结束\n", "", t, flags=re.S)
+                t = t.replace("&&!(shared.student&&shared.student.dict_mode==='python')", "")
+                ui.write_text(t, encoding="utf-8")
+                ui = proj / "ui/progress.ui"
+                t = ui.read_text(encoding="utf-8")
+                t = re.sub(r"    区域 默写 当 shared.dictation&&shared.dictation.mode==='python'\n.*?\n    结束\n", "", t, flags=re.S)
+                t = t.replace("    区域 单词默写 当 !(shared.dictation&&shared.dictation.mode==='python')\n", "    区域 单词默写\n")
+                ui.write_text(t, encoding="utf-8")
+                for ent, pat in (("dictation", r"  字段 py_\w+ .*?\n"), ("report", r"  字段 last_answer .*?\n")):
+                    f = proj / f"entities/{ent}.entity"
+                    f.write_text(re.sub(pat, "", f.read_text(encoding="utf-8")), encoding="utf-8")
                 ui = proj / "ui/textbook.ui"
                 ui.write_text(ui.read_text(encoding="utf-8").replace("显示 reading.explanation 正文 Markdown", "显示 reading.explanation 正文"), encoding="utf-8")
                 (proj / "ui/teacher_lesson.ui").unlink()  # K187 新界面不在基线 golden 里

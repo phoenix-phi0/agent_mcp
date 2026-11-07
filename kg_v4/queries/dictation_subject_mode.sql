@@ -1,0 +1,1 @@
+SELECT CASE WHEN code <> 'python' THEN 'jp' ELSE CASE WHEN json_valid(caps) THEN CASE WHEN json_extract(caps, '$.dictation') = 1 THEN 'python' ELSE 'python_off' END ELSE 'python_off' END END AS mode FROM subject_info WHERE id = CAST(:subject_id AS INTEGER)

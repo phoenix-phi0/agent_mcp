@@ -10,7 +10,7 @@
 结束
 
 接口 POST /dictation/start 动作 dictation_start 角色 student
-  设 r = 调用 dictation.开始页面 learner={learner} dict_direction={dict_direction 或} dict_level={dict_level 或} dict_source={dict_source 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  设 r = 调用 dictation.开始页面 learner={learner} dict_direction={dict_direction 或} dict_level={dict_level 或} dict_source={dict_source 或} py_kind={py_kind 或} py_level={py_level 或} py_source={py_source 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   响应 state {r}
 结束
 
@@ -48,7 +48,7 @@
 结束
 
 接口 POST /dictation/answer 动作 dictation_answer 角色 student
-  设 r = 调用 dictation.判答案页面 learner={learner} dict_answer={dict_answer 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  设 r = 调用 dictation.判答案页面 learner={learner} dict_answer={dict_answer 或} py_term={py_term 或} py_output={py_output 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   响应 state {r}
 结束
 
@@ -58,7 +58,7 @@
 结束
 
 接口 GET /dictation/wrong-book 角色 student
-  设 r = 调用 dictation.取错词本 learner={learner} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
+  设 r = 调用 dictation.取错词本 learner={learner} lang={lang 或} current_role={current_role 或} auth_mode={auth_mode 或} subject={subject 或}
   返回 {r}
 结束
 

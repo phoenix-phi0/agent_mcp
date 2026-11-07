@@ -33,6 +33,7 @@
   given_text 文本 最近作答表「作答」列
   result 文本 最近作答表「对错」列
   direction_label 文本 错词表「方向」列
+  last_answer 长文本 错题表「最近答错写的」列
   chat_q 文本 问老师筛选「关键词」
   chat_from 文本 问老师筛选「起始日期」
   chat_to 文本 问老师筛选「结束日期」
@@ -235,6 +236,7 @@
   伪代码 调用 取学生学情 student=student subject=subject_id 得 g；调用 lesson.取当前系列 learner=student subject=subject_id 取 name；调用 progress.列最近作答 learner=student limit=20 subject=subject_id 得 recent；调用 dictation.取默写概况 learner=student subject=subject_id 得 dict
   伪代码 K182 内容日语替换：lang = 调用 account.取语言 username=learner 取 lang（查不到为空视为 zh）；ja 时 student_points/student_wrong/student_recent 各行的知识点 title、条目 name 调用 subject.译文（tbl=kg_point field=title / tbl=kg_item field=name，row_key=对应编号）、错题题干调 取题干 时带 lang={lang}，均非空才替换；取学生学情 本身不改（还要喂 AI 学情总结）
   伪代码 K190 日语文案：下面带数字或名字的文案在 lang 为 ja 时写日文：没有这个学生的 missing「この学生はいません（{student}）。クラス全体の一覧に戻って選び直してください。」；last 都没有时「まだありません」；head「{display_name}（{student}）　教材：{系列 name}　最近の学習：{last}」；overview「まだ解答がありません」或「習得済み {mastered_count} 個の知識ポイント　解答 {answer_total} 問　直近の正答率 {recent_accuracy}%　平均スコア {avg_score}」；dictation「単語の書き取り：まだ解答がありません」或「単語の書き取り：解答 {total} 回、正答率 {accuracy}%、間違えた単語帳 {wrong_book_count} 個」；student_summary.head「AI 学習状況のまとめ（{summary_at}、{summary_author} が依頼）」；student_recent 的 result 对写「正解」、错写「不正解」（这一列不进词表：同一行的「作答」列是学生的答案，答「对」的会被词表一起换掉）。lang 不是 ja 时一律是下面的中文，一字不改
+  伪代码 K192 Python 默写：dict.mode 等于 python（本科目是 Python 默写）时 student 对象多一个 dict_mode=python（否则 dict_mode=jp，日语其余一字不变）；dictation 文案中文 dict.total 为 0 写「默写：还没有作答」，否则「默写：作答 {total} 次，正确率 {accuracy}%，错题本 {wrong_book_count} 题」；ja 写「書き取り：まだ解答がありません」或「書き取り：解答 {total} 回、正答率 {accuracy}%、間違いノート {wrong_book_count} 問」；student_book 改为调用 dictation.取错词本 learner=student lang=lang subject=subject_id（lang 是当前教师的界面语言，题面按它选），每项 {label: prompt 原样（不截断、不过词表、不插 HTML）, direction_label: kind 为 term 中文「术语默写」ja「用語の書き取り」、output 中文「代码输出」ja「コードの出力」, last_answer: last_answer 原样, last_wrong: last_at}；不读学生无权的科目（subject_id 已由 本科目 解析并校验）
   伪代码 last：g.dialog_last_at、recent 第一条的 at、dict.last_at 三者里最晚的（空串不算），都没有写「还没有」
   伪代码 student 对象 = {username, head, overview, dictation, missing: "", back: "#%E5%AD%A6%E6%83%85"}：head=「{display_name}（{student}）　教材：{系列 name}　最近学习：{last}」（全角空格分隔）；overview 在 answer_total 为 0 时是「还没有作答」，否则「已掌握 {mastered_count} 个知识点　作答 {answer_total} 题　近期正确率 {recent_accuracy}%　平均得分 {avg_score}」；dictation 在 dict.total 为 0 时是「单词默写：还没有作答」，否则「单词默写：作答 {total} 次，正确率 {accuracy}%，错词本 {wrong_book_count} 个」
   伪代码 student_summary={"student": student, "head": has_summary 为 1 时「AI 学情总结（{summary_at}，{summary_author} 请的）」否则空串, "text": summary 或空串}

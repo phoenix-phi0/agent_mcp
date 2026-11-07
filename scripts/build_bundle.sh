@@ -96,6 +96,9 @@ cp "$CSRC/ja/lesson.tsv" "$OUT/content/python_v1/ja_lesson/"
 rm -f "$CSRC/ja/lesson.tsv"
 for f in points.csv items.csv edges.csv contrasts.csv quiz_v2.txt; do cp "$CSRC/$f" "$OUT/content/python_v1/$f"; done
 cp "$CSRC"/ja/*.tsv "$OUT/content/python_v1/ja/"
+# K192：Python 默写题库（136 题，中日双语字段在同一文件里；校验器只在开发机用，生产不执行题目代码）
+mkdir -p "$OUT/content/python_v1/dictation"
+cp "$CSRC/dictation/questions.json" "$CSRC/dictation/README.md" "$OUT/content/python_v1/dictation/"
 
 # ---- 3 requirements.txt（版本钉开发机 .venv）----
 VENV_PY="$REPO/.venv/bin/python"; VENV_PIP="$REPO/.venv/bin/pip"
@@ -328,7 +331,9 @@ cat > "$OUT/scripts/load_python_content.sh" <<'XEOF_LOAD'
 #   → 题库导入（POST /quiz/import，清空本科目题库重灌）→ 日文译文导入（project/scripts/import_content_ja.py，
 #   先预检再 --apply）→ 中文课文 13 课（project/setup/import_lesson_rows.py，按条目/知识点挂接，所以在图谱之后）
 #   → 课文译文 54 行（ja_lesson/lesson.tsv，要在课文之后）。最后按库里的行数自检：图谱 34/49/110/13、题库 99、
-#   课文 13、挂接 110/34、译文 499（442+54+3：K191 日语科目的名字）。
+#   课文 13、挂接 110/34、译文 499（442+54+3：K191 日语科目的名字）、默写题 136（术语 68、代码输出 68）。
+#   K192：最后导入 Python 默写题库（project/scripts/import_python_dictation.py，先预检再 --apply，
+#   按 (科目, 题号) upsert），自检通过后才给 Python 科目的 caps 合并 dictation=1。
 # 前提：install.sh、init_data.sh 已跑，服务已在跑（bash scripts/start.sh）。
 # 可重复执行：图谱导入按编号「新增/更新」，题库重灌结果一致，译文 upsert；科目已存在则跳过建科目。
 # 用法：KG_PASSWORD='管理员口令' bash scripts/load_python_content.sh
@@ -443,7 +448,12 @@ for line in open(sys.argv[2], encoding="utf-8").read().splitlines():
 con.commit(); con.close(); print("新增", n)
 XNAMES
 
-say "自检行数（期望 图 34/49/110/13、题 99、课文 13、挂接 110/34、译文 499）"
+say "Python 默写题库预检（K192）"
+"$PY" "$HERE/project/scripts/import_python_dictation.py" --db "$DB" --subject python --file "$C/dictation/questions.json"
+say "Python 默写题库写入"
+"$PY" "$HERE/project/scripts/import_python_dictation.py" --db "$DB" --subject python --file "$C/dictation/questions.json" --apply
+
+say "自检行数（期望 图 34/49/110/13、题 99、课文 13、挂接 110/34、译文 499、默写 136/68/68）"
 "$PY" - "$DB" "$SID" <<'XPY'
 import sqlite3, sys
 con = sqlite3.connect(sys.argv[1]); sid = sys.argv[2]
@@ -457,8 +467,11 @@ got = [n("select count(*) from kg_point where subject_id=?"),
        n("select count(*) from lesson_text where subject_id=?"),
        n("select count(*) from lesson_item_link where subject_id=?"),
        n("select count(*) from lesson_point_link where subject_id=?"),
-       con.execute("select count(*) from subject_content_translation where lang='ja'").fetchone()[0]]
-exp = [34, 49, 110, 13, 99, 13, 110, 34, 499]
+       con.execute("select count(*) from subject_content_translation where lang='ja'").fetchone()[0],
+       n("select count(*) from dictation_question where subject_id=? and enabled=1"),
+       n("select count(*) from dictation_question where subject_id=? and kind='term'"),
+       n("select count(*) from dictation_question where subject_id=? and kind='output'")]
+exp = [34, 49, 110, 13, 99, 13, 110, 34, 499, 136, 68, 68]
 print("实际:", "/".join(map(str, got)))
 if got != exp:
     print("!! 行数和期望不符：期望 " + "/".join(map(str, exp)))
@@ -468,6 +481,8 @@ if not con.execute("select intro from lesson_series where code='python.core_v1'"
     raise SystemExit(1)
 print("内容包导入完成")
 XPY
+say "打开 Python 科目默写（caps 合并 dictation=1，其余键保留；自检过了才做）"
+"$PY" "$HERE/project/scripts/import_python_dictation.py" --db "$DB" --subject python --enable-caps --apply
 XEOF_LOAD
 
 cat > "$OUT/scripts/set_lang.py" <<'XEOF_SETLANG'

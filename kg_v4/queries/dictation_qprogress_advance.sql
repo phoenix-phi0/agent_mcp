@@ -1,0 +1,1 @@
+UPDATE dictation_question_progress SET current_question_id = CAST(:question_id AS INTEGER), answered = 0, asked_ids = :asked_ids, asked_count = asked_count + 1 WHERE learner = :learner AND subject_id = CAST(:subject_id AS INTEGER)

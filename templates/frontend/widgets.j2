@@ -39,7 +39,7 @@
 <%- set model = base ~ "." ~ (f.bind or f.name) -%>
 <%- set opts = options_map.get(f.bind or f.name) or options_map.get(f.name) or [] -%>
 <%- if w == "多行" -%>
-<textarea<%= 控件宽(f) %> v-model="<%= model %>" rows="<% if f.has("单行高") %>1<% else %>8<% endif %>"<% if f.hint %> placeholder="<%= f.hint %>"<% endif %><% if f.required %> required<% endif %> @keydown="onKey($event, '<%= f.submit_action %>')" @input="grow"></textarea>
+<textarea<%= 控件宽(f) %><% if f.has("等宽") %> class="mono" spellcheck="false"<% endif %> v-model="<%= model %>" rows="<% if f.has("单行高") %>1<% else %>8<% endif %>"<% if f.hint %> placeholder="<%= f.hint %>"<% endif %><% if f.required %> required<% endif %><% if not f.has("换行") %> @keydown="onKey($event, '<%= f.submit_action %>')"<% endif %> @input="grow"></textarea>
 <%- elif w == "数字" -%>
 <input<%= 控件宽(f) %> type="number" v-model.number="<%= model %>"<% if f.hint %> placeholder="<%= f.hint %>"<% endif %><% if f.required %> required<% endif %>>
 <%- elif w == "日期" -%>
@@ -221,6 +221,6 @@
 
 <%- macro 显示(n) -%>
 <% if n.has("Markdown") %><div class="dyn prose markdown"<%= 当(n) %><%= 尺寸(n) %>><% if n.label and n.label != n.name %><span class="lbl"><%= n.label %></span><% endif %><div class="dyn-v" v-html="markdown(getPath(shared, '<%= n.bind or n.name %>'))"></div></div><% else %>
-<p class="dyn<% if n.has("正文") %> prose<% endif %>"<%= 当(n) %><%= 尺寸(n) %>><% if n.label and n.label != n.name %><span class="lbl"><%= n.label %></span>
+<p class="dyn<% if n.has("正文") %> prose<% endif %><% if n.has("等宽") %> mono<% endif %>"<%= 当(n) %><%= 尺寸(n) %>><% if n.label and n.label != n.name %><span class="lbl"><%= n.label %></span>
 <% endif %><span class="dyn-v">{{ getPath(shared, '<%= n.bind or n.name %>') }}</span></p><% endif %>
 <%- endmacro -%>

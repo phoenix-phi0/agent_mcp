@@ -1,0 +1,1 @@
+SELECT learner, subject_id, direction, COALESCE(level, '') AS level, COALESCE(source, '') AS source, current_question_id, answered, COALESCE(asked_ids, '') AS asked_ids, asked_count, right_count, COALESCE(round_start, 0) AS round_start FROM dictation_question_progress WHERE learner = :learner AND subject_id = CAST(:subject_id AS INTEGER)

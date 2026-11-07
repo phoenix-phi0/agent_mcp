@@ -55,9 +55,13 @@
         列 result 对错
       结束
     结束
-    区域 单词默写
+    区域 单词默写 当 !(shared.dictation&&shared.dictation.mode==='python')
       显示 dictation.text
       链接 dictation 绑 dictation.link 去默写
+    结束
+    区域 默写 当 shared.dictation&&shared.dictation.mode==='python'
+      显示 dictation.text
+      链接 dictation_py 绑 dictation.link 去默写
     结束
     区域 各等级
       列表 等级表 绑 levels

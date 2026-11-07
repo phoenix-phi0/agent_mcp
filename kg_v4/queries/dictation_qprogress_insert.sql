@@ -1,0 +1,1 @@
+INSERT INTO dictation_question_progress (learner, subject_id, direction, level, source, current_question_id, answered, asked_ids, asked_count, right_count, round_start) VALUES (:learner, CAST(:subject_id AS INTEGER), :direction, :level, :source, CAST(:current_question_id AS INTEGER), 0, :asked_ids, 1, 0, CAST(:round_start AS INTEGER))

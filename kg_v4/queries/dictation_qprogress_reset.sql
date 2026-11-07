@@ -1,0 +1,1 @@
+UPDATE dictation_question_progress SET direction = :direction, level = :level, source = :source, current_question_id = CAST(:current_question_id AS INTEGER), answered = 0, asked_ids = :asked_ids, asked_count = 1, right_count = 0, round_start = CAST(:round_start AS INTEGER) WHERE learner = :learner AND subject_id = CAST(:subject_id AS INTEGER)

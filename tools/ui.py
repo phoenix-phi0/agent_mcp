@@ -380,6 +380,11 @@ FLAG_MODIFIERS = FLAG_MODIFIERS | {"卡片", "正文", "Markdown"}
 # 「浮层 x 关后不载入」：只读的浮层，关上时界面自己的「载入」不再重跑——后面的页面
 # 没变，重拉只会把人刚在表单里输入的字盖掉（K190）。没用的项目生成物一个字节不变。
 FLAG_MODIFIERS = FLAG_MODIFIERS | {"不折行", "关后不载入"}
+# 「等宽」：多行框或「显示」用等宽字体、保留空白和换行，且不过界面词表（写代码、
+# 看代码输出用；代码里的 print、True 不能被整串翻译掉）。
+# 「换行」：多行框里 Enter 就是换行，不提交——只能点按钮交（代码输出要能写多行）。
+# 两个都是用了才生成相关代码，没用的项目生成物一个字节不变（K192）。
+FLAG_MODIFIERS = FLAG_MODIFIERS | {"等宽", "换行"}
 KEYED_MODIFIERS = KEYED_MODIFIERS | {"交给", "翻页"}
 
 # 列「地址 <键>」：这一格画成链接，见上面「链接」的说明
@@ -1406,6 +1411,7 @@ def render_vue(screens, title="UI", options_map=None, rows=None,
              for s in screens for o in s.overlays() if o.has("关后不载入")},
             ensure_ascii=False) if any(o.has("关后不载入") for s in screens for o in s.overlays()) else "",
         "has_nowrap_cols": any(n.kind == "列" and n.has("不折行") for s in screens for n in s.walk()),
+        "has_mono": any(n.has("等宽") for s in screens for n in s.walk()),
         # 顶部导航，由项目编译时算好传进来（见 gen/project.py 的 build）。
         # 传了就用它，不管有没有「切到」；没传照旧按 has_goto 决定。
         "nav": bool(nav),

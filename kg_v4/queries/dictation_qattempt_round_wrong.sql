@@ -1,0 +1,1 @@
+SELECT id, question_id, direction, COALESCE(answer, '') AS answer FROM dictation_question_attempt WHERE learner = :learner AND subject_id = CAST(:subject_id AS INTEGER) AND id > CAST(:round_start AS INTEGER) AND correct = 0 ORDER BY id ASC

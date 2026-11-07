@@ -1012,7 +1012,24 @@
         设 dc = {w2j} {dict.total} 回、正答率 {dict.accuracy}%、間違えた単語帳 {g.wrong_book_count} 個
       结束
     结束
+    设 dmode = jp
+    如果 {dict.mode 或} 等于 python
+      设 dmode = python
+      设 pw = 默写：作答
+      设 dc = 默写：还没有作答
+      如果 {dict.total} 大于 0
+        设 dc = {pw} {dict.total} 次，正确率 {dict.accuracy}%，错题本 {g.wrong_book_count} 题
+      结束
+      如果 {lang} 等于 ja
+        设 dc = 書き取り：まだ解答がありません
+        如果 {dict.total} 大于 0
+          设 pwj = 書き取り：解答
+          设 dc = {pwj} {dict.total} 回、正答率 {dict.accuracy}%、間違いノート {g.wrong_book_count} 問
+        结束
+      结束
+    结束
     设 so.username = {student}
+    设 so.dict_mode = {dmode}
     设 so.head = {head}
     设 so.overview = {ov}
     设 so.dictation = {dc}
@@ -1248,7 +1265,29 @@
       设 srec = 列表加项 {srec} {ro}
     结束
     设 sbk = 解析JSON []
-    遍历 bw 于 {g.wrong_book}
+    设 jpl = {g.wrong_book}
+    如果 {dmode} 等于 python
+      设 jpl = 解析JSON []
+      设 pbk = 调用 dictation.取错词本 learner={student} lang={lang} subject={subject_id}
+      遍历 pw2 于 {pbk.words}
+        设 pdl = 代码输出
+        如果 {lang} 等于 ja
+          设 pdl = コードの出力
+        结束
+        如果 {pw2.kind} 等于 term
+          设 pdl = 术语默写
+          如果 {lang} 等于 ja
+            设 pdl = 用語の書き取り
+          结束
+        结束
+        设 po.label = {pw2.prompt 或}
+        设 po.direction_label = {pdl}
+        设 po.last_answer = {pw2.last_answer 或}
+        设 po.last_wrong = {pw2.last_at 或}
+        设 sbk = 列表加项 {sbk} {po}
+      结束
+    结束
+    遍历 bw 于 {jpl}
       设 bl = {bw.kana} {bw.meaning}
       如果 {bw.kanji} 不为空 且 {bw.kanji} 不等于 {bw.kana}
         设 bl = {bw.kanji}【{bw.kana}】{bw.meaning}

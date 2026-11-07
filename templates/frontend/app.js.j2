@@ -225,6 +225,8 @@ const _app = createApp({
         // 语言切换里的「中文」是给看不懂日文的人用的，不翻；别处的「中文」（表头）照翻
 <% if has_lang_switch %>        if (n.parentElement && n.parentElement.closest(".nav-lang")) continue;
 <% endif %><% if has_markdown %>        if (n.parentElement && n.parentElement.closest(".markdown code")) continue;
+<% endif %><% if has_mono is defined and has_mono %>        // 「等宽」的显示是代码或程序输出，不过词表（K192）
+        if (n.parentElement && n.parentElement.closest(".dyn.mono .dyn-v, td.mono")) continue;
 <% endif %>        const v = n.nodeValue;
         if (!v || !v.trim()) continue;
         const t = dict[v.trim()];

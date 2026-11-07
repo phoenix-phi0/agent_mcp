@@ -117,10 +117,19 @@
         列 result 对错
       结束
     结束
-    区域 默写错词本 当 lists.student_book&&lists.student_book.length
+    区域 默写错词本 当 lists.student_book&&lists.student_book.length&&!(shared.student&&shared.student.dict_mode==='python')
       列表 错词表 绑 student_book
         列 label 单词
         列 direction_label 方向
+        列 last_wrong 最近答错
+      结束
+    结束
+    # K192：Python 科目的默写错题本。题面、答错时写的是代码或输出，等宽显示、不过词表
+    区域 默写错题本 当 lists.student_book&&lists.student_book.length&&shared.student&&shared.student.dict_mode==='python'
+      列表 错题表 绑 student_book
+        列 label 等宽 题面
+        列 direction_label 题型
+        列 last_answer 等宽 答错时写的
         列 last_wrong 最近答错
       结束
     结束
