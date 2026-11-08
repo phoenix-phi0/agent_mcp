@@ -96,6 +96,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 from pathlib import Path
@@ -615,7 +616,77 @@ class ZCodeClient(_CLIBackend):
         return text
 
 
-_BACKENDS = {"claude": ClaudeCLIClient(), "zcode": ZCodeClient()}
+class GooseCLIClient(_CLIBackend):
+    """goose run 纯问答，走 Z.AI 账号，跟 gsbatch 用同一套 zai_low 常驻代理。
+
+    模型：cli:goose/glm-5.3；不写模型用 gsbatch 的默认（glm-5.3-flash）。
+    provider：DSL_GOOSE_PROVIDER > config.json 的 goose_provider > zai_low。
+    目前只接了 zai_low（强度 low，由 18766 的代理补）。
+    key：调用方进程的环境变量 ZAI_CODING_PLAN_API_KEY（或 ZHIPU_API_KEY）。
+    gsbatch 任务里的 shell 是洗过密钥的，在那里调会报「没有 key」——这是
+    gsbatch 有意的，不要为了跑通把 key 写进文件。
+    超时：DSL_GOOSE_TIMEOUT > config.json 的 goose_timeout > 90 秒。
+    --system 是追加在 goose 自己的系统提示词后面的（不像 claude 能整段换掉）；
+    不挂任何扩展、GOOSE_MODE=chat、--max-turns 1，所以没有工具可用。
+    """
+
+    name = "goose"
+
+    @staticmethod
+    def binary() -> str:
+        from . import gsbatch
+        exe = gsbatch.GOOSE_BIN
+        if not exe or not shutil.which(exe):
+            raise BackendError(f"找不到 goose（{exe}），装了吗？"
+                               f"可以用环境变量 GSBATCH_GOOSE 指定路径")
+        return exe
+
+    def complete(self, prompt, system, model) -> str:
+        from . import gsbatch
+        if self.use_wsl():
+            raise BackendError("goose 后端还不支持经 WSL 调")
+        timeout = _setting("DSL_GOOSE_TIMEOUT", "goose_timeout", DEFAULT_TIMEOUT)
+        provider = _text_setting("DSL_GOOSE_PROVIDER", "goose_provider") or "zai_low"
+        if provider != "zai_low":
+            raise BackendError(f"goose 后端目前只接了 zai_low，不支持 {provider}")
+        key = gsbatch._zai_key()
+        if not key:
+            raise BackendError("goose：环境里没有 ZAI_CODING_PLAN_API_KEY"
+                               "（gsbatch 任务的 shell 里拿不到，要在 MCP 服务"
+                               "或 cbatch 起的进程里调）")
+        try:
+            gsbatch._ensure_zai_low()
+        except gsbatch.GSBatchError as e:
+            raise BackendError(f"goose：{e}") from None
+        env = {k: v for k, v in gsbatch._child_env().items()
+               if not k.startswith("GOOSE_") and not gsbatch._leaky_env(k, v)}
+        env.update(GOOSE_DISABLE_KEYRING="1", GOOSE_DISABLE_SESSION_NAMING="true",
+                   GOOSE_MODE="chat", ZAI_CODING_PLAN_API_KEY=key)
+        cmd = [self.binary(), "run", "--no-profile", "--no-session",
+               "--output-format", "stream-json", "--provider", provider,
+               "--model", model or gsbatch.DEFAULT_MODELS[provider],
+               "--max-turns", "1", "--system", system or DEFAULT_SYSTEM,
+               "-i", "-"]
+        with tempfile.TemporaryDirectory(prefix="dsl_goose_") as cwd:
+            try:
+                p = subprocess.run(cmd, cwd=cwd, env=env, input=prompt,
+                                   capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace",
+                                   timeout=timeout)
+            except subprocess.TimeoutExpired:
+                raise BackendError(f"goose 超过 {timeout} 秒没有返回"
+                                   f"（可用 DSL_GOOSE_TIMEOUT 调大）") from None
+        r = gsbatch._parse(p.stdout)
+        if r["error"] or p.returncode != 0:
+            raise BackendError(f"goose 报错（退出码 {p.returncode}）："
+                               f"{(r['error'] or _head(p.stderr) or _head(p.stdout, 3))[:300]}")
+        if not r["text"]:
+            raise BackendError(f"goose 的输出里没有回复文本：{_head(p.stdout, 3)[:300]}")
+        return r["text"]
+
+
+_BACKENDS = {"claude": ClaudeCLIClient(), "zcode": ZCodeClient(),
+             "goose": GooseCLIClient()}
 
 
 class RouterClient:
@@ -760,6 +831,165 @@ class RouterClient:
             lambda b, m: b.stream_messages(messages, model=m),
             lambda m: self._inner.stream_messages(
                 messages, temperature=temperature, model=m, **kw))
+
+
+def claude_agentic(prompt, system, model, cwd, allowed_tools, timeout=600,
+                   max_turns=40, venv=False) -> str:
+    """带工具的 claude -p：在 cwd 里按 allowed_tools 干活（acceptEdits），返回最后的回复文本。
+
+    只给 workflow 的 agentic 角色用（verbs/workflow/_agents.py）。不经 RouterClient，
+    所以不计入引擎的调用预算、没有 fallback。system 用 --append-system-prompt 追加在
+    Claude Code 自己的系统提示词后面（它要靠那段提示词才会用工具）。allowed_tools 之外的
+    工具在无头模式下直接被拒，拒了哪些记 warning。
+    """
+    spec = config.parse_model(model)
+    if (spec.channel, spec.provider) != ("cli", "claude"):
+        raise BackendError(f"agentic 只支持 cli:claude，收到 {spec.canonical}")
+    if ClaudeCLIClient().use_wsl():
+        raise BackendError("agentic 还不支持经 WSL 调")
+    name, effort = config.split_effort(spec.model or "")
+    cmd = [ClaudeCLIClient.binary(), "-p", prompt, "--output-format", "json",
+           "--strict-mcp-config", "--permission-mode", "acceptEdits",
+           "--max-turns", str(max_turns),
+           "--append-system-prompt", system or DEFAULT_SYSTEM]
+    if name:
+        cmd += ["--model", name]
+    if effort:
+        cmd += ["--effort", effort]
+    cmd += ["--allowed-tools", *allowed_tools]
+    env = _agentic_env(cwd, venv)
+    try:
+        p = subprocess.run(cmd, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise BackendError(f"claude（agentic）超过 {timeout} 秒没有返回") from None
+    try:
+        r = json.loads(p.stdout)
+    except json.JSONDecodeError:
+        r = None
+    if not isinstance(r, dict):
+        raise BackendError(f"claude（agentic）退出码 {p.returncode}，输出不是 JSON："
+                           f"{_head(p.stdout, 3)[:300]}\nstderr：{_head(p.stderr)}")
+    denied = [x.get("tool_name", "?") for x in r.get("permission_denials") or []]
+    if denied:
+        log.warning("claude（agentic）被拒的工具调用：%s", denied)
+    if p.returncode != 0 or r.get("is_error"):
+        raise BackendError(f"claude（agentic）报错（退出码 {p.returncode}）："
+                           f"{str(r.get('result') or r.get('subtype') or '')[:300]}")
+    return strip_json(r.get("result") or "")
+
+
+def _agentic_env(cwd, venv):
+    """claude 子进程的环境：订阅登录（去掉 API key）；venv=True 时指向 cwd/.venv（没有就建）。"""
+    from .cbatch import _child_env
+    env = _child_env()
+    env.pop("ANTHROPIC_API_KEY", None)
+    if venv:
+        # 项目专用虚拟环境：没有就建；agent 命令里的 python / pip / pytest 都指向它
+        vdir = Path(cwd) / ".venv"
+        if not (vdir / "bin" / "python").exists():
+            base = shutil.which("python3") or sys.executable
+            r = subprocess.run([base, "-m", "venv", str(vdir)], capture_output=True, text=True, timeout=180)
+            if r.returncode != 0:
+                raise BackendError(f"建虚拟环境失败：{_head(r.stderr)}")
+        for k in ("PYTHONHOME", "PYTHONPATH", "CONDA_PREFIX"):
+            env.pop(k, None)
+        env["VIRTUAL_ENV"] = str(vdir)
+        env["PATH"] = str(vdir / "bin") + os.pathsep + env.get("PATH", "")
+        env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
+    return env
+
+
+def submit_call(prompt, system, model, schema, agentic=None, max_tries=3):
+    """让模型用 submit 工具按格式交结果，返回结果 dict（已校验）。
+
+    只支持 cli:claude 和 cli:goose。agentic（cwd、allowed_tools、timeout、max_turns、venv）
+    只支持 claude：原来的工具照旧，额外多一个 submit。不经 RouterClient：不计入引擎的
+    调用预算、没有 fallback（同 claude_agentic）。没交、或交错 max_tries 次，报 BackendError，
+    信息里带最后几次的格式错误。
+    """
+    from . import wf_submit
+    r = route(model)
+    if r.backend is None or r.backend.name not in ("claude", "goose"):
+        raise CapabilityError(f"按格式提交只支持 cli:claude 和 cli:goose，收到 {model}")
+    backend = r.backend
+    if backend.use_wsl():
+        raise BackendError("按格式提交还不支持经 WSL 调")
+    if agentic and backend.name != "claude":
+        raise BackendError(f"agentic 只支持 cli:claude，收到 {model}")
+    ask = ("\n\n结果必须调用 submit 工具提交（参数就是结果本身，格式由工具定义）。"
+           "不要把结果写在回复里。提交成功后不要再输出任何内容。")
+    ch = wf_submit.SubmitChannel(schema, max_tries)
+    slot = _slots(backend.name)
+    wait = _setting(f"DSL_{backend.name.upper()}_QUEUE_WAIT", f"{backend.name}_queue_wait",
+                    DEFAULT_QUEUE_WAIT)
+    if not slot.acquire(timeout=max(0, wait)):
+        ch.close()
+        raise BackendError(f"{backend.name} 同时在跑的进程满了，排队 {wait} 秒没轮到")
+    try:
+        if backend.name == "claude":
+            name, effort = config.split_effort(r.model or "")
+            cmd = [ClaudeCLIClient.binary(), "-p", prompt + ask, "--output-format", "json",
+                   *ch.claude_args()]
+            if agentic:
+                cwd = agentic["cwd"]
+                timeout = agentic.get("timeout", 600)
+                env = _agentic_env(cwd, agentic.get("venv"))
+                cmd += ["--permission-mode", "acceptEdits",
+                        "--max-turns", str(agentic.get("max_turns", 40)),
+                        "--append-system-prompt", system or DEFAULT_SYSTEM,
+                        "--allowed-tools", *agentic["allowed_tools"], wf_submit.CLAUDE_TOOL]
+            else:
+                cwd = ch.dir
+                timeout = _setting("DSL_CLAUDE_TIMEOUT", "claude_timeout", DEFAULT_TIMEOUT)
+                env = _agentic_env(cwd, False)
+                # 纯问答：内置工具全关，只剩 submit；轮数留给交错重交
+                cmd += ["--tools", "", "--max-turns", str(max_tries + 2),
+                        "--system-prompt", system or DEFAULT_SYSTEM,
+                        "--allowed-tools", wf_submit.CLAUDE_TOOL]
+            if name:
+                cmd += ["--model", name]
+            if effort:
+                cmd += ["--effort", effort]
+            result, out = ch.run(cmd, cwd, env, None, timeout, "claude")
+        else:
+            from . import gsbatch
+            provider = _text_setting("DSL_GOOSE_PROVIDER", "goose_provider") or "zai_low"
+            if provider != "zai_low":
+                raise BackendError(f"goose 后端目前只接了 zai_low，不支持 {provider}")
+            key = gsbatch._zai_key()
+            if not key:
+                raise BackendError("goose：环境里没有 ZAI_CODING_PLAN_API_KEY"
+                                   "（要在 MCP 服务或 cbatch 起的进程里调）")
+            try:
+                gsbatch._ensure_zai_low()
+            except gsbatch.GSBatchError as e:
+                raise BackendError(f"goose：{e}") from None
+            timeout = _setting("DSL_GOOSE_TIMEOUT", "goose_timeout", DEFAULT_TIMEOUT)
+            env = {k: v for k, v in gsbatch._child_env().items()
+                   if not k.startswith("GOOSE_") and not gsbatch._leaky_env(k, v)}
+            # auto：工具调用自动批准（只挂了 submit 一个扩展，--no-profile 不带别的）
+            env.update(GOOSE_DISABLE_KEYRING="1", GOOSE_DISABLE_SESSION_NAMING="true",
+                       GOOSE_MODE="auto", ZAI_CODING_PLAN_API_KEY=key)
+            cmd = [GooseCLIClient.binary(), "run", "--no-profile", "--no-session",
+                   "--output-format", "stream-json", "--provider", provider,
+                   "--model", r.model or gsbatch.DEFAULT_MODELS[provider],
+                   "--max-turns", str(max_tries + 3),
+                   "--with-extension", ch.goose_extension(),
+                   "--system", system or DEFAULT_SYSTEM, "-i", "-"]
+            result, out = ch.run(cmd, ch.dir, env, prompt + ask, timeout, "goose")
+        if result is None:
+            tries = ch.errors()
+            why = (f"交错 {len(tries)} 次：" + "；".join("、".join(t["errors"][:3]) for t in tries[-2:])
+                   if tries else "没有调用 submit")
+            raise BackendError(f"{backend.name} 没有按格式提交（{why}）。输出末尾：{_head(out[-1500:], 8)[:600]}")
+        return result
+    except wf_submit.SubmitError as e:
+        raise BackendError(str(e)) from None
+    finally:
+        slot.release()
+        ch.close()
 
 
 def wrap(client):

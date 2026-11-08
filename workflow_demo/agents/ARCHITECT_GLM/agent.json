@@ -1,0 +1,9 @@
+{
+  "model": "cli:goose/glm-5.3",
+  "tools": [],
+  "packages": [],
+  "skills": [
+    "skills/review.md"
+  ],
+  "max_tool_rounds": 3
+}

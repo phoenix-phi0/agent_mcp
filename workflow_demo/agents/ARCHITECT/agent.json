@@ -1,0 +1,10 @@
+{
+  "model": "cli:claude/sonnet",
+  "tools": [],
+  "packages": [],
+  "skills": [
+    "skills/contract.md"
+  ],
+  "max_tool_rounds": 3,
+  "effort": "high"
+}

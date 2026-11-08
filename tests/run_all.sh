@@ -183,6 +183,15 @@ run DSL任务    $PY tests/tools/test_dslagent_task.py
 run DSL分支规划 $PY tests/tools/test_dslagent_branch.py
 run DSL改法段   $PY tests/tools/test_dslagent_edits.py
 run DSL工具子任务 $PY tests/tools/test_dslagent_tool.py
+run 编排执行   $PY tests/tools/test_dsl_workflow.py
+run 编排角色   $PY tests/tools/test_workflow_agents.py
+run 编排示例   $PY tests/tools/test_workflow_demo.py
+run 编排记录   $PY tests/tools/test_workflow_trace.py
+run 编排实时   $PY tests/tools/test_workflow_live.py
+run 编排控制   $PY tests/tools/test_workflow_ctl.py
+run 编排提交   $PY tests/tools/test_wf_submit.py
+run 编排查看器 $PY tests/tools/test_trace_view.py
+run 查看器令牌 $PY tests/tools/test_trace_token.py
 run DSL规划读码 $PY tests/tools/test_dslagent_planread.py
 run DSL测试环境 $PY tests/tools/test_dslagent_testenv.py
 run DSL按步骤模型 $PY tests/tools/test_dslagent_models.py

@@ -1,0 +1,15 @@
+接口约定
+    任务 {content}
+    角色 ARCHITECT
+    记录 contract
+任务研讨
+    任务 审查接口约定
+    角色 ARCHITECT_GLM
+    文本 contract
+    记录 discussion
+如果 discussion.decide == 需修改
+    接口修改
+        任务 根据研讨结果修订接口约定
+        角色 ARCHITECT
+        文本 discussion
+        记录 contract

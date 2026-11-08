@@ -1,0 +1,8 @@
+{
+  "model": "cli:claude/sonnet",
+  "tools": [],
+  "skills": [],
+  "packages": [],
+  "max_tool_rounds": 3,
+  "effort": "medium"
+}

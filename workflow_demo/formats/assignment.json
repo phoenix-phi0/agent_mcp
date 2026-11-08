@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "description": "任务分配：按依赖顺序排好的实施任务，每项自包含。",
+  "additionalProperties": false,
+  "required": ["tasks"],
+  "properties": {
+    "tasks": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["content", "agent"],
+        "properties": {
+          "content": {"type": "string", "minLength": 1,
+                      "description": "自包含：做什么、涉及的接口字段和错误码、验收条件；有依赖写明「依赖第 N 项」"},
+          "agent": {"const": "ENGINEER", "description": "当前唯一配置的实施角色"}
+        }
+      }
+    }
+  }
+}

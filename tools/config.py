@@ -143,6 +143,8 @@ BACKENDS = {
     ("cli", "claude"): Backend("本机 Claude Code（claude -p）", True, _CLI,
                                True, False),
     ("cli", "zcode"): Backend("本机 ZCode（zcode -p）", True, _CLI, False, False),
+    ("cli", "goose"): Backend("本机 Goose（goose run，Z.AI 账号）", True, _CLI,
+                              True, False),
 }
 
 CHANNELS = ("api", "cli")

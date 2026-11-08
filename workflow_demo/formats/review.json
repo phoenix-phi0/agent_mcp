@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "description": "约定审查：通过或需修改，以及具体到位置的问题。",
+  "additionalProperties": false,
+  "required": ["decide", "summary", "issues"],
+  "properties": {
+    "decide": {"enum": ["通过", "需修改"], "description": "有「严重」或「一般」问题就是需修改"},
+    "summary": {"type": "string", "minLength": 1, "description": "一两句总体判断"},
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["location", "problem", "suggestion", "severity"],
+        "properties": {
+          "location": {"type": "string", "minLength": 1, "description": "接口名.字段 或 章节"},
+          "problem": {"type": "string", "minLength": 1},
+          "suggestion": {"type": "string", "minLength": 1},
+          "severity": {"enum": ["严重", "一般", "轻微"]}
+        }
+      }
+    }
+  }
+}

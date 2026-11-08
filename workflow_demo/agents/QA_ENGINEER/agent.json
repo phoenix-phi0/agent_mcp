@@ -1,0 +1,25 @@
+{
+  "model": "cli:claude/sonnet",
+  "packages": [],
+  "skills": [
+    "skills/acceptance.md"
+  ],
+  "effort": "medium",
+  "agentic": {
+    "cwd": "work/{project}",
+    "allowed_tools": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(ls:*)",
+      "Bash(pip list:*)",
+      "Bash(pip install -r requirements.txt:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(pytest:*)",
+      "Bash(python -m unittest:*)"
+    ],
+    "timeout": 600,
+    "max_turns": 60,
+    "venv": true
+  }
+}

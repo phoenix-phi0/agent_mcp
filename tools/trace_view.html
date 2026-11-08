@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>编排过程查看器</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* 布局：上面概况和耗时条；左边按 workflow.wf 结构画的流程图（叠加本次运行），右边是选中节点的每次执行 */
+:root {
+  --bg: #f4f5f7;
+  --panel: #ffffff;
+  --ink: #1d2230;
+  --muted: #646b7d;
+  --line: #dfe2e8;
+  --accent: #3352c9;
+  --ok: #1f8a5b;
+  --warn: #b7791f;
+  --bad: #c2413a;
+  --r-arch: #3352c9;
+  --r-glm: #0e8a8a;
+  --r-eng: #c26a12;
+  --r-qa: #7a3fb8;
+  --r-other: #5f6675;
+  --code-bg: #f1f3f7;
+  --sel: #e8edfc;
+  --edge: #8a91a3;
+  --font-body: "IBM Plex Sans", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12151c; --panel: #1a1e27; --ink: #e6e8ee; --muted: #9aa1b2; --line: #2c3240;
+    --accent: #8ea6ff; --ok: #4cc08b; --warn: #e0a84a; --bad: #f07a72;
+    --r-arch: #8ea6ff; --r-glm: #4fd1c5; --r-eng: #f0a050; --r-qa: #c39bf2; --r-other: #9aa1b2;
+    --code-bg: #141821; --sel: #232c47; --edge: #6d7486; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12151c; --panel: #1a1e27; --ink: #e6e8ee; --muted: #9aa1b2; --line: #2c3240;
+  --accent: #8ea6ff; --ok: #4cc08b; --warn: #e0a84a; --bad: #f07a72;
+  --r-arch: #8ea6ff; --r-glm: #4fd1c5; --r-eng: #f0a050; --r-qa: #c39bf2; --r-other: #9aa1b2;
+  --code-bg: #141821; --sel: #232c47; --edge: #6d7486; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.55 var(--font-body); padding: 20px clamp(16px, 3vw, 32px) 40px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; font-weight: 600; }
+h1 { font-size: 20px; }
+h2 { font-size: 13px; letter-spacing: .04em; color: var(--muted); font-weight: 500; }
+button, label.btn, select { font: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mono { font-family: var(--font-mono); }
+.num { font-variant-numeric: tabular-nums; }
+
+header.top { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.load { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+label.btn, select.btn { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 6px 12px; }
+label.btn:hover, select.btn:hover { border-color: var(--accent); }
+#file { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.hint { color: var(--muted); font-size: 12.5px; }
+body.drag::after { content: "松开即可载入这份过程记录"; position: fixed; inset: 10px; border: 2px dashed var(--accent); border-radius: 12px; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 80%, transparent); font-size: 18px; color: var(--accent); }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.summary { display: flex; flex-wrap: wrap; gap: 10px 28px; padding: 14px 18px; align-items: baseline; }
+.summary .k { color: var(--muted); font-size: 12px; display: block; }
+.summary .v { font-size: 17px; font-weight: 600; }
+.note { padding: 8px 18px 12px; color: var(--muted); font-size: 12.5px; border-top: 1px solid var(--line); }
+.pill { display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid currentColor; line-height: 1.6; }
+.pill.done, .pill.ok, .pill.pass { color: var(--ok); }
+.pill.error, .pill.fix { color: var(--bad); }
+.pill.running { color: var(--warn); }
+.pill.agentic { color: var(--accent); }
+.pill.waiting { color: var(--accent); }
+.pill.aborted, .pill.interrupted { color: var(--bad); }
+.pill.src { color: var(--muted); font-weight: 500; }
+.chip { display: inline-block; font: 11.5px/1.6 var(--font-mono); padding: 0 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); }
+.chip.fmt { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.chip.ovr { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.callout.wait { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.ctl-hist { font-size: 12.5px; color: var(--muted); display: grid; gap: 2px; }
+.ctl-hist b { color: var(--ink); font-weight: 500; }
+
+.strip { margin-top: 14px; padding: 10px 16px 12px; }
+.strip .head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.bars { display: flex; height: 22px; border-radius: 5px; overflow: hidden; background: var(--code-bg); }
+.bars button { border: 0; padding: 0; min-width: 3px; opacity: .85; border-right: 1px solid var(--panel); }
+.bars button:hover, .bars button.sel { opacity: 1; box-shadow: inset 0 0 0 2px var(--ink); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+.main { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(320px, 1fr); gap: 14px; margin-top: 14px; align-items: start; }
+@media (max-width: 960px) { .main { grid-template-columns: 1fr; } }
+.chart { padding: 12px 0 10px; }
+.chart .head { display: flex; justify-content: space-between; gap: 12px; padding: 0 16px 6px; flex-wrap: wrap; }
+#flow { overflow: auto; max-height: 82vh; padding: 0 8px; }
+#flow svg { display: block; }
+#flow text { font-family: var(--font-body); fill: var(--ink); }
+#flow .t-muted { fill: var(--muted); font-size: 11.5px; }
+#flow .t-title { font-size: 13.5px; font-weight: 600; }
+#flow .t-mono { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); }
+#flow .node { cursor: pointer; }
+#flow .node .box { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+#flow .node:hover .box { stroke: var(--ink); }
+#flow .node.sel .box { stroke: var(--accent); stroke-width: 2.4; fill: var(--sel); }
+#flow .node.idle { opacity: .45; }
+#flow .node.err .box { stroke: var(--bad); stroke-width: 2; }
+#flow .node.running .box { stroke: var(--warn); stroke-width: 2.6; }
+#flow .t-run { fill: var(--warn); font-weight: 600; font-size: 11.5px; }
+#flow .node.waiting .box { stroke: var(--accent); stroke-width: 2.6; stroke-dasharray: 6 4; }
+#flow .t-wait { fill: var(--accent); font-weight: 600; font-size: 11.5px; }
+#flow .t-fmt { font-family: var(--font-mono); font-size: 10.5px; fill: var(--accent); }
+#flow .t-ovr { font-size: 10.5px; fill: var(--warn); font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) {
+  #flow .node.running .box { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { stroke-opacity: 1; } 50% { stroke-opacity: .25; } }
+}
+.bars button.running { background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.35) 0 6px, transparent 6px 12px) !important; }
+.live { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.dot.on { background: var(--ok); }
+.dot.off { background: var(--bad); }
+.callout.run { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+#flow .container { fill: none; stroke: var(--edge); stroke-dasharray: 5 4; }
+#flow .edge { fill: none; stroke: var(--edge); stroke-width: 1.4; }
+#flow .edge.taken { stroke: var(--ink); stroke-width: 1.8; }
+#flow .edge.loop.taken { stroke: var(--bad); }
+#flow .edge.untaken { stroke-dasharray: 4 4; opacity: .7; }
+#flow .elabel { font-size: 11.5px; fill: var(--muted); }
+#flow .elabel.hot { fill: var(--bad); font-weight: 600; }
+#flow .badge rect { fill: var(--ink); }
+#flow .badge text { fill: var(--panel); font-size: 11px; font-weight: 600; }
+#flow .verdict-pass { fill: var(--ok); font-weight: 600; font-size: 11.5px; }
+#flow .verdict-fix { fill: var(--bad); font-weight: 600; font-size: 11.5px; }
+
+.detail { padding: 14px 0 16px; min-width: 0; }
+.detail > h2 { padding: 0 18px 8px; }
+.detail .body { padding: 0 18px; display: grid; gap: 12px; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 12.5px; align-items: center; }
+.meta b { color: var(--ink); font-weight: 500; }
+.role { font-size: 11.5px; font-weight: 600; padding: 0 7px; border-radius: 4px; color: #fff; }
+details.run { border: 1px solid var(--line); border-radius: 8px; }
+details.run > summary { list-style: none; padding: 8px 12px; cursor: pointer; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+details.run > summary::-webkit-details-marker { display: none; }
+details.run > summary::before { content: "▸"; color: var(--muted); font-size: 11px; }
+details.run[open] > summary::before { content: "▾"; }
+details.run[open] > summary { border-bottom: 1px solid var(--line); }
+details.run .inner { padding: 10px 12px 12px; display: grid; gap: 10px; }
+details.run.focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.field h3 { font-size: 12.5px; color: var(--muted); font-weight: 500; margin-bottom: 4px; display: flex; justify-content: space-between; gap: 8px; }
+.field h3 button { border: 0; background: none; color: var(--accent); font-size: 12px; padding: 0; }
+pre { margin: 0; background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; font: 12.5px/1.55 var(--font-mono); white-space: pre-wrap; word-break: break-word; max-height: 380px; overflow: auto; }
+pre.task { font-family: var(--font-body); font-size: 13.5px; }
+.j-key { color: var(--accent); }
+.j-num, .j-bool { color: var(--r-eng); }
+.j-null { color: var(--muted); }
+.callout { border-left: 3px solid var(--ok); padding: 6px 12px; background: color-mix(in srgb, var(--ok) 8%, transparent); border-radius: 0 6px 6px 0; font-size: 13px; }
+.callout.fix { border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 8%, transparent); }
+.script-box { background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 4px; max-height: 300px; overflow: auto; white-space: pre; }
+.script-box .ln { display: grid; grid-template-columns: 30px 1fr; font: 12.5px/1.6 var(--font-mono); }
+.script-box .ln span:first-child { color: var(--muted); text-align: right; padding-right: 10px; user-select: none; }
+.script-box .ln.hl { background: var(--sel); font-weight: 500; }
+.err-box { color: var(--bad); }
+</style>
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>编排过程查看器</h1>
+    <div class="hint" id="h-src"></div>
+  </div>
+  <div class="live" id="live-bar" hidden>
+    <span class="dot" id="live-dot"></span><span class="hint" id="live-msg">连接中…</span>
+    <label class="hint" for="run-pick">运行</label>
+    <select class="btn" id="run-pick"></select>
+    <label class="hint"><input type="checkbox" id="follow" checked> 跟随最新、跟随进行中的节点</label>
+  </div>
+  <div class="load" id="static-bar">
+    <label class="hint" for="pick">示例</label>
+    <select class="btn" id="pick">
+      <option value="real">第三次真跑（agentic 版，9 次调用）</option>
+      <option value="fake">带返工的离线测试（走过两个回环）</option>
+      <option value="running">运行中的快照（停在 QA 测试）</option>
+    </select>
+    <label class="btn" for="file">打开过程记录 JSON</label>
+    <input type="file" id="file" accept=".json,application/json">
+    <span class="hint">也可以把 runs/*.json 拖到页面上</span>
+  </div>
+</header>
+
+<section class="panel" aria-label="概况">
+  <div class="summary" id="summary"></div>
+  <div class="note" id="note" hidden></div>
+</section>
+
+<section class="panel strip" aria-label="耗时分布">
+  <div class="head"><h2>耗时分布 · 按执行顺序，宽度 = 耗时</h2><span class="hint" id="strip-hint">点一段跳到对应节点</span></div>
+  <div class="bars" id="bars"></div>
+  <div class="legend" id="legend"></div>
+</section>
+
+<div class="main">
+  <section class="panel chart" aria-label="流程结构">
+    <div class="head"><h2>流程结构 · workflow.wf，叠加本次运行</h2><span class="hint">实线 = 走过，虚线 = 没走；红色回环 = 返工；角标 = 执行次数</span></div>
+    <div id="flow"></div>
+  </section>
+  <section class="panel detail" aria-label="节点详情">
+    <h2 id="d-head">节点详情</h2>
+    <div class="body" id="detail"></div>
+  </section>
+</div>
+
+<script type="application/json" id="sample-real">null</script>
+<script type="application/json" id="sample-fake">null</script>
+<script type="application/json" id="sample-running">null</script>
+<script>
+(function () {
+  "use strict";
+  var ROLE_VAR = { ARCHITECT: "--r-arch", ARCHITECT_GLM: "--r-glm", ENGINEER: "--r-eng", QA_ENGINEER: "--r-qa" };
+  var ROLE_LABEL = { ARCHITECT: "架构师", ARCHITECT_GLM: "审查员", ENGINEER: "工程师", QA_ENGINEER: "QA" };
+  var S = { trace: null, tree: [], byLine: {}, selLine: null, focusSeq: null, live: false, lastClick: 0 };
+  // 在本机 trace_server 里打开时是实时模式：定时拉 /api/run
+  // trace_server 提供页面时会在 <head> 里加 <meta name="trace-live">：经隧道从外网打开（主机名不是 localhost）也进实时模式
+  var LIVE = /^https?:$/.test(location.protocol) &&
+    (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || !!document.querySelector('meta[name="trace-live"]'));
+  function parseTime(s) { return s ? Date.parse(String(s).replace(/([+-]\d\d)(\d\d)$/, "$1:$2")) : NaN; }
+  // 进行中的耗时：实时且进程还在就跟着走；否则停在记录最后一次更新的时刻
+  function ticking() { return S.live && S.trace && S.trace.status === "running" && S.trace._alive !== false; }
+  function elapsedAttrs(startIso) {
+    var st = parseTime(startIso), end = ticking() ? Date.now() : parseTime(S.trace && S.trace.updated);
+    var sec = isNaN(st) ? NaN : Math.max(0, ((isNaN(end) ? Date.now() : end) - st) / 1000);
+    return { sec: sec, attr: ticking() && !isNaN(st) ? ' data-start="' + st + '"' : "" };
+  }
+
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function cssv(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+  function roleColor(r) { return cssv(ROLE_VAR[r] || "--r-other"); }
+  function fmtSec(s) {
+    if (s == null || isNaN(s)) return "—";
+    if (s < 60) return (Math.round(s * 10) / 10) + " 秒";
+    var m = Math.floor(s / 60), r = Math.round(s - m * 60);
+    return m + " 分 " + (r < 10 ? "0" : "") + r + " 秒";
+  }
+  function shortSec(s) { return s < 60 ? Math.round(s) + "s" : (s / 60).toFixed(1) + "m"; }
+  function roleChip(r) { return '<span class="role" style="background:' + roleColor(r) + '">' + esc(ROLE_LABEL[r] || r || "?") + "</span>"; }
+  function decideOf(e) { return e && e.result && typeof e.result === "object" ? e.result.decide : undefined; }
+  function clip(s, n) { s = String(s); return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+  // 一次运行的整体状态（受控编排多了 waiting / aborted；记录说在跑、进程没了 = interrupted）
+  var RUN_TXT = { done: "已完成", error: "出错", running: "运行中", waiting: "暂停 · 等外部决定", aborted: "已中止", interrupted: "已中断（进程不在了）" };
+  function runStatus(t) {
+    if (t.status === "running" && (t._alive === false || (t._control && t._control.worker && t._control.worker_alive === false))) return "interrupted";
+    return t.status || "?";
+  }
+  var SRC_TXT = { auto: "自动", execute: "外部指定执行", external: "外部提交结果" };
+  function isExec(e) { return e.type !== "task" || e.status !== "waiting"; }   // waiting 是「停在这里」，不算一次执行
+  function fmtOf(n) { return n && n.fields ? n.fields["格式"] : null; }
+
+  // ---------- 解析 workflow.wf（与 _workflow.py 的 parse 同一套缩进规则）----------
+  function parseScript(script) {
+    var rows = [];
+    script.split("\n").forEach(function (raw, i) {
+      if (!raw.trim() || raw.trim().charAt(0) === "#") return;
+      rows.push({ ind: raw.length - raw.replace(/^ +/, "").length, text: raw.trim(), line: i + 1 });
+    });
+    var pos = 0;
+    function block(level) {
+      var out = [];
+      while (pos < rows.length && rows[pos].ind === level) {
+        var r = rows[pos++], kids = [];
+        if (pos < rows.length && rows[pos].ind > level) kids = block(rows[pos].ind);
+        out.push(classify(r, kids));
+      }
+      return out;
+    }
+    function classify(r, kids) {
+      var t = r.text, m;
+      if ((m = t.match(/^标记\s*:\s*(\w+)$/))) return { kind: "label", name: m[1], line: r.line };
+      if ((m = t.match(/^跳转\s+(\w+)\s+最大\s+(\d+)$/))) return { kind: "jump", target: m[1], max: +m[2], line: r.line };
+      if ((m = t.match(/^遍历\s+(\w+)\s+于\s+(.+)$/))) return { kind: "each", v: m[1], src: m[2], line: r.line, kids: kids };
+      if ((m = t.match(/^存储\s+(\w+)\s+(.+)$/))) return { kind: "store", target: m[1], src: m[2], line: r.line };
+      if (t.indexOf("如果 ") === 0) return { kind: "if", cond: t.slice(3).trim(), line: r.line, kids: kids };
+      if (kids.length) {
+        var f = {};
+        kids.forEach(function (k) { if (k.kind === "raw") f[k.key] = k.val; });
+        return { kind: "task", name: t, fields: f, line: r.line };
+      }
+      var sp = t.indexOf(" ");
+      return { kind: "raw", key: sp < 0 ? t : t.slice(0, sp), val: sp < 0 ? "" : t.slice(sp + 1), line: r.line };
+    }
+    return rows.length ? block(rows[0].ind) : [];
+  }
+
+  // ---------- 按行号把事件挂到节点上 ----------
+  function indexEvents(events) {
+    var by = {};
+    events.forEach(function (e) { (by[e.line] = by[e.line] || []).push(e); });
+    return by;
+  }
+
+  // ---------- 布局 ----------
+  var NW = 236, NH = 82, DW = 236, DH = 74, LH = 26, SH = 34, VG = 34, COLW = NW + 90, PAD = 14, TOPPAD = 30;
+
+  function layout(tree) {
+    var nodes = [], edges = [], conts = [], labels = {}, jumps = [];
+    function colX(c) { return 20 + c * COLW; }
+    function size(n) {
+      if (n.kind === "task") return [NW, NH];
+      if (n.kind === "if") return [DW, DH];
+      if (n.kind === "label" || n.kind === "start" || n.kind === "end") return [NW, LH];
+      if (n.kind === "store") return [NW, SH];
+      return [NW, NH];
+    }
+    // 返回 {first, last(可接下一步的节点或 null), endY}
+    function place(list, col, y) {
+      var prev = null, first = null, i;
+      for (i = 0; i < list.length; i++) {
+        var n = list[i];
+        if (n.kind === "raw") continue;
+        if (n.kind === "jump") {
+          jumps.push({ from: prev, n: n });
+          prev = null;            // 跳转之后这条路不再往下
+          continue;
+        }
+        if (n.kind === "each") {
+          var top = y;
+          var inner = place(n.kids, col, y + TOPPAD + PAD);
+          var box = { x: colX(col) - PAD, y: top, w: NW + PAD * 2, h: inner.endY - top + PAD - VG + 8, n: n };
+          conts.push(box);
+          n.box = box;
+          if (prev) edges.push({ a: prev, b: { x: box.x + box.w / 2, y: box.y, w: 0, h: 0, cont: true, eachNode: n }, kind: "seq" });
+          if (inner.first) edges.push({ a: { x: box.x + box.w / 2, y: box.y + TOPPAD - 6, w: 0, h: 0, cont: true }, b: inner.first, kind: "seq", line: n.line, enterEach: true });
+          if (prev && prev.n && prev.n.kind === "label") prev.nextNode = { cont: true, eachNode: n };
+          if (!first) first = { x: box.x, y: box.y, w: box.w, h: 0, cont: true };
+          prev = { x: box.x, y: box.y, w: box.w, h: box.h, cont: true, eachNode: n };
+          y = box.y + box.h + VG;
+          continue;
+        }
+        var sz = size(n);
+        var node = { n: n, x: colX(col), y: y, w: sz[0], h: sz[1] };
+        nodes.push(node);
+        if (n.kind === "label") labels[n.name] = node;
+        if (prev) edges.push({ a: prev, b: node, kind: "seq", afterIf: prev.n && prev.n.kind === "if" ? prev.n : null });
+        if (prev && prev.n && prev.n.kind === "label") prev.nextNode = node;
+        if (!first) first = node;
+        y += sz[1] + VG;
+        if (n.kind === "if") {
+          var yb = node.y + (DH - NH) / 2;
+          var br = place(n.kids, col + 1, yb);
+          if (br.first) edges.push({ a: node, b: br.first, kind: "yes", ifNode: n });
+          n.branchLast = br.last;
+          y = Math.max(y, br.endY);
+          if (br.last) n.merge = br.last;   // 分支没以跳转收尾：汇回主线
+        }
+        prev = node;
+      }
+      return { first: first, last: prev, endY: y };
+    }
+    var res = place(tree, 0, 16);
+    // 分支没以跳转收尾的，补一条汇回主线的边
+    var maxRight = 0;
+    nodes.forEach(function (o) { maxRight = Math.max(maxRight, o.x + o.w); });
+    conts.forEach(function (c) { maxRight = Math.max(maxRight, c.x + c.w); });
+    return { nodes: nodes, edges: edges, conts: conts, labels: labels, jumps: jumps, height: res.endY, width: maxRight };
+  }
+
+  // ---------- 统计 ----------
+  function statsFor(line) {
+    var all = S.byLine[line] || [];
+    var evs = all.filter(isExec);
+    var st = { runs: evs.length, secs: 0, errs: 0, t: 0, f: 0, last: evs[evs.length - 1], running: null,
+               waiting: all.filter(function (e) { return !isExec(e); }).pop() || null };
+    evs.forEach(function (e) {
+      if (e.status === "running") st.running = e;
+      st.secs += Number(e.seconds) || 0;
+      if (e.status === "error") st.errs++;
+      if (e.type === "if") { if (e.value) st.t++; else st.f++; }
+    });
+    return st;
+  }
+
+  // ---------- 画图 ----------
+  function draw() {
+    var L = layout(S.tree);
+    var lanes = L.jumps.length;
+    var W = L.width + 40 + lanes * 26 + 70, H = L.height + 10;
+    var s = '<svg width="' + W + '" height="' + H + '" role="img" aria-label="workflow 的流程结构图，叠加了本次运行的执行次数">';
+    s += '<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="' + cssv("--edge") + '"/></marker>' +
+      '<marker id="arr-hot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="' + cssv("--bad") + '"/></marker>' +
+      '<marker id="arr-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="' + cssv("--ink") + '"/></marker></defs>';
+
+    // 遍历容器
+    L.conts.forEach(function (c) {
+      var st = statsFor(c.n.line);
+      var cnt = st.last ? st.last.count : null;
+      var sel = S.selLine === c.n.line;
+      s += '<g class="node' + (st.runs ? "" : " idle") + (sel ? " sel" : "") + '" data-line="' + c.n.line + '" tabindex="0" role="button" aria-label="遍历 ' + esc(c.n.src) + '">' +
+        '<rect class="container" x="' + c.x + '" y="' + c.y + '" width="' + c.w + '" height="' + c.h + '" rx="10"' + (sel ? ' style="stroke:' + cssv("--accent") + ';stroke-width:2"' : "") + "/>" +
+        '<text class="t-muted" x="' + (c.x + 10) + '" y="' + (c.y + 17) + '">遍历 ' + esc(c.n.v) + " 于 " + esc(clip(c.n.src, 22)) + (cnt != null ? "　· " + cnt + " 项" : "") + "</text></g>";
+    });
+
+    // 普通边
+    L.edges.forEach(function (e) {
+      var a = e.a, b = e.b, cls = "edge", lab = "", marker = "arr";
+      var taken = true;
+      if (e.kind === "yes") {
+        var st = statsFor(e.ifNode.line);
+        taken = st.t > 0;
+        lab = "是" + (st.runs ? " ×" + st.t : "");
+        var y0 = a.y + a.h / 2;
+        s += '<path class="' + cls + (taken ? " taken" : " untaken") + '" d="M' + (a.x + a.w) + "," + y0 + " H" + (b.x - 2) + '" marker-end="url(#' + (taken ? "arr-ink" : "arr") + ')"/>';
+        s += '<text class="elabel" x="' + (a.x + a.w + 8) + '" y="' + (y0 - 6) + '">' + lab + "</text>";
+        return;
+      }
+      if (e.afterIf) {
+        var st2 = statsFor(e.afterIf.line);
+        taken = st2.f > 0;
+        lab = "否" + (st2.runs ? " ×" + st2.f : "");
+      } else {
+        taken = runsOf(b) > 0;
+      }
+      var x = a.x + a.w / 2, y1 = a.y + a.h, y2 = b.y - 2;
+      if (e.enterEach) { y1 = a.y; }
+      s += '<path class="' + cls + (taken ? " taken" : " untaken") + '" d="M' + x + "," + y1 + " V" + y2 + '" marker-end="url(#' + (taken ? "arr-ink" : marker) + ')"/>';
+      if (lab) s += '<text class="elabel" x="' + (x + 8) + '" y="' + (y1 + 16) + '">' + lab + "</text>";
+    });
+
+    // 跳转回环
+    L.jumps.forEach(function (j, i) {
+      var to = L.labels[j.n.target], from = j.from;
+      if (!to || !from) return;
+      var evs = S.byLine[j.n.line] || [];
+      var cnt = evs.length;
+      var lane = L.width + 34 + i * 26;
+      var y0 = from.y + from.h / 2, yt = to.y + to.h / 2;
+      var hot = cnt > 0;
+      s += '<path class="edge loop ' + (hot ? "taken" : "untaken") + '" d="M' + (from.x + from.w) + "," + y0 + " H" + lane + " V" + yt + " H" + (to.x + to.w + 2) + '" marker-end="url(#' + (hot ? "arr-hot" : "arr") + ')"/>';
+      var tx = lane + 6, ty = (y0 + yt) / 2;
+      s += '<g class="node" data-line="' + j.n.line + '" tabindex="0" role="button" aria-label="跳转 ' + esc(j.n.target) + '">' +
+        '<text class="elabel' + (hot ? " hot" : "") + '" x="' + tx + '" y="' + (ty - 7) + '">跳回 ' + esc(j.n.target) + "</text>" +
+        '<text class="elabel' + (hot ? " hot" : "") + '" x="' + tx + '" y="' + (ty + 9) + '">' + cnt + " / " + j.n.max + " 次</text></g>";
+    });
+
+    // 节点
+    L.nodes.forEach(function (o) {
+      var n = o.n, st = statsFor(n.line), sel = S.selLine === n.line;
+      var ran = n.kind === "task" || n.kind === "if" || n.kind === "store" ? st.runs : runsOf(o);
+      var cls = "node" + (ran || st.waiting ? "" : " idle") + (sel ? " sel" : "") + (st.errs ? " err" : "") + (st.running ? " running" : "") + (st.waiting ? " waiting" : "");
+      var g = '<g class="' + cls + '" data-line="' + n.line + '" tabindex="0" role="button" aria-label="' + esc(n.name || n.cond || n.kind) + '">';
+      if (n.kind === "start" || n.kind === "end") {
+        var endTxt = n.kind === "start" ? "开始" : ({ done: "结束 · 已完成", error: "出错停止", running: "运行中（还没结束）", waiting: "暂停中（等外部决定）",
+          aborted: "已中止", interrupted: "中断（进程不在了）" }[runStatus(S.trace)] || "结束");
+        g += '<rect class="box" x="' + o.x + '" y="' + o.y + '" width="' + o.w + '" height="' + o.h + '" rx="13"' + (n.kind === "end" && S.trace.status === "error" ? ' style="stroke:' + cssv("--bad") + '"' : "") + '/>' +
+          '<text x="' + (o.x + o.w / 2) + '" y="' + (o.y + 17) + '" text-anchor="middle" style="font-size:12.5px;font-weight:600">' + esc(endTxt) + "</text>";
+      } else if (n.kind === "label") {
+        g += '<rect class="box" x="' + o.x + '" y="' + o.y + '" width="' + o.w + '" height="' + o.h + '" rx="13"/>' +
+          '<text class="t-mono" x="' + (o.x + 12) + '" y="' + (o.y + 17) + '">标记 ' + esc(n.name) + "（跳转目标）</text>";
+      } else if (n.kind === "store") {
+        g += '<rect class="box" x="' + o.x + '" y="' + o.y + '" width="' + o.w + '" height="' + o.h + '" rx="17"/>' +
+          '<text x="' + (o.x + 14) + '" y="' + (o.y + 21) + '" style="font-size:12.5px">存入 ' + esc(n.target) + '</text>' +
+          (st.last ? '<text class="t-muted" x="' + (o.x + o.w - 12) + '" y="' + (o.y + 21) + '" text-anchor="end">共 ' + st.last.size + " 条</text>" : "");
+      } else if (n.kind === "if") {
+        var cx = o.x + o.w / 2, cy = o.y + o.h / 2;
+        g += '<polygon class="box" points="' + cx + "," + o.y + " " + (o.x + o.w) + "," + cy + " " + cx + "," + (o.y + o.h) + " " + o.x + "," + cy + '"/>' +
+          '<text class="t-muted" x="' + cx + '" y="' + (cy - 5) + '" text-anchor="middle">如果</text>' +
+          '<text x="' + cx + '" y="' + (cy + 12) + '" text-anchor="middle" style="font-size:12px">' + esc(clip(n.cond.replace(/\s*==\s*/, " = "), 26)) + "</text>";
+      } else {
+        var roles = Array.from(new Set((S.byLine[n.line] || []).map(function (e) { return e.default_role || e.role; }).filter(Boolean)));
+        var role = roles[0] || (n.fields["角色"] && /^[A-Z_]+$/.test(n.fields["角色"]) ? n.fields["角色"] : null);
+        var color = role ? roleColor(role) : cssv("--r-other");
+        g += '<rect class="box" x="' + o.x + '" y="' + o.y + '" width="' + o.w + '" height="' + o.h + '" rx="8"/>' +
+          '<rect x="' + o.x + '" y="' + o.y + '" width="6" height="' + o.h + '" rx="3" fill="' + color + '"/>' +
+          '<text class="t-title" x="' + (o.x + 16) + '" y="' + (o.y + 22) + '">' + esc(n.name) + "</text>" +
+          '<text class="t-muted" x="' + (o.x + 16) + '" y="' + (o.y + 40) + '">' + esc(role ? (ROLE_LABEL[role] || role) : "角色 " + (n.fields["角色"] || "?")) + " → " + esc(n.fields["记录"] || "") + "</text>";
+        var execs = (S.byLine[n.line] || []).filter(isExec);
+        var last = st.running ? (st.runs > 1 ? execs[st.runs - 2] : null) : st.last, d = decideOf(last);
+        if (st.waiting) {
+          g += '<text class="t-wait" x="' + (o.x + 16) + '" y="' + (o.y + 57) + '">暂停 · 第 ' + esc(st.waiting.step) + " 步等外部</text>";
+        } else if (st.running) {
+          var ea = elapsedAttrs(st.running.started);
+          g += '<text class="t-run" x="' + (o.x + 16) + '" y="' + (o.y + 57) + '"' + ea.attr + ' data-prefix="进行中 · 已 ">进行中 · 已 ' + fmtSec(ea.sec) + "</text>";
+        } else {
+          var info = st.runs ? (st.secs > 0 ? "累计 " + fmtSec(st.secs) : "") : "没有执行";
+          g += '<text class="t-muted" x="' + (o.x + 16) + '" y="' + (o.y + 57) + '">' + esc(info) + "</text>";
+        }
+        if (d && !st.waiting) g += '<text class="' + (d === "通过" ? "verdict-pass" : "verdict-fix") + '" x="' + (o.x + o.w - 12) + '" y="' + (o.y + 57) + '" text-anchor="end">最后：' + esc(d) + "</text>";
+        // 第四行：格式 · 提交方式；右边是这一节点有没有被外部换过模型/卡、交过结果
+        var fmt = fmtOf(n), lastX = st.running || st.last;
+        if (fmt) g += '<text class="t-fmt" x="' + (o.x + 16) + '" y="' + (o.y + 74) + '">格式 ' + esc(fmt) + (lastX && lastX.via ? " · " + (lastX.via === "submit" ? "工具提交" : "JSON 校验") : "") + "</text>";
+        var marks = [];
+        if (execs.some(function (e) { return e.default_role; })) marks.push("换卡");
+        if (execs.some(function (e) { return e.model_override; })) marks.push("换模型");
+        if (execs.some(function (e) { return e.source === "external"; })) marks.push("外部交");
+        if (marks.length) g += '<text class="t-ovr" x="' + (o.x + o.w - 12) + '" y="' + (o.y + 74) + '" text-anchor="end">' + esc(marks.join(" · ")) + "</text>";
+        if (st.errs) g += '<text class="verdict-fix" x="' + (o.x + o.w - 12) + '" y="' + (o.y + 40) + '" text-anchor="end">出错 ' + st.errs + "</text>";
+        if (st.runs) {
+          var bt = "×" + st.runs, bw = 12 + bt.length * 7;
+          g += '<g class="badge"><rect x="' + (o.x + o.w - bw - 8) + '" y="' + (o.y + 8) + '" width="' + bw + '" height="18" rx="9"/>' +
+            '<text x="' + (o.x + o.w - 8 - bw / 2) + '" y="' + (o.y + 21) + '" text-anchor="middle">' + bt + "</text></g>";
+        }
+      }
+      s += g + "</g>";
+    });
+    s += "</svg>";
+    $("flow").innerHTML = s;
+    $("flow").querySelectorAll(".node").forEach(function (g) {
+      var go = function () { userSelect(Number(g.getAttribute("data-line")), null); };
+      g.addEventListener("click", go);
+      g.addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); } });
+    });
+  }
+  function runsOf(b) {
+    if (b.cont) return b.eachNode ? statsFor(b.eachNode.line).runs : 1;
+    if (b.n && b.n.kind === "start") return 1;
+    if (b.n && b.n.kind === "end") return S.trace.status === "done" ? 1 : 0;
+    if (b.n && b.n.kind === "label") return b.nextNode ? runsOf(b.nextNode) : 1;
+    return b.n ? statsFor(b.n.line).runs : 1;
+  }
+
+  // ---------- 概况、耗时条 ----------
+  function renderSummary(t) {
+    var ev = t.events || [];
+    var tasks = ev.filter(function (e) { return e.type === "task" && isExec(e); });
+    var jumps = ev.filter(function (e) { return e.type === "jump"; }).length;
+    var ctl = t._control, pend = t.status === "waiting" ? t.pending : null;
+    var errs = tasks.filter(function (e) { return e.status === "error"; }).length;
+    var models = Array.from(new Set(tasks.map(function (e) { return e.model; }).filter(Boolean)));
+    var total = t.seconds != null ? t.seconds : tasks.reduce(function (a, e) { return a + (Number(e.seconds) || 0); }, 0);
+    var running = tasks.find(function (e) { return e.status === "running"; });
+    var rs = runStatus(t), stTxt = RUN_TXT[rs] || rs, stCls = rs;
+    if (rs === "running" && !S.live) { stTxt = "记录停在运行中"; }
+    var totalHtml = '<span class="num">' + fmtSec(total) + "</span>";
+    if (t.status === "running") {
+      var ea = elapsedAttrs(t.started);
+      totalHtml = '<span class="num"' + ea.attr + ' data-prefix="">' + fmtSec(ea.sec) + "</span>";
+    }
+    var items = [
+      ["脚本", esc(t.workflow || "workflow") + ".wf"],
+      ["状态", '<span class="pill ' + esc(stCls) + '">' + esc(stTxt) + "</span>"],
+      [t.status === "running" ? "已运行" : "总耗时", totalHtml],
+      ["agent 调用", '<span class="num">' + tasks.length + " 次</span>" + (errs ? ' <span class="pill error">' + errs + " 次出错</span>" : "")],
+      ["返工跳转", '<span class="num">' + jumps + " 次</span>"]
+    ];
+    if (running) items.push(["当前", roleChip(running.role) + " " + esc(running.name)]);
+    if (pend) items.push(["停在", roleChip(pend.card || pend.role) + " " + esc(pend.name) + ' <span class="hint">第 ' + esc(pend.step) + " 步</span>"]);
+    if (ctl) items.push(["外部控制", '<span style="font-size:13.5px;font-weight:500">' + (ctl.mode === "auto" ? "自动往下跑" : "逐步，每步停") +
+      (ctl.stop_roles.length ? " · 在 " + esc(ctl.stop_roles.join("、")) + " 前停" : "") + "</span>" + (t.resumes ? ' <span class="hint">继续过 ' + t.resumes + " 次</span>" : "")]);
+    var inputs = t.inputs && Object.keys(t.inputs).length ? Object.keys(t.inputs).map(function (k) { return k + " = " + t.inputs[k]; }).join("；") : "";
+    $("summary").innerHTML = items.map(function (it) { return '<div><span class="k">' + it[0] + '</span><span class="v">' + it[1] + "</span></div>"; }).join("") +
+      (inputs ? '<div><span class="k">输入</span><span class="v" style="font-size:13.5px;font-weight:500">' + esc(inputs) + "</span></div>" : "") +
+      (models.length ? '<div><span class="k">用到的模型</span><span class="v mono" style="font-size:12.5px;font-weight:400">' + esc(models.join("  ·  ")) + "</span></div>" : "");
+    var note = [];
+    if (t.note) note.push(esc(t.note));
+    if (t.status === "error" && t.error) note.push('<span class="err-box">出错原因：' + esc(t.error) + "</span>");
+    if (t.status === "running" && !S.live) note.push("这份记录停在运行中：流程可能还在跑，也可能进程已经没了。要实时看，在项目里运行 python -m tools.trace_server 工作目录，再打开 http://127.0.0.1:8765 。");
+    if (pend) note.push('<span style="color:var(--accent)">停在第 ' + esc(pend.step) + "「" + esc(pend.name) + "」，等外部决定：交结果（workflow.submit）、用默认或换模型/卡执行（workflow.execute）、继续自动跑（workflow.resume）。</span>" +
+      (pend.last_error ? '<br><span class="err-box">这一步上次失败：' + esc(clip(pend.last_error, 300)) + "</span>" : ""));
+    if (ctl && (Object.keys(ctl.models).length || Object.keys(ctl.roles).length)) note.push("长期覆盖：" + esc(Object.keys(ctl.models).map(function (k) { return k + " 用 " + ctl.models[k]; })
+      .concat(Object.keys(ctl.roles).map(function (k) { return k + " 换成卡 " + ctl.roles[k]; })).join("；")));
+    if (rs === "interrupted" && ctl) note.push('<span class="err-box">后台进程不在了：被杀掉或机器重启过。进度都在记录里，workflow.resume 会从断的那一步接着走。</span>');
+    if (t.status === "running" && t._alive === false && !ctl) note.push('<span class="err-box">记录里的进程（pid ' + esc(t.pid) + "）已经不在了：流程被杀掉或机器重启过，最后停在「" + esc(running ? running.name : "?") + "」。</span>");
+    $("note").hidden = !note.length;
+    $("note").innerHTML = note.join("<br>");
+  }
+  function renderStrip(t) {
+    var tasks = (t.events || []).filter(function (e) { return e.type === "task" && isExec(e); });
+    var total = tasks.reduce(function (a, e) { return a + (e.status === "running" ? elapsedAttrs(e.started).sec || 0 : Number(e.seconds) || 0); }, 0);
+    var even = total <= 0;
+    $("strip-hint").textContent = even ? "这份记录没有耗时（离线假客户端），每段等宽" : "点一段跳到对应节点";
+    $("bars").innerHTML = tasks.map(function (e) {
+      var secs = e.status === "running" ? elapsedAttrs(e.started).sec || 0 : Number(e.seconds) || 0;
+      var w = even ? 1 : Math.max(secs, total / 400);
+      var d = decideOf(e);
+      return '<button type="button" data-seq="' + e.seq + '" data-line="' + e.line + '" class="' + (S.focusSeq === e.seq ? "sel" : "") + (e.status === "running" ? " running" : "") + '" style="flex:' + w + ";background:" + (e.status === "error" ? cssv("--bad") : roleColor(e.role)) + '" title="' +
+        esc("#" + e.seq + " " + e.name + (d ? " · " + d : "") + "（" + fmtSec(e.seconds) + "）") + '" aria-label="' + esc("#" + e.seq + " " + e.name) + '"></button>';
+    }).join("");
+    $("bars").querySelectorAll("button").forEach(function (b) {
+      b.addEventListener("click", function () { userSelect(Number(b.getAttribute("data-line")), Number(b.getAttribute("data-seq"))); });
+    });
+    var roles = Array.from(new Set(tasks.map(function (e) { return e.role; })));
+    $("legend").innerHTML = roles.map(function (r) {
+      var sec = tasks.filter(function (e) { return e.role === r; }).reduce(function (a, e) { return a + (e.status === "running" ? elapsedAttrs(e.started).sec || 0 : Number(e.seconds) || 0); }, 0);
+      return '<span><i style="background:' + roleColor(r) + '"></i>' + esc(ROLE_LABEL[r] || r) + (total > 0 ? " " + fmtSec(sec) + "（" + Math.round(sec * 100 / total) + "%）" : "") + "</span>";
+    }).join("");
+  }
+
+  // ---------- 详情 ----------
+  function jsonHtml(v, ind) {
+    ind = ind || "";
+    var nx = ind + "  ";
+    if (v === null) return '<span class="j-null">null</span>';
+    if (typeof v === "string") return esc(JSON.stringify(v));
+    if (typeof v === "number") return '<span class="j-num">' + v + "</span>";
+    if (typeof v === "boolean") return '<span class="j-bool">' + v + "</span>";
+    if (Array.isArray(v)) return v.length ? "[\n" + v.map(function (x) { return nx + jsonHtml(x, nx); }).join(",\n") + "\n" + ind + "]" : "[]";
+    var ks = Object.keys(v);
+    return ks.length ? "{\n" + ks.map(function (k) { return nx + '<span class="j-key">' + esc(JSON.stringify(k)) + "</span>: " + jsonHtml(v[k], nx); }).join(",\n") + "\n" + ind + "}" : "{}";
+  }
+  function jsonBlock(v) {
+    if (typeof v === "string") {
+      try { var p = JSON.parse(v); if (p && typeof p === "object") return jsonHtml(p); } catch (err) { /* 普通文本 */ }
+      return esc(v);
+    }
+    return jsonHtml(v);
+  }
+  var fid = 0;
+  function field(title, content, cls) {
+    var id = "f" + (++fid);
+    return '<div class="field"><h3><span>' + title + '</span><button type="button" data-copy="' + id + '">复制</button></h3><pre class="' + (cls || "") + '" id="' + id + '">' + content + "</pre></div>";
+  }
+  function verdictOf(e) {
+    var r = e.result, d = decideOf(e);
+    if (d) {
+      var fix = r.task ? "<br><b>返工要求：</b>" + esc(clip(r.task, 400)) : "";
+      return '<div class="callout' + (d === "需修改" ? " fix" : "") + '"><b>' + esc(d) + "</b>　" + esc(r.summary || "") + fix + "</div>";
+    }
+    if (r && typeof r === "object" && r.status) {
+      var ver = r.verification || {};
+      return '<div class="callout' + (r.status === "完成" ? "" : " fix") + '"><b>' + esc(r.status) + "</b>　" + esc(r.summary || "") +
+        (ver.method || ver.result ? "<br><b>验证：</b>" + (ver.executed ? "已执行" : "未执行") + (ver.result ? " · " + esc(clip(ver.result, 200)) : "") : "") + "</div>";
+    }
+    return "";
+  }
+  function brief(e) {
+    if (e.status === "error") return "出错";
+    var r = e.result;
+    if (r && typeof r === "object") {
+      if (Array.isArray(r.tasks)) return r.tasks.length + " 项任务";
+      if (r.contract && typeof r.contract === "object") return "约定：" + clip(r.contract.goal || "", 40);
+      if (r.summary) return clip(r.summary, 48);
+      return clip(JSON.stringify(r), 48);
+    }
+    return clip(r == null ? "" : r, 48);
+  }
+  function scriptBox(t, line) {
+    var lines = (t.script || "").replace(/\n$/, "").split("\n");
+    return '<div class="field"><h3><span>脚本 ' + esc(t.workflow || "") + ".wf（第 " + line + ' 行）</span></h3><div class="script-box" id="scriptbox">' +
+      lines.map(function (l, i) { return '<div class="ln' + (i + 1 === line ? " hl" : "") + '"><span>' + (i + 1) + "</span><span>" + esc(l || " ") + "</span></div>"; }).join("") + "</div></div>";
+  }
+  function findNode(list, line) {
+    for (var i = 0; i < list.length; i++) {
+      var n = list[i];
+      if (n.line === line) return n;
+      if (n.kids) { var f = findNode(n.kids, line); if (f) return f; }
+    }
+    return null;
+  }
+
+  function renderDetail() {
+    var t = S.trace, line = S.selLine, box = $("detail");
+    var openNow = {};
+    box.querySelectorAll("details.run").forEach(function (d) { openNow[d.getAttribute("data-seq")] = d.open; });
+    var n = findNode(S.tree, line);
+    if (!n) { $("d-head").textContent = "节点详情"; box.innerHTML = '<p class="hint">点流程图里的节点查看它每一次执行。</p>'; return; }
+    var evs = S.byLine[line] || [];
+    var html = "";
+    if (n.kind === "task") {
+      $("d-head").textContent = n.name + " · 执行 " + evs.length + " 次";
+      var role = evs[0] && evs[0].role;
+      html += '<div class="meta">' + (role ? roleChip(role) : "") +
+        "<span>角色写法 <b class=\"mono\">" + esc(n.fields["角色"] || "—") + "</b></span>" +
+        "<span>任务 <b class=\"mono\">" + esc(n.fields["任务"] || "（用块名）") + "</b></span>" +
+        (n.fields["文本"] ? "<span>参考文本 <b class=\"mono\">" + esc(n.fields["文本"]) + "</b></span>" : "") +
+        "<span>写入 <b class=\"mono\">" + esc(n.fields["记录"] || "—") + "</b></span>" +
+        (evs[0] && evs[0].model ? "<span>模型 <b class=\"mono\">" + esc(evs[0].model) + "</b></span>" : "") +
+        (evs[0] && evs[0].agentic ? '<span class="pill agentic">带工具</span>' : "") +
+        (fmtOf(n) ? '<span>格式 <span class="chip fmt">' + esc(fmtOf(n)) + "</span></span>" : "") + "</div>";
+      var schema = fmtOf(n) && t._formats ? t._formats[fmtOf(n)] : null;
+      if (!schema && t.pending && t.pending.line === n.line) schema = t.pending.schema;
+      if (schema) html += '<details class="run"><summary><b>格式定义</b><span class="hint">formats/' + esc(fmtOf(n)) + ".json · 模型只能按这个用 submit 工具交，外部交的结果也按它校验</span></summary>" +
+        '<div class="inner">' + field("JSON Schema", jsonHtml(schema)) + "</div></details>";
+      if (!evs.length) html += '<p class="hint">这次运行没有走到这个节点。</p>';
+      var openSeq = S.focusSeq && evs.some(function (e) { return e.seq === S.focusSeq; }) ? S.focusSeq :
+        ((evs.find(function (e) { return e.status === "running" || e.status === "waiting"; }) || evs.find(function (e) { return e.status === "error"; }) || evs[evs.length - 1] || {}).seq);
+      var k = 0;
+      evs.forEach(function (e) {
+        var d = decideOf(e), i = isExec(e) ? k++ : k;
+        if (!isExec(e)) {
+          // 停在这里等外部：把 pending 里的完整请求摊开
+          var pd = t.status === "waiting" && t.pending && t.pending.step === e.step ? t.pending : null;
+          html += '<details class="run' + (e.seq === openSeq ? " focus" : "") + '" data-seq="' + e.seq + '" open><summary><b>第 ' + esc(e.step) + " 步 · 暂停</b>" +
+            '<span class="pill waiting">等外部</span></summary><div class="inner">' +
+            (pd ? '<div class="callout wait"><b>默认会这样执行</b>　卡 <span class="mono">' + esc(pd.card || e.role) + '</span> · 模型 <span class="mono">' + esc(pd.model || "?") + "</span>" +
+              (pd.agentic ? " · 带工具" : "") + (pd.format ? " · 格式 " + esc(pd.format) : "") + "</div>" +
+              (pd.last_error ? field("上次失败的原因", '<span class="err-box">' + esc(pd.last_error) + "</span>") : "") +
+              (pd.card_error ? field("角色卡读不了", '<span class="err-box">' + esc(pd.card_error) + "</span>") : "") +
+              (pd.prompt ? field("提示词（外部自己执行时照这个发）", esc(pd.prompt), "task") : "") +
+              (pd.system ? field("系统提示（角色卡）", esc(pd.system), "task") : "")
+              : '<div class="hint">这条是当时停下等外部的记录，后来已经继续了。</div>') +
+            field("任务", jsonBlock(e.task), "task") + (e.context != null ? field("参考文本", jsonBlock(e.context)) : "") + "</div></details>";
+          return;
+        }
+        var isOpen = S.keepOpen && (String(e.seq) in openNow) ? openNow[e.seq] : e.seq === openSeq;
+        html += '<details class="run' + (e.seq === openSeq ? " focus" : "") + '" data-seq="' + e.seq + '"' + (isOpen ? " open" : "") + ">" +
+          "<summary><b>第 " + (i + 1) + " 次</b><span class=\"hint mono\">#" + e.seq + "</span><span class=\"num\">" + fmtSec(e.seconds) + "</span>" +
+          (d ? '<span class="pill ' + (d === "通过" ? "pass" : "fix") + '">' + esc(d) + "</span>" : "") +
+          (e.status === "error" ? '<span class="pill error">出错</span>' : "") +
+          (e.status === "aborted" ? '<span class="pill aborted">中止</span>' : "") +
+          (e.source && e.source !== "auto" ? '<span class="pill src">' + esc(SRC_TXT[e.source] || e.source) + "</span>" : "") +
+          (e.default_role ? '<span class="chip ovr">换卡 ' + esc(e.default_role) + " → " + esc(e.role) + "</span>" : "") +
+          (e.model_override ? '<span class="chip ovr">换模型 ' + esc(e.model_override) + "</span>" : "") +
+          (e.status === "running" ? '<span class="pill running">进行中</span>' : "") +
+          '<span class="hint">' + esc(e.status === "running" ? "等 agent 回复…" : brief(e)) + "</span></summary>" +
+          '<div class="inner">' + (e.status === "running" ? (function () {
+            var ea = elapsedAttrs(e.started);
+            return '<div class="callout run"><b>进行中</b>　已 <span' + ea.attr + ' data-prefix="">' + fmtSec(ea.sec) + "</span>" + (e.agentic ? "（带工具，单次最长 15 分钟左右）" : "") + "</div>";
+          })() : verdictOf(e)) +
+          (e.status === "error" ? field("错误", '<span class="err-box">' + esc(e.error || "") + "</span>") : "") +
+          (e.raw ? field("模型的原始回复（没通过解析或格式校验）", jsonBlock(e.raw)) : "") +
+          (e.model ? '<div class="meta"><span>模型 <b class="mono">' + esc(e.model) + "</b></span>" + (e.via ? "<span>提交 <b>" + (e.via === "submit" ? "submit 工具" : "回复 JSON 后校验") + "</b></span>" : "") +
+            (e.source ? "<span>来源 <b>" + esc(SRC_TXT[e.source] || e.source) + "</b></span>" : "") + "</div>" : "") +
+          field("任务", jsonBlock(e.task), typeof e.task === "string" && e.task.trim().charAt(0) !== "{" ? "task" : "") +
+          (e.context != null ? field("参考文本", jsonBlock(e.context)) : "") +
+          (e.status === "ok" ? field("返回结果", jsonBlock(e.result)) : "") + "</div></details>";
+      });
+    } else if (n.kind === "if") {
+      var st = statsFor(line);
+      $("d-head").textContent = "如果 " + n.cond;
+      html += '<div class="meta"><span>判断 <b>' + st.runs + "</b> 次</span><span>成立 <b>" + st.t + "</b> 次（进入分支）</span><span>不成立 <b>" + st.f + "</b> 次</span></div>";
+      html += '<div class="hint">依次：' + (evs.map(function (e) { return "#" + e.seq + " " + (e.value ? "成立" : "不成立"); }).join("，") || "没有判断过") + "</div>";
+    } else if (n.kind === "each") {
+      $("d-head").textContent = "遍历 " + n.v + " 于 " + n.src;
+      html += '<div class="meta"><span>' + (evs.length ? "共 <b>" + evs[evs.length - 1].count + "</b> 项" : "没有执行") + "</span></div>";
+    } else if (n.kind === "jump") {
+      $("d-head").textContent = "跳转 " + n.target;
+      html += '<div class="meta"><span>实际跳了 <b>' + evs.length + "</b> 次，最多 " + n.max + " 次。超过上限会报错，整个流程停下。</span></div>";
+    } else if (n.kind === "store") {
+      $("d-head").textContent = "存入 " + n.target;
+      html += '<div class="meta"><span>存了 <b>' + evs.length + "</b> 次" + (evs.length ? "，最后共 " + evs[evs.length - 1].size + " 条" : "") + "</span></div>";
+    } else if (n.kind === "start" || n.kind === "end") {
+      $("d-head").textContent = n.kind === "start" ? "开始" : "结束";
+      html += '<div class="meta"><span>开始 <b class="num">' + esc((t.started || "—").replace("T", " ").slice(0, 19)) + '</b></span><span>结束 <b class="num">' + esc((t.finished || "—").replace("T", " ").slice(0, 19)) + "</b></span><span>状态 <b>" + esc(t.status || "?") + "</b></span></div>" +
+        (t.error ? '<div class="callout fix">' + esc(t.error) + "</div>" : "") +
+        (t._control && t._control.history.length ? '<div class="field"><h3><span>外部控制的操作（最近 ' + t._control.history.length + ' 条）</span></h3><div class="ctl-hist">' +
+          t._control.history.map(function (h) {
+            var extra = Object.keys(h).filter(function (x) { return x !== "at" && x !== "op" && h[x] != null; }).map(function (x) { return x + "=" + (typeof h[x] === "object" ? JSON.stringify(h[x]) : h[x]); }).join(" ");
+            return "<div><span class=\"num\">" + esc((h.at || "").replace("T", " ").slice(0, 19)) + "</span>　<b>" + esc(h.op) + "</b> " + esc(extra) + "</div>";
+          }).join("") + "</div></div>" : "");
+      box.innerHTML = html;
+      return;
+    } else if (n.kind === "label") {
+      $("d-head").textContent = "标记 " + n.name;
+      html += '<div class="hint">跳转的落点，本身不执行任何东西。</div>';
+    }
+    html += scriptBox(t, line);
+    box.innerHTML = html;
+    box.querySelectorAll("[data-copy]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var pre = $(b.getAttribute("data-copy"));
+        try {
+          navigator.clipboard.writeText(pre ? pre.textContent : "").then(function () { b.textContent = "已复制"; setTimeout(function () { b.textContent = "复制"; }, 1200); },
+            function () { b.textContent = "复制不了，请手动选择"; });
+        } catch (err) { b.textContent = "复制不了，请手动选择"; }
+      });
+    });
+    var hl = box.querySelector(".ln.hl"), sb = $("scriptbox");
+    if (hl && sb) sb.scrollTop = Math.max(0, hl.offsetTop - sb.offsetTop - 60);
+  }
+
+  function userSelect(line, seq) { S.lastClick = Date.now(); selectLine(line, seq); }
+  function selectLine(line, seq) {
+    S.selLine = line;
+    S.focusSeq = seq;
+    draw();
+    renderStrip(S.trace);
+    renderDetail();
+  }
+
+  function load(trace, source, keep) {
+    if (!trace || !Array.isArray(trace.events)) { showError("这不是编排过程记录：缺少 events 列表。请选 runs/ 目录下的 .json 文件。"); return; }
+    if (!trace.script) { showError("这份记录里没有 script 字段，画不出流程结构。"); return; }
+    S.trace = trace;
+    S.tree = [{ kind: "start", line: -1 }].concat(parseScript(trace.script), [{ kind: "end", line: -2 }]);
+    S.byLine = indexEvents(trace.events);
+    $("h-src").textContent = source;
+    renderSummary(trace);
+    var run = trace.events.find(function (e) { return e.type === "task" && (e.status === "running" || (e.status === "waiting" && trace.status === "waiting")); });
+    var err = trace.events.find(function (e) { return e.type === "task" && e.status === "error"; });
+    var firstTask = trace.events.find(function (e) { return e.type === "task"; });
+    var follow = S.live && $("follow").checked && Date.now() - S.lastClick > 15000;
+    S.keepOpen = !!keep;
+    if (keep && !(follow && run)) { selectLine(S.selLine, S.focusSeq); S.keepOpen = false; return; }
+    var pick = run || err || firstTask;
+    selectLine(pick ? pick.line : null, pick ? pick.seq : null);
+    S.keepOpen = false;
+  }
+  function showError(msg) { $("note").hidden = false; $("note").innerHTML = '<span class="err-box">' + esc(msg) + "</span>"; }
+  function readFile(f) {
+    if (!f) return;
+    var rd = new FileReader();
+    rd.onload = function () { try { load(JSON.parse(rd.result), "文件：" + f.name); } catch (err) { showError("读不了 " + f.name + "：" + err.message); } };
+    rd.onerror = function () { showError("读不了 " + f.name); };
+    rd.readAsText(f, "utf-8");
+  }
+  $("file").addEventListener("change", function (e) { readFile(e.target.files[0]); e.target.value = ""; });
+  var dragDepth = 0;
+  document.addEventListener("dragenter", function (e) { e.preventDefault(); dragDepth++; document.body.classList.add("drag"); });
+  document.addEventListener("dragleave", function () { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("drag"); } });
+  document.addEventListener("dragover", function (e) { e.preventDefault(); });
+  document.addEventListener("drop", function (e) { e.preventDefault(); dragDepth = 0; document.body.classList.remove("drag"); readFile(e.dataTransfer && e.dataTransfer.files[0]); });
+  var SAMPLES = { real: ["sample-real", "示例：2026-11-08 第三次真跑（agentic 版）"], fake: ["sample-fake", "示例：带返工的离线测试"],
+    running: ["sample-running", "示例：运行中的快照（离线测试跑到第 8 次调用时拷下的过程记录）"] };
+  function loadSample(k) {
+    if ($(SAMPLES[k][0]).textContent.trim() === "null") { showError("这一份没有内置示例，请打开或拖入 runs/*.json。"); return; }
+    try { load(JSON.parse($(SAMPLES[k][0]).textContent), SAMPLES[k][1]); } catch (err) { showError("示例数据坏了：" + err.message); }
+  }
+  $("pick").addEventListener("change", function (e) { loadSample(e.target.value); });
+  new MutationObserver(function () { if (S.trace) selectLine(S.selLine, S.focusSeq); }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  // 计时器：带 data-start 的元素每秒刷新
+  setInterval(function () {
+    document.querySelectorAll("[data-start]").forEach(function (el) {
+      el.textContent = (el.getAttribute("data-prefix") || "") + fmtSec((Date.now() - Number(el.getAttribute("data-start"))) / 1000);
+    });
+  }, 1000);
+
+  // ---------- 实时模式 ----------
+  var cur = { name: null, sig: "" };
+  function setConn(ok, msg) { $("live-dot").className = "dot " + (ok ? "on" : "off"); $("live-msg").textContent = msg; }
+  function fetchJson(url) { return fetch(url, { cache: "no-store" }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }); }
+  function poll() {
+    fetchJson("api/runs").then(function (d) {
+      var runs = d.runs || [];
+      var sel = $("run-pick"), prev = sel.value;
+      sel.innerHTML = runs.map(function (r) {
+        var st = r.status === "running" ? (r.alive === false ? "已中断" : "运行中") : ({ done: "完成", error: "出错", aborted: "已中止",
+          waiting: "暂停在第 " + r.waiting_step + " 步" }[r.status] || r.status);
+        if (r.controlled) st += " · 受控";
+        return '<option value="' + esc(r.name) + '">' + esc(r.name.replace(/\.json$/, "")) + " · " + esc(st) + " · " + r.calls + " 次调用</option>";
+      }).join("");
+      if (!runs.length) { setConn(true, "已连接 " + d.dir + "，还没有运行记录"); return null; }
+      var want = $("follow").checked ? runs[0].name : (prev && runs.some(function (r) { return r.name === prev; }) ? prev : runs[0].name);
+      sel.value = want;
+      setConn(true, "已连接，每 1.5 秒刷新 · " + d.dir);
+      return fetchJson("api/run?name=" + encodeURIComponent(want));
+    }).then(function (t) {
+      if (!t) return;
+      var sig = t._name + "|" + t.updated + "|" + t.events.length + "|" + t._alive + "|" + t.status;
+      if (sig === cur.sig) return;
+      var same = cur.name === t._name;
+      cur = { name: t._name, sig: sig };
+      load(t, "实时：" + t._name, same);
+    }).catch(function (err) { setConn(false, "连不上查看服务（" + err.message + "），重试中…"); })
+      .then(function () { setTimeout(poll, 1500); });
+  }
+  if (LIVE) {
+    S.live = true;
+    $("live-bar").hidden = false;
+    $("static-bar").hidden = true;
+    $("run-pick").addEventListener("change", function () { $("follow").checked = false; cur.sig = ""; });
+    poll();
+  } else {
+    loadSample("real");
+  }
+})();
+</script>
+</body>
+</html>

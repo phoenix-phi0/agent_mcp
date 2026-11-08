@@ -1,0 +1,53 @@
+{
+  "type": "object",
+  "description": "接口修改：按审查意见改出的完整新版约定，外加逐条处理记录。",
+  "additionalProperties": false,
+  "required": ["contract", "changes"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "constraints", "interfaces", "invariants", "acceptance", "risks", "open_questions"],
+      "properties": {
+        "goal": {"type": "string", "minLength": 1},
+        "constraints": {"type": "array", "items": {"type": "string"}},
+        "interfaces": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "input", "output", "errors"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "input": {"type": "object"},
+              "output": {"type": "object"},
+              "errors": {
+                "type": "array",
+                "items": {"type": "object", "required": ["code", "when"],
+                          "properties": {"code": {"type": "string", "minLength": 1},
+                                         "when": {"type": "string", "minLength": 1}}}
+              },
+              "permissions": {"type": "string"}
+            }
+          }
+        },
+        "invariants": {"type": "array", "items": {"type": "string"}},
+        "acceptance": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "risks": {"type": "array", "items": {"type": "string"}},
+        "open_questions": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "changes": {
+      "type": "array",
+      "description": "每条审查意见怎么处理的",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["issue", "action", "detail"],
+        "properties": {
+          "issue": {"type": "string", "minLength": 1, "description": "审查意见原文要点"},
+          "action": {"enum": ["已修改", "不采纳"]},
+          "detail": {"type": "string", "minLength": 1, "description": "改了什么或为什么不改"}
+        }
+      }
+    }
+  }
+}

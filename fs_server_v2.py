@@ -141,6 +141,18 @@ _CALLABLE = {
     "cxbatch.wait":     ("tools.cxbatch", "wait"),
     "cxbatch.jobs":     ("tools.cxbatch", "jobs"),
     "cxbatch.cancel":   ("tools.cxbatch", "cancel"),
+    # 编排的外部控制：逐步停、交结果、换模型/角色卡、暂停继续、回退、中止。见 tools/workflow_ctl.py。
+    # 写的只有工作目录下 runs/ 里的记录和控制文件；execute/resume 起的后台进程跑的是角色卡里的模型。
+    "workflow.start":     ("tools.workflow_ctl", "start"),
+    "workflow.status":    ("tools.workflow_ctl", "status"),
+    "workflow.submit":    ("tools.workflow_ctl", "submit"),
+    "workflow.execute":   ("tools.workflow_ctl", "execute"),
+    "workflow.pause":     ("tools.workflow_ctl", "pause"),
+    "workflow.resume":    ("tools.workflow_ctl", "resume"),
+    "workflow.configure": ("tools.workflow_ctl", "configure"),
+    "workflow.rewind":    ("tools.workflow_ctl", "rewind"),
+    "workflow.abort":     ("tools.workflow_ctl", "abort"),
+    "workflow.runs":      ("tools.workflow_ctl", "list_runs"),
     # GSBatch：同样的批量，执行端换成 Goose 的无头模式（goose run）。默认
     # zai_low + glm-5.3-flash + effort low；goose 没有沙箱，auto 下工具自动批准，
     # 单次上限 10 条——见 gsbatch.py 模块文档。

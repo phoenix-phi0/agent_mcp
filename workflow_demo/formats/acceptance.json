@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "description": "验收结论：逐条对照验收目标；需修改时 task 是工程师能直接照做的返工要求。",
+  "additionalProperties": false,
+  "required": ["decide", "summary", "checked", "not_verified"],
+  "properties": {
+    "decide": {"enum": ["通过", "需修改"]},
+    "summary": {"type": "string", "minLength": 1},
+    "checked": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["item", "result", "evidence"],
+        "properties": {
+          "item": {"type": "string", "minLength": 1},
+          "result": {"enum": ["满足", "不满足", "未验证"]},
+          "evidence": {"type": "string"}
+        }
+      }
+    },
+    "not_verified": {"type": "array", "items": {"type": "string"}},
+    "task": {"type": "string", "minLength": 1,
+             "description": "自包含的返工要求：修什么、期望行为、修完怎么证明。需修改时必填"}
+  },
+  "if": {"properties": {"decide": {"const": "需修改"}}, "required": ["decide"]},
+  "then": {"required": ["task"]}
+}

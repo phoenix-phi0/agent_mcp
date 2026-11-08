@@ -1,0 +1,7 @@
+{
+  "model": "api:zhipu/glm-5.3",
+  "tools": [],
+  "skills": [],
+  "packages": [],
+  "max_tool_rounds": 3
+}
