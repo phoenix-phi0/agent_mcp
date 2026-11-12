@@ -190,6 +190,9 @@ run 编排记录   $PY tests/tools/test_workflow_trace.py
 run 编排实时   $PY tests/tools/test_workflow_live.py
 run 编排控制   $PY tests/tools/test_workflow_ctl.py
 run 编排提交   $PY tests/tools/test_wf_submit.py
+run 编排角色工具 $PY tests/tools/test_wf_gsb_tools.py
+run 编排成本分配 $PY tests/tools/test_wf_cost.py
+run 编排代码重构 $PY tests/tools/test_wf_refactor.py
 run 编排查看器 $PY tests/tools/test_trace_view.py
 run 查看器令牌 $PY tests/tools/test_trace_token.py
 run DSL规划读码 $PY tests/tools/test_dslagent_planread.py
@@ -211,6 +214,7 @@ run DSL整份重写 $PY tests/tools/test_dslagent_k84.py
 run 批量opencode $PY tests/tools/test_obatch.py
 run 批量codex   $PY tests/tools/test_cxbatch.py
 run 批量goose   $PY tests/tools/test_gsbatch.py
+run 探针检索    $PY tests/tools/test_code_search.py
 run Colab启动   $PY tests/tools/test_colab_vllm.py
 run 批量grok    $PY tests/tools/test_gbatch.py
 run grok权限    $PY tests/tools/test_gbatch_perm.py

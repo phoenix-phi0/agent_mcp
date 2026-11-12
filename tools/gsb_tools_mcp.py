@@ -56,6 +56,9 @@ import threading
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import code_search  # noqa: E402  同目录的检索模块（纯标准库）
+
 _SECRET_NAME = re.compile(r"TOKEN|SECRET|PASSW|API_?KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIAL", re.I)
 # Cursor 沙箱会把被藏起来的密钥塞进这个“恢复脚本”环境变量的值里；变量名本身
 # 不含 TOKEN，旧逻辑漏掉后，子进程 env/printenv 会把真实凭证露给模型。
@@ -116,6 +119,9 @@ PROBE_PREAMBLE = """你是一个只读探针，另一个 agent 把阅读 / 对�
 3. 只交回要求的内容和格式，不复述过程。
 4. 你的最后一条回复就是交付结果。
 5. 一次读多个文件或同一文件多段时，优先用 read_files（若有该工具），不要分多次 cat/sed。
+6. 有 search 工具时，先用它按意思找线索（代码块和以前的探针 / 审查 / 批量任务结论）：不知道叫什么名字、
+   要在大文件里定位、想知道以前查过没有，都先 search；命中的位置再用 read_files 核实，结论以读到的为准。
+   以前的结论可能已过时，引用时注明来源和日期。
 
 任务：
 """
@@ -936,6 +942,11 @@ def _verify_opts(effort, timeout_secs, model, cwd):
     return backend, eff, to, m, wd, exe
 
 
+def _probe_tools_only():
+    """探针挂的 MCP 子集：默认 read_files + search；GSB_PROBE_SEARCH=0 时只给 read_files（对比用）。"""
+    return "read_files" if os.environ.get("GSB_PROBE_SEARCH", "1") == "0" else "read_files,search"
+
+
 def _new_probe_id(kind):
     """probe / review / verify 共用的 id：p1-<pid>-<ts> / r… / v…。"""
     with _PLOCK:
@@ -969,7 +980,7 @@ def _codex_start(kind, prompt, eff, to, m, wd, exe, sandbox="read-only", extra_c
         cmd += [
             "-c", f'mcp_servers.gsb_read_files.command={py!r}',
             "-c", f'mcp_servers.gsb_read_files.args=[{script!r}]',
-            "-c", 'mcp_servers.gsb_read_files.env.GSB_TOOLS_ONLY="read_files"',
+            "-c", f'mcp_servers.gsb_read_files.env.GSB_TOOLS_ONLY="{_probe_tools_only()}"',
         ]
     cmd.append("-")
     env = {k: v for k, v in os.environ.items() if not _leaky_env(k, v)}
@@ -1004,6 +1015,16 @@ def _claude_start(kind, prompt, eff, to, m, wd, exe, sandbox=False, extra_dirs=(
         f.write(prompt)
     py = sys.executable or "python3"
     mcp_cfg = PROBE_CLAUDE_MCP
+    try:                                 # 按 GSB_PROBE_SEARCH 决定探针挂不挂 search
+        with open(PROBE_CLAUDE_MCP, encoding="utf-8") as f:
+            cfg = json.load(f)
+        srv = cfg["mcpServers"]["gsb_read_files"]
+        srv.setdefault("env", {})["GSB_TOOLS_ONLY"] = _probe_tools_only()
+        mcp_cfg = base + ".mcp.json"
+        with open(mcp_cfg, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False)
+    except (OSError, ValueError, KeyError):
+        mcp_cfg = PROBE_CLAUDE_MCP
     if os.environ.get("GSB_PROBE_READ_FILES", "1") == "0":
         empty = base + ".mcp_empty.json"
         with open(empty, "w", encoding="utf-8") as f:
@@ -1779,6 +1800,19 @@ TOOLS = [
          "max_chars_per_file": {"type": "integer", "description": f"单文件字数上限，默认 {DEF_PER_FILE}"},
          "max_total_chars": {"type": "integer", "description": f"总字数上限，默认 {DEF_TOTAL}"}},
          "required": ["files"]}},
+    {"name": "search",
+     "description": ("按意思检索，返回 path:行范围 和几行预览（BM25 + 中文分词，按函数 / 接口 / 标题切块，"
+                     "增量索引）。scope=code 搜工作目录的代码和文档；scope=exp 搜以前的经验："
+                     "gsbatch / cbatch 任务书和回复、probe / review / verify 的指令和结论；all 两样都搜。"
+                     "不知道标识符叫什么、在大文件里定位、想知道以前查过没有时先用它；"
+                     "精确的标识符 rg 更准。命中只是线索，内容以 read_files 读到的为准。"),
+     "inputSchema": {"type": "object", "properties": {
+         "query": {"type": "string", "description": "要找什么，自然语言或关键词，中英文都行"},
+         "scope": {"type": "string", "enum": ["all", "code", "exp"], "description": "默认 all"},
+         "k": {"type": "integer", "description": "返回几条，默认 8，最多 30"},
+         "path_glob": {"type": "string", "description": "只搜匹配的代码路径，如 tools/*.py（不影响经验）"},
+         "cwd": {"type": "string", "description": "要搜的目录，默认任务工作目录"}},
+         "required": ["query"]}},
     {"name": "multi_edit",
      "description": ("优先用本工具，不要用 shell 的 sed/awk 或逐次 edit 改文件。一次对同一文件多处或多个文件做 before→after 精确替换（语义同 goose 内置 edit / fsedit）："
                      "before 必须正好出现 count 次（默认 1），多了少了都报错。"
@@ -1975,7 +2009,10 @@ if _ONLY:
     if _miss:
         raise SystemExit(f"GSB_TOOLS_ONLY 里没有这些工具：{', '.join(_miss)}")
     TOOLS = [_have[n] for n in _ONLY]
-    SERVER = {**SERVER, "name": "gsb_read_files" if _ONLY == ["read_files"] else "gsb_tools_subset"}
+    # 探针挂的只读子集（read_files，可带 search）沿用 gsb_read_files 这个名字：
+    # Claude 探针 / 验证的 --allowed-tools 写的是 mcp__gsb_read_files
+    _READ_ONLY_SET = set(_ONLY) <= {"read_files", "search"}
+    SERVER = {**SERVER, "name": "gsb_read_files" if _READ_ONLY_SET else "gsb_tools_subset"}
 
 _OUT = threading.Lock()
 _CANCELS = {}
@@ -1986,6 +2023,9 @@ def _priority_instructions():
     没挂的不写（GSB_TOOLS_ONLY 子集也不会提示不存在的工具）。"""
     have = {t["name"] for t in TOOLS}
     p = []
+    if "search" in have:
+        p.append("不知道东西叫什么、要在大文件里定位、想知道以前查过没有，先用 search 找线索"
+                 "（scope=exp 搜以前的任务和探针结论），再用 read_files 核实。")
     if "read_files" in have:
         p.append("读文件一律用 read_files（可一次多个文件、带行号范围、glob），不要用 shell 的 "
                  "cat/head/tail/sed -n/less 读；grep/rg 搜索可以照用，但看搜到的内容回 read_files。")
@@ -2024,6 +2064,10 @@ def _call(name, args, cancel):
     if name == "read_files":
         return read_files(args.get("files"), args.get("max_chars_per_file"),
                           args.get("max_total_chars"))
+    if name == "search":
+        return code_search.search(args.get("query"), _resolve(args["cwd"]) if args.get("cwd") else None,
+                                  args.get("scope") or "all", args.get("k") or 8,
+                                  args.get("path_glob"), deny=_deny_read)
     if name == "multi_edit":
         a = args.get("atomic")
         return multi_edit(args.get("edits"), True if a is None else bool(a), args.get("cwd"))
