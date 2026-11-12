@@ -1,0 +1,31 @@
+{
+  "model": "cli:claude/fable",
+  "cost": 15,
+  "description": "顶档工程师（Claude Fable 5.2，高思考强度，比 opus 高一档），带探针和独立审查。实测同一小任务费用约为 opus 的 1.9 倍。只给最难、做错代价最大的项：跨多个模块的设计、复杂并发和事务、安全相关逻辑，或者其他档位做过、返工仍过不了的项。一般任务不要挑它。",
+  "packages": [],
+  "skills": [
+    "skills/implementation.md"
+  ],
+  "effort": "high",
+  "agentic": {
+    "cwd": "work/{project}",
+    "allowed_tools": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Bash(ls:*)",
+      "Bash(pip install:*)",
+      "Bash(python -m pip install:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(pytest:*)",
+      "Bash(python -m unittest:*)",
+      "Bash(python -m py_compile:*)"
+    ],
+    "timeout": 1800,
+    "max_turns": 100,
+    "venv": true,
+    "mcp_tools": ["probe", "review"]
+  }
+}

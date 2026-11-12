@@ -1,5 +1,7 @@
 {
   "model": "cli:claude/sonnet",
+  "cost": 3,
+  "description": "中档工程师（sonnet）。一般的模块实现：几个函数、几种错误码、要读懂已有代码再配合着写；带探针和提交前的独立审查。",
   "packages": [],
   "skills": [
     "skills/implementation.md"
@@ -21,8 +23,9 @@
       "Bash(python -m unittest:*)",
       "Bash(python -m py_compile:*)"
     ],
-    "timeout": 900,
+    "timeout": 1200,
     "max_turns": 60,
-    "venv": true
+    "venv": true,
+    "mcp_tools": ["probe", "review"]
   }
 }

@@ -1,0 +1,17 @@
+{
+  "model": "cli:codex/gpt-6.1-sol",
+  "cost": 2,
+  "description": "GPT 验收（Codex gpt-6.1-sol，走 ChatGPT 订阅），项目只读、临时目录可写：能读代码、跑全量测试（含 tmp_path 类用例），不能改项目文件，改了这一步直接判失败。逐条对照验收目标查实现和测试，给出通过或返工要求。和写代码的 Claude 不是同一家模型，用来做交叉验收；没有探针。",
+  "packages": [],
+  "skills": [
+    "skills/acceptance.md"
+  ],
+  "effort": "medium",
+  "agentic": {
+    "cwd": "work/{project}",
+    "sandbox": "project-read-only",
+    "timeout": 1800,
+    "max_turns": 60,
+    "venv": true
+  }
+}

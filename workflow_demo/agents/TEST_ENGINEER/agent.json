@@ -1,0 +1,28 @@
+{
+  "model": "cli:claude/sonnet",
+  "cost": 2,
+  "description": "测试工程师（sonnet，低思考强度）。只给已经实现的功能补测试：边界、错误码、组合场景；不改实现代码，发现的缺陷写进记录交给后面返工。适合「补边界用例」这类任务，不能用来实现功能。",
+  "packages": [],
+  "skills": [
+    "skills/testing.md"
+  ],
+  "effort": "low",
+  "agentic": {
+    "cwd": "work/{project}",
+    "allowed_tools": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Bash(ls:*)",
+      "Bash(pip install -r requirements.txt:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(pytest:*)",
+      "Bash(python -m unittest:*)"
+    ],
+    "timeout": 900,
+    "max_turns": 50,
+    "venv": true
+  }
+}

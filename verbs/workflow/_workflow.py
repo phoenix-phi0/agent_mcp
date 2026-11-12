@@ -14,6 +14,12 @@ _LABEL = re.compile(r"^标记\s*:\s*(\w+)\s*$")
 _EACH = re.compile(r"^遍历\s+(\w+)\s+于\s+(.+)$")
 _STORE = re.compile(r"^存储\s+(\w+)\s+(.+)$")
 _REF = re.compile(r"^[\w]+(?:\.[\w]+)*$")
+# 角色清单 roster ENGINEER_LITE ENGINEER …：读这些卡的成本和说明，存成列表给派活的节点看
+# 也可以写变量：角色清单 roster {roles}，入口脚本里 设 roles = A,B,C（逗号或空格分隔）
+_ROSTER = re.compile(r"^角色清单\s+(\w+)\s+([A-Za-z{][\w ,{}]*)$")
+_CARD = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+# 成本合计 spent assignment.tasks [预算 {budget}]：按每项的 agent 查卡的成本加总，和预算比
+_COST = re.compile(r"^成本合计\s+(\w+)\s+(\S+)(?:\s+预算\s+(\S+))?\s*$")
 
 
 def parse(script):
@@ -97,6 +103,20 @@ class _Trace:
         if self.path is None:
             return
         self.data["updated"] = _stamp()
+        # 已经花掉的成本：真跑过（成功或失败）的任务节点按卡的 cost 加总。回放的事件是原样搬回来的，
+        # 带着当初的 cost，照算（那次确实花了）；外部交的结果没有 cost，不算
+        costs = [e["cost"] for e in self.data["events"]
+                 if e.get("type") == "task" and e.get("status") in ("ok", "error")
+                 and isinstance(e.get("cost"), (int, float))]
+        if costs:
+            self.data["cost_spent"] = round(sum(costs), 3)
+        # 实际费用：claude 自己报的（按 API 标价估算；Max 订阅不按这个计费），加上工具内部的花费。
+        # 只有 claude 后端有；goose（GLM）的拿不到，计为未知
+        usd = [e["usage"]["total_usd"] for e in self.data["events"]
+               if e.get("type") == "task" and isinstance(e.get("usage"), dict)
+               and isinstance(e["usage"].get("total_usd"), (int, float))]
+        if usd:
+            self.data["usd_spent"] = round(sum(usd), 4)
         tmp = self.path.with_name(self.path.name + ".tmp")
         tmp.write_text(json.dumps(self.data, ensure_ascii=False, indent=2, default=str),
                        encoding="utf-8")
@@ -108,7 +128,7 @@ def _stamp():
 
 
 def run(engine, script, call_agent, name="workflow", describe=None, load_format=None,
-        check_format=None):
+        check_format=None, card_info=None):
     """engine._wf_control 有值时，每个任务节点怎么跑由外部决定（见 tools/workflow_ctl.py）：
     回放记录里的结果、用外部交来的结果、按默认或覆盖的模型/角色卡跑，或者停下等待。"""
     nodes = parse(script)
@@ -120,6 +140,7 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
     if ctl is not None:
         ctl.attach(trace)
     steps = [0]
+    allowed_roles = []        # 最近一次「角色清单」的卡名；成本合计用它挡住清单外的卡
     engine.store("workflow_trace", str(trace.path) if trace.path else "")
     labels = {}
     jumps = {}
@@ -199,6 +220,67 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                     raise DSLError(f"第 {n} 行：{m[1]} 不是列表")
                 old.append(resolve(m[2]))
                 trace.add(type="store", line=n, target=m[1], size=len(old))
+                continue
+            m = _ROSTER.fullmatch(line) or _COST.fullmatch(line)
+            if m:
+                if children:
+                    raise DSLError(f"第 {n} 行：{line.split()[0]}不能带子块")
+                if card_info is None:
+                    raise DSLError(f"第 {n} 行：这个执行器不支持{line.split()[0]}")
+
+                def card(role):
+                    try:
+                        info = card_info(engine, role)
+                    except DSLError as e:
+                        raise DSLError(f"第 {n} 行：{e}") from e
+                    if info.get("cost") is None:
+                        raise DSLError(f"第 {n} 行：角色 {role} 没有配置 cost")
+                    return info
+
+                if line.startswith("角色清单"):
+                    names = [x for x in re.split(r"[,\s]+", to_text(engine.expand(m[2]))) if x]
+                    bad = [x for x in names if not _CARD.fullmatch(x)]
+                    if bad or not names:
+                        raise DSLError(f"第 {n} 行：角色清单无效（变量没设？）：{m[2]} → {names}")
+                    if len(set(names)) != len(names):
+                        raise DSLError(f"第 {n} 行：角色清单里有重复的角色")
+                    roster = [{k: v for k, v in card(x).items() if k != "model"} for x in names]
+                    allowed_roles[:] = names
+                    engine.store(m[1], roster)
+                    trace.add(type="roster", line=n, target=m[1], roles=roster)
+                    continue
+                items = resolve(m[2])
+                if not isinstance(items, list) or not all(isinstance(x, dict) for x in items):
+                    raise DSLError(f"第 {n} 行：成本合计需要对象列表：{m[2]}")
+                budget = None
+                if m[3]:
+                    raw = resolve(m[3])
+                    try:
+                        budget = float(raw)
+                    except (TypeError, ValueError):
+                        raise DSLError(f"第 {n} 行：预算不是数字：{raw!r}") from None
+                    if budget.is_integer():
+                        budget = int(budget)
+                rows, cache = [], {}
+                for i, item in enumerate(items, 1):
+                    role = item.get("agent")
+                    if not isinstance(role, str) or not role:
+                        raise DSLError(f"第 {n} 行：第 {i} 项没有 agent")
+                    if role not in cache:
+                        cache[role] = card(role)["cost"]
+                    rows.append({"index": i, "agent": role, "cost": cache[role],
+                                 "content": to_text(item.get("content", ""))})
+                total = round(sum(r["cost"] for r in rows), 3)
+                # 挑了角色清单外的卡（格式里列的比这次清单多）：也算超出，让分配调整换掉
+                outside = sorted({r["agent"] for r in rows} - set(allowed_roles)) if allowed_roles else []
+                summary = {"total": total, "budget": budget, "tasks": rows,
+                           "status": "超出" if (budget is not None and total > budget) or outside else "未超出"}
+                if outside:
+                    summary["not_in_roster"] = outside
+                engine.store(m[1], summary)
+                trace.add(type="cost", line=n, target=m[1], source=m[2].strip(), total=total,
+                          budget=budget, status=summary["status"], not_in_roster=outside or None,
+                          by_role={r: sum(x["cost"] for x in rows if x["agent"] == r) for r in cache})
                 continue
             if children:
                 fields = {}

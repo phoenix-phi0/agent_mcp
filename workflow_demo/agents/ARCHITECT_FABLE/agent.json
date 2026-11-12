@@ -1,0 +1,15 @@
+{
+  "model": "cli:claude/fable",
+  "cost": 30,
+  "description": "顶档架构师（Claude Fable 5.2，低思考强度）。写接口约定、按审查意见修改约定、拆任务并按成本给每项挑角色。钱包需求实测架构师两步约 $2.2，约为 sonnet 架构师的 6 倍，质量看不出明显提升；默认仍用 sonnet，需求明显更大或 sonnet 写约定出过问题时再换它。high 档约 $6 且会拆得过细，不要用。",
+  "tools": [],
+  "packages": [],
+  "skills": [
+    "skills/contract.md",
+    "skills/cost_assignment.md",
+    "skills/refactor.md"
+  ],
+  "max_tool_rounds": 3,
+  "timeout": 600,
+  "effort": "low"
+}

@@ -1,10 +1,15 @@
 {
   "model": "cli:claude/sonnet",
+  "cost": 5,
+  "description": "架构师（sonnet，高思考强度）。写接口约定或重构方案、按审查意见修改、拆任务并按成本给每项挑角色。",
   "tools": [],
   "packages": [],
   "skills": [
-    "skills/contract.md"
+    "skills/contract.md",
+    "skills/cost_assignment.md",
+    "skills/refactor.md"
   ],
   "max_tool_rounds": 3,
+  "timeout": 600,
   "effort": "high"
 }

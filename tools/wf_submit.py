@@ -81,10 +81,10 @@ class SubmitChannel:
         return {"WF_SCHEMA": str(self.schema_path), "WF_OUT": str(self.out),
                 "WF_LOG": str(self.log), "WF_MAX_TRIES": str(self.max_tries)}
 
-    def claude_args(self):
-        """claude -p 用：只挂这一个 MCP 服务，并放行 submit 工具。"""
+    def claude_args(self, extra=None):
+        """claude -p 用：挂提交工具这个 MCP 服务（extra 里可以再加别的，如 gsb 探针）。"""
         cfg = {"mcpServers": {"wf": {"command": sys.executable, "args": [str(SERVER)],
-                                     "env": self.env()}}}
+                                     "env": self.env()}, **(extra or {})}}
         return ["--strict-mcp-config", "--mcp-config", json.dumps(cfg, ensure_ascii=False)]
 
     def goose_extension(self):
@@ -92,8 +92,11 @@ class SubmitChannel:
         envs = " ".join(f"{k}={v}" for k, v in self.env().items())
         return f"wf_submit:{envs} {sys.executable} {SERVER}"
 
-    def run(self, cmd, cwd, env, stdin_text, timeout, label):
-        """跑 cmd；结果文件一出现就结束进程组。返回 (结果 dict 或 None, 进程输出)。"""
+    def run(self, cmd, cwd, env, stdin_text, timeout, label, grace=0):
+        """跑 cmd；结果文件一出现就结束进程组。返回 (结果 dict 或 None, 进程输出)。
+
+        grace：结果出现后再等进程自己退出的秒数。claude -p --output-format json 只在退出时打印
+        本次的费用和用量，立刻杀掉就拿不到；记账要用时给个 30 左右，等不到照样杀。"""
         t0 = time.time()
         with tempfile.TemporaryFile("w+", encoding="utf-8") as so, \
                 tempfile.TemporaryFile("w+", encoding="utf-8") as se:
@@ -112,6 +115,9 @@ class SubmitChannel:
                 if self.out.exists():
                     done = True
                     time.sleep(0.3)        # 让工具把「已提交」回完，进程退不退都收
+                    end = time.time() + grace
+                    while proc.poll() is None and time.time() < end:
+                        time.sleep(0.2)
                     break
                 if proc.poll() is not None:
                     break
@@ -123,7 +129,8 @@ class SubmitChannel:
                 _kill(proc)
             so.seek(0)
             se.seek(0)
-            output = so.read()[-20000:] + ("\n[stderr]\n" + se.read()[-4000:])
+            self.stdout = so.read()          # 完整的标准输出：记账要从 claude 的最终 JSON 里读费用
+            output = self.stdout[-20000:] + ("\n[stderr]\n" + se.read()[-4000:])
         if done or self.out.exists():
             return json.loads(self.out.read_text(encoding="utf-8")), output
         return None, output

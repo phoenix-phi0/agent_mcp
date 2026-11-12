@@ -26,4 +26,5 @@ def register(reg, workspace):
         return module.run(engine, path.read_text(encoding="utf-8"), agents.call_agent, name=path.stem,
                           describe=agents.describe,
                           load_format=agents.load_format,
-                          check_format=agents.check_format)
+                          check_format=agents.check_format,
+                          card_info=agents.card_info)

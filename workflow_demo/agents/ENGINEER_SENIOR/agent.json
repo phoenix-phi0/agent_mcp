@@ -1,0 +1,31 @@
+{
+  "model": "cli:claude/opus",
+  "cost": 8,
+  "description": "高档工程师（opus，高思考强度），带探针和独立审查。适合跨多个模块的改动、鉴权、并发和状态机、性能要求、需求有含糊处需要权衡的任务。贵，只给真正难的项。",
+  "packages": [],
+  "skills": [
+    "skills/implementation.md"
+  ],
+  "effort": "high",
+  "agentic": {
+    "cwd": "work/{project}",
+    "allowed_tools": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Bash(ls:*)",
+      "Bash(pip install:*)",
+      "Bash(python -m pip install:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(pytest:*)",
+      "Bash(python -m unittest:*)",
+      "Bash(python -m py_compile:*)"
+    ],
+    "timeout": 1500,
+    "max_turns": 80,
+    "venv": true,
+    "mcp_tools": ["probe", "review"]
+  }
+}

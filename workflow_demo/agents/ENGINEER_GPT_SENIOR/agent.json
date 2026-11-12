@@ -1,0 +1,17 @@
+{
+  "model": "cli:codex/gpt-6-astra",
+  "cost": 4,
+  "description": "高档 GPT 工程师（Codex gpt-6-astra，高思考强度，走 ChatGPT 订阅、不占 Claude 额度），沙箱里只能写项目目录。官方定位最强的前沿模型；简单算法题上和中档分不出差别，优势要在难任务上体现。适合跨模块改动、鉴权、并发和状态机、性能要求、需求有含糊处要权衡的任务；没有探针和审查。",
+  "packages": [],
+  "skills": [
+    "skills/implementation.md"
+  ],
+  "effort": "high",
+  "agentic": {
+    "cwd": "work/{project}",
+    "sandbox": "workspace-write",
+    "timeout": 2400,
+    "max_turns": 80,
+    "venv": true
+  }
+}

@@ -685,8 +685,198 @@ class GooseCLIClient(_CLIBackend):
         return r["text"]
 
 
+CODEX_DEFAULT_MODEL = "gpt-6-luna"
+# project-read-only：给验收用。项目目录只读、临时目录可写（pytest 的输出捕获和 tmp_path 要写临时文件，
+# 纯 read-only 下起不来，见 20261110-113224 那次 QA 连判两轮「需修改」）。实现上是 workspace-write，
+# 但 -C 指向一个空的临时目录，项目目录不在可写范围里；跑完再比对项目文件，被改了就报错
+CODEX_SANDBOXES = ("read-only", "workspace-write", "project-read-only")
+_SNAP_SKIP = {".venv", ".pytest_cache", "__pycache__", ".git", "node_modules"}
+
+
+def _tree_snapshot(root):
+    """项目目录里每个文件的 (大小, 修改时间)；跳过虚拟环境和各种缓存。比对两次就知道有没有被改。"""
+    out = {}
+    root = Path(root)
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SNAP_SKIP]
+        for f in filenames:
+            p = Path(dirpath) / f
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            out[str(p.relative_to(root))] = (st.st_size, st.st_mtime_ns)
+    return out
+
+
+def _snapshot_diff(before, after):
+    """两次快照的差异：新增、删除、改动的文件（相对路径），各最多列 10 个。"""
+    added = sorted(set(after) - set(before))
+    removed = sorted(set(before) - set(after))
+    changed = sorted(k for k in set(before) & set(after) if before[k] != after[k])
+    return {k: v[:10] for k, v in (("新增", added), ("删除", removed), ("改动", changed)) if v}
+
+
+def _codex_cmd(model, sandbox, cwd, out_file, mcp_env=None, effort="medium", network=None):
+    """codex exec 的命令行。提示词从标准输入给（最后的「-」）。
+
+    sandbox：read-only / workspace-write（只有 cwd 可写；放开网络，pip install 要用）。
+    mcp_env：挂提交工具时传 SubmitChannel.env()，用内联 TOML 配一个 wf 服务。
+    不带任何 --dangerously* / full-auto：越权的命令由 codex 的沙箱挡掉。"""
+    exe = CodexCLIClient.binary()
+    # 模型名可以带「@努力程度」（gpt-6-astra@high），同 cli:claude 的写法；不带用 effort 参数
+    model, eff = config.split_effort(model or "")
+    effort = eff or effort
+    # --ignore-user-config：不读 ~/.codex/config.toml（登录照旧用 CODEX_HOME），这次调用的配置全由下面的
+    # 参数给，同 claude 的 --strict-mcp-config。不加的话全局挂的 MCP 也会进来，比如 gsb_tools 的
+    # run_wait / multi_edit 在 codex 沙箱外面跑命令、改文件，等于没有沙箱（实测验收调了 run_wait，一步卡 6 分钟）
+    cmd = [exe, "exec", "--ignore-user-config", "-m", model or CODEX_DEFAULT_MODEL, "-s", sandbox,
+           "--skip-git-repo-check", "--color", "never", "--json", "-c", f"model_reasoning_effort={effort}",
+           "-C", str(cwd), "-o", str(out_file)]
+    if sandbox not in ("read-only", "workspace-write"):
+        raise BackendError(f"codex 命令行只收 read-only / workspace-write，收到 {sandbox}（project-read-only 要先换算）")
+    # 网络：默认只有 workspace-write（实施要装依赖）放开；验收换算来的 workspace-write 传 network=False
+    if sandbox == "workspace-write" and (network is None or network):
+        cmd += ["-c", "sandbox_workspace_write.network_access=true"]
+    if mcp_env is not None:
+        from . import wf_submit
+        env_toml = "{" + ", ".join(f"{k}={json.dumps(v)}" for k, v in mcp_env.items()) + "}"
+        cmd += ["-c", f"mcp_servers.wf.command={json.dumps(sys.executable)}",
+                "-c", f"mcp_servers.wf.args=[{json.dumps(str(wf_submit.SERVER))}]",
+                "-c", f"mcp_servers.wf.env={env_toml}",
+                # exec 模式审批策略是 never：不放行的话 submit 调用直接被拒（「requires approval」）。
+                # 只放开 wf 这一个服务，它只有 submit 一个工具
+                "-c", 'mcp_servers.wf.default_tools_approval_mode="approve"']
+    return cmd + ["-"]
+
+
+def _codex_usage(stdout, seconds=None):
+    """codex exec --json 的事件流里加总每轮（turn.completed）的 token。订阅计费，不报美元。"""
+    tot, turns = {}, 0
+    for line in (stdout or "").splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(ev, dict) and ev.get("type") == "turn.completed":
+            turns += 1
+            for k, v in (ev.get("usage") or {}).items():
+                if isinstance(v, (int, float)):
+                    tot[k] = tot.get(k, 0) + v
+    out = {"turns": turns or None, "input_tokens": tot.get("input_tokens"),
+           "output_tokens": tot.get("output_tokens"), "cache_read": tot.get("cached_input_tokens"),
+           "reasoning_tokens": tot.get("reasoning_output_tokens"), "billing": "subscription"}
+    if seconds is not None:
+        out["seconds"] = round(seconds, 1)
+    return out
+
+
+class CodexCLIClient(_CLIBackend):
+    """codex exec 纯问答：只读沙箱、空的临时目录、不挂 MCP。ChatGPT 登录靠 HOME 下的 ~/.codex。
+
+    codex 没有「整段换掉系统提示词」的参数，system 拼在提示词前面。
+    超时：DSL_CODEX_TIMEOUT > config.json 的 codex_timeout > 90 秒。"""
+
+    name = "codex"
+
+    @staticmethod
+    def binary() -> str:
+        exe = os.environ.get("GSB_CODEX_BIN") or shutil.which("codex")
+        if not exe:
+            raise BackendError("找不到 codex（PATH 里没有；可用 GSB_CODEX_BIN 指定）")
+        return exe
+
+    def complete(self, prompt, system, model) -> str:
+        if self.use_wsl():
+            raise BackendError("codex 后端还不支持经 WSL 调")
+        timeout = _setting("DSL_CODEX_TIMEOUT", "codex_timeout", DEFAULT_TIMEOUT)
+        with tempfile.TemporaryDirectory(prefix="dsl_codex_") as cwd:
+            out = Path(cwd) / "reply.txt"
+            cmd = _codex_cmd(model, "read-only", cwd, out)
+            text = f"{system or DEFAULT_SYSTEM}\n\n{prompt}"
+            try:
+                p = subprocess.run(cmd, cwd=cwd, env=_agentic_env(cwd, False), input=text,
+                                   capture_output=True, text=True, encoding="utf-8",
+                                   errors="replace", timeout=timeout)
+            except subprocess.TimeoutExpired:
+                raise BackendError(f"codex 超过 {timeout} 秒没有返回（可用 DSL_CODEX_TIMEOUT 调大）") from None
+            reply = out.read_text(encoding="utf-8").strip() if out.exists() else ""
+        if p.returncode != 0 or not reply:
+            raise BackendError(f"codex 报错（退出码 {p.returncode}）：{_head(p.stderr or p.stdout)[:300]}")
+        return reply
+
+
+BATCHMGR_URL = os.environ.get("BATCHMGR_URL", "http://127.0.0.1:8010")
+
+
+BATCHMGR_TRY_TIMEOUT = int(os.environ.get("DSL_BATCHMGR_TRY_TIMEOUT") or 120)
+
+
+def _batchmgr_goose_json(prompt, system, model, schema, max_tries=3, timeout=900):
+    """本进程环境里没有 Z.AI key 时，经 batchmgr（它的进程里有 key）跑一次 gsbatch 纯问答，
+    要 JSON 回复、按 schema 校验，错了把错误附上重问，最多 max_tries 次。key 不经过本进程。
+
+    返回 (结果 dict, 用量 dict)。batchmgr 连不上 / 一直交错 → BackendError。"""
+    import time as _time
+    import urllib.error
+    import urllib.request
+    from . import wf_submit
+
+    def call(method, path, body=None):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(BATCHMGR_URL + path, data=data, method=method,
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            raise BackendError(f"batchmgr {path} 返回 {e.code}：{e.read().decode(errors='replace')[:300]}") from None
+        except (urllib.error.URLError, OSError) as e:
+            raise BackendError(f"goose：本进程环境里没有 Z.AI key，batchmgr（{BATCHMGR_URL}）也连不上：{e}") from None
+
+    base = (f"{system or DEFAULT_SYSTEM}\n\n{prompt}\n\n按下面的 JSON Schema 只返回一个 JSON 对象，"
+            f"不要代码围栏或解释：\n{json.dumps(schema, ensure_ascii=False)}")
+    feedback, usage, t0 = "", {"billing": "subscription", "est_usd": 0.0, "tries": 0}, _time.time()
+    for _ in range(max(1, max_tries)):
+        # batchmgr 用「\n---\n」切任务：正文里的分隔线换掉，免得被拆成几条
+        text = (base + feedback).replace("\n---\n", "\n- - -\n")
+        # 每次尝试的超时：正常 20–40 秒；goose 偶尔卡住一个请求都不发（20261110-213459 那次卡满 600 秒才重试），
+        # 设短一点好早点换下一次
+        r = call("POST", "/api/submit", {"kind": "gsbatch", "prompts": text, "model": model or "",
+                                         "permission_mode": "chat", "extra_tools": "false",
+                                         "timeout": BATCHMGR_TRY_TIMEOUT, "name": "wf-goose"})
+        jid = r.get("job_id")
+        if not jid:
+            raise BackendError(f"batchmgr 没有返回 job_id：{str(r)[:300]}")
+        while True:
+            _time.sleep(3)
+            st = call("GET", f"/api/job/gsbatch/{jid}").get("job") or {}
+            if st.get("status") not in ("queued", "running"):
+                break
+            if _time.time() - t0 > timeout:
+                raise BackendError(f"goose（经 batchmgr）超过 {timeout} 秒没有返回，任务 {jid}")
+        task = (st.get("tasks") or [{}])[0]
+        usage["tries"] += 1
+        usage.setdefault("attempts", []).append({"job": jid, "status": task.get("status"),
+                                                 "seconds": task.get("seconds")})
+        usage["est_usd"] = round(usage["est_usd"] + (task.get("cost_est_usd") or 0), 6)
+        out = task.get("output") or ""
+        try:
+            result = json.loads(strip_json(out))
+        except (ValueError, TypeError):
+            feedback = f"\n\n上一次的回复不是 JSON 对象（开头：{out[:80]!r}），这次只返回 JSON。"
+            continue
+        errors = wf_submit.validate(schema, result) if isinstance(result, dict) else ["(顶层): 必须是对象"]
+        if not errors:
+            usage["seconds"] = round(_time.time() - t0, 1)
+            usage["total_usd"] = usage["est_usd"]
+            return result, usage
+        feedback = "\n\n上一次的结果不符合格式，改掉这些再返回完整 JSON：\n" + "\n".join(errors[:10])
+    raise BackendError(f"goose（经 batchmgr）{max_tries} 次都没有按格式返回。最后：{feedback[-400:]}")
+
+
 _BACKENDS = {"claude": ClaudeCLIClient(), "zcode": ZCodeClient(),
-             "goose": GooseCLIClient()}
+             "goose": GooseCLIClient(), "codex": CodexCLIClient()}
 
 
 class RouterClient:
@@ -833,8 +1023,98 @@ class RouterClient:
                 messages, temperature=temperature, model=m, **kw))
 
 
+# agentic 角色可以额外挂的 gsb_tools 工具（tools/gsb_tools_mcp.py）。只开不绕过命令白名单的：
+# probe 是只读探针（Claude haiku，plan 模式），review 是独立审查员（只读）；*_wait 跟着自动挂上。
+# 不开 run_wait（任意 shell）、read_files（任意路径）、multi_edit（与 Edit 重复）、verify（按引擎仓库
+# 的 .venv 核对环境，普通项目会判「环境不符」）。
+GSB_AGENT_TOOLS = ("probe", "review")     # 角色卡 agentic.mcp_tools 能写的全部
+_GSB_WAIT = {"probe": "probe_wait", "review": "review_wait"}
+
+
+def gsb_claude_bin():
+    """claude 可执行文件的绝对路径：GSB_CLAUDE_BIN > PATH > ~/.local/bin/claude；都没有返回 None。"""
+    for cand in (os.environ.get("GSB_CLAUDE_BIN"), shutil.which("claude"),
+                 str(Path.home() / ".local" / "bin" / "claude")):
+        if cand and os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return os.path.abspath(cand)     # 不解开链接：claude 升级后链接指向新版本
+    return None
+
+
+def gsb_mcp(tools):
+    """(mcpServers 里的一项, 要放行的工具名列表)。tools 为空返回 (None, [])。只管 probe、review。"""
+    tools = [t for t in dict.fromkeys(tools or []) if t in _GSB_WAIT]
+    if not tools:
+        return None, []
+    names = []
+    for t in tools:
+        names += [t, _GSB_WAIT[t]]
+    env = {"GSB_TOOLS_ONLY": ",".join(names), "GSB_MAX_BLOCK": "270"}
+    # 探针和审查要再起 claude：服务端只在 PATH 里找，而后台跑编排的进程 PATH 里常常没有 ~/.local/bin
+    # （真跑时 review 报过「找不到 claude」）。这里找到绝对路径直接交给它
+    claude = gsb_claude_bin()
+    if claude:
+        env["GSB_CLAUDE_BIN"] = claude
+    if "probe" in tools:
+        env.update(GSB_PROBE="1", GSB_PROBE_BACKEND="claude")
+    if "review" in tools:
+        env.update(GSB_REVIEW="1", GSB_REVIEW_BACKEND="claude")
+    server = {"command": sys.executable,
+              "args": [str(Path(__file__).resolve().with_name("gsb_tools_mcp.py"))], "env": env}
+    return server, [f"mcp__gsb__{n}" for n in names]
+
+
+def agent_mcp(tools, cost_log=None):
+    """角色卡的 mcp_tools → ({服务名: 配置}, 要放行的工具名列表)。空的返回 ({}, [])。
+
+    cost_log：挂上的工具自己再调模型时把费用记到这里（一行一次），_usage 加总进这一步的用量。
+    现在挂的探针、审查没接这个，传了也不用；留着给以后要记账的工具。"""
+    servers, allowed = {}, []
+    server, names = gsb_mcp(tools)
+    if server:
+        servers["gsb"] = server
+        allowed += names
+    return servers, allowed
+
+
+# 最近一次 claude_agentic / submit_call 的实际用量（claude 自己报的费用和 token），编排节点读了记进过程记录。
+# 每个编排进程一次只跑一个节点，用模块变量就够；调用前清空，拿不到就是 None。
+LAST_USAGE = {"value": None}
+
+
+def _usage(result_json, cost_log=None, seconds=None):
+    """从 claude -p --output-format json 的结果里取费用和用量；再加上 cost_log 里记的工具内部花费。"""
+    out = {}
+    if isinstance(result_json, dict):
+        u = result_json.get("usage") or {}
+        out = {"cost_usd": result_json.get("total_cost_usd"), "turns": result_json.get("num_turns"),
+               "input_tokens": u.get("input_tokens"), "output_tokens": u.get("output_tokens"),
+               "cache_read": u.get("cache_read_input_tokens"),
+               "cache_creation": u.get("cache_creation_input_tokens")}
+    if cost_log and Path(cost_log).is_file():
+        rows = [json.loads(x) for x in Path(cost_log).read_text(encoding="utf-8").splitlines() if x.strip()]
+        costs = [r.get("cost_usd") for r in rows if isinstance(r.get("cost_usd"), (int, float))]
+        out.update(tool_calls=len(rows), tool_cost_usd=round(sum(costs), 6))
+    if seconds is not None:
+        out["seconds"] = round(seconds, 1)
+    if out.get("cost_usd") is not None or out.get("tool_cost_usd"):
+        out["total_usd"] = round((out.get("cost_usd") or 0) + (out.get("tool_cost_usd") or 0), 6)
+    return out or None
+
+
+def _last_json(text):
+    """标准输出里最后一个整行 JSON 对象（claude --output-format json 只打一行）。"""
+    for line in reversed((text or "").strip().splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except ValueError:
+                continue
+    return None
+
+
 def claude_agentic(prompt, system, model, cwd, allowed_tools, timeout=600,
-                   max_turns=40, venv=False) -> str:
+                   max_turns=40, venv=False, mcp_tools=None) -> str:
     """带工具的 claude -p：在 cwd 里按 allowed_tools 干活（acceptEdits），返回最后的回复文本。
 
     只给 workflow 的 agentic 角色用（verbs/workflow/_agents.py）。不经 RouterClient，
@@ -856,18 +1136,29 @@ def claude_agentic(prompt, system, model, cwd, allowed_tools, timeout=600,
         cmd += ["--model", name]
     if effort:
         cmd += ["--effort", effort]
-    cmd += ["--allowed-tools", *allowed_tools]
+    LAST_USAGE["value"] = None
+    cost_log = Path(tempfile.mkdtemp(prefix="wf_cost_")) / "algo.jsonl"
+    servers, extra = agent_mcp(mcp_tools, cost_log)
+    if servers:
+        cmd += ["--mcp-config", json.dumps({"mcpServers": servers}, ensure_ascii=False)]
+    cmd += ["--allowed-tools", *allowed_tools, *extra]
     env = _agentic_env(cwd, venv)
+    import time as _time
+    t0 = _time.time()
     try:
         p = subprocess.run(cmd, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired:
+        LAST_USAGE["value"] = _usage(None, cost_log, _time.time() - t0)
+        shutil.rmtree(cost_log.parent, ignore_errors=True)
         raise BackendError(f"claude（agentic）超过 {timeout} 秒没有返回") from None
     try:
         r = json.loads(p.stdout)
     except json.JSONDecodeError:
         r = None
+    LAST_USAGE["value"] = _usage(r, cost_log, _time.time() - t0)
+    shutil.rmtree(cost_log.parent, ignore_errors=True)
     if not isinstance(r, dict):
         raise BackendError(f"claude（agentic）退出码 {p.returncode}，输出不是 JSON："
                            f"{_head(p.stdout, 3)[:300]}\nstderr：{_head(p.stderr)}")
@@ -893,6 +1184,16 @@ def _agentic_env(cwd, venv):
             r = subprocess.run([base, "-m", "venv", str(vdir)], capture_output=True, text=True, timeout=180)
             if r.returncode != 0:
                 raise BackendError(f"建虚拟环境失败：{_head(r.stderr)}")
+            # 新环境先在沙箱外装好 pytest：codex 沙箱里联网装包很慢（实测第一个实施步骤 7 分钟耗在
+            # pip install pytest 上），claude 也省一轮。装不上不拦，agent 自己还能装
+            try:
+                pr = subprocess.run([str(vdir / "bin" / "python"), "-m", "pip", "install", "-q",
+                                     "--disable-pip-version-check", "pytest"],
+                                    capture_output=True, text=True, timeout=300)
+                if pr.returncode != 0:
+                    logging.getLogger(__name__).warning("新虚拟环境预装 pytest 失败：%s", _head(pr.stderr))
+            except subprocess.TimeoutExpired:
+                logging.getLogger(__name__).warning("新虚拟环境预装 pytest 超过 300 秒，跳过")
         for k in ("PYTHONHOME", "PYTHONPATH", "CONDA_PREFIX"):
             env.pop(k, None)
         env["VIRTUAL_ENV"] = str(vdir)
@@ -901,8 +1202,15 @@ def _agentic_env(cwd, venv):
     return env
 
 
-def submit_call(prompt, system, model, schema, agentic=None, max_tries=3):
+def submit_call(prompt, system, model, schema, agentic=None, max_tries=3, timeout=None, via=None):
     """让模型用 submit 工具按格式交结果，返回结果 dict（已校验）。
+
+    timeout：纯问答（非 agentic）这一次的超时秒数，角色卡的 timeout 传进来；不给就用
+    DSL_<后端>_TIMEOUT / config.json / 默认 90 秒。claude、codex、本机 goose 都认；经 batchmgr 的
+    goose 用 BATCHMGR_TRY_TIMEOUT（每次尝试）。agentic 的超时在 agentic["timeout"] 里。
+
+    via：goose 走哪条路。None = 本进程有 Z.AI key 就本机起 goose，没有就经 batchmgr；
+    "batchmgr" = 一律经 batchmgr（本机 goose 在 MCP 里审长约定 300 秒交不上，batchmgr 54 秒）。
 
     只支持 cli:claude 和 cli:goose。agentic（cwd、allowed_tools、timeout、max_turns、venv）
     只支持 claude：原来的工具照旧，额外多一个 submit。不经 RouterClient：不计入引擎的
@@ -911,16 +1219,28 @@ def submit_call(prompt, system, model, schema, agentic=None, max_tries=3):
     """
     from . import wf_submit
     r = route(model)
-    if r.backend is None or r.backend.name not in ("claude", "goose"):
-        raise CapabilityError(f"按格式提交只支持 cli:claude 和 cli:goose，收到 {model}")
+    if r.backend is None or r.backend.name not in ("claude", "goose", "codex"):
+        raise CapabilityError(f"按格式提交只支持 cli:claude、cli:goose 和 cli:codex，收到 {model}")
     backend = r.backend
     if backend.use_wsl():
         raise BackendError("按格式提交还不支持经 WSL 调")
-    if agentic and backend.name != "claude":
-        raise BackendError(f"agentic 只支持 cli:claude，收到 {model}")
+    if agentic and backend.name not in ("claude", "codex"):
+        raise BackendError(f"agentic 只支持 cli:claude 和 cli:codex，收到 {model}")
+    if backend.name == "goose":
+        from . import gsbatch
+        if via == "batchmgr" or not gsbatch._zai_key():
+            # 指定经 batchmgr，或本进程（MCP 服务 / 编排）环境里没有 Z.AI key：经 batchmgr 跑，key 只留在它那里
+            LAST_USAGE["value"] = None
+            result, usage = _batchmgr_goose_json(prompt, system, r.model, schema, max_tries)
+            LAST_USAGE["value"] = usage
+            return result
     ask = ("\n\n结果必须调用 submit 工具提交（参数就是结果本身，格式由工具定义）。"
            "不要把结果写在回复里。提交成功后不要再输出任何内容。")
     ch = wf_submit.SubmitChannel(schema, max_tries)
+    LAST_USAGE["value"] = None
+    cost_log = ch.dir / "algo_cost.jsonl"
+    import time as _time
+    t0 = _time.time()
     slot = _slots(backend.name)
     wait = _setting(f"DSL_{backend.name.upper()}_QUEUE_WAIT", f"{backend.name}_queue_wait",
                     DEFAULT_QUEUE_WAIT)
@@ -930,8 +1250,10 @@ def submit_call(prompt, system, model, schema, agentic=None, max_tries=3):
     try:
         if backend.name == "claude":
             name, effort = config.split_effort(r.model or "")
-            cmd = [ClaudeCLIClient.binary(), "-p", prompt + ask, "--output-format", "json",
-                   *ch.claude_args()]
+            servers, extra = agent_mcp((agentic or {}).get("mcp_tools"), cost_log)
+            # 提示词从标准输入给：长参考文本（如 133KB 的重构分析）当命令行参数会超过单个参数 128KB 的上限（E2BIG）
+            cmd = [ClaudeCLIClient.binary(), "-p", "--output-format", "json",
+                   *ch.claude_args(servers or None)]
             if agentic:
                 cwd = agentic["cwd"]
                 timeout = agentic.get("timeout", 600)
@@ -939,10 +1261,10 @@ def submit_call(prompt, system, model, schema, agentic=None, max_tries=3):
                 cmd += ["--permission-mode", "acceptEdits",
                         "--max-turns", str(agentic.get("max_turns", 40)),
                         "--append-system-prompt", system or DEFAULT_SYSTEM,
-                        "--allowed-tools", *agentic["allowed_tools"], wf_submit.CLAUDE_TOOL]
+                        "--allowed-tools", *agentic["allowed_tools"], *extra, wf_submit.CLAUDE_TOOL]
             else:
                 cwd = ch.dir
-                timeout = _setting("DSL_CLAUDE_TIMEOUT", "claude_timeout", DEFAULT_TIMEOUT)
+                timeout = timeout or _setting("DSL_CLAUDE_TIMEOUT", "claude_timeout", DEFAULT_TIMEOUT)
                 env = _agentic_env(cwd, False)
                 # 纯问答：内置工具全关，只剩 submit；轮数留给交错重交
                 cmd += ["--tools", "", "--max-turns", str(max_tries + 2),
@@ -952,7 +1274,60 @@ def submit_call(prompt, system, model, schema, agentic=None, max_tries=3):
                 cmd += ["--model", name]
             if effort:
                 cmd += ["--effort", effort]
-            result, out = ch.run(cmd, cwd, env, None, timeout, "claude")
+            try:
+                # grace：交了以后等它自己退出，才拿得到 claude 报的本次费用和用量
+                result, out = ch.run(cmd, cwd, env, prompt + ask, timeout, "claude", grace=30)
+            finally:
+                LAST_USAGE["value"] = _usage(_last_json(getattr(ch, "stdout", "")), cost_log, _time.time() - t0)
+        elif backend.name == "codex":
+            # agentic：在 cwd 里干活，权限由 codex 沙箱管（workspace-write 只能写 cwd）；否则只读、空目录
+            project, before, network, where = None, None, None, ""
+            if agentic:
+                cwd, sandbox = agentic["cwd"], agentic.get("sandbox") or "workspace-write"
+                timeout = agentic.get("timeout", 600)
+                env = _agentic_env(cwd, agentic.get("venv"))
+                if sandbox == "project-read-only":
+                    # 验收：codex 的工作目录换成空的临时目录（可写，放 pytest 的临时文件），项目目录不在可写范围
+                    project, cwd = Path(cwd), ch.dir / "qa_scratch"
+                    cwd.mkdir(exist_ok=True)
+                    sandbox, network = "workspace-write", False
+                    env = dict(env, TMPDIR=str(cwd), PYTHONDONTWRITEBYTECODE="1")
+                    before = _tree_snapshot(project)
+                    where = (f"【工作环境】项目目录（只读）：{project}。先 cd 进去再读文件、跑测试；"
+                             f"临时文件写在 {cwd}（TMPDIR 已指向它）。不能改项目里的任何文件。\n\n")
+            else:
+                cwd, sandbox = ch.dir, "read-only"
+                timeout = timeout or _setting("DSL_CODEX_TIMEOUT", "codex_timeout", DEFAULT_TIMEOUT)
+                env = _agentic_env(cwd, False)
+            if agentic and agentic.get("venv"):
+                # codex 沙箱里的 shell 是登录 shell（bash -lc），会重置 PATH，环境变量里的虚拟环境不生效：
+                # 直接告诉它绝对路径
+                vpy = Path(project or agentic["cwd"]) / ".venv" / "bin" / "python"
+                where += (f"【虚拟环境】命令里用 {vpy}（如 {vpy} -m pytest、{vpy} -m pip install -r requirements.txt）；"
+                          f"沙箱里的 shell 不带这个环境，裸写 python / pytest 找不到。\n\n")
+            reply_f = ch.dir / "codex_reply.txt"
+            cmd = _codex_cmd(r.model, sandbox, cwd, reply_f, mcp_env=ch.env(), network=network)
+            # 事件流带时间戳另存一份（哪一步慢就看两行之间的间隔），路径记进这一步的用量
+            log_dir = Path(os.environ.get("DSL_CODEX_LOG_DIR") or Path(__file__).resolve().parents[1] / "data" / "codex_logs")
+            event_log = None
+            try:
+                log_dir.mkdir(parents=True, exist_ok=True)
+                event_log = log_dir / f"{_time.strftime('%Y%m%d-%H%M%S')}_{os.getpid()}_{ch.dir.name}.log"
+                cmd = [sys.executable, str(Path(__file__).with_name("ts_tee.py")), str(event_log), "--", *cmd]
+            except OSError:
+                event_log = None
+            # codex 没有换系统提示词的参数：角色说明拼在最前面
+            text = f"{system or DEFAULT_SYSTEM}\n\n{where}{prompt}{ask}"
+            try:
+                result, out = ch.run(cmd, cwd, env, text, timeout, "codex", grace=10)
+            finally:
+                LAST_USAGE["value"] = _codex_usage(getattr(ch, "stdout", ""), _time.time() - t0)
+                if event_log is not None:
+                    LAST_USAGE["value"]["event_log"] = str(event_log)
+            if project is not None:
+                diff = _snapshot_diff(before, _tree_snapshot(project))
+                if diff:
+                    raise BackendError(f"codex（只读验收）改动了项目文件：{diff}")
         else:
             from . import gsbatch
             provider = _text_setting("DSL_GOOSE_PROVIDER", "goose_provider") or "zai_low"
@@ -966,7 +1341,7 @@ def submit_call(prompt, system, model, schema, agentic=None, max_tries=3):
                 gsbatch._ensure_zai_low()
             except gsbatch.GSBatchError as e:
                 raise BackendError(f"goose：{e}") from None
-            timeout = _setting("DSL_GOOSE_TIMEOUT", "goose_timeout", DEFAULT_TIMEOUT)
+            timeout = timeout or _setting("DSL_GOOSE_TIMEOUT", "goose_timeout", DEFAULT_TIMEOUT)
             env = {k: v for k, v in gsbatch._child_env().items()
                    if not k.startswith("GOOSE_") and not gsbatch._leaky_env(k, v)}
             # auto：工具调用自动批准（只挂了 submit 一个扩展，--no-profile 不带别的）

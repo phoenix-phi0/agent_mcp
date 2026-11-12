@@ -1,0 +1,17 @@
+{
+  "model": "cli:codex/gpt-6.1-terra",
+  "cost": 1,
+  "description": "便宜档 GPT 工程师（Codex gpt-6.1-terra，轻量代码生成，走 ChatGPT 订阅、不占 Claude 额度），沙箱里只能写项目目录。算法对比 16/16、最快，流程里写过 4 项都一次通过。适合边界清楚的小任务：项目骨架、单个函数或数据类、纯计算和校验、照已有模式加分支。不适合跨模块、鉴权并发、需求含糊的任务。",
+  "packages": [],
+  "skills": [
+    "skills/implementation.md"
+  ],
+  "effort": "medium",
+  "agentic": {
+    "cwd": "work/{project}",
+    "sandbox": "workspace-write",
+    "timeout": 1800,
+    "max_turns": 40,
+    "venv": true
+  }
+}

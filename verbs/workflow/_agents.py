@@ -8,7 +8,8 @@ from tools.dsl_core import DSLError, ScriptReturn
 
 _NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _EFFORTS = set(config.EFFORTS)
-_KEYS = {"model", "effort", "tools", "skills", "packages", "max_tool_rounds", "agentic"}
+_KEYS = {"model", "effort", "tools", "skills", "packages", "max_tool_rounds", "agentic", "cost", "description",
+         "timeout", "via"}
 
 
 def load_agent(engine, name, model_override=None):
@@ -37,8 +38,8 @@ def load_agent(engine, name, model_override=None):
     if effort is not None:
         if not isinstance(effort, str) or effort not in _EFFORTS:
             raise DSLError(f"agent「{name}」effort 无效：{effort}")
-        if not model.startswith("cli:claude/") or "@" in model:
-            raise DSLError(f"agent「{name}」只有 cli:claude 模型支持独立 effort 配置")
+        if not model.startswith(("cli:claude/", "cli:codex/")) or "@" in model:
+            raise DSLError(f"agent「{name}」只有 cli:claude 和 cli:codex 模型支持独立 effort 配置")
         model += "@" + effort
     if model_override:
         if not isinstance(model_override, str) or not model_override.strip():
@@ -51,16 +52,47 @@ def load_agent(engine, name, model_override=None):
     for key in ("tools", "skills", "packages"):
         if not isinstance(data.get(key, []), list) or any(not isinstance(x, str) or not x.strip() for x in data.get(key, [])):
             raise DSLError(f"agent「{name}」的 {key} 必须是非空字符串列表")
+    # cost：这张卡跑一次的相对成本（只是一个数，流程用它分配任务、记账）；description：给派活的节点看的一句话
+    cost = data.get("cost")
+    if cost is not None and (not isinstance(cost, (int, float)) or isinstance(cost, bool) or not 0 < cost <= 1000):
+        raise DSLError(f"agent「{name}」cost 必须是 0–1000 之间的正数")
+    description = data.get("description", "")
+    if not isinstance(description, str) or len(description) > 300:
+        raise DSLError(f"agent「{name}」description 必须是不超过 300 字的字符串")
     rounds = data.get("max_tool_rounds", 3)
     if not isinstance(rounds, int) or isinstance(rounds, bool) or not 1 <= rounds <= 10:
         raise DSLError(f"agent「{name}」max_tool_rounds 必须在 1–10")
+    # timeout：纯问答（按格式提交）一次的超时秒数。慢模型（fable@high 写约定要两分钟以上）要调大；
+    # agentic 的卡写在 agentic.timeout 里，这里不收
+    call_timeout = data.get("timeout")
+    if call_timeout is not None:
+        if not isinstance(call_timeout, int) or isinstance(call_timeout, bool) or not 30 <= call_timeout <= 3600:
+            raise DSLError(f"agent「{name}」timeout 必须是 30–3600 的整数")
+        if data.get("agentic") is not None:
+            raise DSLError(f"agent「{name}」agentic 的超时写在 agentic.timeout 里，不写顶层 timeout")
+    # via：只给 cli:goose 用，"batchmgr" = 一律经 batchmgr 调 GLM（本机 goose 在 MCP 里审长约定交不上）
+    via = data.get("via")
+    if via is not None and (via != "batchmgr" or not model.startswith("cli:goose/")):
+        raise DSLError(f"agent「{name}」via 只能是 \"batchmgr\"，且只给 cli:goose 模型用")
     agentic = data.get("agentic")
     if agentic is not None:
         # agentic：claude -p 自带工具在 cwd 里干活。只认 cli:claude；不能和 DSL 的 tools 混用
-        if not isinstance(agentic, dict) or set(agentic) - {"cwd", "allowed_tools", "timeout", "max_turns", "venv"}:
-            raise DSLError(f"agent「{name}」agentic 只能写 cwd、allowed_tools、timeout、max_turns、venv")
-        if not model.startswith("cli:claude"):
-            raise DSLError(f"agent「{name}」agentic 目前只支持 cli:claude 模型（现在是 {model}）")
+        if not isinstance(agentic, dict) or set(agentic) - {"cwd", "allowed_tools", "timeout", "max_turns", "venv",
+                                                             "mcp_tools", "sandbox"}:
+            raise DSLError(f"agent「{name}」agentic 只能写 cwd、allowed_tools、timeout、max_turns、venv、mcp_tools、"
+                           f"sandbox")
+        is_codex = model.startswith("cli:codex")
+        if not (model.startswith("cli:claude") or is_codex):
+            raise DSLError(f"agent「{name}」agentic 目前只支持 cli:claude 和 cli:codex 模型（现在是 {model}）")
+        from tools.llm_router import CODEX_SANDBOXES
+        if is_codex:
+            # codex 的权限由它的系统级沙箱管：写 sandbox，不写 allowed_tools；探针 / 审查还没接
+            if agentic.get("allowed_tools") or agentic.get("mcp_tools"):
+                raise DSLError(f"agent「{name}」codex 的 agentic 用 sandbox 管权限，不写 allowed_tools、mcp_tools")
+            if agentic.get("sandbox", "workspace-write") not in CODEX_SANDBOXES:
+                raise DSLError(f"agent「{name}」agentic.sandbox 只能是 {' / '.join(CODEX_SANDBOXES)}")
+        elif "sandbox" in agentic:
+            raise DSLError(f"agent「{name}」sandbox 只给 cli:codex 用；claude 用 allowed_tools")
         if data.get("tools"):
             raise DSLError(f"agent「{name}」agentic 和 tools 不能同时写")
         root = engine.workdir.resolve()
@@ -71,9 +103,9 @@ def load_agent(engine, name, model_override=None):
         cwd = (root / raw_cwd.strip()).resolve()
         if cwd != root and root not in cwd.parents:
             raise DSLError(f"agent「{name}」agentic.cwd 越出工作目录")
-        allowed = agentic.get("allowed_tools")
-        if (not isinstance(allowed, list) or not allowed
-                or any(not isinstance(x, str) or not x.strip() for x in allowed)):
+        allowed = [] if is_codex else agentic.get("allowed_tools")
+        if not is_codex and (not isinstance(allowed, list) or not allowed
+                             or any(not isinstance(x, str) or not x.strip() for x in allowed)):
             raise DSLError(f"agent「{name}」agentic.allowed_tools 必须是非空字符串列表")
         if any(x.replace(" ", "") in ("Bash", "Bash(*)", "Bash(:*)") for x in allowed):
             raise DSLError(f"agent「{name}」agentic 不允许不受限的 Bash，写成 Bash(python3 -m pytest:*) 这样")
@@ -86,8 +118,16 @@ def load_agent(engine, name, model_override=None):
         venv = agentic.get("venv", False)
         if not isinstance(venv, bool):
             raise DSLError(f"agent「{name}」agentic.venv 只能是 true 或 false")
+        # mcp_tools：再挂几个 gsb_tools 的工具（探针、独立审查），见 llm_router.GSB_AGENT_TOOLS
+        from tools.llm_router import GSB_AGENT_TOOLS
+        mcp_tools = agentic.get("mcp_tools", [])
+        if (not isinstance(mcp_tools, list) or any(not isinstance(x, str) for x in mcp_tools)
+                or set(mcp_tools) - set(GSB_AGENT_TOOLS)):
+            raise DSLError(f"agent「{name}」agentic.mcp_tools 只能从 {list(GSB_AGENT_TOOLS)} 里选")
         agentic = {"cwd": cwd, "allowed_tools": [x.strip() for x in allowed],
-                   "timeout": timeout, "max_turns": turns, "venv": venv}
+                   "timeout": timeout, "max_turns": turns, "venv": venv, "mcp_tools": list(mcp_tools)}
+        if is_codex:
+            agentic["sandbox"] = (data["agentic"].get("sandbox") or "workspace-write")
     parts = [soul.read_text(encoding="utf-8").strip()]
     for rel in data.get("skills", []):
         path = (folder / rel).resolve()
@@ -98,7 +138,15 @@ def load_agent(engine, name, model_override=None):
         parts.append(f"【技能 {rel}】\n{path.read_text(encoding='utf-8')}")
     return {"name": name, "model": model, "tools": data.get("tools", []),
             "packages": data.get("packages", []), "rounds": rounds,
-            "system": "\n\n".join(parts), "agentic": agentic}
+            "system": "\n\n".join(parts), "agentic": agentic,
+            "cost": cost, "description": description.strip(), "timeout": call_timeout, "via": via}
+
+
+def card_info(engine, name):
+    """给编排的「角色清单」「成本合计」用：卡的名字、成本、一句话说明、模型。"""
+    profile = load_agent(engine, name)
+    return {"name": name, "cost": profile["cost"], "description": profile["description"],
+            "model": profile["model"]}
 
 
 def load_format(engine, name):
@@ -134,14 +182,15 @@ def _uses_submit(engine, profile, fmt):
     if not fmt or getattr(engine.client, "offline", False) is True:
         return False
     spec = config.parse_model(profile["model"])
-    return spec.channel == "cli" and spec.provider in ("claude", "goose")
+    return spec.channel == "cli" and spec.provider in ("claude", "goose", "codex")
 
 
 def describe(engine, name, task, context=None, model=None, node=None, fmt=None):
     """不调用，只给出这一步会怎么调：外部自己执行时照这个拼请求（prompt 里带格式）。"""
     profile = load_agent(engine, name, model)
     out = {"card": name, "model": profile["model"], "agentic": bool(profile.get("agentic")),
-           "system": profile["system"], "prompt": _prompt(task, context, node, fmt)}
+           "system": profile["system"], "prompt": _prompt(task, context, node, fmt),
+           "cost": profile.get("cost")}
     if fmt:
         out.update(format=fmt[0], schema=fmt[1])
     return out
@@ -160,6 +209,8 @@ def call_agent(engine, name, task, context=None, model=None, node=None, fmt=None
     # 给编排过程记录用：这次实际用的模型和方式
     submit = _uses_submit(engine, profile, fmt)
     engine._wf_last_call = {"model": profile["model"], "agentic": bool(profile.get("agentic"))}
+    if profile.get("cost") is not None:
+        engine._wf_last_call["cost"] = profile["cost"]
     if fmt:
         engine._wf_last_call.update(format=fmt[0], via="submit" if submit else "json")
     on_call = getattr(engine, "_wf_on_call", None)
@@ -170,12 +221,15 @@ def call_agent(engine, name, task, context=None, model=None, node=None, fmt=None
                 {"role": "user", "content": prompt}]
     if engine.dry_run:
         return {}
+    from tools import llm_router as _router
+    _router.LAST_USAGE["value"] = None
     try:
         # 离线的假客户端（测试、mock）照旧走 client，不真去起 claude，同 RouterClient 的约定
         if submit:
             from tools import llm_router
             reply = llm_router.submit_call(prompt, profile["system"], profile["model"], fmt[1],
-                                           agentic=profile.get("agentic"))
+                                           agentic=profile.get("agentic"), timeout=profile.get("timeout"),
+                                           via=profile.get("via"))
         elif profile.get("agentic") and getattr(engine.client, "offline", False) is not True:
             from tools import llm_router
             reply = llm_router.claude_agentic(prompt, profile["system"], profile["model"],
@@ -188,6 +242,10 @@ def call_agent(engine, name, task, context=None, model=None, node=None, fmt=None
         raise
     except Exception as e:
         raise DSLError(f"agent「{name}」调用失败：{e}") from e
+    finally:
+        # 实际用量（claude 自己报的费用、token、轮数，加上工具内部的花费）：成功失败都记
+        if _router.LAST_USAGE["value"]:
+            engine._wf_last_call["usage"] = _router.LAST_USAGE["value"]
     if isinstance(reply, dict):
         result = reply
     else:

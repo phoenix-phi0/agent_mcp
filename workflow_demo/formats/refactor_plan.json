@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "description": "重构方案：架构师按现状分析写，交给审查员审、交给工程师分步实施。行为不变是硬约束。",
+  "additionalProperties": false,
+  "required": ["plan"],
+  "properties": {
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "keep", "steps", "acceptance", "out_of_scope", "risks", "open_questions"],
+      "properties": {
+        "goal": {"type": "string", "minLength": 1, "description": "重构要达到什么，一句话"},
+        "keep": {"type": "array", "minItems": 1, "items": {"type": "string"},
+                 "description": "必须原样保留的东西：公开接口签名、错误码和顺序、事务/锁结构、已有测试的断言"},
+        "steps": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["title", "smells", "change", "files", "verify"],
+            "properties": {
+              "title": {"type": "string", "minLength": 1},
+              "smells": {"type": "array", "items": {"type": "string"}, "description": "对应现状分析里的哪几条 location"},
+              "change": {"type": "string", "minLength": 1, "description": "具体怎么改：抽什么函数、搬到哪、改什么名"},
+              "files": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+              "verify": {"type": "string", "minLength": 1, "description": "这一步怎么证明行为没变：全量测试数不减、补哪条测试"}
+            }
+          }
+        },
+        "acceptance": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "整体验收，能判断真假"},
+        "out_of_scope": {"type": "array", "items": {"type": "string"}, "description": "看到了但这次不动的，写理由"},
+        "risks": {"type": "array", "items": {"type": "string"}},
+        "open_questions": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

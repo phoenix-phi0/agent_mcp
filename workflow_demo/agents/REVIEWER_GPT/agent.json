@@ -1,0 +1,13 @@
+{
+  "model": "cli:codex/gpt-6.1-sol",
+  "effort": "medium",
+  "cost": 2,
+  "description": "审查员（codex sol，ChatGPT 订阅）。对照需求审接口约定，只提问题不改约定；ARCHITECT_GLM 审不完长约定时换它（roles={\"ARCHITECT_GLM\": \"REVIEWER_GPT\"}）。",
+  "tools": [],
+  "packages": [],
+  "skills": [
+    "skills/review.md"
+  ],
+  "max_tool_rounds": 3,
+  "timeout": 600
+}

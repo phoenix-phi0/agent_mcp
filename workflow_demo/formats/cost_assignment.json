@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "description": "按成本的任务分配：按依赖顺序排好的实施任务，每项自包含，并按难度挑一个角色。",
+  "additionalProperties": false,
+  "required": ["tasks"],
+  "properties": {
+    "tasks": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["content", "agent", "reason"],
+        "properties": {
+          "content": {"type": "string", "minLength": 1,
+                      "description": "自包含：做什么、涉及的接口字段和错误码、验收条件；有依赖写明「依赖第 N 项」"},
+          "agent": {"enum": ["ENGINEER_LITE", "ENGINEER_GPT_LITE", "ENGINEER_GPT", "ENGINEER", "ENGINEER_GPT_SENIOR",
+                             "ENGINEER_SENIOR", "ENGINEER_FABLE", "TEST_ENGINEER"],
+                    "description": "从任务里给的可用角色清单里挑"},
+          "reason": {"type": "string", "minLength": 1, "description": "难度判断和为什么挑这一档"}
+        }
+      }
+    },
+    "budget_note": {"type": "string", "description": "预算紧、不得不降档时写明哪几项风险最大"}
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "type": "object",
+  "description": "方案修改：按审查意见改出的完整新版重构方案，外加逐条处理记录。",
+  "additionalProperties": false,
+  "required": ["plan", "changes"],
+  "properties": {
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "keep", "steps", "acceptance", "out_of_scope", "risks", "open_questions"],
+      "properties": {
+        "goal": {"type": "string", "minLength": 1},
+        "keep": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "steps": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["title", "smells", "change", "files", "verify"],
+            "properties": {
+              "title": {"type": "string", "minLength": 1},
+              "smells": {"type": "array", "items": {"type": "string"}},
+              "change": {"type": "string", "minLength": 1},
+              "files": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+              "verify": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "acceptance": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "out_of_scope": {"type": "array", "items": {"type": "string"}},
+        "risks": {"type": "array", "items": {"type": "string"}},
+        "open_questions": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["issue", "action", "detail"],
+        "properties": {
+          "issue": {"type": "string", "minLength": 1},
+          "action": {"enum": ["已修改", "不采纳"]},
+          "detail": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

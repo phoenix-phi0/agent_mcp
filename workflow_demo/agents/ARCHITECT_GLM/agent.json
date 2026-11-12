@@ -1,9 +1,13 @@
 {
   "model": "cli:goose/glm-5.3",
+  "cost": 1,
+  "description": "审查员（GLM）。对照需求审接口约定，只提问题不改约定。",
   "tools": [],
   "packages": [],
   "skills": [
     "skills/review.md"
   ],
-  "max_tool_rounds": 3
+  "max_tool_rounds": 3,
+  "timeout": 300,
+  "via": "batchmgr"
 }

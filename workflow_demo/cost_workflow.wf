@@ -1,0 +1,60 @@
+# 按成本分配：架构师看着「可用角色」清单（每张卡的 cost 和说明）给每项任务挑角色，
+# 引擎按卡的 cost 加总，超了预算就让架构师只改角色重分，最多两次；每个节点花了多少记在过程记录里
+角色清单 roster {roles}
+接口约定
+    任务 {content}。技术栈：{stack}
+    角色 ARCHITECT
+    格式 contract
+    记录 contract
+标记:a
+任务研讨
+    任务 {content}
+    角色 ARCHITECT_GLM
+    文本 contract
+    格式 review
+    记录 discussion
+如果 discussion.decide == 需修改
+    接口修改
+        任务 discussion
+        文本 contract
+        角色 ARCHITECT
+        格式 contract_revision
+        记录 contract
+    跳转 a 最大 5
+任务分配
+    任务 任务分配。技术栈：{stack}。实施预算：{budget}（所有项的 cost 加起来不能超过它）。可用角色：{roster}
+    文本 contract
+    角色 ARCHITECT
+    格式 cost_assignment
+    记录 assignment
+标记:c
+成本合计 spent assignment.tasks 预算 {budget}
+如果 spent.status == 超出
+    分配调整
+        任务 分配调整：上一次的分配超出了实施预算或用了清单外的角色（见参考文本的 not_in_roster），只改 agent，让合计不超过预算、且只用可用角色。可用角色：{roster}
+        文本 spent
+        角色 ARCHITECT
+        格式 cost_assignment
+        记录 assignment
+    跳转 c 最大 2
+遍历 task 于 assignment.tasks
+    任务实现
+        任务 task.content
+        角色 task.agent
+        格式 implementation
+        记录 task_result
+    存储 task_results task_result
+标记:b
+测试
+    任务 {test_content}
+    文本 task_results
+    角色 QA_ENGINEER
+    格式 acceptance
+    记录 test_discussion
+如果 test_discussion.decide == 需修改
+    代码修改
+        任务 test_discussion.task
+        角色 ENGINEER
+        格式 implementation
+        记录 task_result
+    跳转 b 最大 5

@@ -1,0 +1,69 @@
+{
+  "type": "object",
+  "description": "重构前的现状分析：读过代码、跑过测试之后的基线和问题清单，交给架构师写重构方案、交给 QA 做回归对照。",
+  "additionalProperties": false,
+  "required": ["analysis"],
+  "properties": {
+    "analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "files", "test_command", "baseline", "public_api", "smells", "constraints"],
+      "properties": {
+        "summary": {"type": "string", "minLength": 1, "description": "项目是什么、代码现在什么样，两三句"},
+        "files": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["path", "lines", "role"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "lines": {"type": "integer", "minimum": 0},
+              "role": {"type": "string", "minLength": 1, "description": "这个文件干什么"}
+            }
+          }
+        },
+        "test_command": {"type": "string", "minLength": 1, "description": "实际跑测试用的命令"},
+        "baseline": {
+          "type": "object", "additionalProperties": false,
+          "required": ["summary_line", "passed", "failed"],
+          "properties": {
+            "summary_line": {"type": "string", "minLength": 1, "description": "pytest 汇总行原文，如「218 passed in 15.37s」"},
+            "passed": {"type": "integer", "minimum": 0},
+            "failed": {"type": "integer", "minimum": 0},
+            "failing_tests": {"type": "array", "items": {"type": "string"}, "description": "重构前就失败的用例名"}
+          }
+        },
+        "public_api": {
+          "type": "array", "minItems": 1,
+          "description": "外部会调用的东西（测试用到的也算）：重构后必须原样保留",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["name", "signature", "where"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1, "description": "如 WalletService.transfer、WalletError.code"},
+              "signature": {"type": "string", "minLength": 1, "description": "参数和返回值/属性，照代码写"},
+              "where": {"type": "string", "minLength": 1, "description": "文件:行号 或 文件:函数"}
+            }
+          }
+        },
+        "smells": {
+          "type": "array",
+          "description": "值得重构的问题，按收益从高到低排",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["location", "problem", "impact", "suggestion", "risk"],
+            "properties": {
+              "location": {"type": "string", "minLength": 1, "description": "文件:函数 或 文件:行号范围"},
+              "problem": {"type": "string", "minLength": 1, "description": "看到的事实，如「transfer 和 deposit 各自重复 30 行鉴权+校验」"},
+              "impact": {"type": "string", "minLength": 1, "description": "不改会怎样：难改、容易出错、难测"},
+              "suggestion": {"type": "string", "minLength": 1},
+              "risk": {"enum": ["低", "中", "高"], "description": "改它破坏行为的风险"}
+            }
+          }
+        },
+        "constraints": {"type": "array", "items": {"type": "string"}, "description": "重构必须守住的东西：并发/事务结构、错误码顺序、测试钩子等"},
+        "notes": {"type": "array", "items": {"type": "string"}, "description": "看到但不打算动的问题、测试覆盖的薄弱处"}
+      }
+    }
+  }
+}

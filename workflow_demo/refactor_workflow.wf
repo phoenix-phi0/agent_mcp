@@ -1,0 +1,68 @@
+# 代码重构：对 work/{project} 里已有的代码做重构，行为不变。
+# 现状分析（读代码、跑测试记基线）→ 重构方案 → 审查（最多改 2 轮，避免审查员越挑越细把方案改大）
+# → 按成本分配 → 逐项实施 → 回归验收（对照基线：测试数不减、公开接口不变、已有断言没改）
+角色清单 roster {roles}
+现状分析
+    任务 重构目标：{goal}。技术栈：{stack}。测试命令（以这个为准，跑它记基线）：{test_cmd}
+    角色 REFACTOR_ANALYST
+    格式 refactor_analysis
+    记录 analysis
+重构方案
+    任务 重构方案：按参考文本（现状分析）写重构方案。重构目标：{goal}。行为不变是硬约束
+    文本 analysis
+    角色 ARCHITECT
+    格式 refactor_plan
+    记录 plan
+标记:a
+方案审查
+    任务 审查重构方案（不是接口约定）。重构目标：{goal}。按清单逐项看，另外重点查：每一步是否只做一件事、能否单独验证；keep 有没有漏掉公开接口、错误码顺序、事务和锁结构；有没有夹带新功能或与重构无关的修改。不要提新功能
+    角色 ARCHITECT_GLM
+    文本 plan
+    格式 review
+    记录 discussion
+如果 discussion.decide == 需修改
+    方案修改
+        任务 discussion
+        文本 plan
+        角色 ARCHITECT
+        格式 refactor_plan_revision
+        记录 plan
+    跳转 a 最大 2
+任务分配
+    任务 任务分配（重构）：参考文本是重构方案，按其中的 steps 拆任务，content 按重构写法写，每项的验收里原样写上测试命令：{test_cmd}。技术栈：{stack}。实施预算：{budget}（所有项的 cost 加起来不能超过它）。可用角色：{roster}
+    文本 plan
+    角色 ARCHITECT
+    格式 cost_assignment
+    记录 assignment
+标记:c
+成本合计 spent assignment.tasks 预算 {budget}
+如果 spent.status == 超出
+    分配调整
+        任务 分配调整：上一次的分配超出了实施预算或用了清单外的角色（见参考文本的 not_in_roster），只改 agent，让合计不超过预算、且只用可用角色。可用角色：{roster}
+        文本 spent
+        角色 ARCHITECT
+        格式 cost_assignment
+        记录 assignment
+    跳转 c 最大 2
+存储 task_results analysis
+遍历 task 于 assignment.tasks
+    任务实现
+        任务 task.content
+        角色 task.agent
+        格式 implementation
+        记录 task_result
+    存储 task_results task_result
+标记:b
+测试
+    任务 回归验收（重构，行为不变）：{test_content}。测试命令（以这个为准，不要换成别的）：{test_cmd}。参考文本第一条是重构前的现状分析：baseline 是重构前的测试结果，public_api 是必须原样保留的接口，constraints 是不能动的结构；其余是各项实现记录。必须核对：1 全量测试通过数不少于 baseline 且没有失败（baseline 里原本就失败的除外）；2 public_api 每一项仍按原签名存在；3 constraints 每一条仍成立（看代码）；4 已有测试文件的断言没有被改弱或删除（用 git diff 或对照实现记录里的 changes，只允许改 import）；5 没有新增功能
+    文本 task_results
+    角色 QA_ENGINEER
+    格式 acceptance
+    记录 test_discussion
+如果 test_discussion.decide == 需修改
+    代码修改
+        任务 test_discussion.task
+        角色 ENGINEER
+        格式 implementation
+        记录 task_result
+    跳转 b 最大 3

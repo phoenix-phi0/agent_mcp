@@ -1,0 +1,17 @@
+{
+  "model": "cli:codex/gpt-6.1-sol",
+  "cost": 2,
+  "description": "中档 GPT 工程师（Codex gpt-6.1-sol，主力模型，走 ChatGPT 订阅、不占 Claude 额度），沙箱里只能写项目目录。算法对比 16/16，绕开过超长整数这类运行环境限制。适合规格写清楚的一般模块：几个函数和错误码、要读懂前面代码再配合；没有探针和审查，跨模块、鉴权并发和需要权衡的任务给更高档。",
+  "packages": [],
+  "skills": [
+    "skills/implementation.md"
+  ],
+  "effort": "medium",
+  "agentic": {
+    "cwd": "work/{project}",
+    "sandbox": "workspace-write",
+    "timeout": 2400,
+    "max_turns": 60,
+    "venv": true
+  }
+}

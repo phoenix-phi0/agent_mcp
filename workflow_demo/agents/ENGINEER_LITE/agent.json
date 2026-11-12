@@ -1,0 +1,29 @@
+{
+  "model": "cli:claude/haiku",
+  "cost": 1,
+  "description": "便宜档工程师（haiku），没有探针和审查。适合边界清楚的小任务：项目骨架、单个函数或数据类、纯计算和校验、照已有模式加一个分支。不适合跨模块改动、鉴权和并发、需求含糊要自己判断的任务。",
+  "packages": [],
+  "skills": [
+    "skills/implementation.md"
+  ],
+  "agentic": {
+    "cwd": "work/{project}",
+    "allowed_tools": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Bash(ls:*)",
+      "Bash(pip install:*)",
+      "Bash(python -m pip install:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(pytest:*)",
+      "Bash(python -m unittest:*)",
+      "Bash(python -m py_compile:*)"
+    ],
+    "timeout": 600,
+    "max_turns": 40,
+    "venv": true
+  }
+}

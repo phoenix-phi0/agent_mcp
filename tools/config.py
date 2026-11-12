@@ -145,6 +145,9 @@ BACKENDS = {
     ("cli", "zcode"): Backend("本机 ZCode（zcode -p）", True, _CLI, False, False),
     ("cli", "goose"): Backend("本机 Goose（goose run，Z.AI 账号）", True, _CLI,
                               True, False),
+    # codex exec（ChatGPT 账号登录，~/.codex/auth.json）：有系统级沙箱（read-only / workspace-write）
+    ("cli", "codex"): Backend("本机 Codex（codex exec，ChatGPT 账号）", True, _CLI,
+                              True, False),
 }
 
 CHANNELS = ("api", "cli")
@@ -152,7 +155,7 @@ CHANNELS = ("api", "cli")
 # 模型名后面「@努力程度」：只有 claude -p 有 --effort。值是 claude 认的那几个，
 # 写错了在解析时就报，不要等到真起 claude 才失败。
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-EFFORT_BACKENDS = {("cli", "claude")}
+EFFORT_BACKENDS = {("cli", "claude"), ("cli", "codex")}   # codex：-c model_reasoning_effort=…
 
 
 class ModelSpec(NamedTuple):

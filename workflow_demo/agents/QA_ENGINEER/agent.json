@@ -1,5 +1,7 @@
 {
   "model": "cli:claude/sonnet",
+  "cost": 4,
+  "description": "QA（sonnet）。逐条对照验收目标查实现和测试，跑全量测试，给出通过或返工要求；验收项多时用探针并行查。",
   "packages": [],
   "skills": [
     "skills/acceptance.md"
@@ -18,8 +20,9 @@
       "Bash(pytest:*)",
       "Bash(python -m unittest:*)"
     ],
-    "timeout": 600,
+    "timeout": 900,
     "max_turns": 60,
-    "venv": true
+    "venv": true,
+    "mcp_tools": ["probe"]
   }
 }
