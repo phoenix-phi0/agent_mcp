@@ -1,7 +1,8 @@
 // 用 jsdom 打开 tools/trace_view.html（离线模式），把一份过程记录当示例载入，
 // 输出渲染结果给 tests/tools/test_trace_view.py 断言。
 //   node trace_view_check.js <trace_view.html> <trace.json> [选中的行号]
-// 输出一行 JSON：summary、note、flow（SVG 文本）、classes（各节点 class）、detail、bars（耗时条段数）
+// 输出一行 JSON：summary、note、flow（SVG 文本）、classes（各节点 class）、detail、bars（耗时条段数）、
+// act / writeButtons（有没有「由我来做」和写操作按钮；离线打开应该都没有）
 const fs = require("fs");
 const { JSDOM } = require("jsdom");
 
@@ -30,6 +31,9 @@ setTimeout(() => {
     head: doc.getElementById("d-head").textContent,
     detail: doc.getElementById("detail").textContent,
     bars: doc.querySelectorAll("#bars button").length,
+    // 只读打开（没有查看服务）：不该有「由我来做」和任何写操作的按钮
+    act: !!doc.getElementById("act"),
+    writeButtons: doc.querySelectorAll("[data-act], [data-add], [data-mode]").length,
   };
   process.stdout.write(JSON.stringify(out));
   dom.window.close();

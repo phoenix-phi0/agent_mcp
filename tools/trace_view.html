@@ -164,6 +164,52 @@ pre.task { font-family: var(--font-body); font-size: 13.5px; }
 .script-box .ln span:first-child { color: var(--muted); text-align: right; padding-right: 10px; user-select: none; }
 .script-box .ln.hl { background: var(--sel); font-weight: 500; }
 .err-box { color: var(--bad); }
+
+/* 由我来做：停住的节点按格式定义生成的表单，和其他决定的按钮（只在本机查看服务开放写接口时出现） */
+.act { border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 8px; padding: 12px; display: grid; gap: 10px; background: color-mix(in srgb, var(--accent) 4%, var(--panel)); min-width: 0; }
+.act-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.act-head h3, .act-other h3 { font-size: 14px; color: var(--ink); }
+.act-other h3 { font-size: 12.5px; color: var(--muted); font-weight: 500; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; background: var(--panel); color: var(--muted); padding: 3px 12px; font-size: 12.5px; }
+.seg button.on { background: var(--accent); color: var(--panel); font-weight: 600; }
+.act-row { display: flex; gap: 8px 10px; flex-wrap: wrap; align-items: center; }
+.act-row label { display: inline-flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--muted); }
+.btn2 { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 5px 12px; font-size: 13px; }
+.btn2:hover { border-color: var(--accent); }
+.btn2.primary { background: var(--accent); border-color: var(--accent); color: var(--panel); font-weight: 600; }
+.btn2.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); }
+.btn2.danger.solid { background: var(--bad); border-color: var(--bad); color: var(--panel); font-weight: 600; }
+.btn2.link { border: 0; background: none; color: var(--accent); padding: 0; font-size: 12.5px; }
+.act button:disabled { opacity: .5; cursor: default; }
+.f-root { display: grid; gap: 10px; min-width: 0; }
+.f-field { display: grid; gap: 4px; min-width: 0; }
+.f-lab { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; font-size: 12.5px; }
+.f-lab b { font-family: var(--font-mono); font-weight: 500; color: var(--ink); }
+.req { color: var(--bad); font-weight: 600; }
+.f-in { width: 100%; font: 13px/1.5 var(--font-body); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+textarea.f-in { resize: vertical; min-height: 60px; display: block; }
+.f-in.mono, #act-json { font-family: var(--font-mono); font-size: 12.5px; }
+#act-json { min-height: 260px; }
+select.f-in { width: auto; min-width: 150px; max-width: 100%; }
+.f-in.short { width: auto; min-width: 220px; max-width: 100%; }
+.f-in:focus { border-color: var(--accent); }
+.f-in.bad, .f-arr.bad, .f-obj.bad { border-color: var(--bad); box-shadow: 0 0 0 1px var(--bad); }
+.f-obj { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px 10px; margin: 0; display: grid; gap: 10px; min-width: 0; }
+.f-obj legend { padding: 0 4px; }
+.f-arr { border-radius: 6px; }
+.f-item { border: 1px dashed var(--line); border-radius: 6px; padding: 8px; display: grid; gap: 8px; background: var(--panel); min-width: 0; }
+.f-item.f-line { display: flex; gap: 6px; border: 0; padding: 0; background: none; align-items: flex-start; }
+.f-item-head { display: flex; justify-content: space-between; align-items: center; }
+.f-del, .f-add { border: 0; background: none; color: var(--accent); font-size: 12.5px; padding: 2px 4px; white-space: nowrap; }
+.f-del { color: var(--bad); }
+.f-add { justify-self: start; }
+.f-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.act-msg { border-left: 3px solid var(--accent); padding: 6px 12px; border-radius: 0 6px 6px 0; font-size: 13px; background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.act-msg.bad { border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 8%, transparent); }
+.act-msg.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, transparent); }
+.act-msg ul { margin: 4px 0 0; padding-left: 18px; font-family: var(--font-mono); font-size: 12px; word-break: break-word; }
+.act-other { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 8px; }
 </style>
 </head>
 <body>
@@ -219,13 +265,28 @@ pre.task { font-family: var(--font-body); font-size: 13.5px; }
 <script>
 (function () {
   "use strict";
-  var ROLE_VAR = { ARCHITECT: "--r-arch", ARCHITECT_GLM: "--r-glm", ENGINEER: "--r-eng", QA_ENGINEER: "--r-qa" };
-  var ROLE_LABEL = { ARCHITECT: "架构师", ARCHITECT_GLM: "审查员", ENGINEER: "工程师", QA_ENGINEER: "QA" };
+  var ROLE_VAR = { ARCHITECT: "--r-arch", ARCHITECT_GLM: "--r-glm", ENGINEER: "--r-eng", QA_ENGINEER: "--r-qa",
+                   ENGINEER_LITE: "--r-eng", ENGINEER_SENIOR: "--r-eng", TEST_ENGINEER: "--r-qa" };
+  var ROLE_LABEL = { ARCHITECT: "架构师", ARCHITECT_GLM: "审查员", ENGINEER: "工程师", QA_ENGINEER: "QA",
+                     ENGINEER_LITE: "工程师·便宜档", ENGINEER_SENIOR: "工程师·高档", TEST_ENGINEER: "测试工程师",
+                     ARCHITECT_FABLE: "架构师·Fable", REVIEWER_GPT: "审查员·GPT", REFACTOR_ANALYST: "现状分析员",
+                     ENGINEER_FABLE: "工程师·Fable", ENGINEER_GPT_LITE: "工程师·GPT便宜档", ENGINEER_GPT: "工程师·GPT中档",
+                     ENGINEER_GPT_SENIOR: "工程师·GPT高档", QA_GPT: "QA·GPT" };
+  // 没列出的卡按名字前缀归色：新加的卡不用回来改这里
+  var ROLE_PREFIX = [[/^ARCHITECT/, "--r-arch"], [/^REVIEW/, "--r-glm"], [/^ENGINEER/, "--r-eng"], [/^(QA|TEST|REFACTOR)/, "--r-qa"]];
+  function roleVar(r) {
+    if (ROLE_VAR[r]) return ROLE_VAR[r];
+    for (var i = 0; i < ROLE_PREFIX.length; i++) if (ROLE_PREFIX[i][0].test(r || "")) return ROLE_PREFIX[i][1];
+    return "--r-other";
+  }
+  function roleName(r) { return ROLE_LABEL[r] || r; }
   var S = { trace: null, tree: [], byLine: {}, selLine: null, focusSeq: null, live: false, lastClick: 0 };
   // 在本机 trace_server 里打开时是实时模式：定时拉 /api/run
   // trace_server 提供页面时会在 <head> 里加 <meta name="trace-live">：经隧道从外网打开（主机名不是 localhost）也进实时模式
   var LIVE = /^https?:$/.test(location.protocol) &&
     (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || !!document.querySelector('meta[name="trace-live"]'));
+  // 查看服务开放了写接口（只在绑定本机地址时）才有这个标记；直接打开 html 文件时没有服务，页面保持只读
+  var WRITE = LIVE && !!document.querySelector('meta[name="trace-write"]');
   function parseTime(s) { return s ? Date.parse(String(s).replace(/([+-]\d\d)(\d\d)$/, "$1:$2")) : NaN; }
   // 进行中的耗时：实时且进程还在就跟着走；否则停在记录最后一次更新的时刻
   function ticking() { return S.live && S.trace && S.trace.status === "running" && S.trace._alive !== false; }
@@ -238,7 +299,7 @@ pre.task { font-family: var(--font-body); font-size: 13.5px; }
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function cssv(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
-  function roleColor(r) { return cssv(ROLE_VAR[r] || "--r-other"); }
+  function roleColor(r) { return cssv(roleVar(r)); }
   function fmtSec(s) {
     if (s == null || isNaN(s)) return "—";
     if (s < 60) return (Math.round(s * 10) / 10) + " 秒";
@@ -282,6 +343,9 @@ pre.task { font-family: var(--font-body); font-size: 13.5px; }
       if ((m = t.match(/^跳转\s+(\w+)\s+最大\s+(\d+)$/))) return { kind: "jump", target: m[1], max: +m[2], line: r.line };
       if ((m = t.match(/^遍历\s+(\w+)\s+于\s+(.+)$/))) return { kind: "each", v: m[1], src: m[2], line: r.line, kids: kids };
       if ((m = t.match(/^存储\s+(\w+)\s+(.+)$/))) return { kind: "store", target: m[1], src: m[2], line: r.line };
+      // 按成本分配的两条语句：画成和「存储」一样的小节点
+      if ((m = t.match(/^角色清单\s+(\w+)\s+(.+)$/))) return { kind: "roster", target: m[1], roles: m[2].trim().split(/\s+/), line: r.line };
+      if ((m = t.match(/^成本合计\s+(\w+)\s+(\S+)/))) return { kind: "cost", target: m[1], src: m[2], line: r.line };
       if (t.indexOf("如果 ") === 0) return { kind: "if", cond: t.slice(3).trim(), line: r.line, kids: kids };
       if (kids.length) {
         var f = {};
@@ -311,7 +375,7 @@ pre.task { font-family: var(--font-body); font-size: 13.5px; }
       if (n.kind === "task") return [NW, NH];
       if (n.kind === "if") return [DW, DH];
       if (n.kind === "label" || n.kind === "start" || n.kind === "end") return [NW, LH];
-      if (n.kind === "store") return [NW, SH];
+      if (n.kind === "store" || n.kind === "roster" || n.kind === "cost") return [NW, SH];
       return [NW, NH];
     }
     // 返回 {first, last(可接下一步的节点或 null), endY}
@@ -447,7 +511,7 @@ pre.task { font-family: var(--font-body); font-size: 13.5px; }
     // 节点
     L.nodes.forEach(function (o) {
       var n = o.n, st = statsFor(n.line), sel = S.selLine === n.line;
-      var ran = n.kind === "task" || n.kind === "if" || n.kind === "store" ? st.runs : runsOf(o);
+      var ran = n.kind === "task" || n.kind === "if" || n.kind === "store" || n.kind === "roster" || n.kind === "cost" ? st.runs : runsOf(o);
       var cls = "node" + (ran || st.waiting ? "" : " idle") + (sel ? " sel" : "") + (st.errs ? " err" : "") + (st.running ? " running" : "") + (st.waiting ? " waiting" : "");
       var g = '<g class="' + cls + '" data-line="' + n.line + '" tabindex="0" role="button" aria-label="' + esc(n.name || n.cond || n.kind) + '">';
       if (n.kind === "start" || n.kind === "end") {
@@ -462,6 +526,14 @@ pre.task { font-family: var(--font-body); font-size: 13.5px; }
         g += '<rect class="box" x="' + o.x + '" y="' + o.y + '" width="' + o.w + '" height="' + o.h + '" rx="17"/>' +
           '<text x="' + (o.x + 14) + '" y="' + (o.y + 21) + '" style="font-size:12.5px">存入 ' + esc(n.target) + '</text>' +
           (st.last ? '<text class="t-muted" x="' + (o.x + o.w - 12) + '" y="' + (o.y + 21) + '" text-anchor="end">共 ' + st.last.size + " 条</text>" : "");
+      } else if (n.kind === "roster" || n.kind === "cost") {
+        // 角色清单：几张卡；成本合计：最后一次的「合计 / 预算」，超出标红
+        var ce = st.last, right = "", over = false;
+        if (n.kind === "roster") right = (ce && ce.roles ? ce.roles.length : n.roles.length) + " 张卡";
+        else if (ce) { over = ce.status === "超出"; right = ce.total + (ce.budget != null ? " / " + ce.budget : "") + (over ? " 超出" : ""); }
+        g += '<rect class="box" x="' + o.x + '" y="' + o.y + '" width="' + o.w + '" height="' + o.h + '" rx="17"' + (over ? ' style="stroke:' + cssv("--bad") + '"' : "") + "/>" +
+          '<text x="' + (o.x + 14) + '" y="' + (o.y + 21) + '" style="font-size:12.5px">' + (n.kind === "roster" ? "角色清单 " : "成本合计 ") + esc(n.target) + "</text>" +
+          (right ? '<text class="' + (over ? "verdict-fix" : "t-muted") + '" x="' + (o.x + o.w - 12) + '" y="' + (o.y + 21) + '" text-anchor="end">' + esc(right) + "</text>" : "");
       } else if (n.kind === "if") {
         var cx = o.x + o.w / 2, cy = o.y + o.h / 2;
         g += '<polygon class="box" points="' + cx + "," + o.y + " " + (o.x + o.w) + "," + cy + " " + cx + "," + (o.y + o.h) + " " + o.x + "," + cy + '"/>' +
@@ -470,11 +542,15 @@ pre.task { font-family: var(--font-body); font-size: 13.5px; }
       } else {
         var roles = Array.from(new Set((S.byLine[n.line] || []).map(function (e) { return e.default_role || e.role; }).filter(Boolean)));
         var role = roles[0] || (n.fields["角色"] && /^[A-Z_]+$/.test(n.fields["角色"]) ? n.fields["角色"] : null);
+        // 换过卡：标出最近一次实际用的卡（运行时 roles 覆盖或外部 execute 指定）
+        var ovr = (S.byLine[n.line] || []).filter(function (e) { return e.default_role && e.role; });
+        var swapTo = ovr.length ? ovr[ovr.length - 1].role : null;
         var color = role ? roleColor(role) : cssv("--r-other");
         g += '<rect class="box" x="' + o.x + '" y="' + o.y + '" width="' + o.w + '" height="' + o.h + '" rx="8"/>' +
           '<rect x="' + o.x + '" y="' + o.y + '" width="6" height="' + o.h + '" rx="3" fill="' + color + '"/>' +
           '<text class="t-title" x="' + (o.x + 16) + '" y="' + (o.y + 22) + '">' + esc(n.name) + "</text>" +
-          '<text class="t-muted" x="' + (o.x + 16) + '" y="' + (o.y + 40) + '">' + esc(role ? (ROLE_LABEL[role] || role) : "角色 " + (n.fields["角色"] || "?")) + " → " + esc(n.fields["记录"] || "") + "</text>";
+          '<text class="t-muted" x="' + (o.x + 16) + '" y="' + (o.y + 40) + '">' + esc(role ? roleName(role) : "角色 " + (n.fields["角色"] || "?")) +
+          (swapTo && swapTo !== role ? "（换 " + esc(roleName(swapTo)) + "）" : "") + " → " + esc(n.fields["记录"] || "") + "</text>";
         var execs = (S.byLine[n.line] || []).filter(isExec);
         var last = st.running ? (st.runs > 1 ? execs[st.runs - 2] : null) : st.last, d = decideOf(last);
         if (st.waiting) {
@@ -483,7 +559,9 @@ pre.task { font-family: var(--font-body); font-size: 13.5px; }
           var ea = elapsedAttrs(st.running.started);
           g += '<text class="t-run" x="' + (o.x + 16) + '" y="' + (o.y + 57) + '"' + ea.attr + ' data-prefix="进行中 · 已 ">进行中 · 已 ' + fmtSec(ea.sec) + "</text>";
         } else {
-          var info = st.runs ? (st.secs > 0 ? "累计 " + fmtSec(st.secs) : "") : "没有执行";
+          var spent = execs.reduce(function (a, e) { return a + (typeof e.cost === "number" ? e.cost : 0); }, 0);
+          var usd = execs.reduce(function (a, e) { return a + (e.usage && typeof e.usage.total_usd === "number" ? e.usage.total_usd : 0); }, 0);
+          var info = st.runs ? [st.secs > 0 ? "累计 " + fmtSec(st.secs) : "", spent ? "成本 " + spent : "", usd ? "$" + usd.toFixed(3) : ""].filter(Boolean).join(" · ") : "没有执行";
           g += '<text class="t-muted" x="' + (o.x + 16) + '" y="' + (o.y + 57) + '">' + esc(info) + "</text>";
         }
         if (d && !st.waiting) g += '<text class="' + (d === "通过" ? "verdict-pass" : "verdict-fix") + '" x="' + (o.x + o.w - 12) + '" y="' + (o.y + 57) + '" text-anchor="end">最后：' + esc(d) + "</text>";
@@ -544,6 +622,16 @@ pre.task { font-family: var(--font-body); font-size: 13.5px; }
       ["agent 调用", '<span class="num">' + tasks.length + " 次</span>" + (errs ? ' <span class="pill error">' + errs + " 次出错</span>" : "")],
       ["返工跳转", '<span class="num">' + jumps + " 次</span>"]
     ];
+    if (typeof t.cost_spent === "number") {
+      // 已花成本 = 跑过的节点按卡的 cost 加总；最后一次成本合计的预算一起列出来
+      var lastCost = ev.filter(function (e) { return e.type === "cost"; }).pop();
+      items.push(["已花成本", '<span class="num">' + t.cost_spent + "</span>" +
+        (lastCost && lastCost.budget != null ? ' <span class="hint">实施分配 ' + lastCost.total + " / 预算 " + lastCost.budget + "</span>" : "")]);
+    }
+    if (typeof t.usd_spent === "number") {
+      // claude 自己报的费用（API 标价估算）；GLM 节点没有这个数
+      items.push(["实际费用（估）", '<span class="num">$' + t.usd_spent.toFixed(3) + "</span>"]);
+    }
     if (running) items.push(["当前", roleChip(running.role) + " " + esc(running.name)]);
     if (pend) items.push(["停在", roleChip(pend.card || pend.role) + " " + esc(pend.name) + ' <span class="hint">第 ' + esc(pend.step) + " 步</span>"]);
     if (ctl) items.push(["外部控制", '<span style="font-size:13.5px;font-weight:500">' + (ctl.mode === "auto" ? "自动往下跑" : "逐步，每步停") +
@@ -556,7 +644,9 @@ pre.task { font-family: var(--font-body); font-size: 13.5px; }
     if (t.note) note.push(esc(t.note));
     if (t.status === "error" && t.error) note.push('<span class="err-box">出错原因：' + esc(t.error) + "</span>");
     if (t.status === "running" && !S.live) note.push("这份记录停在运行中：流程可能还在跑，也可能进程已经没了。要实时看，在项目里运行 python -m tools.trace_server 工作目录，再打开 http://127.0.0.1:8765 。");
-    if (pend) note.push('<span style="color:var(--accent)">停在第 ' + esc(pend.step) + "「" + esc(pend.name) + "」，等外部决定：交结果（workflow.submit）、用默认或换模型/卡执行（workflow.execute）、继续自动跑（workflow.resume）。</span>" +
+    if (S.flash && S.flash.run === t._name && Date.now() - S.flash.at < 60000) note.push('<span style="color:var(--ok)">✓ ' + esc(S.flash.text) + "</span>");
+    if (pend) note.push('<span style="color:var(--accent)">停在第 ' + esc(pend.step) + "「" + esc(pend.name) + "」，等外部决定：交结果（workflow.submit）、用默认或换模型/卡执行（workflow.execute）、继续自动跑（workflow.resume）。" +
+      (WRITE ? "也可以直接在节点详情最下面「由我来做」：填表交结果，或点按钮做其他决定。" : "") + "</span>" +
       (pend.last_error ? '<br><span class="err-box">这一步上次失败：' + esc(clip(pend.last_error, 300)) + "</span>" : ""));
     if (ctl && (Object.keys(ctl.models).length || Object.keys(ctl.roles).length)) note.push("长期覆盖：" + esc(Object.keys(ctl.models).map(function (k) { return k + " 用 " + ctl.models[k]; })
       .concat(Object.keys(ctl.roles).map(function (k) { return k + " 换成卡 " + ctl.roles[k]; })).join("；")));
@@ -690,7 +780,8 @@ pre.task { font-family: var(--font-body); font-size: 13.5px; }
               (pd.prompt ? field("提示词（外部自己执行时照这个发）", esc(pd.prompt), "task") : "") +
               (pd.system ? field("系统提示（角色卡）", esc(pd.system), "task") : "")
               : '<div class="hint">这条是当时停下等外部的记录，后来已经继续了。</div>') +
-            field("任务", jsonBlock(e.task), "task") + (e.context != null ? field("参考文本", jsonBlock(e.context)) : "") + "</div></details>";
+            field("任务", jsonBlock(e.task), "task") + (e.context != null ? field("参考文本", jsonBlock(e.context)) : "") +
+            (pd && WRITE ? '<div class="act" id="act"></div>' : "") + "</div></details>";
           return;
         }
         var isOpen = S.keepOpen && (String(e.seq) in openNow) ? openNow[e.seq] : e.seq === openSeq;
@@ -758,6 +849,382 @@ pre.task { font-family: var(--font-body); font-size: 13.5px; }
     });
     var hl = box.querySelector(".ln.hl"), sb = $("scriptbox");
     if (hl && sb) sb.scrollTop = Math.max(0, hl.offsetTop - sb.offsetTop - 60);
+    if ($("act")) mountAct($("act"), t, evs);
+  }
+
+  // ---------- 由我来做：停住的节点按格式定义生成表单，交给查看服务的写接口 ----------
+  // A 是当前这一步的草稿：详情面板重画（换主题、点别的节点再回来）不丢；运行、步数或记录更新时间变了就换新的
+  var A = { key: null };
+  var LONG_KEY = /summary|detail|problem|suggestion|descri|content|task|reason|evidence|result|goal|when|text|note|plan|analysis|method|issue|risk|question/i;
+  function isObj(v) { return v !== null && typeof v === "object" && !Array.isArray(v); }
+  function copy(v) { return v === undefined ? undefined : JSON.parse(JSON.stringify(v)); }
+  function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+  // 格式定义里一个字段画成什么：enum / string / number / integer / boolean / array / object；其余（自由对象、anyOf 等）是 any，给一格小的 JSON 框
+  function sKind(s) {
+    if (!s || typeof s !== "object") return "any";
+    if (Array.isArray(s.enum)) return "enum";
+    var t = Array.isArray(s.type) ? s.type.filter(function (x) { return x !== "null"; })[0] : s.type;
+    if (!t) t = s.properties ? "object" : s.items ? "array" : "any";
+    if (t === "object" && !s.properties) return "any";
+    return ["object", "array", "string", "number", "integer", "boolean"].indexOf(t) < 0 ? "any" : t;
+  }
+  // 字段位置的写法和服务端校验（tools/wf_submit.validate）一致：issues[0].location，顶层是「(顶层)」
+  function pstr(path) {
+    var o = "";
+    path.forEach(function (p) { o += typeof p === "number" ? "[" + p + "]" : (o ? "." : "") + p; });
+    return o || "(顶层)";
+  }
+  function lastKey(path) { for (var i = path.length - 1; i >= 0; i--) if (typeof path[i] === "string") return path[i]; return ""; }
+  function blank(s) {
+    var k = sKind(s), o, i;
+    if (k === "string") return "";
+    if (k === "boolean") return false;
+    if (k === "array") { o = []; for (i = 0; i < (s.minItems || 0) && i < 20; i++) o.push(blank(s.items)); return o; }
+    if (k === "object") return fill(s, {});
+    if (k === "any" && s && s.type === "object") return {};
+    return undefined;
+  }
+  // 把值补成格式的形状（对象、列表都在），表单才能按位置读写；已有的内容原样留着
+  function fill(s, v) {
+    var k = sKind(s);
+    if (k === "object") {
+      if (!isObj(v)) v = {};
+      Object.keys(s.properties).forEach(function (p) { v[p] = fill(s.properties[p], v[p]); });
+      return v;
+    }
+    if (k === "array") return Array.isArray(v) ? v.map(function (x) { return fill(s.items, x); }) : blank(s);
+    return v === undefined || v === null ? blank(s) : v;
+  }
+  function isEmpty(s, v) {
+    return v === "" || v == null || (Array.isArray(v) && !v.length) || (isObj(v) && !Object.keys(v).length && sKind(s) === "object");
+  }
+  // 要交的值：选填的字段没填就不带（空字符串交上去反而会被「不能为空」拦下），必填的原样留着让校验说话
+  function clean(s, v) {
+    var k = sKind(s);
+    if (k === "object" && isObj(v)) {
+      var req = s.required || [], o = {};
+      Object.keys(v).forEach(function (p) {
+        var c = clean(s.properties[p], v[p]);
+        if (c === undefined || (req.indexOf(p) < 0 && isEmpty(s.properties[p], c))) return;
+        o[p] = c;
+      });
+      return o;
+    }
+    if (k === "array" && Array.isArray(v)) return v.map(function (x) { var c = clean(s.items, x); return c === undefined ? null : c; });
+    return v;
+  }
+  function typeOk(t, v) {
+    if (t === "string") return typeof v === "string";
+    if (t === "integer") return typeof v === "number" && Math.floor(v) === v;
+    if (t === "number") return typeof v === "number" && !isNaN(v);
+    if (t === "boolean") return typeof v === "boolean";
+    if (t === "array") return Array.isArray(v);
+    if (t === "object") return isObj(v);
+    if (t === "null") return v === null;
+    return true;
+  }
+  var TYPE_TXT = { string: "文字", integer: "整数", number: "数字", boolean: "是/否", array: "列表", object: "对象", "null": "空" };
+  // 提交前在页面上先做的基本校验：必填、enum、类型、不能为空、至少几条。完整的校验在服务端
+  function check(s, v, path, out) {
+    if (!s || typeof s !== "object") return;
+    if (Array.isArray(s.enum)) {
+      if (!s.enum.some(function (x) { return same(x, v); })) out.push({ path: path, msg: "要从这几个里选：" + s.enum.join(" / ") });
+      return;
+    }
+    var ts = s.type ? (Array.isArray(s.type) ? s.type : [s.type]) : [];
+    if (ts.length && !ts.some(function (t) { return typeOk(t, v); })) {
+      out.push({ path: path, msg: "类型不对，应该是" + ts.map(function (t) { return TYPE_TXT[t] || t; }).join("或") });
+      return;
+    }
+    if (typeof v === "string" && s.minLength && v.length < s.minLength) out.push({ path: path, msg: s.minLength === 1 ? "不能为空" : "至少 " + s.minLength + " 个字" });
+    if (Array.isArray(v)) {
+      if (s.minItems && v.length < s.minItems) out.push({ path: path, msg: "至少要 " + s.minItems + " 条" });
+      if (s.items) v.forEach(function (x, i) { check(s.items, x, path.concat(i), out); });
+    }
+    if (isObj(v)) {
+      (s.required || []).forEach(function (k) { if (v[k] === undefined) out.push({ path: path.concat(k), msg: "必填" }); });
+      if (s.properties) Object.keys(v).forEach(function (k) {
+        if (v[k] === undefined) return;
+        if (s.properties[k]) check(s.properties[k], v[k], path.concat(k), out);
+        else if (s.additionalProperties === false) out.push({ path: path.concat(k), msg: "格式里没有这个字段" });
+      });
+    }
+  }
+  function getAt(o, path) { for (var i = 0; i < path.length; i++) { if (o == null) return undefined; o = o[path[i]]; } return o; }
+  function setAt(o, path, val) {
+    for (var i = 0; i < path.length - 1; i++) { if (o == null) return; o = o[path[i]]; }
+    if (o != null && path.length) o[path[path.length - 1]] = val;
+  }
+  function schemaAt(s, path) {
+    path.forEach(function (p) { s = s ? (typeof p === "number" ? s.items : (s.properties || {})[p]) : null; });
+    return s || {};
+  }
+
+  // ---- 画表单 ----
+  function pAttrs(path, kind) { return ' data-p="' + esc(JSON.stringify(path)) + '" data-ps="' + esc(pstr(path)) + '" data-k="' + kind + '" aria-label="' + esc(pstr(path)) + '"'; }
+  function labelHtml(name, s, req) {
+    return '<span class="f-lab"><b>' + esc(name) + "</b>" + (req ? '<span class="req" title="必填">*</span>' : "") +
+      (s && s.description ? '<span class="hint">' + esc(s.description) + "</span>" : "") + "</span>";
+  }
+  // 长文本用多行框：已有内容长或带换行、格式里写了较大的 maxLength、或字段名看着是一段话（summary / detail / problem…）
+  function isLong(s, name, v) {
+    if (typeof v === "string" && (v.length > 60 || v.indexOf("\n") >= 0)) return true;
+    if (s.maxLength) return s.maxLength > 100;
+    return LONG_KEY.test(String(name));
+  }
+  function leafHtml(s, v, path, name) {
+    var k = sKind(s);
+    if (k === "enum") return '<select class="f-in"' + pAttrs(path, "enum") + '><option value="">（请选择）</option>' + s.enum.map(function (x, i) {
+      return '<option value="' + i + '"' + (same(x, v) ? " selected" : "") + ">" + esc(typeof x === "string" ? x : JSON.stringify(x)) + "</option>";
+    }).join("") + "</select>";
+    if (k === "string") {
+      var txt = v == null ? "" : typeof v === "string" ? v : JSON.stringify(v);
+      return isLong(s, name, v) ? '<textarea class="f-in" rows="3"' + pAttrs(path, "str") + ">" + esc(txt) + "</textarea>"
+        : '<input class="f-in" type="text"' + pAttrs(path, "str") + ' value="' + esc(txt) + '">';
+    }
+    if (k === "number" || k === "integer") return '<input class="f-in short" type="number" step="' + (k === "integer" ? "1" : "any") + '"' + pAttrs(path, "num") + ' value="' + esc(v == null ? "" : v) + '">';
+    if (k === "boolean") return '<label class="f-check"><input type="checkbox"' + pAttrs(path, "bool") + (v ? " checked" : "") + "> 是</label>";
+    // 这一格写坏了的 JSON 原文留着（A.badJson），重画时不冲掉
+    var bj = A.badJson && A.badJson[pstr(path)];
+    return '<textarea class="f-in mono' + (bj ? " bad" : "") + '" rows="3" placeholder="这一格格式不固定，直接写 JSON"' + pAttrs(path, "json") + ">" +
+      esc(bj ? bj.text : v === undefined ? "" : JSON.stringify(v, null, 2)) + "</textarea>";
+  }
+  // 同一层里 enum 字段（decide 这类结论）排在最上面，其余按格式定义里的顺序
+  function propOrder(s) {
+    var ks = Object.keys(s.properties);
+    return ks.filter(function (k) { return sKind(s.properties[k]) === "enum"; }).concat(ks.filter(function (k) { return sKind(s.properties[k]) !== "enum"; }));
+  }
+  function fieldHtml(s, v, path, name, req) {
+    var k = sKind(s), lab = name == null ? "" : labelHtml(name, s, req);
+    if (k === "object") {
+      var inner = propOrder(s).map(function (p) {
+        return fieldHtml(s.properties[p], isObj(v) ? v[p] : undefined, path.concat(p), p, (s.required || []).indexOf(p) >= 0);
+      }).join("");
+      return name == null ? inner : '<fieldset class="f-obj" data-ps="' + esc(pstr(path)) + '"><legend>' + lab + "</legend>" + inner + "</fieldset>";
+    }
+    if (k === "array") {
+      var arr = Array.isArray(v) ? v : [], it = s.items || {}, simple = sKind(it) !== "object" && sKind(it) !== "array";
+      var rows = arr.map(function (x, i) {
+        var p = path.concat(i);
+        var del = '<button type="button" class="f-del" data-del="' + esc(JSON.stringify(p)) + '" aria-label="删除第 ' + (i + 1) + ' 条">删除</button>';
+        return simple ? '<div class="f-item f-line">' + leafHtml(it, x, p, lastKey(path)) + del + "</div>"
+          : '<div class="f-item"><div class="f-item-head"><span class="hint">第 ' + (i + 1) + " 条</span>" + del + "</div>" + fieldHtml(it, x, p, null, false) + "</div>";
+      }).join("");
+      return '<div class="f-field f-arr" data-ps="' + esc(pstr(path)) + '">' + lab + (arr.length ? "" : '<span class="hint">还没有条目</span>') + rows +
+        '<button type="button" class="f-add" data-add="' + esc(JSON.stringify(path)) + '">＋ 添加一条</button></div>';
+    }
+    return '<div class="f-field">' + lab + leafHtml(s, v, path, name == null ? lastKey(path) : name) + "</div>";
+  }
+
+  function mountAct(el, t, evs) {
+    var pd = t.pending, key = t._name + "|" + pd.step + "|" + t.updated;
+    var schema = pd.schema || (pd.format && t._formats ? t._formats[pd.format] : null) || null;
+    if (schema && sKind(schema) !== "object") schema = null;
+    var last = evs.filter(function (e) { return isExec(e) && e.status === "ok" && isObj(e.result); }).pop();
+    if (A.key !== key) {
+      A = { key: key, mode: schema ? "form" : "json", val: schema ? fill(schema, {}) : {}, text: "{}", textErr: null, badJson: {},
+            msg: null, busy: false, confirm: false, card: "", model: "" };
+    }
+    A.name = t._name; A.pd = pd; A.schema = schema; A.last = last ? last.result : null; A.agents = t._agents || []; A.el = el;
+    el.addEventListener("input", actInput);
+    el.addEventListener("change", actInput);
+    el.addEventListener("click", actClick);
+    renderAct();
+  }
+  function renderAct() {
+    var pd = A.pd, el = A.el, dis = A.busy ? " disabled" : "";
+    var who = roleName(pd.card || pd.role);
+    var h = '<div class="act-head"><h3>由我来做（扮演 ' + esc(who) + "）</h3>" +
+      (A.schema ? '<span class="seg" role="group" aria-label="填写方式"><button type="button" data-mode="form" class="' + (A.mode === "form" ? "on" : "") + '" aria-pressed="' + (A.mode === "form") + '">表单</button>' +
+        '<button type="button" data-mode="json" class="' + (A.mode === "json" ? "on" : "") + '" aria-pressed="' + (A.mode === "json") + '">JSON</button></span>' : "") + "</div>";
+    h += '<div class="hint">看完上面的提示词、角色卡和参考文本，' + (A.schema ? "按格式 <span class=\"chip fmt\">" + esc(pd.format || "") + "</span> 填好后提交" : "这个节点没有格式定义，直接写一个 JSON 对象提交") +
+      "：第 " + esc(pd.step) + " 步就用你交的结果，不再调模型。带 <span class=\"req\">*</span> 的必填。</div>";
+    h += '<div class="act-row">' + (A.last ? '<button type="button" class="btn2 link" data-act="copy-last"' + dis + ">从上次这个节点的结果复制</button>" : '<span class="hint">这个节点还没有过结果，没有可复制的</span>') +
+      '<button type="button" class="btn2 link" data-act="clear"' + dis + ">清空重填</button></div>";
+    if (A.mode === "form") h += '<div class="f-root" id="act-form">' + fieldHtml(A.schema, A.val, [], null, false) + "</div>";
+    else h += '<textarea class="f-in" id="act-json" spellcheck="false" aria-label="结果的原始 JSON">' + esc(A.text) + "</textarea>" +
+      '<div class="hint" id="act-json-state">' + (A.textErr ? '<span class="err-box">JSON 还有错：' + esc(A.textErr) + "</span>" : "") + "</div>";
+    if (A.msg) h += '<div class="act-msg ' + A.msg.kind + '" id="act-msg" role="status">' + esc(A.msg.text) +
+      (A.msg.errors && A.msg.errors.length ? "<ul>" + A.msg.errors.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>" : "") + "</div>";
+    h += '<div class="act-row"><button type="button" class="btn2 primary" data-act="submit"' + dis + ">提交结果</button></div>";
+    // 其他决定：让模型来做、继续自动跑、中止
+    var models = [];
+    A.agents.forEach(function (a) { if (a.model && models.indexOf(a.model) < 0) models.push(a.model); });
+    h += '<div class="act-other"><h3>或者不自己做</h3>' +
+      '<div class="act-row"><button type="button" class="btn2" data-act="exec"' + dis + '>按默认执行</button><span class="hint">卡 <span class="mono">' + esc(pd.card || pd.role) +
+      '</span> · 模型 <span class="mono">' + esc(pd.model || "?") + "</span></span></div>" +
+      '<div class="act-row"><label>换卡 <select class="f-in" id="act-card"' + dis + '><option value="">不换</option>' + A.agents.map(function (a) {
+        return '<option value="' + esc(a.name) + '"' + (A.card === a.name ? " selected" : "") + ' title="' + esc(a.description || "") + '">' +
+          esc((ROLE_LABEL[a.name] ? ROLE_LABEL[a.name] + " · " : "") + a.name + (a.model ? " · " + a.model : "")) + "</option>";
+      }).join("") + "</select></label>" +
+      '<label>换模型 <input class="f-in short" id="act-model" type="text" list="act-models" placeholder="不换（要写全，如 cli:goose/glm-5.3）" value="' + esc(A.model) + '"' + dis + "></label>" +
+      '<datalist id="act-models">' + models.map(function (m) { return '<option value="' + esc(m) + '">'; }).join("") + "</datalist>" +
+      '<button type="button" class="btn2" data-act="exec-as"' + dis + ">按所选执行</button></div>" +
+      '<div class="act-row"><button type="button" class="btn2" data-act="resume"' + dis + '>继续自动跑</button><span class="hint">从这一步起按默认往下跑，不再每步停</span></div>' +
+      '<div class="act-row" id="act-abort">' + (A.confirm
+        ? '<span class="err-box">确定中止这次运行？后台进程会被停掉。</span><button type="button" class="btn2 danger solid" data-act="abort-yes"' + dis + ">确定中止</button>" +
+          '<button type="button" class="btn2" data-act="abort-no"' + dis + ">不中止</button>"
+        : '<button type="button" class="btn2 danger" data-act="abort"' + dis + ">中止</button>") + "</div></div>";
+    el.innerHTML = h;
+    (A.msg && A.msg.marks || []).forEach(function (ps) {
+      el.querySelectorAll("[data-ps]").forEach(function (x) { if (x.getAttribute("data-ps") === ps) x.classList.add("bad"); });
+    });
+  }
+  function parseText() {
+    try {
+      var v = JSON.parse(A.text);
+      if (!isObj(v)) throw new Error("最外层要是一个对象 { … }");
+      A.parsed = v; A.textErr = null;
+      return true;
+    } catch (err) { A.textErr = err.message; return false; }
+  }
+  function actInput(ev) {
+    var t = ev.target;
+    if (t.id === "act-card") { A.card = t.value; return; }
+    if (t.id === "act-model") { A.model = t.value; return; }
+    if (t.id === "act-json") {
+      A.text = t.value;
+      parseText();
+      var st = $("act-json-state");
+      if (st) st.innerHTML = A.textErr ? '<span class="err-box">JSON 还有错：' + esc(A.textErr) + "</span>" : "";
+      return;
+    }
+    if (!t.getAttribute || !t.getAttribute("data-p")) return;
+    var path = JSON.parse(t.getAttribute("data-p")), k = t.getAttribute("data-k"), ps = t.getAttribute("data-ps"), v;
+    if (k === "enum") v = t.value === "" ? undefined : schemaAt(A.schema, path).enum[Number(t.value)];
+    else if (k === "num") v = t.value === "" ? undefined : Number(t.value);
+    else if (k === "bool") v = t.checked;
+    else if (k === "json") {
+      if (!t.value.trim()) v = undefined;
+      else {
+        try { v = JSON.parse(t.value); } catch (err) { A.badJson[ps] = { msg: err.message, text: t.value }; t.classList.add("bad"); return; }
+      }
+      delete A.badJson[ps];
+    } else v = t.value;
+    t.classList.remove("bad");
+    setAt(A.val, path, v);
+  }
+  function setMode(m) {
+    if (m === A.mode || !A.schema) return;
+    if (m === "json") { A.text = JSON.stringify(clean(A.schema, A.val), null, 2); A.textErr = null; }
+    else {
+      if (!parseText()) { A.msg = { kind: "bad", text: "JSON 还有错，改对了才能切回表单：" + A.textErr }; renderAct(); return; }
+      A.val = fill(A.schema, A.parsed); A.badJson = {};
+    }
+    A.mode = m; A.msg = null;
+    renderAct();
+  }
+  // 现在要交的值，和页面上查出的问题（[{ps, msg}]）
+  function currentValue() {
+    var value, errs = [], bad = [];
+    if (A.mode === "json") {
+      if (!parseText()) return { errs: [{ ps: "(顶层)", msg: "不是合法的 JSON：" + A.textErr }] };
+      value = A.parsed;
+    } else {
+      Object.keys(A.badJson).forEach(function (ps) { bad.push({ ps: ps, msg: "这一格的 JSON 写错了：" + A.badJson[ps].msg }); });
+      if (bad.length) return { errs: bad };
+      value = clean(A.schema, A.val);
+    }
+    if (A.schema) check(A.schema, value, [], errs);
+    return { value: value, errs: errs.map(function (x) { return { ps: pstr(x.path), msg: x.msg }; }) };
+  }
+  // 服务端的字段错误是「位置: 原因」；缺必填字段时位置是上一层，字段名在原因里，这里拼回来好在表单上标红
+  function marksOf(errors) {
+    return (errors || []).map(function (x) {
+      var m = String(x).match(/^(.*?): (.*)$/);
+      if (!m) return null;
+      var miss = m[2].match(/^'([^']+)' is a required property/);
+      if (miss) return m[1] === "(顶层)" ? miss[1] : m[1] + "." + miss[1];
+      return m[1];
+    }).filter(Boolean);
+  }
+  function send(op, body, okText) {
+    if (A.busy) return;
+    var key = A.key;
+    body.name = A.name;
+    A.busy = true; A.confirm = false;
+    A.msg = { kind: "info", text: "正在发送…" };
+    renderAct();
+    fetch("api/" + op, { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(function (r) {
+        return r.json().then(function (d) { return { ok: r.ok && !!(d && d.ok), d: d || {} }; },
+          function () { return { ok: false, d: { error: "查看服务返回了 HTTP " + r.status } }; });
+      }, function (err) { return { ok: false, d: { error: "连不上查看服务：" + err.message } }; })
+      .then(function (res) {
+        if (A.key !== key) return;
+        if (res.ok) {
+          // 成功：按钮保持不可点，立刻重拉运行状态；记录一变，这块就换成下一步的（或消失）
+          S.flash = { run: A.name, text: okText, at: Date.now() };
+          A.msg = { kind: "ok", text: okText + "，正在刷新运行状态…" };
+          S.lastClick = 0;
+          renderAct();
+          // 重拉之后还停在同一步、记录也没变（比如同一秒内又停回来）：把按钮放开，免得一直点不了
+          refresh().then(function () {
+            if (A.key !== key || !A.busy) return;
+            A.busy = false;
+            A.msg = { kind: "ok", text: okText + "。" };
+            if (A.el && document.contains(A.el)) renderAct();
+          });
+          return;
+        }
+        A.busy = false;
+        var errors = res.d.errors || [];
+        A.msg = { kind: "bad", text: errors.length ? String(res.d.error || "").split("：")[0] + "：" : (res.d.error || "没有成功"), errors: errors, marks: marksOf(errors) };
+        renderAct();
+      });
+  }
+  function actClick(ev) {
+    var b = ev.target.closest ? ev.target.closest("button") : null, path, arr;
+    if (!b || b.disabled || !A.el || !A.el.contains(b)) return;
+    if (b.hasAttribute("data-add")) {
+      path = JSON.parse(b.getAttribute("data-add"));
+      arr = getAt(A.val, path);
+      if (Array.isArray(arr)) arr.push(blank(schemaAt(A.schema, path).items || {}));
+      A.msg = null;
+      return renderAct();
+    }
+    if (b.hasAttribute("data-del")) {
+      path = JSON.parse(b.getAttribute("data-del"));
+      arr = getAt(A.val, path.slice(0, -1));
+      if (Array.isArray(arr)) arr.splice(path[path.length - 1], 1);
+      A.msg = null; A.badJson = {};      // 删掉一条后位置都挪了，写坏的原文不再对得上
+      return renderAct();
+    }
+    if (b.hasAttribute("data-mode")) return setMode(b.getAttribute("data-mode"));
+    var act = b.getAttribute("data-act"), pd = A.pd, who = roleName(pd.card || pd.role);
+    if (act === "copy-last" && A.last) {
+      if (A.mode === "json") { A.text = JSON.stringify(A.last, null, 2); A.textErr = null; }
+      else { A.val = fill(A.schema, copy(A.last)); A.badJson = {}; }
+      A.msg = { kind: "info", text: "已复制上次的结果，改好再提交。" };
+      renderAct();
+    } else if (act === "clear") {
+      A.val = A.schema ? fill(A.schema, {}) : {}; A.text = A.schema ? JSON.stringify(clean(A.schema, A.val), null, 2) : "{}"; A.textErr = null; A.msg = null; A.badJson = {};
+      renderAct();
+    } else if (act === "submit") {
+      var cv = currentValue();
+      if (cv.errs.length) {
+        A.msg = { kind: "bad", text: "还不能提交，先改这 " + cv.errs.length + " 处：", errors: cv.errs.map(function (x) { return x.ps + ": " + x.msg; }),
+                  marks: cv.errs.map(function (x) { return x.ps; }) };
+        return renderAct();
+      }
+      send("submit", { step: pd.step, result: cv.value }, "已交第 " + pd.step + " 步「" + pd.name + "」的结果（扮演 " + who + "）");
+    } else if (act === "exec") {
+      send("execute", { step: pd.step }, "第 " + pd.step + " 步「" + pd.name + "」已按默认交给 " + who + " 执行");
+    } else if (act === "exec-as") {
+      var card = A.card || null, model = (A.model || "").trim() || null;
+      if (!card && !model) { A.msg = { kind: "bad", text: "先选一张要换的卡，或填一个要换的模型；都不换就点「按默认执行」。" }; return renderAct(); }
+      send("execute", { step: pd.step, role: card, model: model }, "第 " + pd.step + " 步「" + pd.name + "」已交给" + (card ? "卡 " + card : "") + (model ? " 模型 " + model : "") + " 执行");
+    } else if (act === "resume") {
+      send("resume", {}, "已改成自动往下跑");
+    } else if (act === "abort") {
+      A.confirm = true; A.msg = null;
+      renderAct();
+    } else if (act === "abort-no") {
+      A.confirm = false;
+      renderAct();
+    } else if (act === "abort-yes") {
+      send("abort", {}, "已中止这次运行");
+    }
   }
 
   function userSelect(line, seq) { S.lastClick = Date.now(); selectLine(line, seq); }
@@ -820,8 +1287,8 @@ pre.task { font-family: var(--font-body); font-size: 13.5px; }
   var cur = { name: null, sig: "" };
   function setConn(ok, msg) { $("live-dot").className = "dot " + (ok ? "on" : "off"); $("live-msg").textContent = msg; }
   function fetchJson(url) { return fetch(url, { cache: "no-store" }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }); }
-  function poll() {
-    fetchJson("api/runs").then(function (d) {
+  function pollOnce() {
+    return fetchJson("api/runs").then(function (d) {
       var runs = d.runs || [];
       var sel = $("run-pick"), prev = sel.value;
       sel.innerHTML = runs.map(function (r) {
@@ -842,9 +1309,11 @@ pre.task { font-family: var(--font-body); font-size: 13.5px; }
       var same = cur.name === t._name;
       cur = { name: t._name, sig: sig };
       load(t, "实时：" + t._name, same);
-    }).catch(function (err) { setConn(false, "连不上查看服务（" + err.message + "），重试中…"); })
-      .then(function () { setTimeout(poll, 1500); });
+    }).catch(function (err) { setConn(false, "连不上查看服务（" + err.message + "），重试中…"); });
   }
+  function poll() { pollOnce().then(function () { setTimeout(poll, 1500); }); }
+  // 写操作成功后不等下一轮，立刻重拉一次
+  function refresh() { cur.sig = ""; return pollOnce(); }
   if (LIVE) {
     S.live = true;
     $("live-bar").hidden = false;
