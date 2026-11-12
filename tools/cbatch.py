@@ -452,6 +452,10 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
             for k in ("engine", "project", "test_cmd", "fallback", "dsl_options"):
                 if k in t:
                     items[-1]["_" + k] = t[k]
+            if "effort" in t:
+                if t["effort"] not in ("low", "medium", "high"):
+                    raise CBatchError(f"effort 只能是 low/medium/high，收到：{t['effort']!r}")
+                items[-1]["effort"] = t["effort"]
         else:
             raise CBatchError(f"任务要是非空字符串或含 prompt 的字典，收到：{t!r}")
 
@@ -503,7 +507,7 @@ def submit(tasks, name: str = "", mode: str = "isolated", cwd: str = None,
         "auto": None,
         "tasks": [dict(it, status="pending", output="", error="",
                        model=None if model == "auto" else (model or None),
-                       effort=None, model_reason="",
+                       effort=it.get("effort"), model_reason="",
                        session_id=None, cost_usd=None, turns=None,
                        seconds=None, engine_used=None, versions=None,
                        calls=None, calls_log=None) for it in items],
