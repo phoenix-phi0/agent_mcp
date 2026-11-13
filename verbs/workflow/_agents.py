@@ -164,11 +164,14 @@ def check_format(fmt, result):
     return wf_submit.validate(fmt[1], result) if fmt else []
 
 
-def _prompt(task, context, node=None, fmt=None, submit=False):
+def _prompt(task, context, node=None, fmt=None, submit=False, notes=None, previous=None):
     prompt = f"本次调用：{node}（提交格式 {fmt[0]}）\n" if fmt else ""
     prompt += f"任务：{task}\n"
     if context is not None:
         prompt += f"参考文本：{json.dumps(context, ensure_ascii=False) if isinstance(context, (dict, list)) else context}\n"
+    if notes:
+        prompt += "补充说明（人工追加，和任务同等效力）：\n"
+        prompt += "".join(f"{i}. {note['text']}\n" for i, note in enumerate(notes, 1))
     if fmt and submit:
         return prompt          # 用 submit 工具交：工具的参数格式就是这一步的格式，提示由 submit_call 加
     if fmt:
@@ -185,18 +188,19 @@ def _uses_submit(engine, profile, fmt):
     return spec.channel == "cli" and spec.provider in ("claude", "goose", "codex")
 
 
-def describe(engine, name, task, context=None, model=None, node=None, fmt=None):
+def describe(engine, name, task, context=None, model=None, node=None, fmt=None, notes=None, previous=None):
     """不调用，只给出这一步会怎么调：外部自己执行时照这个拼请求（prompt 里带格式）。"""
     profile = load_agent(engine, name, model)
     out = {"card": name, "model": profile["model"], "agentic": bool(profile.get("agentic")),
-           "system": profile["system"], "prompt": _prompt(task, context, node, fmt),
+           "system": profile["system"],
+           "prompt": _prompt(task, context, node, fmt, notes=notes, previous=previous),
            "cost": profile.get("cost")}
     if fmt:
         out.update(format=fmt[0], schema=fmt[1])
     return out
 
 
-def call_agent(engine, name, task, context=None, model=None, node=None, fmt=None):
+def call_agent(engine, name, task, context=None, model=None, node=None, fmt=None, notes=None, previous=None):
     profile = load_agent(engine, name, model)
     for pack in profile["packages"]:
         if not _NAME.fullmatch(pack):
@@ -216,7 +220,7 @@ def call_agent(engine, name, task, context=None, model=None, node=None, fmt=None
     on_call = getattr(engine, "_wf_on_call", None)
     if on_call:
         on_call(engine._wf_last_call)   # 调用前就把模型写进进行中的那条事件
-    prompt = _prompt(task, context, node, fmt, submit)
+    prompt = _prompt(task, context, node, fmt, submit, notes=notes, previous=previous)
     messages = [{"role": "system", "content": profile["system"]},
                 {"role": "user", "content": prompt}]
     if engine.dry_run:

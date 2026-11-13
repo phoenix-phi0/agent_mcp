@@ -193,6 +193,7 @@ run 编排提交   $PY tests/tools/test_wf_submit.py
 run 编排角色工具 $PY tests/tools/test_wf_gsb_tools.py
 run 编排成本分配 $PY tests/tools/test_wf_cost.py
 run 编排代码重构 $PY tests/tools/test_wf_refactor.py
+run 编排人工确认 $PY tests/tools/test_wf_confirm.py
 run 编排查看器 $PY tests/tools/test_trace_view.py
 run 查看器令牌 $PY tests/tools/test_trace_token.py
 run DSL规划读码 $PY tests/tools/test_dslagent_planread.py

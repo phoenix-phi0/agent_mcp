@@ -1,0 +1,87 @@
+// GSBatch 自动续接判定规则。
+//
+// 逐条翻译自 tools/gsbatch.py::_run_one 的内联逻辑（2026-11-01 的自动续接），
+// 优先级用 salience 复刻 Python 的判断顺序。两边必须同判——tests 里有
+// 一致性对照（sandbox 对照脚本 / tests/test_gsbatch_rules.py），改任何一边都要跑。
+//
+// 输入事实：Attempt（一次 goose 进程结束后的现场；reason/transient 由
+// GsbatchDecide.buildAttempt 按 Python 的分支算好）
+// 输出事实：Decision（resume / stop + gave_up 理由 + 退避秒数）
+//
+// 停止类规则命中就 setDecided(true) + update——不更新的话 R99 照样匹配，
+// 会一次吐出两个决策（Java 侧按「恰好一个」校验，两个就报错，属于显式失败）。
+
+package tools.gsbatch;
+
+global java.util.List emits;
+
+rule "R10 没出错就不续接（正常完成 / 超时 / 取消 / 真失败）"
+    salience 100
+    when
+        $a : Attempt(reason == "")
+    then
+        $a.setDecided(true);
+        update($a);
+        emits.add(new Decision(false, "", 0));
+end
+
+// reason 非空但不像瞬时错误（429 / 额度 / 鉴权 / 上下文超长…）：
+// Python 里把 reason 置空 → 静默停止，不给 resume_gave_up
+rule "R20 非瞬时错误不重试"
+    salience 90
+    when
+        $a : Attempt(reason != "", transient == false)
+    then
+        $a.setDecided(true);
+        update($a);
+        emits.add(new Decision(false, "", 0));
+end
+
+rule "R30 没有会话 id 接不上"
+    salience 80
+    when
+        $a : Attempt(reason != "", hasSession == false)
+    then
+        $a.setDecided(true);
+        update($a);
+        emits.add(new Decision(false, "没有会话 id，接不上", 0));
+end
+
+rule "R40 已取消"
+    salience 70
+    when
+        $a : Attempt(reason != "", cancelled == true)
+    then
+        $a.setDecided(true);
+        update($a);
+        emits.add(new Decision(false, "已取消", 0));
+end
+
+rule "R50 重试次数用完"
+    salience 60
+    when
+        $a : Attempt(reason != "", retries >= resumeMax)
+    then
+        $a.setDecided(true);
+        update($a);
+        emits.add(new Decision(false, "已重试 " + $a.getRetries() + " 次，不再试", 0));
+end
+
+rule "R60 剩余时间不够再续"
+    salience 50
+    when
+        $a : Attempt(reason != "", secondsLeft <= 0)
+    then
+        $a.setDecided(true);
+        update($a);
+        emits.add(new Decision(false, "剩余时间不够再续", 0));
+end
+
+rule "R99 该续接：等 backoff 之后接同一个会话"
+    salience 10
+    when
+        $a : Attempt(reason != "", decided == false)
+    then
+        int k = Math.min($a.getRetries(), $a.getBackoff().length - 1);
+        emits.add(new Decision(true, "", $a.getBackoff()[k]));
+end

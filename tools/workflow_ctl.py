@@ -8,7 +8,7 @@
 
   1. submitted 里有这一步    → 用外部交来的结果，往下走
   2. go 里有这一步           → 用内置执行器跑（可带模型、角色卡覆盖）
-  3. mode=auto，角色不在 stop_roles → 按默认跑（models/roles 里的长期覆盖照样生效）
+  3. mode=auto，未命中 confirm_before 规则 → 按默认跑（models/roles 里的长期覆盖照样生效）
   4. 否则停下：状态 waiting，pending 里是这一步的完整请求（角色卡、模型、系统提示、提示词）
 
 所以进程被杀、机器重启都不丢进度。暂停 = 把 mode 改回 step：正在跑的那一步跑完就停。
@@ -42,6 +42,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 _MODES = ("step", "auto")
 _CARD = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+_RULE = re.compile(r"^[\w\-·.]{1,80}\*?$")
+_ACTOR = re.compile(r"(?:viewer|workflow_ctl|mcp:[\w.\-]{1,64})")
 
 
 class WorkflowPause(BaseException):
@@ -71,6 +73,38 @@ def _dump(path, data):
 def _side(trace, ext):
     trace = Path(trace)
     return trace.with_name(trace.name[:-len(".json")] + ext)
+
+
+def _rules(cfg, which):
+    if which == "before":
+        return cfg.get("confirm_before", cfg.get("stop_roles", []))
+    return cfg.get("confirm_" + which, [])
+
+
+def _match(rules, names):
+    for rule in rules:
+        if any(name is not None and (name == rule or
+               (rule.endswith("*") and name.startswith(rule[:-1]))) for name in names):
+            return rule
+    return None
+
+
+def _check_rules(rules):
+    if not isinstance(rules, (list, tuple)):
+        raise ControlError(f"确认规则无效：{rules!r}")
+    for rule in rules:
+        if not isinstance(rule, str) or (rule != "*" and not _RULE.fullmatch(rule)):
+            raise ControlError(f"确认规则无效：{rule!r}")
+
+
+def _before_setting(stop_roles, confirm_before):
+    if stop_roles is not None and confirm_before is not None and stop_roles != confirm_before:
+        raise ControlError("两个是同一个设置，只给一个")
+    rules = confirm_before if confirm_before is not None else stop_roles
+    if rules is not None:
+        _check_rules(rules)
+        return list(rules)
+    return None
 
 
 class _Control:
@@ -120,6 +154,8 @@ class _Control:
 
     def _decide(self, req):
         k = req["step"]
+        attempt = len(self.failed.get(k, [])) + 1
+        meta = {"attempt": attempt, "notes": [], "confirm": [], "reason": None}
         old = self.replay.get(k)
         if old is not None:
             was = (old.get("line"), old.get("name"), old.get("default_role", old.get("role")), old.get("task"))
@@ -127,24 +163,44 @@ class _Control:
             if was != now:
                 raise ControlError(f"第 {k} 步回放对不上（脚本或输入改过？）："
                                    f"记录是 {was[1]}/{was[2]}，现在是 {now[1]}/{now[2]}")
-            return {"action": "replay", "event": old}
+            return {**meta, "action": "replay", "event": old,
+                    "attempt": old.get("attempt", attempt), "notes": old.get("notes", []),
+                    "confirm": old.get("confirm", [])}
         cfg = self._current()
         key = str(k)
+        meta["notes"] = cfg.get("notes", {}).get(key, [])
         if not self.orders:
-            return {"action": "wait", "model": cfg.get("models", {}).get(req["role"]),
-                    "role": cfg.get("roles", {}).get(req["role"])}
+            reason = "error" if (self.old or {}).get("status") == "error" else "interrupted"
+            return {**meta, "action": "wait", "model": cfg.get("models", {}).get(req["role"]),
+                    "role": cfg.get("roles", {}).get(req["role"]), "reason": reason}
         if key in cfg.get("submitted", {}):
-            return {"action": "result", "result": cfg["submitted"][key]}
+            # submitted 继续存原结果，来源从既有 history 取，兼容旧控制文件的形状。
+            submitted = next((h for h in reversed(cfg.get("history", []))
+                              if h.get("op") == "submit" and h.get("step") == k), {})
+            actor = submitted.get("actor", "workflow_ctl")
+            return {**meta, "action": "result", "result": cfg["submitted"][key], "actor": actor,
+                    "confirm": [{"phase": "before", "action": "submit", "actor": actor,
+                                 "at": submitted.get("at") or _stamp()}]}
         plan = {"model": cfg.get("models", {}).get(req["role"]),
                 "role": cfg.get("roles", {}).get(req["role"])}
         if key in cfg.get("go", {}):
             go = cfg["go"][key]
-            return {"action": "run", "by": "execute",
-                    "model": go.get("model") or plan["model"], "role": go.get("role") or plan["role"]}
-        if (not self.force_step and cfg.get("mode") == "auto"
-                and req["role"] not in cfg.get("stop_roles", [])):
-            return {"action": "run", "by": "auto", **plan}
-        return {"action": "wait", **plan}
+            if "attempt" not in go or go["attempt"] == attempt:
+                # 历史说明继续带进提示词；确认动作只记本次尝试新追加的说明。
+                confirm = [{"phase": "before", "action": "note", "actor": n["actor"], "at": n["at"]}
+                           for n in meta["notes"] if n.get("kind") == "add" and n.get("attempt") == attempt]
+                return {**meta, "action": "run", "by": "execute",
+                        "model": go.get("model") or plan["model"], "role": go.get("role") or plan["role"],
+                        "confirm": confirm + [{"phase": "before", "action": "run", "role": go.get("role"),
+                                     "model": go.get("model"), "actor": go.get("actor", "workflow_ctl"),
+                                     "at": go.get("at") or _stamp()}]}
+        names = {req["name"], req["role"], cfg.get("go", {}).get(key, {}).get("role") or plan["role"]}
+        matched = _match(_rules(cfg, "before"), names)
+        if cfg.get("mode") == "step" or self.force_step:
+            return {**meta, "action": "wait", "reason": "step", **plan}
+        if matched is not None:
+            return {**meta, "action": "wait", "reason": "rule:" + matched, **plan}
+        return {**meta, "action": "run", "by": "auto", **plan}
 
 
 # ---- 内部：推进、后台进程 ----
@@ -246,9 +302,27 @@ def _log(cfg, op, **kw):
 
 
 def _prune(cfg, keep_below):
-    """去掉 >= keep_below 步的 submitted/go，免得回退后旧指令又生效。"""
-    for key in ("submitted", "go"):
+    """去掉 >= keep_below 步的 submitted/go/notes，免得回退后旧指令和说明又生效。"""
+    for key in ("submitted", "go", "notes"):
         cfg[key] = {k: v for k, v in cfg.get(key, {}).items() if int(k) < keep_below}
+
+
+def _check_note(note):
+    if note is None:
+        return
+    if not isinstance(note, str) or not note.strip():
+        raise ControlError("说明必须是非空字符串")
+    if len(note) > 4000:
+        raise ControlError("说明最多 4000 字")
+    try:
+        note.encode("utf-8")
+    except UnicodeEncodeError as e:
+        raise ControlError("说明必须是有效的 UTF-8 字符串") from e
+
+
+def _check_actor(actor):
+    if not isinstance(actor, str) or not _ACTOR.fullmatch(actor):
+        raise ControlError(f"来源无效：{actor!r}")
 
 
 def _check_model(model):
@@ -259,6 +333,7 @@ def _check_model(model):
     if not isinstance(model, str) or ":" not in model or "/" not in model:
         raise ControlError(f"模型名无效：{model}（要写全，如 cli:goose/glm-5.3）")
     try:
+        model.encode("utf-8")
         config.parse_model(model)
     except Exception as e:
         raise ControlError(f"模型名无效：{model}（{e}）") from e
@@ -287,8 +362,9 @@ def _rel(p):
 
 # ---- 接口 ----
 
-def start(workdir, entry="run.zs", mode="step", stop_roles=(), models=None, roles=None,
-          wait=False, client=None):
+def start(workdir, entry="run.zs", mode="step", stop_roles=None, models=None, roles=None,
+          wait=False, client=None, confirm_before=None, actor="workflow_ctl"):
+    _check_actor(actor)
     wd = Path(workdir)
     if not wd.is_absolute():
         wd = ROOT / wd
@@ -303,11 +379,13 @@ def start(workdir, entry="run.zs", mode="step", stop_roles=(), models=None, role
     if mode not in _MODES:
         raise ControlError(f"mode 只能是 {_MODES}")
     _check_maps(models, roles)
-    for r in stop_roles:
-        _check_card(r)
-    cfg = {"entry": entry, "mode": mode, "stop_roles": list(stop_roles), "models": dict(models or {}),
+    before = _before_setting(stop_roles, confirm_before)
+    if before is None:
+        before = []
+    cfg = {"entry": entry, "mode": mode, "confirm_before": before, "stop_roles": before,
+           "models": dict(models or {}),
            "roles": dict(roles or {}), "submitted": {}, "go": {}, "worker": None, "history": []}
-    _log(cfg, "start", mode=mode)
+    _log(cfg, "start", mode=mode, actor=actor)
     # 第一遍只走到第一个节点就停，不调模型；有了记录文件再按 mode 往下走
     trace = _advance(None, cfg, client, force_step=True, workdir=wd)
     if trace is None:
@@ -332,23 +410,27 @@ def status(run, detail=False):
         if e.get("type") != "task":
             continue
         row = {k: e.get(k) for k in ("step", "name", "role", "status", "model", "seconds")}
-        for k in ("default_role", "source", "model_override", "error"):
+        row["attempt"] = e.get("attempt", 1)
+        for k in ("default_role", "source", "model_override", "error", "actor", "confirm"):
             if e.get(k):
                 row[k] = e[k]
         if detail and "result" in e:
             row["result"] = e["result"]
         steps.append(row)
     out = {"run": _rel(p), "workflow": t.get("workflow"), "status": st, "error": t.get("error"),
-           "mode": cfg.get("mode"), "stop_roles": cfg.get("stop_roles", []),
+           "mode": cfg.get("mode"), "confirm_before": _rules(cfg, "before"),
+           "stop_roles": _rules(cfg, "before"),
            "models": cfg.get("models", {}), "roles": cfg.get("roles", {}),
            "worker_alive": alive, "resumes": t.get("resumes", 0), "steps": steps}
     pend = t.get("pending") if t.get("status") == "waiting" else None
     if pend:
+        pend = {"phase": "before", "reason": "step", "attempt": 1, **pend}
         out["pending"] = pend if detail else {k: v for k, v in pend.items() if k not in ("system", "prompt", "schema")}
     return out
 
 
-def submit(run, result, step=None, wait=None, client=None):
+def submit(run, result, step=None, wait=None, client=None, actor="workflow_ctl"):
+    _check_actor(actor)
     p, cf, cfg, t = _open(run)
     _idle(cfg)
     pend = _pending(_settle(p, cfg, t, client), step)
@@ -367,38 +449,52 @@ def submit(run, result, step=None, wait=None, client=None):
             raise ControlError(f"结果不符合格式 {pend.get('format')}：" + "；".join(bad[:5]))
     _prune(cfg, pend["step"])
     cfg["submitted"][str(pend["step"])] = result
-    _log(cfg, "submit", step=pend["step"])
+    _log(cfg, "submit", step=pend["step"], actor=actor)
     _dump(cf, cfg)
     _continue(p, cfg["mode"] == "step" if wait is None else wait, client)
     return status(p)
 
 
-def execute(run, model=None, role=None, step=None, wait=False, client=None):
+def execute(run, model=None, role=None, step=None, wait=False, client=None, note=None, actor="workflow_ctl"):
+    _check_actor(actor)
     p, cf, cfg, t = _open(run)
     _idle(cfg)
     _check_model(model)
     _check_card(role)
-    pend = _pending(_settle(p, cfg, t, client), step)
+    _check_note(note)
+    t = _settle(p, cfg, t, client)
+    pend = _pending(t, step)
+    key = str(pend["step"])
+    attempt = 1 + sum(e.get("type") == "task" and e.get("step") == pend["step"]
+                      and e.get("status") == "error" for e in t.get("events", []))
+    notes = list(cfg.get("notes", {}).get(key, []))
     _prune(cfg, pend["step"])
-    cfg["go"][str(pend["step"])] = {"model": model, "role": role}
-    _log(cfg, "execute", step=pend["step"], model=model, role=role)
+    at = _stamp()
+    if note is not None:
+        notes.append({"kind": "add", "text": note, "attempt": attempt, "actor": actor, "at": at})
+    if notes:
+        cfg["notes"][key] = notes
+    cfg["go"][key] = {"model": model, "role": role, "attempt": attempt, "actor": actor, "at": at}
+    _log(cfg, "execute", step=pend["step"], model=model, role=role, actor=actor)
     _dump(cf, cfg)
     _continue(p, wait, client)
     return status(p)
 
 
-def pause(run):
+def pause(run, actor="workflow_ctl"):
+    _check_actor(actor)
     p, cf, cfg, _ = _open(run)
     cfg["mode"] = "step"
-    _log(cfg, "pause")
+    _log(cfg, "pause", actor=actor)
     _dump(cf, cfg)
     return status(p)
 
 
-def resume(run, wait=False, client=None):
+def resume(run, wait=False, client=None, actor="workflow_ctl"):
+    _check_actor(actor)
     p, cf, cfg, t = _open(run)
     cfg["mode"] = "auto"
-    _log(cfg, "resume")
+    _log(cfg, "resume", actor=actor)
     _dump(cf, cfg)
     st = status(p)["status"]
     if not _alive(cfg) and st in ("waiting", "interrupted", "error", "aborted"):
@@ -406,37 +502,40 @@ def resume(run, wait=False, client=None):
     return status(p)
 
 
-def configure(run, stop_roles=None, models=None, roles=None):
+def configure(run, stop_roles=None, models=None, roles=None, confirm_before=None, actor="workflow_ctl"):
     """None = 不改；传 {} / [] = 清空。只影响还没跑的节点。"""
+    _check_actor(actor)
     p, cf, cfg, _ = _open(run)
     _check_maps(models, roles)
-    if stop_roles is not None:
-        for r in stop_roles:
-            _check_card(r)
-        cfg["stop_roles"] = list(stop_roles)
+    before = _before_setting(stop_roles, confirm_before)
+    if before is not None:
+        cfg["confirm_before"] = before
+        cfg["stop_roles"] = before
     if models is not None:
         cfg["models"] = dict(models)
     if roles is not None:
         cfg["roles"] = dict(roles)
-    _log(cfg, "configure", stop_roles=stop_roles, models=models, roles=roles)
+    _log(cfg, "configure", stop_roles=before, confirm_before=before, models=models, roles=roles, actor=actor)
     _dump(cf, cfg)
     return status(p)
 
 
-def rewind(run, step, client=None):
+def rewind(run, step, client=None, actor="workflow_ctl"):
+    _check_actor(actor)
     p, cf, cfg, _ = _open(run)
     _idle(cfg)
     step = int(step)
     if step < 1:
         raise ControlError("step 从 1 开始")
     _prune(cfg, step)
-    _log(cfg, "rewind", step=step)
+    _log(cfg, "rewind", step=step, actor=actor)
     _dump(cf, cfg)
     _advance(p, cfg, client, rewind=step, force_step=True)
     return status(p)
 
 
-def abort(run):
+def abort(run, actor="workflow_ctl"):
+    _check_actor(actor)
     p, cf, cfg, t = _open(run)
     if _alive(cfg):
         pid = cfg["worker"]
@@ -455,9 +554,9 @@ def abort(run):
         if e.get("type") == "task" and e.get("status") in ("running", "waiting"):
             e["status"] = "aborted"
     t.pop("pending", None)
-    t.update(status="aborted", error="外部中止", finished=_stamp(), updated=_stamp())
+    t.update(status="aborted", error=f"外部中止（{actor}）", finished=_stamp(), updated=_stamp())
     _dump(p, t)
-    _log(cfg, "abort")
+    _log(cfg, "abort", actor=actor)
     _dump(cf, cfg)
     return status(p)
 

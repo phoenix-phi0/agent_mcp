@@ -105,6 +105,8 @@ elif "SLEEP" in prompt:
     time.sleep(30)
 resume = arg("--session-id")
 sid = resume or ("20261023_" + str(int(t0 * 1000000) % 100000))
+if "NETERR3" in prompt:
+    sid = "20261023_3333"
 print("")
 print("    __( O)>  ● new session · " + str(prov) + " " + str(arg("--model")))
 print("   \\\\____)    " + sid + " · " + os.getcwd())
@@ -114,7 +116,20 @@ def emit(o):
 def msg(mid, content, role="assistant"):
     emit({{"type": "message", "message": {{"id": mid, "role": role, "content": content,
           "metadata": {{"inference": {{"provider": prov, "requestedModel": arg("--model")}}}}}}}})
-if "ERR" in prompt:
+if ("NETERR" in prompt and not resume) or resume == "20261023_3333":   # 3333 = NETERR3 的会话，一直断
+    msg("m0", [{{"type": "thinking", "thinking": "半截"}}])
+    msg("m0", [{{"type": "text", "text": "做了一半"}}])
+    msg("m9", [{{"type": "error", "kind": "other", "message": "Network error: Stream decode error: error decoding response body"}}])
+    emit({{"type": "error", "error": "Network error: Stream decode error: error decoding response body"}})
+    sys.stderr.write("Error: Network error: Stream decode error: error decoding response body")
+    sys.exit(1)
+if "QUOTA" in prompt:
+    emit({{"type": "error", "error": "Request failed: 429 Too Many Requests: usage limit exceeded (1308)"}})
+    sys.stderr.write("Error: 429 quota")
+    sys.exit(1)
+if "STALL" in prompt and not resume:
+    time.sleep(30)
+if "ERR" in prompt and "NETERR" not in prompt:
     emit({{"type": "error", "error": "模型不可用"}})
     sys.exit(0)
 if "RC3" in prompt:
@@ -165,6 +180,7 @@ os.environ.update(
     GSBATCH_ZAI_UPSTREAM=f"http://127.0.0.1:{UP_PORT}",
     GSBATCH_ZAI_LOW_START=str(start), GSBATCH_ZAI_LOW_PORT=str(UP_PORT),
     GSBATCH_ZAI_LOW_LOG=str(ZLOG),
+    GSBATCH_RESUME_BACKOFF="0.2", GSBATCH_STALL_SEC="4",
     ZHIPU_API_KEY=SECRET, GH_TOKEN="ghp_fakefakefakefake", GOOSE_PROVIDER="openai",
     CLAUDECODE="1", CLAUDE_CODE_SESSION_ID="parent")
 os.environ.pop("ZAI_CODING_PLAN_API_KEY", None)
@@ -468,6 +484,42 @@ def main():
     t = d["tasks"][0]
     check(t["status"] == "error" and t["rc"] == 3 and "boom" in t["stderr"] and d["status"] == "failed",
           "记 rc 和 stderr 摘要", t)
+
+    print("自动续接（网络 / 流中断）")
+    d, cs = run(["NETERR 一", "QUOTA 二"], concurrency=2, timeout=30)
+    t0_, t1_ = d["tasks"]
+    rs = [c for c in cs if "NETERR" in c["prompt"] or "上次因网络中断" in c["prompt"]]
+    check(t0_["status"] == "done" and t0_.get("retry_count") == 1, "流解码错误续接 1 次后完成",
+          {k: t0_.get(k) for k in ("status", "retry_count", "error")})
+    rc_ = [c for c in cs if "上次因网络中断" in c["prompt"]]
+    check(len(rc_) == 1 and arg(rc_[0], "--session-id") == t0_["retries"][0]["session_id"]
+          and "--resume" in rc_[0]["argv"], "续接用 --resume --session-id 同一个会话",
+          [c["argv"] for c in rc_])
+    check("Stream decode" in t0_["retries"][0]["reason"] and t0_["retries"][0]["wait"] == 0.2,
+          "job.json 记了重试原因和等待", t0_.get("retries"))
+    check("做了一半" in t0_["output"] and "答：" in t0_["output"], "两段输出都保留", t0_["output"][:80])
+    check(t1_["status"] == "error" and not t1_.get("retries") and t1_.get("retry_count") == 0
+          and len([c for c in cs if "QUOTA" in c["prompt"]]) == 1, "429 / 额度错误不重试",
+          {k: t1_.get(k) for k in ("status", "retry_count", "error")})
+    d, cs = run(["NETERR3 一直断"], timeout=30)
+    t = d["tasks"][0]
+    check(t["status"] == "error" and t.get("retry_count") == 3 and len(cs) == 4
+          and "已重试 3 次" in (t.get("resume_gave_up") or ""), "最多重试 3 次就放弃",
+          {k: t.get(k) for k in ("status", "retry_count", "resume_gave_up")})
+    d, cs = run(["ERR 模型"], timeout=30)
+    check(d["tasks"][0]["status"] == "error" and len(cs) == 1, "非网络错误不重试", d["tasks"][0].get("error"))
+    t0s = time.time()
+    d, cs = run(["STALL 卡住"], timeout=30)
+    t = d["tasks"][0]
+    check(t["status"] == "done" and t.get("retry_count") == 1 and "流卡住" in t["retries"][0]["reason"]
+          and time.time() - t0s < 15, "流卡住被看门狗杀掉后续接完成",
+          {k: t.get(k) for k in ("status", "retry_count", "retries", "error")})
+    check(gsbatch._transient("Network error: Stream decode error: error decoding response body")
+          and gsbatch._transient("HTTP 502 Bad Gateway") and gsbatch._transient("connection reset by peer")
+          and not gsbatch._transient("429 Too Many Requests")
+          and not gsbatch._transient("Network error: 401 Unauthorized")
+          and not gsbatch._transient("timeout: quota exceeded")
+          and not gsbatch._transient("模型不可用"), "错误分类")
 
     print("输出截断")
     d, cs = run(["BIG"])

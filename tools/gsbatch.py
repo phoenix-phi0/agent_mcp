@@ -178,6 +178,28 @@ TASK_TIMEOUT = 600
 MAX_OUTPUT = 100_000
 PREVIEW = 500
 
+# 自动续接（2026-11-01）：goose 因网络 / 流中断 / 上游 5xx 退出，或流卡住太久，就用
+# --resume 接同会话继续。判定抽成了规则引擎：tools/gsbatch_rules.py（默认
+# 本地实现），GSBATCH_DECIDER=drools 走 tools/gsbatch_drools/ 的 Drools 规则。
+# 用前先跑一次 tools/gsbatch_drools/build.sh，一致性由 tests/test_gsbatch_rules.py 保证。
+# --resume --session-id 接同一个会话继续。额度 / 429 / 鉴权 / 真失败 / 超时不重试。
+RESUME_MAX = int(os.environ.get("GSBATCH_RESUME_MAX") or 3)
+RESUME_BACKOFF = tuple(float(x) for x in (os.environ.get("GSBATCH_RESUME_BACKOFF") or "30,60,120").split(",") if x.strip())
+STALL_SEC = float(os.environ.get("GSBATCH_STALL_SEC") or 600)   # 标准输出这么久没动静 = 流卡住；0 = 不看
+RESUME_PROMPT = ("上次因网络中断停止（{reason}），请从中断处继续完成任务：先核对已经做了哪些（文件、进程、报告），"
+                 "不要从头重做，接着做剩下的部分。")
+_NOT_TRANSIENT = re.compile(
+    r"\b429\b|rate.?limit|quota|insufficient|余额|额度|欠费|限流|too many requests|usage limit|"
+    r"\b40[13]\b|unauthori[sz]ed|forbidden|authenticat|api.?key|invalid.?key|鉴权|"
+    r"\b1113\b|\b1301\b|\b1302\b|\b1304\b|\b1308\b|context.?length|maximum context|prompt is too long|too long",
+    re.I)
+_TRANSIENT = re.compile(
+    r"stream decode error|error decoding response body|network error|connection (reset|refused|closed|aborted)|"
+    r"reset by peer|broken pipe|unexpected eof|incomplete (message|chunked)|timed? ?out|timeout|"
+    r"\b50[0234]\b|bad gateway|service unavailable|gateway time|server error|overloaded|"
+    r"temporarily unavailable|error sending request|hyper::|reqwest",
+    re.I)
+
 PROVIDERS = ("zai_low", "zai_coding_plan", "chatgpt_codex")
 ZAI = ("zai_low", "zai_coding_plan")
 DEFAULT_PROVIDER = "zai_low"
@@ -1238,6 +1260,89 @@ def _goose_tokens(c: dict, prev: dict = None):
     return tok, tot
 
 
+def _transient(err: str) -> bool:
+    """出错文字像网络 / 流中断 / 上游 5xx（可续接重试）；额度、429、鉴权、上下文超长一律不算。"""
+    err = err or ""
+    return bool(_TRANSIENT.search(err)) and not _NOT_TRANSIENT.search(err)
+
+
+def _decide_resume(why, rc, pa_err, err_tail, retries, sess, cancel_fn, deadline):
+    """续接判定：出错后要不要 --resume 接着跑、等多久。
+
+    判定本体在 tools/gsbatch_rules.py：默认 decide_local（原来 _run_one 里
+    的内联逻辑原样搬过去），GSBATCH_DECIDER=drools 走 Drools 规则引擎
+    （tools/gsbatch_drools/decide.drl），两边同判由
+    tests/test_gsbatch_rules.py 对照保证。引擎坏了自动回退本地，
+    回退会记在返回值的 engine 字段里，不静默。
+
+    返回 {"resume": bool, "wait": int, "gave_up": str, "reason": str|None}。
+    reason 是出错原文（retries 记录和日志用），resume=False 且 gave_up
+    为空 = 静默停止（正常完成 / 超时 / 非瞬时错误）。
+    """
+    if why == "stall":
+        reason = f"流卡住：{int(STALL_SEC)} 秒没有输出，已杀掉"
+    elif why is None and (rc != 0 or pa_err):
+        reason = (pa_err or err_tail or f"退出码 {rc}").strip()
+    else:
+        reason = None
+    k = len(retries)
+    wait_s = RESUME_BACKOFF[min(k, len(RESUME_BACKOFF) - 1)] if RESUME_BACKOFF else 0
+    seconds_left = deadline - time.time() - wait_s
+    from .gsbatch_rules import decide
+    d = decide(why=why, rc=rc, err_text=reason or "", retries=k,
+               has_session=bool(sess), cancelled=cancel_fn(),
+               seconds_left=seconds_left,
+               backoff=RESUME_BACKOFF or (0,), resume_max=RESUME_MAX)
+    return {"resume": d["resume"], "wait": d["wait"],
+            "gave_up": d["gave_up"], "reason": reason,
+            "engine": d.get("engine", "local")}
+
+
+def _attempt(cmd, cwd, env, prompt, deadline, pid_file, stall_sec, cancelled=None):
+    """跑一次 goose：逐行读标准输出，记最后一次动静。
+    → (out, err, rc, why)；why ∈ None / "timeout" / "stall" / "cancel"。"""
+    p = subprocess.Popen(cmd, cwd=cwd, env=env, stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                         start_new_session=True)
+    pid_file.write_text(str(p.pid))
+    out, err, last = [], [], [time.time()]
+
+    def rd(f, buf, touch):
+        for line in iter(f.readline, ""):
+            buf.append(line)
+            if touch:
+                last[0] = time.time()
+        f.close()
+
+    ths = [threading.Thread(target=rd, args=(p.stdout, out, True), daemon=True),
+           threading.Thread(target=rd, args=(p.stderr, err, False), daemon=True)]
+    for th in ths:
+        th.start()
+    try:
+        p.stdin.write(prompt)
+        p.stdin.close()
+    except OSError:
+        pass
+    why = None
+    while p.poll() is None:
+        now = time.time()
+        if now >= deadline:
+            why = "timeout"
+        elif stall_sec and now - last[0] >= stall_sec:
+            why = "stall"
+        elif cancelled and cancelled():
+            why = "cancel"
+        if why:
+            _killpg(p.pid)
+            break
+        time.sleep(min(1.0, max(0.05, (stall_sec or 1) / 20)))
+    p.wait()
+    for th in ths:
+        th.join(5)
+    pid_file.unlink(missing_ok=True)
+    return "".join(out), "".join(err), p.returncode, why
+
+
 def _run_one(d: dict, t: dict, resume: str = None, n: int = 1, prev_total: dict = None) -> None:
     """跑一条，结果写回 t。不抛异常。"""
     jd = _job_dir(d["id"])
@@ -1270,33 +1375,67 @@ def _run_one(d: dict, t: dict, resume: str = None, n: int = 1, prev_total: dict 
                 pass
 
     t0 = time.time()
-    try:
-        p = subprocess.Popen(cmd, cwd=d["cwd"], env=_env(d, t), stdin=subprocess.PIPE,
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                             start_new_session=True)
-    except OSError as e:
-        if pfile:
-            pfile.unlink(missing_ok=True)
-        t.update(status="error", error=f"起不来 goose：{e}", seconds=0)
-        return
-    (jd / f"task_{n}.pid").write_text(str(p.pid))
-    try:
-        out, err = p.communicate(t["prompt"], timeout=o["timeout"])
-        timed_out = False
-    except subprocess.TimeoutExpired:
-        _killpg(p.pid)
-        out, err = p.communicate()
-        timed_out = True
-    (jd / f"task_{n}.pid").unlink(missing_ok=True)
+    deadline = t0 + o["timeout"]
+    cancelled = lambda: (jd / "cancel").exists()   # noqa: E731
+    env = _env(d, t)
+    prompt, cur_cmd, sess = t["prompt"], cmd, resume
+    outs, errs, texts, retries = [], [], [], []
+    timed_out = False
+    while True:
+        try:
+            out, err, rc, why = _attempt(cur_cmd, d["cwd"], env, prompt, deadline,
+                                         jd / f"task_{n}.pid", STALL_SEC, cancelled)
+        except OSError as e:
+            if pfile:
+                pfile.unlink(missing_ok=True)
+            t.update(status="error", error=f"起不来 goose：{e}", seconds=round(time.time() - t0, 1))
+            return
+        outs.append(out)
+        errs.append(err)
+        timed_out = why == "timeout"
+        pa = _parse(out or "")
+        sess = pa["session_id"] or sess
+        if pa["text"]:
+            texts.append(pa["text"])
+        # 续接判定抽成了规则引擎（tools/gsbatch_rules.py，规则在
+        # tools/gsbatch_drools/decide.drl），判定分支见 _decide_resume
+        dres = _decide_resume(why, rc, pa["error"], err.strip()[-300:],
+                              retries, sess, cancelled, deadline)
+        k = len(retries)
+        reason = dres["reason"] if dres["resume"] or dres["gave_up"] else None
+        if not dres["resume"]:
+            if dres["gave_up"]:
+                t["resume_gave_up"] = dres["gave_up"]
+            break
+        wait_s = dres["wait"]
+        retries.append({"attempt": k + 2, "at": _now(), "reason": _mask(reason)[:300],
+                        "wait": wait_s, "session_id": sess, "rc": rc})
+        t["retries"] = retries
+        print(f"[{_now()}] task {n}：{reason[:200]} → {wait_s:g} 秒后续接会话 {sess}（第 {k + 1}/{RESUME_MAX} 次）",
+              flush=True)
+        end = time.time() + wait_s
+        while time.time() < end and not cancelled():
+            time.sleep(min(1.0, wait_s / 10 or 0.05))
+        if cancelled():
+            break
+        cur_cmd = _command(d, t, n, sess)
+        prompt = RESUME_PROMPT.format(reason=_mask(reason)[:120])
     if pfile:
         pfile.unlink(missing_ok=True)
+    sep = "\n" + json.dumps({"type": "gsbatch_resume"}) + "\n"
+    out, err = sep.join(outs), "\n--- 续接 ---\n".join(errs)
     keep(out, err)
     t["seconds"] = round(time.time() - t0, 1)
-    t["rc"] = p.returncode
-    t["stderr"] = _mask((err or "").strip()[-500:])
+    t["rc"] = rc
+    t["stderr"] = _mask((errs[-1] or "").strip()[-500:])
+    t["retry_count"] = len(retries)
+    if retries:
+        t["cmd_resume"] = _show_cmd(cur_cmd)
 
-    parsed = _parse(out or "")
-    text = parsed["text"]
+    parsed = _parse(outs[-1] or "")
+    parsed["session_id"] = sess
+    parsed["tool_calls"] = sum(_parse(x or "")["tool_calls"] for x in outs)
+    text = "\n\n".join(texts)
     if len(text) > MAX_OUTPUT:
         text = text[:MAX_OUTPUT] + f"\n…（输出太长，已截断，共 {len(text)} 字）"
     gtok, gtot = _goose_tokens(parsed["complete"], prev_total)
@@ -1327,9 +1466,13 @@ def _run_one(d: dict, t: dict, resume: str = None, n: int = 1, prev_total: dict 
         t.update(status="timeout", error=f"超过 {o['timeout']} 秒，已杀掉")
         return
     perr = parsed["error"] or (llm["errors"][-1] if llm and llm["errors"] else "")
-    if p.returncode != 0:
+    if why == "stall":
+        t.update(status="error", error=f"流卡住：{int(STALL_SEC)} 秒没有输出，已杀掉（续接 {len(retries)} 次后放弃）")
+    elif why == "cancel":
+        t.update(status="cancelled")
+    elif rc != 0:
         t.update(status="error",
-                 error=(f"退出码 {p.returncode} " + (perr or t["stderr"])).strip())
+                 error=(f"退出码 {rc} " + (perr or t["stderr"])).strip())
     elif parsed["error"]:
         t.update(status="error", error=parsed["error"])
     elif parsed["complete"] is None:

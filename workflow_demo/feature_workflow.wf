@@ -1,0 +1,40 @@
+# 按设计实现功能：设计已经写好、审过（{design} 是设计全文，项目根目录另有一份 {design_file} 给工程师读），
+# 所以不再写约定、不再审方案：架构师按设计拆任务 → 按成本分配 → 逐项实现 → 回归验收（不过就返工）
+角色清单 roster {roles}
+任务分配
+    任务 任务分配（按设计实现新功能，不是重构）：参考文本是设计方案全文，这次只做：{scope}。按方案拆成能单独验证的任务，先底层后上层，前一项做完后一项能接着用；每项 content 写清：对应方案哪几节、改哪些文件和函数、要实现的行为、要新增或补充的测试（写方案第 8 节的编号和测试文件名）、验收命令（原样写）：{test_cmd}。项目在 work/{project}（工程师的工作目录就是它），设计全文在项目根目录 {design_file}，工程师能自己读，content 里引用章节号即可，不用整段抄。约束：{goal}。技术栈：{stack}。实施预算：{budget}（所有项的 cost 加起来不能超过它）。可用角色：{roster}
+    文本 design
+    角色 ARCHITECT
+    格式 cost_assignment
+    记录 assignment
+标记:c
+成本合计 spent assignment.tasks 预算 {budget}
+如果 spent.status == 超出
+    分配调整
+        任务 分配调整：上一次的分配超出了实施预算或用了清单外的角色（见参考文本的 not_in_roster），只改 agent，让合计不超过预算、且只用可用角色。可用角色：{roster}
+        文本 spent
+        角色 ARCHITECT
+        格式 cost_assignment
+        记录 assignment
+    跳转 c 最大 2
+遍历 task 于 assignment.tasks
+    任务实现
+        任务 task.content
+        角色 task.agent
+        格式 implementation
+        记录 task_result
+    存储 task_results task_result
+标记:b
+测试
+    任务 验收（按设计实现新功能）：{test_content}。测试命令（以这个为准，不要换成别的）：{test_cmd}。这次的范围：{scope}。设计全文在项目根目录 {design_file}。必须核对：1 测试命令全部通过；2 范围内设计要求的行为都实现了，第 8 节对应编号的测试都写了，而且真在测这些行为（不是空壳）；3 已有测试文件的断言没有被改弱或删除（用 git diff 看）；4 没有做范围以外的事；5 旧的调用方式照常能用。范围外的问题（包括项目原本就有的，用 git diff 分辨）和验收环境的限制（沙箱不让开端口等）只写进 summary 当备注，不判需修改、不写进 task。约束：{goal}。参考文本是各项实现记录
+    文本 task_results
+    角色 QA_ENGINEER
+    格式 acceptance
+    记录 test_discussion
+如果 test_discussion.decide == 需修改
+    代码修改
+        任务 test_discussion.task
+        角色 ENGINEER
+        格式 implementation
+        记录 task_result
+    跳转 b 最大 3

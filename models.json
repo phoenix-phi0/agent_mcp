@@ -6,7 +6,7 @@
     "aliases：别名 → 模型或档位名（只解析一层：别名可以指向档位，档位不能再指向别名）。档位和别名不能重名。",
     "模型名格式「通道:提供方/模型」：api:zhipu/glm-5.3 走智谱 HTTP API；api:anthropic/… 预留，还没接入；",
     "cli:claude/haiku|sonnet|opus 走本机 claude -p（cli:claude 不带模型 = 它自己的默认）；cli:zcode 走本机 zcode -p（不能选模型）。",
-    "兼容旧写法：裸名 glm-5.3 = api:zhipu/glm-5.3，claude:sonnet = cli:claude/sonnet，zcode = cli:zcode。",
+    "cli:claude/haiku|sonnet|opus|fable 走本机 claude -p（cli:claude 不带模型 = 它自己的默认）；cli:zcode 走本机 zcode -p（不能选模型）。",
     "能力差别：api 支持「带工具」和真流式；cli 不支持「带工具」（报错），「流式」降级成整段一次性返回；",
     "cli 每次起一个进程，慢（十秒上下）；claude 吃 Max 订阅额度，zcode 吃 Z.AI 账号额度。",
     "三档现在走 claude（快=haiku、平衡=sonnet、强=opus；快曾短暂换成 sonnet@low，现改回 haiku；「@努力程度」只有 cli:claude 能写），各配一个智谱模型做 fallback 接住「带工具」。",
@@ -18,14 +18,25 @@
   ],
   "default": "平衡",
   "tiers": {
-    "快": {"model": "cli:claude/haiku", "fallback": "api:zhipu/glm-5.3-flashx"},
-    "平衡": {"model": "cli:claude/sonnet", "fallback": "api:zhipu/glm-5.3-flash"},
-    "强": {"model": "cli:claude/opus", "fallback": "api:zhipu/glm-5.3"}
+    "快": {
+      "model": "cli:claude/haiku",
+      "fallback": "api:zhipu/glm-5.3-flashx"
+    },
+    "平衡": {
+      "model": "cli:claude/sonnet",
+      "fallback": "api:zhipu/glm-5.3-flash"
+    },
+    "强": {
+      "model": "cli:claude/opus",
+      "fallback": "api:zhipu/glm-5.3"
+    }
   },
   "aliases": {
     "克": "cli:claude/sonnet",
     "克快": "cli:claude/sonnet@low",
     "克强": "cli:claude/opus",
-    "z": "cli:zcode"
+    "z": "cli:zcode",
+    "fable": "cli:claude/fable",
+    "克fable": "cli:claude/fable"
   }
 }

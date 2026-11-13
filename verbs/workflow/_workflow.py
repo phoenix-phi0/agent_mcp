@@ -313,10 +313,21 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                 # 这一步以前失败过的尝试原样留在记录里（回放时控制器交回来）
                 for failed in decision.get("failed", []):
                     trace.add(**{k: v for k, v in failed.items() if k != "seq"})
+                metadata = {}
+                if ctl is not None:
+                    metadata["attempt"] = decision.get("attempt", len(decision.get("failed", [])) + 1)
+                    if decision.get("notes"):
+                        metadata["notes"] = decision["notes"]
+                        extra["notes"] = decision["notes"]
+                    if decision.get("confirm"):
+                        metadata["confirm"] = decision["confirm"]
 
                 def stop(use_role, use_model, last_error=None):
                     """停在这一步等外部：记一条 waiting 事件，pending 里放完整请求。"""
-                    pending = dict(request, card=use_role)
+                    pending = dict(request, card=use_role, phase="before",
+                                   reason="error" if last_error else decision.get("reason") or "step",
+                                   attempt=metadata["attempt"] + (1 if last_error else 0),
+                                   notes=decision.get("notes", []))
                     if last_error:
                         pending["last_error"] = last_error
                     if describe is not None:
@@ -324,7 +335,7 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                             pending.update(describe(engine, use_role, task, context, model=use_model, **extra))
                         except Exception as e:      # 卡坏了也照样停下，让外部看到原因、换卡
                             pending["card_error"] = str(e)
-                    trace.add(type="task", **request, status="waiting")
+                    trace.add(type="task", **request, status="waiting", attempt=pending["attempt"])
                     trace.data.update(status="waiting", pending=pending)
                     trace.save()
                     raise ctl.pause()
@@ -339,7 +350,8 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                     if bad:
                         raise DSLError(f"第 {n} 行：外部交的结果不符合格式 {fmt[0]}：" + "；".join(bad[:5]))
                     trace.add(type="task", **request, started=_stamp(), status="ok", source="external",
-                              model="external", seconds=0.0, result=decision["result"])
+                              model="external", seconds=0.0, result=decision["result"],
+                              actor=decision.get("actor", "workflow_ctl"), **metadata)
                     engine.store(record, decision["result"])
                     continue
                 use_role = decision.get("role") or role
@@ -349,7 +361,7 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                 if action != "run":
                     raise DSLError(f"第 {n} 行：外部控制给了未知动作：{action}")
                 t0, started = time.time(), _stamp()
-                event = dict(type="task", **request, started=started)
+                event = dict(type="task", **request, started=started, **metadata)
                 if use_role != role:
                     event.update(role=use_role, default_role=role)
                 if decision.get("by"):

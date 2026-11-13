@@ -9,3 +9,4 @@ fastmcp>=4.0        # MCP 服务（fs_server_*）
 uvicorn>=0.54
 starlette>=1.7
 pypdf>=6.19         # doc 包「读文档」读 PDF（kg 教材导入页）。docx 用标准库读，不用装
+jsonschema>=4.0     # 编排的格式校验（tools/wf_submit.py 用 Draft202012Validator）
