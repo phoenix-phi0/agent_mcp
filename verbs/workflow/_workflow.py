@@ -106,7 +106,7 @@ class _Trace:
         # 已经花掉的成本：真跑过（成功或失败）的任务节点按卡的 cost 加总。回放的事件是原样搬回来的，
         # 带着当初的 cost，照算（那次确实花了）；外部交的结果没有 cost，不算
         costs = [e["cost"] for e in self.data["events"]
-                 if e.get("type") == "task" and e.get("status") in ("ok", "error")
+                 if e.get("type") == "task" and e.get("status") in ("ok", "error", "review", "rejected")
                  and isinstance(e.get("cost"), (int, float))]
         if costs:
             self.data["cost_spent"] = round(sum(costs), 3)
@@ -310,23 +310,27 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                 extra = {"node": line, "fmt": fmt} if fmt else {}
                 decision = ctl.decide(request) if ctl is not None else {"action": "run"}
                 action = decision["action"]
-                # 这一步以前失败过的尝试原样留在记录里（回放时控制器交回来）
-                for failed in decision.get("failed", []):
+                # 这一步以前失败或被打回的尝试原样留在记录里。
+                carry = decision.get("carry", decision.get("failed", []))
+                for failed in carry:
                     trace.add(**{k: v for k, v in failed.items() if k != "seq"})
                 metadata = {}
                 if ctl is not None:
-                    metadata["attempt"] = decision.get("attempt", len(decision.get("failed", [])) + 1)
+                    metadata["attempt"] = decision.get("attempt", len(carry) + 1)
                     if decision.get("notes"):
                         metadata["notes"] = decision["notes"]
                         extra["notes"] = decision["notes"]
                     if decision.get("confirm"):
                         metadata["confirm"] = decision["confirm"]
+                    if "previous" in decision:
+                        extra["previous"] = decision["previous"]
 
                 def stop(use_role, use_model, last_error=None):
                     """停在这一步等外部：记一条 waiting 事件，pending 里放完整请求。"""
                     pending = dict(request, card=use_role, phase="before",
                                    reason="error" if last_error else decision.get("reason") or "step",
                                    attempt=metadata["attempt"] + (1 if last_error else 0),
+                                   max_attempts=decision.get("max_attempts", 4),
                                    notes=decision.get("notes", []))
                     if last_error:
                         pending["last_error"] = last_error
@@ -340,10 +344,35 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                     trace.save()
                     raise ctl.pause()
 
-                if action == "replay":
+                def stop_after(event):
+                    """review 本身就是停点：保留结果，不 store，也不另记 waiting 事件。"""
+                    pending = dict(request, card=event.get("role", role), phase="after",
+                                   result=event["result"], attempt=event.get("attempt", 1),
+                                   max_attempts=decision.get("max_attempts", 4), model=event.get("model"),
+                                   reason=decision.get("reason"), notes=decision.get("notes", []))
+                    if describe is not None:
+                        try:
+                            pending.update(describe(engine, pending["card"], task, context,
+                                                    model=pending["model"], **extra))
+                        except Exception as e:
+                            pending["card_error"] = str(e)
+                    trace.data.update(status="waiting", pending=pending)
+                    trace.save()
+                    raise ctl.pause()
+
+                if action == "hold":
+                    event = trace.add(**{k: v for k, v in decision["event"].items() if k != "seq"})
+                    stop_after(event)
+                if action in ("replay", "release"):
                     old = {k: v for k, v in decision["event"].items() if k != "seq"}
+                    result = decision.get("result", old["result"])
+                    if decision.get("revise"):
+                        old.update(result=result, **decision["revise"])
+                    if action == "release":
+                        old.update(status="ok", result=result,
+                                   confirm=old.get("confirm", []) + decision.get("confirm", []))
                     trace.add(**old)
-                    engine.store(record, old["result"])
+                    engine.store(record, result)
                     continue
                 if action == "result":
                     bad = check_format(fmt, decision["result"]) if fmt and check_format else []
@@ -384,8 +413,12 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                     raise
                 finally:
                     engine._wf_on_call = None
-                trace.update(ev, **getattr(engine, "_wf_last_call", {}), status="ok",
-                             result=result, seconds=round(time.time() - t0, 1))
+                review = ctl is not None and decision.get("after", False)
+                review_meta = {"notes": decision.get("notes", []), "confirm": decision.get("confirm", [])} if review else {}
+                trace.update(ev, **getattr(engine, "_wf_last_call", {}), status="review" if review else "ok",
+                             result=result, seconds=round(time.time() - t0, 1), **review_meta)
+                if review:
+                    stop_after(ev)
                 engine.store(record, result)
                 continue
             raise DSLError(f"第 {n} 行：看不懂的编排语句：{line}")

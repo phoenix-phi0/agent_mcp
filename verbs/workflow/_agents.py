@@ -172,6 +172,15 @@ def _prompt(task, context, node=None, fmt=None, submit=False, notes=None, previo
     if notes:
         prompt += "补充说明（人工追加，和任务同等效力）：\n"
         prompt += "".join(f"{i}. {note['text']}\n" for i, note in enumerate(notes, 1))
+    if previous is not None:
+        prompt += "上一次交的结果被打回，要按意见重做：\n"
+        reject = next((note for note in reversed(notes or []) if note.get("kind") == "reject"), None)
+        if reject is not None:
+            prompt += f"打回意见：{reject['text']}\n"
+        result = json.dumps(previous, ensure_ascii=False)
+        if len(result) > 20000:
+            result = result[:20000] + "…（已截断）"
+        prompt += f"上一次的结果：{result}\n"
     if fmt and submit:
         return prompt          # 用 submit 工具交：工具的参数格式就是这一步的格式，提示由 submit_call 加
     if fmt:

@@ -30,6 +30,7 @@
 
 控制文件只由这些接口函数写；后台进程只读它。
 """
+import fcntl
 import json
 import os
 import re
@@ -37,12 +38,15 @@ import signal
 import subprocess
 import sys
 import time
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 _MODES = ("step", "auto")
 _CARD = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _RULE = re.compile(r"^[\w\-·.]{1,80}\*?$")
+_CTL_LOCKS = threading.local()
 _ACTOR = re.compile(r"(?:viewer|workflow_ctl|mcp:[\w.\-]{1,64})")
 
 
@@ -75,10 +79,41 @@ def _side(trace, ext):
     return trace.with_name(trace.name[:-len(".json")] + ext)
 
 
+@contextmanager
+def _ctl_lock(run):
+    """锁独立文件；每个线程按规范路径计数，允许同线程嵌套调用写接口。"""
+    trace = Path(run)
+    if not trace.is_absolute():
+        trace = ROOT / trace
+    trace = trace.resolve()
+    if ROOT not in trace.parents or trace.parent.name != "runs" or trace.suffix != ".json" or not trace.is_file():
+        raise ControlError(f"不是编排记录：{run}")
+    path = _side(trace, ".ctl.lock")
+    held = getattr(_CTL_LOCKS, "held", None)
+    if held is None:
+        held = _CTL_LOCKS.held = {}
+    if path in held:
+        held[path] += 1
+        try:
+            yield
+        finally:
+            held[path] -= 1
+        return
+    # 不同线程分别 open，flock 因而会互斥；不能共享同一个文件描述符。
+    with path.open("a") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        held[path] = 1
+        try:
+            yield
+        finally:
+            del held[path]
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
 def _rules(cfg, which):
-    if which == "before":
+    if which in ("before", "confirm_before"):
         return cfg.get("confirm_before", cfg.get("stop_roles", []))
-    return cfg.get("confirm_" + which, [])
+    return cfg.get("confirm_after", [])
 
 
 def _match(rules, names):
@@ -95,6 +130,11 @@ def _check_rules(rules):
     for rule in rules:
         if not isinstance(rule, str) or (rule != "*" and not _RULE.fullmatch(rule)):
             raise ControlError(f"确认规则无效：{rule!r}")
+
+
+def _check_max_attempts(max_attempts):
+    if max_attempts is not None and (type(max_attempts) is not int or not 1 <= max_attempts <= 50):
+        raise ControlError(f"max_attempts 无效：{max_attempts!r}")
 
 
 def _before_setting(stop_roles, confirm_before):
@@ -118,7 +158,9 @@ class _Control:
         self.path = Path(trace) if trace else None
         self.old = _load(trace) if trace else None
         self.replay = {}
-        self.failed = {}            # 第几步 → 以前失败的尝试（保留在记录里，不回放结果）
+        self.held = {}              # 第几步 → 最近一次等待结束后确认的结果
+        self.carry = {}             # 第几步 → 以前失败或被打回的尝试（只保留，不回放结果）
+        self.failed = self.carry    # 兼容旧调用方
         for e in (self.old or {}).get("events", []):
             if e.get("type") != "task" or "step" not in e:
                 continue
@@ -126,8 +168,10 @@ class _Control:
                 continue
             if e.get("status") == "ok":
                 self.replay[e["step"]] = e
-            elif e.get("status") == "error":
-                self.failed.setdefault(e["step"], []).append(e)
+            elif e.get("status") == "review":
+                self.held[e["step"]] = e
+            elif e.get("status") in ("error", "rejected"):
+                self.carry.setdefault(e["step"], []).append(e)
         self.claimed = False
 
     def claim(self):
@@ -149,13 +193,46 @@ class _Control:
 
     def decide(self, req):
         out = self._decide(req)
-        out["failed"] = self.failed.get(req["step"], [])
+        out["carry"] = self.carry.get(req["step"], [])
+        out["failed"] = out["carry"]
         return out
+
+    @staticmethod
+    def _revised(event, revisions):
+        """只补尚未应用的修订；始终保留模型最初交回的结果。"""
+        existing = event.get("revisions", [])
+        rev = max((r.get("rev", 0) for r in existing), default=0)
+        newer = sorted((r for r in revisions if r.get("rev", 0) > rev), key=lambda r: r["rev"])
+        if not newer:
+            return {"result": event["result"], "revise": None}
+        return {"result": newer[-1]["result"],
+                "revise": {"result_model": event.get("result_model", event["result"]),
+                           "revisions": existing + newer}}
 
     def _decide(self, req):
         k = req["step"]
-        attempt = len(self.failed.get(k, [])) + 1
-        meta = {"attempt": attempt, "notes": [], "confirm": [], "reason": None}
+        cfg = self._current()
+        key = str(k)
+        attempt = len(self.carry.get(k, [])) + 1
+        meta = {"attempt": attempt, "max_attempts": cfg.get("max_attempts", 4),
+                "notes": cfg.get("notes", {}).get(key, []), "confirm": [],
+                "reason": None, "after": False, "revise": None}
+        plan = {"model": cfg.get("models", {}).get(req["role"]),
+                "role": cfg.get("roles", {}).get(req["role"])}
+        go = cfg.get("go", {}).get(key, {})
+        names = {req["name"], req["role"], go.get("role") or plan["role"]}
+        meta["after"] = _match(_rules(cfg, "after"), names) is not None
+
+        def after(use_role):
+            matched = _match(_rules(cfg, "after"), {req["name"], req["role"], use_role})
+            return {"after": matched is not None, "reason": "rule:" + matched if matched else None}
+
+        def rejected_run(verdict, previous):
+            use_role = verdict.get("role") or plan["role"]
+            return {**meta, "action": "run", "by": "reject", "role": use_role,
+                    "model": verdict.get("model") or plan["model"], "previous": previous,
+                    "attempt": len(self.carry.get(k, [])) + 1, **after(use_role)}
+
         old = self.replay.get(k)
         if old is not None:
             was = (old.get("line"), old.get("name"), old.get("default_role", old.get("role")), old.get("task"))
@@ -164,11 +241,30 @@ class _Control:
                 raise ControlError(f"第 {k} 步回放对不上（脚本或输入改过？）："
                                    f"记录是 {was[1]}/{was[2]}，现在是 {now[1]}/{now[2]}")
             return {**meta, "action": "replay", "event": old,
-                    "attempt": old.get("attempt", attempt), "notes": old.get("notes", []),
-                    "confirm": old.get("confirm", [])}
-        cfg = self._current()
-        key = str(k)
-        meta["notes"] = cfg.get("notes", {}).get(key, [])
+                    "notes": old.get("notes", []), "confirm": old.get("confirm", []),
+                    **self._revised(old, cfg.get("revisions", {}).get(key, []))}
+        held = self.held.get(k)
+        verdict = cfg.get("after", {}).get(key, {})
+        if held is not None:
+            held_meta = {**meta, **after(held.get("role")), "attempt": held.get("attempt", 1), "event": held}
+            if self.orders and verdict.get("attempt") == held.get("attempt", 1):
+                confirm = {"phase": "after", "action": verdict.get("action"),
+                           "actor": verdict.get("actor", "workflow_ctl"), "at": verdict.get("at")}
+                if verdict.get("action") == "approve":
+                    revised = self._revised(held, cfg.get("revisions", {}).get(key, []))
+                    confirm["revised"] = revised["revise"] is not None
+                    return {**held_meta, "action": "release", **revised, "confirm": [confirm]}
+                if verdict.get("action") == "reject":
+                    note = next((n for n in reversed(meta["notes"]) if n.get("kind") == "reject"), {})
+                    rejected = {**held, "status": "rejected",
+                                "confirm": held.get("confirm", []) + [confirm],
+                                "reject": {"text": note.get("text", ""), "actor": confirm["actor"],
+                                           "at": confirm["at"], "next_role": verdict.get("role"),
+                                           "next_model": verdict.get("model")}}
+                    self.carry.setdefault(k, []).append(rejected)
+                    del self.held[k]
+                    return rejected_run(verdict, held["result"])
+            return {**held_meta, "action": "hold"}
         if not self.orders:
             reason = "error" if (self.old or {}).get("status") == "error" else "interrupted"
             return {**meta, "action": "wait", "model": cfg.get("models", {}).get(req["role"]),
@@ -178,13 +274,14 @@ class _Control:
             submitted = next((h for h in reversed(cfg.get("history", []))
                               if h.get("op") == "submit" and h.get("step") == k), {})
             actor = submitted.get("actor", "workflow_ctl")
-            return {**meta, "action": "result", "result": cfg["submitted"][key], "actor": actor,
+            return {**meta, "action": "result", "result": cfg["submitted"][key], "actor": actor, "after": False,
                     "confirm": [{"phase": "before", "action": "submit", "actor": actor,
                                  "at": submitted.get("at") or _stamp()}]}
-        plan = {"model": cfg.get("models", {}).get(req["role"]),
-                "role": cfg.get("roles", {}).get(req["role"])}
+        if verdict.get("action") == "reject" and verdict.get("attempt") == attempt - 1:
+            rejected = next((e for e in reversed(self.carry.get(k, [])) if e.get("status") == "rejected"), None)
+            if rejected is not None:
+                return rejected_run(verdict, rejected["result"])
         if key in cfg.get("go", {}):
-            go = cfg["go"][key]
             if "attempt" not in go or go["attempt"] == attempt:
                 # 历史说明继续带进提示词；确认动作只记本次尝试新追加的说明。
                 confirm = [{"phase": "before", "action": "note", "actor": n["actor"], "at": n["at"]}
@@ -193,14 +290,14 @@ class _Control:
                         "model": go.get("model") or plan["model"], "role": go.get("role") or plan["role"],
                         "confirm": confirm + [{"phase": "before", "action": "run", "role": go.get("role"),
                                      "model": go.get("model"), "actor": go.get("actor", "workflow_ctl"),
-                                     "at": go.get("at") or _stamp()}]}
-        names = {req["name"], req["role"], cfg.get("go", {}).get(key, {}).get("role") or plan["role"]}
+                                     "at": go.get("at") or _stamp()}],
+                        **after(go.get("role") or plan["role"])}
         matched = _match(_rules(cfg, "before"), names)
         if cfg.get("mode") == "step" or self.force_step:
             return {**meta, "action": "wait", "reason": "step", **plan}
         if matched is not None:
             return {**meta, "action": "wait", "reason": "rule:" + matched, **plan}
-        return {**meta, "action": "run", "by": "auto", **plan}
+        return {**meta, "action": "run", "by": "auto", **plan, **after(go.get("role") or plan["role"])}
 
 
 # ---- 内部：推进、后台进程 ----
@@ -239,20 +336,21 @@ def _alive(cfg):
 
 
 def _spawn(trace):
-    cf = _side(trace, ".ctl")
-    t = _load(trace)
-    t.update(status="running", updated=_stamp())
-    _dump(trace, t)
-    env = dict(os.environ, PYTHONPATH=str(ROOT))
-    with open(_side(trace, ".log"), "a", encoding="utf-8") as log:
-        log.write(f"\n=== {_stamp()} advance\n")
-        log.flush()
-        proc = subprocess.Popen([sys.executable, "-m", "tools.workflow_ctl", "advance", str(trace)],
-                                cwd=ROOT, env=env, stdin=subprocess.DEVNULL, stdout=log,
-                                stderr=subprocess.STDOUT, start_new_session=True)
-    cfg = _load(cf)
-    cfg["worker"] = proc.pid
-    _dump(cf, cfg)
+    with _ctl_lock(trace):
+        cf = _side(trace, ".ctl")
+        t = _load(trace)
+        t.update(status="running", updated=_stamp())
+        _dump(trace, t)
+        env = dict(os.environ, PYTHONPATH=str(ROOT))
+        with open(_side(trace, ".log"), "a", encoding="utf-8") as log:
+            log.write(f"\n=== {_stamp()} advance\n")
+            log.flush()
+            proc = subprocess.Popen([sys.executable, "-m", "tools.workflow_ctl", "advance", str(trace)],
+                                    cwd=ROOT, env=env, stdin=subprocess.DEVNULL, stdout=log,
+                                    stderr=subprocess.STDOUT, start_new_session=True)
+        cfg = _load(cf)
+        cfg["worker"] = proc.pid
+        _dump(cf, cfg)
 
 
 def _continue(trace, wait, client):
@@ -302,8 +400,10 @@ def _log(cfg, op, **kw):
 
 
 def _prune(cfg, keep_below):
-    """去掉 >= keep_below 步的 submitted/go/notes，免得回退后旧指令和说明又生效。"""
-    for key in ("submitted", "go", "notes"):
+    """去掉 >= keep_below 步的 submitted/go/notes/after/revisions，免得回退后旧指令和说明又生效。"""
+    for key in ("submitted", "go", "notes", "after", "revisions"):
+        if key in ("after", "revisions") and key not in cfg:
+            continue
         cfg[key] = {k: v for k, v in cfg.get(key, {}).items() if int(k) < keep_below}
 
 
@@ -341,7 +441,7 @@ def _check_model(model):
 
 
 def _check_card(card):
-    if card is not None and not _CARD.fullmatch(card):
+    if card is not None and (not isinstance(card, str) or not _CARD.fullmatch(card)):
         raise ControlError(f"角色卡名无效：{card}")
     return card
 
@@ -363,7 +463,8 @@ def _rel(p):
 # ---- 接口 ----
 
 def start(workdir, entry="run.zs", mode="step", stop_roles=None, models=None, roles=None,
-          wait=False, client=None, confirm_before=None, actor="workflow_ctl"):
+          wait=False, client=None, confirm_before=None, actor="workflow_ctl",
+          confirm_after=None, max_attempts=None):
     _check_actor(actor)
     wd = Path(workdir)
     if not wd.is_absolute():
@@ -380,17 +481,23 @@ def start(workdir, entry="run.zs", mode="step", stop_roles=None, models=None, ro
         raise ControlError(f"mode 只能是 {_MODES}")
     _check_maps(models, roles)
     before = _before_setting(stop_roles, confirm_before)
+    if confirm_after is not None:
+        _check_rules(confirm_after)
+    _check_max_attempts(max_attempts)
     if before is None:
         before = []
     cfg = {"entry": entry, "mode": mode, "confirm_before": before, "stop_roles": before,
+           "confirm_after": list(confirm_after or []), "max_attempts": 4 if max_attempts is None else max_attempts,
            "models": dict(models or {}),
            "roles": dict(roles or {}), "submitted": {}, "go": {}, "worker": None, "history": []}
-    _log(cfg, "start", mode=mode, actor=actor)
+    _log(cfg, "start", mode=mode, actor=actor,
+         confirm_after=cfg["confirm_after"], max_attempts=cfg["max_attempts"])
     # 第一遍只走到第一个节点就停，不调模型；有了记录文件再按 mode 往下走
     trace = _advance(None, cfg, client, force_step=True, workdir=wd)
     if trace is None:
         raise ControlError("入口脚本跑完了，没有执行编排")
-    _dump(_side(trace, ".ctl"), cfg)
+    with _ctl_lock(trace):
+        _dump(_side(trace, ".ctl"), cfg)
     if mode == "auto" and _load(trace).get("status") == "waiting":
         _continue(trace, wait, client)
     return status(trace)
@@ -411,6 +518,14 @@ def status(run, detail=False):
             continue
         row = {k: e.get(k) for k in ("step", "name", "role", "status", "model", "seconds")}
         row["attempt"] = e.get("attempt", 1)
+        if "actor" in e:
+            row["actor"] = e["actor"]
+        else:
+            # 模型事件的结束后裁决来源保存在 confirm；普通开始前确认不补来源。
+            after = next((c for c in reversed(e.get("confirm", [])) if c.get("phase") == "after"), None)
+            if after is not None and "actor" in after:
+                row["actor"] = after["actor"]
+        row["revised"] = bool(e.get("revisions"))
         for k in ("default_role", "source", "model_override", "error", "actor", "confirm"):
             if e.get(k):
                 row[k] = e[k]
@@ -419,7 +534,8 @@ def status(run, detail=False):
         steps.append(row)
     out = {"run": _rel(p), "workflow": t.get("workflow"), "status": st, "error": t.get("error"),
            "mode": cfg.get("mode"), "confirm_before": _rules(cfg, "before"),
-           "stop_roles": _rules(cfg, "before"),
+           "stop_roles": _rules(cfg, "before"), "confirm_after": _rules(cfg, "confirm_after"),
+           "max_attempts": cfg.get("max_attempts", 4),
            "models": cfg.get("models", {}), "roles": cfg.get("roles", {}),
            "worker_alive": alive, "resumes": t.get("resumes", 0), "steps": steps}
     pend = t.get("pending") if t.get("status") == "waiting" else None
@@ -429,11 +545,7 @@ def status(run, detail=False):
     return out
 
 
-def submit(run, result, step=None, wait=None, client=None, actor="workflow_ctl"):
-    _check_actor(actor)
-    p, cf, cfg, t = _open(run)
-    _idle(cfg)
-    pend = _pending(_settle(p, cfg, t, client), step)
+def _check_result(pend, result):
     if isinstance(result, str):
         try:
             result = json.loads(result)
@@ -447,117 +559,220 @@ def submit(run, result, step=None, wait=None, client=None, actor="workflow_ctl")
         bad = validate(pend["schema"], result)
         if bad:
             raise ControlError(f"结果不符合格式 {pend.get('format')}：" + "；".join(bad[:5]))
-    _prune(cfg, pend["step"])
-    cfg["submitted"][str(pend["step"])] = result
-    _log(cfg, "submit", step=pend["step"], actor=actor)
-    _dump(cf, cfg)
+    try:
+        json.dumps(result, ensure_ascii=False).encode("utf-8")
+    except (UnicodeEncodeError, TypeError, ValueError) as e:
+        raise ControlError("结果必须是有效的 UTF-8 JSON 对象") from e
+    return result
+
+
+def _check_phase(pend, phase, attempt=None):
+    if pend.get("phase", "before") != phase:
+        if phase == "before":
+            raise ControlError("这一步在等结束后确认，用 approve / reject")
+        raise ControlError("这一步在等开始前确认，用 execute / submit")
+    if attempt is not None and attempt != pend.get("attempt", 1):
+        raise ControlError(f"结果已经换了（现在是第 {pend.get('attempt', 1)} 次），刷新后再确认")
+
+
+def submit(run, result, step=None, wait=None, client=None, actor="workflow_ctl"):
+    _check_actor(actor)
+    with _ctl_lock(run):
+        p, cf, cfg, t = _open(run)
+        _idle(cfg)
+        pend = _pending(_settle(p, cfg, t, client), step)
+        _check_phase(pend, "before")
+        result = _check_result(pend, result)
+        _prune(cfg, pend["step"])
+        cfg["submitted"][str(pend["step"])] = result
+        _log(cfg, "submit", step=pend["step"], actor=actor)
+        _dump(cf, cfg)
     _continue(p, cfg["mode"] == "step" if wait is None else wait, client)
     return status(p)
 
 
 def execute(run, model=None, role=None, step=None, wait=False, client=None, note=None, actor="workflow_ctl"):
     _check_actor(actor)
-    p, cf, cfg, t = _open(run)
-    _idle(cfg)
-    _check_model(model)
-    _check_card(role)
-    _check_note(note)
-    t = _settle(p, cfg, t, client)
-    pend = _pending(t, step)
-    key = str(pend["step"])
-    attempt = 1 + sum(e.get("type") == "task" and e.get("step") == pend["step"]
-                      and e.get("status") == "error" for e in t.get("events", []))
-    notes = list(cfg.get("notes", {}).get(key, []))
-    _prune(cfg, pend["step"])
-    at = _stamp()
-    if note is not None:
-        notes.append({"kind": "add", "text": note, "attempt": attempt, "actor": actor, "at": at})
-    if notes:
-        cfg["notes"][key] = notes
-    cfg["go"][key] = {"model": model, "role": role, "attempt": attempt, "actor": actor, "at": at}
-    _log(cfg, "execute", step=pend["step"], model=model, role=role, actor=actor)
-    _dump(cf, cfg)
+    with _ctl_lock(run):
+        p, cf, cfg, t = _open(run)
+        _idle(cfg)
+        # 已经停下时先检查阶段；恢复旧记录前先拒绝非法参数，避免失败请求改写记录。
+        if t.get("status") == "waiting":
+            _check_phase(_pending(t, step), "before")
+        elif (t.get("pending") or {}).get("phase") == "after":
+            _check_phase(t["pending"], "before")
+        _check_model(model)
+        _check_card(role)
+        _check_note(note)
+        t = _settle(p, cfg, t, client)
+        pend = _pending(t, step)
+        _check_phase(pend, "before")
+        key = str(pend["step"])
+        attempt = 1 + sum(e.get("type") == "task" and e.get("step") == pend["step"]
+                          and e.get("status") in ("error", "rejected") for e in t.get("events", []))
+        notes = list(cfg.get("notes", {}).get(key, []))
+        _prune(cfg, pend["step"])
+        at = _stamp()
+        if note is not None:
+            notes.append({"kind": "add", "text": note, "attempt": attempt, "actor": actor, "at": at})
+        if notes:
+            cfg["notes"][key] = notes
+        cfg["go"][key] = {"model": model, "role": role, "attempt": attempt, "actor": actor, "at": at}
+        _log(cfg, "execute", step=pend["step"], model=model, role=role, actor=actor)
+        _dump(cf, cfg)
+    _continue(p, wait, client)
+    return status(p)
+
+
+def approve(run, result=None, note=None, step=None, attempt=None, wait=None, client=None,
+            actor="workflow_ctl"):
+    _check_actor(actor)
+    with _ctl_lock(run):
+        p, cf, cfg, t = _open(run)
+        _idle(cfg)
+        pend = _pending(_settle(p, cfg, t, client), step)
+        _check_phase(pend, "after", attempt)
+        if result is not None:
+            result = _check_result(pend, result)
+        _check_note(note)
+        key = str(pend["step"])
+        at = _stamp()
+        current_attempt = pend.get("attempt", 1)
+        if result is not None and (json.dumps(result, sort_keys=True, ensure_ascii=False)
+                                   != json.dumps(pend["result"], sort_keys=True, ensure_ascii=False)):
+            revisions = cfg.setdefault("revisions", {}).setdefault(key, [])
+            revisions.append({"rev": max((r["rev"] for r in revisions), default=0) + 1,
+                              "kind": "approve", "attempt": current_attempt, "result": result,
+                              "actor": actor, "at": at, "note": note})
+        cfg.setdefault("after", {})[key] = {"attempt": current_attempt, "action": "approve",
+                                             "actor": actor, "at": at}
+        _log(cfg, "approve", step=pend["step"], attempt=current_attempt, actor=actor)
+        _dump(cf, cfg)
+    _continue(p, cfg["mode"] == "step" if wait is None else wait, client)
+    return status(p)
+
+
+def reject(run, note, model=None, role=None, step=None, attempt=None, wait=False, client=None,
+           actor="workflow_ctl"):
+    _check_actor(actor)
+    with _ctl_lock(run):
+        p, cf, cfg, t = _open(run)
+        _idle(cfg)
+        pend = _pending(_settle(p, cfg, t, client), step)
+        _check_phase(pend, "after", attempt)
+        if not isinstance(note, str) or not note.strip():
+            raise ControlError("打回要写意见")
+        _check_note(note)
+        current_attempt = pend.get("attempt", 1)
+        maximum = cfg.get("max_attempts", 4)
+        if current_attempt >= maximum:
+            raise ControlError(f"第 {pend['step']} 步已经跑了 {current_attempt} 次（上限 {maximum}），"
+                               "不能再打回：可以改了再通过，或者 configure(max_attempts=…) 调高")
+        _check_model(model)
+        _check_card(role)
+        key = str(pend["step"])
+        at = _stamp()
+        cfg.setdefault("notes", {}).setdefault(key, []).append(
+            {"kind": "reject", "text": note, "attempt": current_attempt, "actor": actor, "at": at})
+        cfg.setdefault("after", {})[key] = {"attempt": current_attempt, "action": "reject",
+                                             "model": model, "role": role, "actor": actor, "at": at}
+        _log(cfg, "reject", step=pend["step"], attempt=current_attempt, model=model, role=role, actor=actor)
+        _dump(cf, cfg)
     _continue(p, wait, client)
     return status(p)
 
 
 def pause(run, actor="workflow_ctl"):
     _check_actor(actor)
-    p, cf, cfg, _ = _open(run)
-    cfg["mode"] = "step"
-    _log(cfg, "pause", actor=actor)
-    _dump(cf, cfg)
+    with _ctl_lock(run):
+        p, cf, cfg, _ = _open(run)
+        cfg["mode"] = "step"
+        _log(cfg, "pause", actor=actor)
+        _dump(cf, cfg)
     return status(p)
 
 
 def resume(run, wait=False, client=None, actor="workflow_ctl"):
     _check_actor(actor)
-    p, cf, cfg, t = _open(run)
-    cfg["mode"] = "auto"
-    _log(cfg, "resume", actor=actor)
-    _dump(cf, cfg)
+    with _ctl_lock(run):
+        p, cf, cfg, t = _open(run)
+        cfg["mode"] = "auto"
+        _log(cfg, "resume", actor=actor)
+        _dump(cf, cfg)
     st = status(p)["status"]
     if not _alive(cfg) and st in ("waiting", "interrupted", "error", "aborted"):
         _continue(p, wait, client)
     return status(p)
 
 
-def configure(run, stop_roles=None, models=None, roles=None, confirm_before=None, actor="workflow_ctl"):
+def configure(run, stop_roles=None, models=None, roles=None, confirm_before=None, actor="workflow_ctl",
+              confirm_after=None, max_attempts=None):
     """None = 不改；传 {} / [] = 清空。只影响还没跑的节点。"""
     _check_actor(actor)
-    p, cf, cfg, _ = _open(run)
-    _check_maps(models, roles)
-    before = _before_setting(stop_roles, confirm_before)
-    if before is not None:
-        cfg["confirm_before"] = before
-        cfg["stop_roles"] = before
-    if models is not None:
-        cfg["models"] = dict(models)
-    if roles is not None:
-        cfg["roles"] = dict(roles)
-    _log(cfg, "configure", stop_roles=before, confirm_before=before, models=models, roles=roles, actor=actor)
-    _dump(cf, cfg)
+    with _ctl_lock(run):
+        p, cf, cfg, _ = _open(run)
+        _check_maps(models, roles)
+        before = _before_setting(stop_roles, confirm_before)
+        if confirm_after is not None:
+            _check_rules(confirm_after)
+        _check_max_attempts(max_attempts)
+        if before is not None:
+            cfg["confirm_before"] = before
+            cfg["stop_roles"] = before
+        if confirm_after is not None:
+            cfg["confirm_after"] = list(confirm_after)
+        if max_attempts is not None:
+            cfg["max_attempts"] = max_attempts
+        if models is not None:
+            cfg["models"] = dict(models)
+        if roles is not None:
+            cfg["roles"] = dict(roles)
+        _log(cfg, "configure", stop_roles=before, confirm_before=before, models=models, roles=roles,
+             confirm_after=confirm_after, max_attempts=max_attempts, actor=actor)
+        _dump(cf, cfg)
     return status(p)
 
 
 def rewind(run, step, client=None, actor="workflow_ctl"):
     _check_actor(actor)
-    p, cf, cfg, _ = _open(run)
-    _idle(cfg)
-    step = int(step)
-    if step < 1:
-        raise ControlError("step 从 1 开始")
-    _prune(cfg, step)
-    _log(cfg, "rewind", step=step, actor=actor)
-    _dump(cf, cfg)
+    with _ctl_lock(run):
+        p, cf, cfg, _ = _open(run)
+        _idle(cfg)
+        step = int(step)
+        if step < 1:
+            raise ControlError("step 从 1 开始")
+        _prune(cfg, step)
+        _log(cfg, "rewind", step=step, actor=actor)
+        _dump(cf, cfg)
     _advance(p, cfg, client, rewind=step, force_step=True)
     return status(p)
 
 
 def abort(run, actor="workflow_ctl"):
     _check_actor(actor)
-    p, cf, cfg, t = _open(run)
-    if _alive(cfg):
-        pid = cfg["worker"]
-        try:
-            os.killpg(pid, signal.SIGTERM)
-            for _ in range(50):
-                if not _alive(cfg):
-                    break
-                time.sleep(0.1)
-            else:
-                os.killpg(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        t = _load(p)
-    for e in t.get("events", []):
-        if e.get("type") == "task" and e.get("status") in ("running", "waiting"):
-            e["status"] = "aborted"
-    t.pop("pending", None)
-    t.update(status="aborted", error=f"外部中止（{actor}）", finished=_stamp(), updated=_stamp())
-    _dump(p, t)
-    _log(cfg, "abort", actor=actor)
-    _dump(cf, cfg)
+    with _ctl_lock(run):
+        p, cf, cfg, t = _open(run)
+        if _alive(cfg):
+            pid = cfg["worker"]
+            try:
+                os.killpg(pid, signal.SIGTERM)
+                for _ in range(50):
+                    if not _alive(cfg):
+                        break
+                    time.sleep(0.1)
+                else:
+                    os.killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            t = _load(p)
+        for e in t.get("events", []):
+            if e.get("type") == "task" and e.get("status") in ("running", "waiting"):
+                e["status"] = "aborted"
+        t.pop("pending", None)
+        t.update(status="aborted", error=f"外部中止（{actor}）", finished=_stamp(), updated=_stamp())
+        _dump(p, t)
+        _log(cfg, "abort", actor=actor)
+        _dump(cf, cfg)
     return status(p)
 
 
