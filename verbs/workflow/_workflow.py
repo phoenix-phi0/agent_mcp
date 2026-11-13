@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """缩进式多角色任务编排，由 workflow 包的「编排执行」动词调用。"""
+import hashlib
 import json
 import os
 import re
@@ -7,6 +8,7 @@ import time
 from pathlib import Path
 
 from tools.dsl_core import DSLError, to_text
+from tools.wf_plan import cost_summary
 
 _TASK_FIELDS = {"任务", "角色", "文本", "记录", "格式"}
 _JUMP = re.compile(r"^跳转\s+(\w+)\s+最大\s+(\d+)\s*$")
@@ -47,6 +49,58 @@ def parse(script):
         return out, pos
 
     return block(0, 0)[0] if rows else []
+
+
+def _plans(nodes):
+    """收集遍历清单及匹配的成本表达式，不依赖运行时变量。"""
+    plans, costs = {}, []
+
+    def tasks(block):
+        for line, n, children in block:
+            if _EACH.fullmatch(line):
+                continue  # 内层遍历有自己的逐项变量
+            if line.startswith("如果 "):
+                yield from tasks(children)
+            elif children:
+                yield line, {row.partition(" ")[0]: row.partition(" ")[2].strip()
+                             for row, _, _ in children}
+
+    def scan(block):
+        for line, n, children in block:
+            each = _EACH.fullmatch(line)
+            if each:
+                root, _, path = each[2].strip().partition(".")
+                info = dict(path=path or None, each_line=n, var=each[1], nodes=[],
+                            agent_field=None, content_field=None)
+                for name, fields in tasks(children):
+                    info["nodes"].append(name)
+                    for field, target in (("角色", "agent_field"), ("任务", "content_field")):
+                        value = fields.get(field, "")
+                        if re.fullmatch(re.escape(each[1]) + r"\.\w+", value):
+                            info[target] = value.partition(".")[2]
+                plans[root] = info
+            cost = _COST.fullmatch(line)
+            if cost:
+                costs.append(cost)
+            scan(children)
+
+    scan(nodes)
+    for cost in costs:
+        root, _, path = cost[2].partition(".")
+        info = plans.get(root)
+        if info is not None and info["path"] == (path or None):
+            info.update(cost_target=cost[1], budget_expr=cost[3])
+    return plans
+
+
+def _item_key(item, plan_info):
+    field = (plan_info or {}).get("content_field")
+    # 内容字段缺失或为空时退回整项，免得各项指纹相同、逐项设置串到别的项上
+    if field and isinstance(item, dict) and item.get(field) not in (None, ""):
+        text = to_text(item.get(field))
+    else:
+        text = json.dumps(item, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha1(text.encode("utf-8", errors="surrogatepass")).hexdigest()[:12]
 
 
 class _Trace:
@@ -132,6 +186,9 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
     """engine._wf_control 有值时，每个任务节点怎么跑由外部决定（见 tools/workflow_ctl.py）：
     回放记录里的结果、用外部交来的结果、按默认或覆盖的模型/角色卡跑，或者停下等待。"""
     nodes = parse(script)
+    plans = _plans(nodes)
+    producer = {}
+    each_stack = []
     ctl = getattr(engine, "_wf_control", None)
     if ctl is not None:
         ctl.claim()
@@ -203,10 +260,20 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                 items = resolve(m[2])
                 if not isinstance(items, list):
                     raise DSLError(f"第 {n} 行：遍历需要列表：{m[2]}")
-                trace.add(type="each", line=n, var=m[1], source=m[2].strip(), count=len(items))
-                for item in items:
-                    engine.store(m[1], item)
-                    execute(children)
+                root, _, path = m[2].strip().partition(".")
+                src = producer.get(root)
+                source = {"source_step": src[0]} if src else {}
+                trace.add(type="each", line=n, var=m[1], source=m[2].strip(), count=len(items),
+                          record=root, path=path or None, **source)
+                for i, item in enumerate(items, 1):
+                    each_stack.append(dict(index=i, total=len(items), each_line=n, record=root,
+                                           source_step=src[0] if src else None,
+                                           key=_item_key(item, plans.get(root))))
+                    try:
+                        engine.store(m[1], item)
+                        execute(children)
+                    finally:
+                        each_stack.pop()
                 continue
             m = _STORE.fullmatch(line)
             if m:
@@ -261,26 +328,24 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                         raise DSLError(f"第 {n} 行：预算不是数字：{raw!r}") from None
                     if budget.is_integer():
                         budget = int(budget)
-                rows, cache = [], {}
-                for i, item in enumerate(items, 1):
-                    role = item.get("agent")
-                    if not isinstance(role, str) or not role:
-                        raise DSLError(f"第 {n} 行：第 {i} 项没有 agent")
-                    if role not in cache:
-                        cache[role] = card(role)["cost"]
-                    rows.append({"index": i, "agent": role, "cost": cache[role],
-                                 "content": to_text(item.get("content", ""))})
-                total = round(sum(r["cost"] for r in rows), 3)
-                # 挑了角色清单外的卡（格式里列的比这次清单多）：也算超出，让分配调整换掉
-                outside = sorted({r["agent"] for r in rows} - set(allowed_roles)) if allowed_roles else []
-                summary = {"total": total, "budget": budget, "tasks": rows,
-                           "status": "超出" if (budget is not None and total > budget) or outside else "未超出"}
-                if outside:
-                    summary["not_in_roster"] = outside
+                def checked_items():
+                    for i, item in enumerate(items, 1):
+                        role = item.get("agent")
+                        if not isinstance(role, str) or not role:
+                            raise DSLError(f"第 {n} 行：第 {i} 项没有 agent")
+                        yield item
+
+                summary = cost_summary(checked_items(), budget, allowed_roles, lambda role: card(role)["cost"])
+                rows = summary["tasks"]
+                total = summary["total"]
+                outside = summary.get("not_in_roster", [])
                 engine.store(m[1], summary)
+                root = m[2].strip().partition(".")[0]
+                rev = producer.get(root, (None, 0))[1]
                 trace.add(type="cost", line=n, target=m[1], source=m[2].strip(), total=total,
                           budget=budget, status=summary["status"], not_in_roster=outside or None,
-                          by_role={r: sum(x["cost"] for x in rows if x["agent"] == r) for r in cache})
+                          by_role={r["agent"]: sum(x["cost"] for x in rows if x["agent"] == r["agent"])
+                                   for r in rows}, **({"list_rev": rev} if rev else {}))
                 continue
             if children:
                 fields = {}
@@ -306,6 +371,11 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                                context=context, record=record)
                 if fmt:
                     request["format"] = fmt[0]
+                if each_stack:
+                    request["item"] = dict(each_stack[-1])
+                event_request = dict(request)
+                if each_stack:
+                    event_request["item"] = {k: v for k, v in request["item"].items() if k != "key"}
                 # 只在用到时才多传参数：别的执行器（测试里的假 call_agent）签名不用跟着改
                 extra = {"node": line, "fmt": fmt} if fmt else {}
                 decision = ctl.decide(request) if ctl is not None else {"action": "run"}
@@ -325,6 +395,23 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                     if "previous" in decision:
                         extra["previous"] = decision["previous"]
 
+                def pending_context(pending):
+                    if "item" in request:
+                        pending["item"] = dict(event_request["item"])
+                    root = request.get("item", {}).get("record", record)
+                    info = plans.get(root)
+                    if info is not None:
+                        budget = None
+                        if info.get("budget_expr"):
+                            try:
+                                budget = float(resolve(info["budget_expr"]))
+                                if budget.is_integer():
+                                    budget = int(budget)
+                            except (TypeError, ValueError, LookupError):
+                                pass  # 来源节点停下时预算可能尚未定义
+                        pending["plan"] = dict(info, record=root, budget=budget,
+                                               roster=list(allowed_roles), cost_target=info.get("cost_target"))
+
                 def stop(use_role, use_model, last_error=None):
                     """停在这一步等外部：记一条 waiting 事件，pending 里放完整请求。"""
                     pending = dict(request, card=use_role, phase="before",
@@ -339,7 +426,8 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                             pending.update(describe(engine, use_role, task, context, model=use_model, **extra))
                         except Exception as e:      # 卡坏了也照样停下，让外部看到原因、换卡
                             pending["card_error"] = str(e)
-                    trace.add(type="task", **request, status="waiting", attempt=pending["attempt"])
+                    pending_context(pending)
+                    trace.add(type="task", **event_request, status="waiting", attempt=pending["attempt"])
                     trace.data.update(status="waiting", pending=pending)
                     trace.save()
                     raise ctl.pause()
@@ -356,6 +444,7 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                                                     model=pending["model"], **extra))
                         except Exception as e:
                             pending["card_error"] = str(e)
+                    pending_context(pending)
                     trace.data.update(status="waiting", pending=pending)
                     trace.save()
                     raise ctl.pause()
@@ -373,15 +462,17 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                                    confirm=old.get("confirm", []) + decision.get("confirm", []))
                     trace.add(**old)
                     engine.store(record, result)
+                    producer[record] = (steps[0], max((r["rev"] for r in old.get("revisions", [])), default=0))
                     continue
                 if action == "result":
                     bad = check_format(fmt, decision["result"]) if fmt and check_format else []
                     if bad:
                         raise DSLError(f"第 {n} 行：外部交的结果不符合格式 {fmt[0]}：" + "；".join(bad[:5]))
-                    trace.add(type="task", **request, started=_stamp(), status="ok", source="external",
+                    trace.add(type="task", **event_request, started=_stamp(), status="ok", source="external",
                               model="external", seconds=0.0, result=decision["result"],
                               actor=decision.get("actor", "workflow_ctl"), **metadata)
                     engine.store(record, decision["result"])
+                    producer[record] = (steps[0], 0)
                     continue
                 use_role = decision.get("role") or role
                 use_model = decision.get("model")
@@ -390,7 +481,7 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                 if action != "run":
                     raise DSLError(f"第 {n} 行：外部控制给了未知动作：{action}")
                 t0, started = time.time(), _stamp()
-                event = dict(type="task", **request, started=started, **metadata)
+                event = dict(type="task", **event_request, started=started, **metadata)
                 if use_role != role:
                     event.update(role=use_role, default_role=role)
                 if decision.get("by"):
@@ -420,6 +511,7 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                 if review:
                     stop_after(ev)
                 engine.store(record, result)
+                producer[record] = (steps[0], 0)
                 continue
             raise DSLError(f"第 {n} 行：看不懂的编排语句：{line}")
 

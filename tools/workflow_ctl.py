@@ -147,6 +147,21 @@ def _before_setting(stop_roles, confirm_before):
     return None
 
 
+def _item_control(cfg, item):
+    """按内容指纹找设置；item.agent 由调用方填入本步实际要使用的卡。"""
+    if not item:
+        return {}
+    rows = cfg.get("item_controls", {}).get(item["record"], {}).get("rows", [])
+    index = item["index"] - 1
+    row = rows[index] if 0 <= index < len(rows) else None
+    if not row or row.get("key") != item.get("key"):
+        row = next((r for r in rows if r and r.get("key") == item.get("key")), None)
+    if row is None:
+        return {}
+    return {"model": row.get("model") if "agent" not in item or row.get("agent") == item["agent"] else None,
+            "confirm_before": row.get("confirm_before"), "confirm_after": row.get("confirm_after")}
+
+
 class _Control:
     """交给 _workflow.run 的控制器（engine._wf_control）。"""
 
@@ -217,20 +232,28 @@ class _Control:
         meta = {"attempt": attempt, "max_attempts": cfg.get("max_attempts", 4),
                 "notes": cfg.get("notes", {}).get(key, []), "confirm": [],
                 "reason": None, "after": False, "revise": None}
-        plan = {"model": cfg.get("models", {}).get(req["role"]),
-                "role": cfg.get("roles", {}).get(req["role"])}
         go = cfg.get("go", {}).get(key, {})
+        current_role = go.get("role") or cfg.get("roles", {}).get(req["role"]) or req["role"]
+        item = req.get("item")
+        ic = _item_control(cfg, dict(item, agent=current_role) if item else None)
+        plan = {"model": ic.get("model") or cfg.get("models", {}).get(req["role"]),
+                "role": cfg.get("roles", {}).get(req["role"])}
         names = {req["name"], req["role"], go.get("role") or plan["role"]}
-        meta["after"] = _match(_rules(cfg, "after"), names) is not None
 
         def after(use_role):
+            if ic.get("confirm_after") is not None:
+                return {"after": ic["confirm_after"], "reason": "item"}
             matched = _match(_rules(cfg, "after"), {req["name"], req["role"], use_role})
             return {"after": matched is not None, "reason": "rule:" + matched if matched else None}
 
+        meta.update(after(current_role))
+
         def rejected_run(verdict, previous):
             use_role = verdict.get("role") or plan["role"]
+            retry_ic = _item_control(cfg, dict(item, agent=use_role or req["role"]) if item else None)
             return {**meta, "action": "run", "by": "reject", "role": use_role,
-                    "model": verdict.get("model") or plan["model"], "previous": previous,
+                    "model": verdict.get("model") or retry_ic.get("model") or cfg.get("models", {}).get(req["role"]),
+                    "previous": previous,
                     "attempt": len(self.carry.get(k, [])) + 1, **after(use_role)}
 
         old = self.replay.get(k)
@@ -267,8 +290,7 @@ class _Control:
             return {**held_meta, "action": "hold"}
         if not self.orders:
             reason = "error" if (self.old or {}).get("status") == "error" else "interrupted"
-            return {**meta, "action": "wait", "model": cfg.get("models", {}).get(req["role"]),
-                    "role": cfg.get("roles", {}).get(req["role"]), "reason": reason}
+            return {**meta, "action": "wait", **plan, "reason": reason}
         if key in cfg.get("submitted", {}):
             # submitted 继续存原结果，来源从既有 history 取，兼容旧控制文件的形状。
             submitted = next((h for h in reversed(cfg.get("history", []))
@@ -293,6 +315,10 @@ class _Control:
                                      "at": go.get("at") or _stamp()}],
                         **after(go.get("role") or plan["role"])}
         matched = _match(_rules(cfg, "before"), names)
+        if ic.get("confirm_before") is not None:
+            if ic["confirm_before"]:
+                return {**meta, "action": "wait", "reason": "item", **plan}
+            return {**meta, "action": "run", "by": "auto", **plan, **after(current_role), "reason": "item"}
         if cfg.get("mode") == "step" or self.force_step:
             return {**meta, "action": "wait", "reason": "step", **plan}
         if matched is not None:
@@ -302,7 +328,7 @@ class _Control:
 
 # ---- 内部：推进、后台进程 ----
 
-def _advance(trace, cfg, client=None, rewind=None, force_step=False, workdir=None, orders=True):
+def _advance(trace, cfg, client=None, rewind=None, force_step=False, workdir=None, orders=True, raise_errors=False):
     """从头跑一遍入口脚本，回放到第一个没结果的节点，按控制文件决定。返回记录路径。"""
     from tools.dsl import DSLEngine
     ctl = _Control(cfg, trace, rewind, force_step, orders)
@@ -317,7 +343,7 @@ def _advance(trace, cfg, client=None, rewind=None, force_step=False, workdir=Non
     except WorkflowPause:
         pass
     except Exception:
-        if ctl.path is None:      # 编排还没开始就错了：没有记录可看，原样抛
+        if raise_errors or ctl.path is None:      # 编排还没开始就错了：没有记录可看，原样抛
             raise
     return ctl.path
 
@@ -400,11 +426,31 @@ def _log(cfg, op, **kw):
 
 
 def _prune(cfg, keep_below):
-    """去掉 >= keep_below 步的 submitted/go/notes/after/revisions，免得回退后旧指令和说明又生效。"""
+    """清掉回退位置起的指令、说明、裁决及逐项设置。"""
     for key in ("submitted", "go", "notes", "after", "revisions"):
         if key in ("after", "revisions") and key not in cfg:
             continue
         cfg[key] = {k: v for k, v in cfg.get(key, {}).items() if int(k) < keep_below}
+
+    if "item_controls" in cfg:
+        cfg["item_controls"] = {record: value for record, value in cfg["item_controls"].items()
+                                if value["step"] < keep_below}
+
+
+def _set_item_controls(run, record, step, rows, actor="workflow_ctl"):
+    """保存已绑定内容指纹的设置；与其他控制文件写操作共用锁。目前只有测试直接用它造场景。"""
+    _check_actor(actor)
+    # rows 是内部接口已经绑定 key/agent 的列表，不改清单结果。
+    try:
+        json.dumps({record: rows}, ensure_ascii=False).encode("utf-8")
+    except (UnicodeEncodeError, TypeError, ValueError) as e:
+        raise ControlError("逐项设置必须是有效的 UTF-8 JSON") from e
+    with _ctl_lock(run):
+        _, cf, cfg, _ = _open(run)
+        cfg.setdefault("item_controls", {})[record] = {
+            "step": step, "actor": actor, "at": _stamp(), "rows": rows}
+        _log(cfg, "item_controls", record=record, step=step, actor=actor)
+        _dump(cf, cfg)
 
 
 def _check_note(note):
@@ -624,17 +670,277 @@ def execute(run, model=None, role=None, step=None, wait=False, client=None, note
     return status(p)
 
 
+def _plan_items(result, info):
+    value = result
+    for field in (info.get("path") or "").split("."):
+        if field:
+            value = value.get(field) if isinstance(value, dict) else None
+    if not isinstance(value, list):
+        raise ControlError("这次运行没有可改的分配清单")
+    return value
+
+
+def _check_item_controls(controls, items, info):
+    from verbs.workflow._workflow import _item_key
+    if not isinstance(controls, list):
+        raise ControlError("逐项设置第 1 项：必须是和清单等长的列表")
+    if len(controls) != len(items):
+        index = min(len(controls), len(items)) + 1
+        raise ControlError(f"逐项设置第 {index} 项：列表长度必须和清单相同（{len(items)} 项）")
+    rows = []
+    for index, (control, item) in enumerate(zip(controls, items), 1):
+        if control is None:
+            rows.append(None)
+            continue
+        try:
+            if not isinstance(control, dict):
+                raise ControlError("必须是 null 或对象")
+            if set(control) - {"model", "confirm_before", "confirm_after"}:
+                raise ControlError("有不认识的字段")
+            _check_model(control.get("model"))
+            for field in ("confirm_before", "confirm_after"):
+                if control.get(field) is not None and type(control[field]) is not bool:
+                    raise ControlError(f"{field} 必须是 True/False/None")
+            rows.append(dict(control, key=_item_key(item, info), agent=item.get(info.get("agent_field"))))
+        except ControlError as e:
+            raise ControlError(f"逐项设置第 {index} 项：{e}") from e
+    return rows
+
+
+def _plan_card(t, name):
+    _check_card(name)
+    roots = [Path(t["workdir"]) / "agents", ROOT / "tools/dslagent/agent_profiles"]
+    path = next((root / name / "agent.json" for root in roots
+                 if name and (root / name / "agent.json").is_file()), None)
+    if path is None:
+        raise ControlError(f"没有角色卡：{name}")
+    try:
+        data = _load(path)
+    except (OSError, ValueError) as e:
+        raise ControlError(f"角色卡无法读取：{name}") from e
+    return {"name": name, "cost": data.get("cost"), "description": data.get("description", "")}
+
+
+def _plan_cost(t, info, items):
+    from tools.wf_plan import cost_summary
+    normalized = [{"agent": item.get(info.get("agent_field") or "agent"),
+                   "content": item.get(info.get("content_field") or "content", "")} for item in items]
+    costs = {row["agent"]: _plan_card(t, row["agent"])["cost"] for row in normalized}
+    if any(cost is None for cost in costs.values()):
+        return dict(total=None, budget=info.get("budget"), status=None, not_in_roster=[])
+    summary = cost_summary(normalized, info.get("budget"), info.get("roster", []), costs.__getitem__)
+    return dict(total=summary["total"], budget=summary["budget"],
+                status=summary["status"] if summary["budget"] is not None else None,
+                not_in_roster=summary.get("not_in_roster", []))
+
+
+def plan(run, record=None):
+    """只读地组合清单来源、成本和逐项的实际控制设置。"""
+    from verbs.workflow._workflow import parse, _plans, _item_key
+    _, _, cfg, t = _open(run)
+    plans = _plans(parse(t.get("script", "")))
+    if record is None and len(plans) == 1:
+        record = next(iter(plans))
+    if not isinstance(record, str) or record not in plans:
+        raise ControlError("这次运行没有可改的分配清单")
+    info = dict(plans[record])
+    events = t.get("events", [])
+    pending = t.get("pending") or {}
+    pending_plan = pending.get("plan") or {}
+    each = next((e for e in reversed(events) if e.get("type") == "each"
+                 and e.get("record") == record), None)
+    source = next((e for e in reversed(events) if e.get("type") == "task"
+                   and e.get("record") == record and e.get("status") in ("ok", "review")
+                   and (each is None or e.get("step") == each.get("source_step"))), None)
+    if source is None:
+        raise ControlError("这次运行没有可改的分配清单")
+    items = _plan_items(source["result"], info)
+    expression = record + ("." + info["path"] if info.get("path") else "")
+    cost = next((e for e in reversed(events) if e.get("type") == "cost" and e.get("source") == expression), None)
+    info["budget"] = cost.get("budget") if cost else pending_plan.get("budget") if pending_plan.get("record") == record else None
+    roster_event = next((e for e in reversed(events) if e.get("type") == "roster"), {})
+    info["roster"] = [r["name"] for r in roster_event.get("roles", [])]
+    if not info["roster"] and pending_plan.get("record") == record:
+        info["roster"] = pending_plan.get("roster", [])
+    summary = _plan_cost(t, info, items)
+    rows = []
+    for index, item in enumerate(items, 1):
+        role = item.get(info.get("agent_field") or "agent")
+        related = [e for e in events if e.get("type") == "task"
+                   and e.get("item", {}).get("record") == record
+                   and e["item"].get("source_step") == source["step"]
+                   and e["item"].get("index") == index]
+        states = {e.get("status") for e in related}
+        state = next((state for status, state in [("ok", "done"), ("review", "held"),
+                      ("error", "tried"), ("rejected", "tried"), ("waiting", "waiting")]
+                      if status in states), "todo")
+        step = related[-1]["step"] if related else None
+        go = cfg.get("go", {}).get(str(step), {})
+        effective_role = go.get("role") or cfg.get("roles", {}).get(role) or role
+        ic = _item_control(cfg, dict(record=record, index=index, key=_item_key(item, info), agent=effective_role))
+        names = set(info.get("nodes", [])) | {role, effective_role}
+        before = ic.get("confirm_before")
+        after = ic.get("confirm_after")
+        rows.append(dict(index=index, state=state, item=item, cost=_plan_card(t, role)["cost"], step=step,
+                         control=ic or None,
+                         confirm_before=before if before is not None else cfg.get("mode") == "step" or _match(_rules(cfg, "before"), names) is not None,
+                         confirm_after=after if after is not None else _match(_rules(cfg, "after"), names) is not None))
+    why = "后台还在跑" if _alive(cfg) else "运行已结束" if t.get("status") in ("done", "aborted") else None
+    return dict(record=record, path=info.get("path"), source_step=source["step"], format=source.get("format"),
+                editable=why is None, why_not=why, budget=summary["budget"], total=summary["total"], status=summary["status"],
+                roster=[_plan_card(t, name) for name in info["roster"]], rows=rows)
+
+
+def edit_plan(run, tasks=None, item_controls=None, record=None, client=None, actor="workflow_ctl"):
+    """修订清单来源结果；冻结已尝试的前缀，只回放刷新，不执行新任务。"""
+    from copy import deepcopy
+    from verbs.workflow._workflow import parse, _plans, _item_key
+    from tools.wf_submit import load_format
+
+    _check_actor(actor)
+    with _ctl_lock(run):
+        p, cf, cfg, t = _open(run)
+        events = t.get("events", [])
+        pending = t.get("pending") or {}
+        if (pending.get("phase") == "after" and pending.get("plan")
+                and not pending.get("item")):
+            raise ControlError("这份清单还在等确认，用 approve 带上改后的结果")
+        plans = _plans(parse(t.get("script", "")))
+        if record is None and len(plans) == 1:
+            record = next(iter(plans))
+        if not isinstance(record, str) or record not in plans:
+            raise ControlError("这次运行没有可改的分配清单")
+        info = dict(plans[record])
+        each = next((e for e in reversed(events) if e.get("type") == "each"
+                     and e.get("record") == record), None)
+        source = next((e for e in reversed(events) if e.get("type") == "task"
+                       and e.get("record") == record and e.get("status") == "ok"
+                       and (each is None or e.get("step") == each.get("source_step"))), None)
+        if source is None:
+            raise ControlError("这次运行没有可改的分配清单")
+        step = source["step"]
+        key = str(step)
+        current = _Control._revised(source, cfg.get("revisions", {}).get(key, []))["result"]
+        old_items = _plan_items(current, info)
+        items = old_items if tasks is None else tasks
+        done = max((e["item"]["index"] for e in events
+                    if e.get("type") == "task" and e.get("status") in ("ok", "review", "error", "rejected", "running")
+                    and e.get("item", {}).get("record") == record
+                    and e["item"].get("source_step") == step
+                    and e["item"].get("each_line") == info["each_line"]), default=0)
+
+        def same(left, right):
+            # JSON 类型也要一致，避免 True == 1 掩盖对已跑项的修改。
+            return json.dumps(left, sort_keys=True, ensure_ascii=True) == json.dumps(right, sort_keys=True, ensure_ascii=True)
+
+        if tasks is not None and isinstance(tasks, list):
+            for i in range(done):
+                if i >= len(tasks) or not same(tasks[i], old_items[i]):
+                    raise ControlError(f"第 {i + 1} 项已经跑过，不能改")
+        if isinstance(item_controls, list):
+            for i, control in enumerate(item_controls[:done], 1):
+                if control is not None:
+                    raise ControlError(f"第 {i} 项已经跑过，不能改")
+        result = deepcopy(current)
+        path = [field for field in (info.get("path") or "").split(".") if field]
+        if path:
+            target = result
+            for field in path[:-1]:
+                target = target[field]
+            target[path[-1]] = deepcopy(items)
+        else:
+            result = deepcopy(items)
+        fmt = source.get("format")
+        schema = load_format(Path(t["workdir"]), fmt) if fmt else None
+        result = _check_result(dict(format=fmt, schema=schema), result)
+        items = _plan_items(result, info)
+        expression = record + ("." + info["path"] if info.get("path") else "")
+        cost = next((e for e in reversed(events) if e.get("type") == "cost"
+                     and e.get("source") == expression), {})
+        roster = next((e for e in reversed(events) if e.get("type") == "roster"), {})
+        info["budget"] = cost.get("budget")
+        info["roster"] = [r["name"] for r in roster.get("roles", [])]
+        preview = _plan_cost(t, info, items)
+        started = done > 0 or any(e.get("type") == "task" and e.get("status") == "ok"
+                                  and e.get("step", 0) > step for e in events)
+        if started and (preview["status"] == "超出" or preview["not_in_roster"]):
+            outside = ("；清单外的卡：" + "、".join(preview["not_in_roster"])) if preview["not_in_roster"] else ""
+            raise ControlError(f"改后合计 {preview['total']}，预算 {preview['budget']}{outside}："
+                               "遍历已经开始，不能再进分配调整。把别的未跑项降档，或 rewind 到任务分配重来")
+        changed = not same(items, old_items)
+        if changed and _alive(cfg):
+            raise ControlError("后台还在跑，先 pause 等当前这步跑完再改清单")
+        if item_controls is not None:
+            rows = _check_item_controls(item_controls, items, info)
+            # null 是不修改冻结项的设置，并非清除。
+            for i in range(done):
+                old_rows = cfg.get("item_controls", {}).get(record, {}).get("rows", [])
+                rows[i] = deepcopy(old_rows[i]) if i < len(old_rows) else None
+        else:
+            old_rows = cfg.get("item_controls", {}).get(record, {}).get("rows", [])
+            rows = []
+            for i, item in enumerate(items):
+                fingerprint = _item_key(item, info)
+                row = old_rows[i] if i < len(old_rows) else None
+                if row is None or row.get("key") != fingerprint:
+                    row = next((r for r in old_rows if r and r.get("key") == fingerprint), None)
+                # 保留原 agent，换卡后原卡模型自然失效。
+                rows.append(deepcopy(row))
+        trace_backup, control_backup = p.read_bytes(), cf.read_bytes()
+        at = _stamp()
+        revisions = cfg.setdefault("revisions", {}).setdefault(key, [])
+        revisions.append(dict(rev=max((r.get("rev", 0) for r in revisions), default=0) + 1,
+                              kind="plan_edit", result=result, actor=actor, at=at))
+        cfg.setdefault("item_controls", {})[record] = dict(step=step, actor=actor, at=at, rows=rows)
+        _log(cfg, "edit_plan", step=step, record=record, actor=actor)
+        try:
+            _dump(cf, cfg)
+            # 活着的 worker 在下一个节点读取设置；不能由另一次回放覆盖它的记录。
+            if not _alive(cfg):
+                _advance(p, cfg, client, force_step=True, orders=False, raise_errors=True)
+        except BaseException:
+            p.write_bytes(trace_backup)
+            cf.write_bytes(control_backup)
+            raise
+        out = status(p)
+        out["cost_preview"] = preview
+        return out
+
+
 def approve(run, result=None, note=None, step=None, attempt=None, wait=None, client=None,
-            actor="workflow_ctl"):
+            actor="workflow_ctl", item_controls=None):
     _check_actor(actor)
     with _ctl_lock(run):
         p, cf, cfg, t = _open(run)
         _idle(cfg)
-        pend = _pending(_settle(p, cfg, t, client), step)
+        # 先校验已有 pending，非法请求不能因恢复记录而写文件。
+        pend = t.get("pending")
+        if pend is None:
+            pend = _pending(t, step)
+        elif step is not None and int(step) != pend["step"]:
+            _pending(dict(t, status="waiting"), step)
         _check_phase(pend, "after", attempt)
         if result is not None:
             result = _check_result(pend, result)
+        info = pend.get("plan")
+        if item_controls is not None and info is None:
+            raise ControlError("逐项设置只能用在分配清单上")
+        final = result if result is not None else pend["result"]
+        source_step = pend["step"]
+        if info and pend.get("item"):
+            source_step = pend["item"].get("source_step")
+            source = next((e for e in reversed(t.get("events", []))
+                           if e.get("type") == "task" and e.get("step") == source_step
+                           and e.get("status") == "ok"), None)
+            if source is None:
+                raise ControlError("这次运行没有可改的分配清单")
+            final = source["result"]
+        items = _plan_items(final, info) if info else None
+        rows = _check_item_controls(item_controls, items, info) if item_controls is not None else None
+        preview = _plan_cost(t, info, items) if info else None
         _check_note(note)
+        pend = _pending(_settle(p, cfg, t, client), step)
+        _check_phase(pend, "after", attempt)
         key = str(pend["step"])
         at = _stamp()
         current_attempt = pend.get("attempt", 1)
@@ -644,12 +950,19 @@ def approve(run, result=None, note=None, step=None, attempt=None, wait=None, cli
             revisions.append({"rev": max((r["rev"] for r in revisions), default=0) + 1,
                               "kind": "approve", "attempt": current_attempt, "result": result,
                               "actor": actor, "at": at, "note": note})
+        if rows is not None:
+            cfg.setdefault("item_controls", {})[info["record"]] = {
+                "step": source_step, "actor": actor, "at": at, "rows": rows}
+            _log(cfg, "item_controls", record=info["record"], step=source_step, actor=actor)
         cfg.setdefault("after", {})[key] = {"attempt": current_attempt, "action": "approve",
                                              "actor": actor, "at": at}
         _log(cfg, "approve", step=pend["step"], attempt=current_attempt, actor=actor)
         _dump(cf, cfg)
     _continue(p, cfg["mode"] == "step" if wait is None else wait, client)
-    return status(p)
+    out = status(p)
+    if preview is not None:
+        out["cost_preview"] = preview
+    return out
 
 
 def reject(run, note, model=None, role=None, step=None, attempt=None, wait=False, client=None,
@@ -676,7 +989,11 @@ def reject(run, note, model=None, role=None, step=None, attempt=None, wait=False
             {"kind": "reject", "text": note, "attempt": current_attempt, "actor": actor, "at": at})
         cfg.setdefault("after", {})[key] = {"attempt": current_attempt, "action": "reject",
                                              "model": model, "role": role, "actor": actor, "at": at}
-        _log(cfg, "reject", step=pend["step"], attempt=current_attempt, model=model, role=role, actor=actor)
+        record = (pend.get("plan") or {}).get("record")
+        if record is not None:
+            cfg.get("item_controls", {}).pop(record, None)
+        _log(cfg, "reject", step=pend["step"], attempt=current_attempt, model=model, role=role, actor=actor,
+             **({"record": record} if record is not None else {}))
         _dump(cf, cfg)
     _continue(p, wait, client)
     return status(p)

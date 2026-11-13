@@ -616,7 +616,7 @@ def test_rewind_confirm_state(tmp):
     cfg = wc._load(cf)
     check(all(cfg[key] == {'1': [dict(marker='1')]} for key in ['notes', 'after', 'revisions']),
           'rewind 按数字清除 notes/after/revisions 当前及后续步，保留前序')
-    check(cfg['item_controls'] == {'assignment': {'step': 3}}, '本项不清 item_controls')
+    check(cfg['item_controls'] == {}, 'rewind 到来源步之前清除该 record 的逐项设置')
 
 
 def test_ctl_lock_l1(tmp):
@@ -1371,11 +1371,638 @@ def test_api_interrupted(tmp):
     check(task_events(run)[0]['status'] == 'ok' and len(c.calls) == 1, '用例18：恢复后 approve 不重跑')
 
 
+def test_cost_summary(tmp):
+    from tools.wf_plan import cost_summary
+
+    costs = {'ENGINEER_LITE': 1, 'ENGINEER': 3, 'ENGINEER_SENIOR': 8, 'TEST_ENGINEER': 2}
+    items = [{'agent': role, 'content': f'【第{i}项】做第{i}件事'}
+             for i, role in enumerate(('ENGINEER_LITE', 'ENGINEER', 'ENGINEER'), 1)]
+    rows = [{'index': i, 'agent': item['agent'], 'cost': costs[item['agent']], 'content': item['content']}
+            for i, item in enumerate(items, 1)]
+    allowed = ['ENGINEER_LITE', 'ENGINEER', 'ENGINEER_SENIOR']
+    check(cost_summary(items, 7, allowed, costs.__getitem__) ==
+          {'total': 7, 'budget': 7, 'tasks': rows, 'status': '未超出'}, '成本合计等于预算未超出')
+    over = [{'agent': 'ENGINEER_SENIOR', 'content': items[0]['content']}, *items[1:]]
+    over_rows = [{'index': 1, 'agent': 'ENGINEER_SENIOR', 'cost': 8, 'content': items[0]['content']}, *rows[1:]]
+    check(cost_summary(over, 7, allowed, costs.__getitem__) ==
+          {'total': 14, 'budget': 7, 'tasks': over_rows, 'status': '超出'}, '成本合计超预算')
+    outside = [{'agent': 'TEST_ENGINEER', 'content': '甲'}, {'agent': 'ENGINEER_LITE', 'content': '乙'}]
+    check(cost_summary(outside, 7, allowed, costs.__getitem__) ==
+          {'total': 3, 'budget': 7, 'tasks': [{'index': 1, 'agent': 'TEST_ENGINEER', 'cost': 2, 'content': '甲'},
+                                              {'index': 2, 'agent': 'ENGINEER_LITE', 'cost': 1, 'content': '乙'}],
+           'status': '超出', 'not_in_roster': ['TEST_ENGINEER']}, '清单外角色判超出')
+
+
+def _scan_cost_trace(tmp, name):
+    from test_wf_cost import demo_copy as cost_demo, run_demo, plan
+    from wf_fixtures import contract, review, impl, acceptance
+    folder = tmp / name
+    folder.mkdir()
+    _, _, trace, error = run_demo(cost_demo(folder), [contract('v1'), review('通过'),
+                                  plan('ENGINEER_LITE', 'ENGINEER', 'ENGINEER'),
+                                  impl('甲'), impl('乙'), impl('丙'), acceptance('通过')])
+    check(error is None and trace['status'] == 'done', '补充：成本流程跑完')
+    return trace
+
+
+def test_scan_each_source(tmp):
+    trace = _scan_cost_trace(tmp, 'scan-source')
+    source = next(e for e in trace['events'] if e.get('name') == '任务分配')
+    each = next(e for e in trace['events'] if e['type'] == 'each')
+    check(each['record'] == 'assignment' and each['path'] == 'tasks'
+          and each['source_step'] == source['step'], '补充a：遍历带清单来源和产生步号')
+
+
+def test_scan_task_items(tmp):
+    trace = _scan_cost_trace(tmp, 'scan-items')
+    tasks = [e for e in trace['events'] if e.get('name') == '任务实现']
+    each = next(e for e in trace['events'] if e['type'] == 'each')
+    check([e['item'] for e in tasks] ==
+          [dict(index=i, total=3, each_line=each['line'], record='assignment',
+                source_step=each['source_step']) for i in range(1, 4)],
+          '补充b：任务 item 从1递增、总数和来源正确，事件不带 key')
+
+
+def test_scan_outside_item(tmp):
+    trace = _scan_cost_trace(tmp, 'scan-outside')
+    check(all('item' not in e for e in trace['events']
+              if e['type'] == 'task' and e['name'] != '任务实现'),
+          '补充c：遍历前后的任务事件没有 item')
+
+
+def test_scan_unrevised_cost(tmp):
+    trace = _scan_cost_trace(tmp, 'scan-unrevised')
+    costs = [e for e in trace['events'] if e['type'] == 'cost']
+    check(costs and all('list_rev' not in e for e in costs), '补充d：未修订成本事件没有 list_rev')
+
+
+def test_scan_plans(tmp):
+    from verbs.workflow._workflow import _plans, parse
+    entry = (ROOT / 'workflow_demo/run_cost.zs').read_text(encoding='utf-8')
+    workflow = next(line.split()[1] for line in entry.splitlines() if line.startswith('编排执行 '))
+    script = (ROOT / 'workflow_demo' / workflow).read_text(encoding='utf-8')
+    info = _plans(parse(script))['assignment']
+    check(info == dict(path='tasks', each_line=next(i for i, line in enumerate(script.splitlines(), 1)
+                                                   if line.startswith('遍历 ')),
+                       var='task', nodes=['任务实现'], agent_field='agent', content_field='content',
+                       cost_target='spent', budget_expr='{budget}'), '补充e：静态扫描成本入口引用的流程')
+    nested = _plans(parse('如果 yes\n    遍历 x 于 data.rows\n        工作\n            角色 ENGINEER\n            任务 固定文本\n            记录 result'))
+    check(nested['data']['agent_field'] is None and nested['data']['content_field'] is None,
+          '补充：递归扫描，非逐项字段留空')
+    check(_plans(parse('')) == {}, '补充：空流程没有清单')
+
+
+def test_scan_item_key(tmp):
+    import hashlib
+    from verbs.workflow._workflow import _item_key
+    info = dict(content_field='content')
+    key = _item_key(dict(content='相同内容', agent='A'), info)
+    check(key == hashlib.sha1('相同内容'.encode()).hexdigest()[:12]
+          and key == _item_key(dict(content='相同内容', agent='B'), info)
+          and key != _item_key(dict(content='不同内容'), info) and len(key) == 12,
+          '补充f：内容指纹稳定、区分内容且长度12')
+    check(_item_key(dict(b=2, a=1), None) == _item_key(dict(a=1, b=2), {})
+          and len(_item_key({}, None)) == 12, '补充：无内容字段按整项排序序列化，支持空项')
+
+
+def test_scan_controlled_replay(tmp):
+    from test_wf_cost import demo_copy as cost_demo, plan
+    from wf_fixtures import contract, review, impl, acceptance
+    folder = tmp / 'scan-controlled'
+    folder.mkdir()
+    c = client([contract('v1'), review('通过'), plan('ENGINEER_LITE', 'ENGINEER'),
+                impl('甲'), impl('乙'), acceptance('通过')])
+    s = wc.start(cost_demo(folder), entry='run_cost.zs', mode='auto',
+                 confirm_after=['任务分配'], client=c)
+    run = s['run']
+    s = wc.approve(run, result=plan('ENGINEER', 'ENGINEER_LITE'), client=c)
+    trace = wc._load(ROOT / run)
+    cost = next(e for e in trace['events'] if e['type'] == 'cost')
+    check(s['status'] == 'done' and cost['list_rev'] == 1 and cost['total'] == 4,
+          '补充：放行修订清单后成本带 list_rev')
+    # 模拟旧版本记录：去掉任务 item，回放核对仍只认原有四个字段。
+    for event in trace['events']:
+        if event['type'] == 'task':
+            event.pop('item', None)
+    wc._dump(ROOT / run, trace)
+    before = len(c.calls)
+    s = wc.resume(run, client=c)
+    trace = wc._load(ROOT / run)
+    check(s['status'] == 'done' and len(c.calls) == before
+          and next(e for e in trace['events'] if e['type'] == 'cost')['list_rev'] == 1,
+          '补充：旧任务事件无 item 仍回放，已应用的修订号保留')
+
+
+def test_scan_request_item(tmp):
+    from tools.dsl import DSLEngine
+    from verbs.workflow import _workflow
+    class RecordingControl(wc._Control):
+        def decide(self, request):
+            requests.append(request)
+            return super().decide(request)
+    requests = []
+    wd = tmp / 'scan-request'
+    wd.mkdir()
+    engine = DSLEngine(client=client([]), workdir=wd, verbose=False)
+    engine.vars['rows'] = [{'content': '甲'}, {'content': '乙'}]
+    engine._wf_control = RecordingControl(dict(mode='auto'))
+    script = ('遍历 x 于 rows\n    实施\n        角色 ENGINEER\n        任务 x.content\n'
+              '        记录 result\n结束\n    角色 ENGINEER\n    记录 final')
+    _workflow.run(engine, script, lambda *args: {'ok': True})
+    check([r['item']['index'] for r in requests[:2]] == [1, 2]
+          and requests[0]['item'] is not requests[1]['item']
+          and requests[0]['item']['key'] == _workflow._item_key({'content': '甲'}, dict(content_field='content'))
+          and 'item' not in requests[2], '补充：控制器收到独立 item 副本及 key，遍历结束后弹栈')
+    trace = wc._load(engine.vars['workflow_trace'])
+    each = next(e for e in trace['events'] if e['type'] == 'each')
+    check(each['path'] is None and 'source_step' not in each,
+          '补充：无任务来源的列表不写 each.source_step')
+
+
+def test_item_fingerprints(tmp):
+    rows = [dict(key='a', agent='ENGINEER', model='cli:fake/first', confirm_before=True),
+            dict(key='b', agent='ENGINEER', model='cli:fake/second', confirm_after=False),
+            dict(key='a', agent='ENGINEER', model='cli:fake/duplicate'), None]
+    cfg = dict(item_controls={'assignment': dict(step=3, rows=rows)})
+    item = dict(record='assignment', index=1, key='a', agent='ENGINEER')
+    assert wc._item_control(cfg, item)['model'] == 'cli:fake/first'
+    assert wc._item_control(cfg, dict(item, index=3))['model'] == 'cli:fake/duplicate'
+    assert wc._item_control(cfg, dict(item, index=4, key='b'))['confirm_after'] is False
+    assert wc._item_control(cfg, dict(item, key='missing')) == {}
+    assert wc._item_control({}, item) == {} and wc._item_control(cfg, None) == {}
+    changed = wc._item_control(cfg, dict(item, agent='ENGINEER_LITE'))
+    assert changed.get('model') is None and changed['confirm_before'] is True
+    req = dict(step=4, name='任务实现', role='ENGINEER', item=item)
+    for override in [dict(roles={'ENGINEER': 'ENGINEER_LITE'}),
+                     dict(go={'4': dict(role='ENGINEER_LITE')})]:
+        d = wc._Control(dict(cfg, mode='auto', models={'ENGINEER': 'cli:fake/global'}, **override)).decide(req)
+        assert d['model'] == 'cli:fake/global'
+    for extra, expected in [({}, 'cli:fake/first'),
+                            (dict(go={'4': dict(model='cli:fake/go')}), 'cli:fake/go')]:
+        d = wc._Control(dict(cfg, mode='auto', models={'ENGINEER': 'cli:fake/global'}, **extra)).decide(req)
+        assert d['model'] == expected
+    for role, model, expected in [('ENGINEER', None, 'cli:fake/first'),
+                                  ('ENGINEER_LITE', None, 'cli:fake/global'),
+                                  ('ENGINEER_LITE', 'cli:fake/reject', 'cli:fake/reject')]:
+        ctl = wc._Control(dict(cfg, mode='auto', models={'ENGINEER': 'cli:fake/global'},
+                              after={'4': dict(action='reject', attempt=1, role=role, model=model)}))
+        ctl.carry[4] = [dict(status='rejected', result={})]
+        assert ctl.decide(req)['model'] == expected
+    for key in ['confirm_before', 'confirm_after']:
+        config = dict(mode='step', confirm_after=['任务实现'], item_controls={
+            'assignment': dict(rows=[dict(rows[0], **{key: False})])})
+        d = wc._Control(config).decide(req)
+        assert (d['action'] == 'run') if key == 'confirm_before' else not d['after']
+    check(True, '逐项指纹同下标优先、换序查找、缺失兼容、换卡模型作废、false 覆盖规则')
+
+
+def test_item_controls_storage_validation(tmp):
+    s = wc.start(demo_copy(tmp, 'item-storage'), client=client([]))
+    run = s['run']
+    cf = wc._side(ROOT / run, '.ctl')
+    before = cf.read_bytes()
+    raises(lambda: wc._set_item_controls(run, 'assignment', 3, [], '\ud800'), '来源无效')
+    for record, rows in [('\ud800', []), ('assignment', [dict(key='\ud800')]),
+                         ('assignment', [dict(agent='\ud800')]),
+                         ('assignment', [dict(model='cli:claude/\ud800')])]:
+        raises(lambda: wc._set_item_controls(run, record, 3, rows, 'viewer'), '有效的 UTF-8 JSON')
+        assert cf.read_bytes() == before
+    wc._set_item_controls(run, 'assignment', 3, [None], 'viewer')
+    stored = wc._load(cf)['item_controls']['assignment']
+    assert stored['rows'] == [None] and stored['at'] and stored['actor'] == 'viewer' and stored['step'] == 3
+    cfg = dict(item_controls={'later': dict(step=10), 'earlier': dict(step=1), 'current': dict(step=3)})
+    wc._prune(cfg, 3)
+    assert cfg['item_controls'] == {'earlier': dict(step=1)}
+    check(True, '逐项存储支持 null，拒绝不可编码输入且不写文件；按来源步数清除')
+
+
+def _item_setup(tmp, name, after):
+    from test_wf_cost import demo_copy as cost_demo, plan
+    from wf_fixtures import contract, review, impl, acceptance
+    folder = tmp / name
+    folder.mkdir()
+    assigned = plan('ENGINEER_LITE', 'ENGINEER', 'ENGINEER')
+    c = client([contract('v1'), review('通过'), assigned, impl('甲'), impl('乙'), impl('丙'), acceptance('通过')])
+    s = wc.start(cost_demo(folder), entry='run_cost.zs', mode='auto',
+                 confirm_after=['任务分配'] + after, client=c)
+    assert s['pending']['phase'] == 'after' and 'item' not in s['pending']
+    assert s['pending']['plan']['record'] == 'assignment'
+    assert s['pending']['plan']['budget'] == 7
+    assert 'ENGINEER' in s['pending']['plan']['roster']
+    return s, c, assigned
+
+
+def _control_rows(assigned):
+    from verbs.workflow._workflow import _item_key
+    return [dict(key=_item_key(row, dict(content_field='content')), agent=row['agent'])
+            for row in assigned['tasks']]
+
+
+def test_item_controls_25(tmp):
+    s, c, assigned = _item_setup(tmp, 'items-25', [])
+    rows = _control_rows(assigned)
+    rows[0]['model'] = 'cli:claude/item-model'
+    rows[1]['confirm_before'] = True
+    rows[2]['confirm_after'] = True
+    run = s['run']
+    wc._set_item_controls(run, 'assignment', s['pending']['step'], rows, 'viewer')
+    cfg = wc._load(wc._side(ROOT / run, '.ctl'))
+    assert cfg['item_controls']['assignment']['rows'] == rows
+    assert cfg['history'][-1]['op'] == 'item_controls' and cfg['history'][-1]['actor'] == 'viewer'
+    s = wc.approve(run, client=c)
+    p = s['pending']
+    assert p['phase'] == 'before' and p['reason'] == 'item' and p['item']['index'] == 2
+    assert p['item']['total'] == 3 and 'key' not in p['item']
+    assert p['plan']['record'] == 'assignment' and p['plan']['budget'] == 7
+    first = next(e for e in task_events(run) if e['name'] == '任务实现' and e['status'] == 'ok')
+    assert first['model_override'] == rows[0]['model']
+    s = wc.execute(run, client=c)
+    assert s['pending']['phase'] == 'after' and s['pending']['reason'] == 'item'
+    assert s['pending']['item']['index'] == 3 and s['pending']['item']['total'] == 3
+    assert 'key' not in s['pending']['item']
+    for call in c.calls:
+        assert all(token not in call['prompt'] for token in ['cli:claude/item-model', 'confirm_before', 'confirm_after'])
+    assert next(e for e in task_events(run) if e['name'] == '任务分配')['result'] == assigned
+    s = wc.approve(run, client=c)
+    assert s['status'] == 'done'
+    s = wc.rewind(run, cfg['item_controls']['assignment']['step'], client=c)
+    assert wc._load(wc._side(ROOT / run, '.ctl'))['item_controls'] == {}
+    check(True, '25：逐项模型、前停后停、item/plan、提示词和结果隔离、rewind 清除')
+
+
+def test_item_controls_26(tmp):
+    s, c, assigned = _item_setup(tmp, 'items-26', ['任务实现'])
+    rows = _control_rows(assigned)
+    rows[0]['confirm_after'] = False
+    wc._set_item_controls(s['run'], 'assignment', s['pending']['step'], rows, 'workflow_ctl')
+    s = wc.approve(s['run'], client=c)
+    assert s['pending']['item']['index'] == 2 and s['pending']['phase'] == 'after'
+    s = wc.approve(s['run'], client=c)
+    assert s['pending']['item']['index'] == 3 and s['pending']['phase'] == 'after'
+    s = wc.approve(s['run'], client=c)
+    assert s['status'] == 'done'
+    check(True, '26：第1项 false 覆盖后确认规则，其余项逐一后停')
+
+
+def test_pending_plan_before_and_missing_budget(tmp):
+    from tools.dsl import DSLEngine
+    from verbs.workflow import _workflow
+    wd = tmp / 'pending-plan-before'
+    wd.mkdir()
+    engine = DSLEngine(client=client([]), workdir=wd, verbose=False)
+    engine._wf_control = wc._Control(dict(mode='step'))
+    script = ('分配\n    角色 ARCHITECT\n    记录 assignment\n'
+              '成本合计 spent assignment.tasks 预算 {missing}\n'
+              '遍历 x 于 assignment.tasks\n    实施\n        角色 x.agent\n'
+              '        任务 x.content\n        记录 result')
+    try:
+        _workflow.run(engine, script, lambda *args: {})
+    except wc.WorkflowPause:
+        pass
+    pending = wc._load(engine.vars['workflow_trace'])['pending']
+    assert pending['plan']['budget'] is None and pending['plan']['roster'] == []
+    assert pending['plan']['cost_target'] == 'spent' and 'item' not in pending
+    check(True, '清单来源开始前停带 plan；预算尚未定义时为 None')
+
+
+def test_plan_approve_22(tmp):
+    from wf_fixtures import impl
+    s, c, assigned = _item_setup(tmp, 'plan-22', [])
+    changed = {'tasks': [dict(assigned['tasks'][1], agent='ENGINEER_LITE'),
+                         dict(assigned['tasks'][0], agent='ENGINEER'),
+                         dict(assigned['tasks'][2], content='新加的一项', agent='ENGINEER_LITE')]}
+    out = wc.approve(s['run'], result=changed, item_controls=[None, {'confirm_before': True}, None], client=c)
+    assert out['cost_preview'] == dict(total=5, budget=7, status='未超出', not_in_roster=[])
+    event = next(e for e in task_events(s['run']) if e['name'] == '任务分配')
+    assert event['result_model'] == assigned and event['result'] == changed
+    costs = [e for e in wc._load(ROOT / s['run'])['events'] if e['type'] == 'cost']
+    assert costs[-1]['total'] == 5
+    out = wc.execute(s['run'], client=c)
+    executed = [e for e in task_events(s['run']) if e['name'] == '任务实现']
+    assert [(e['task'], e['role']) for e in executed] == [(x['content'], x['agent']) for x in changed['tasks']]
+    assert out['status'] == 'done'
+    check(True, '22：改卡、换序、增删后的清单和原结果都保留，成本和遍历用新清单')
+
+
+def test_plan_approve_23_28(tmp):
+    from test_wf_cost import demo_copy as cost_demo, plan
+    from wf_fixtures import contract, review, impl, acceptance
+    for name, role, outside in [('over', 'ENGINEER_SENIOR', []), ('outside', 'ENGINEER_GPT', ['ENGINEER_GPT'])]:
+        folder = tmp / ('plan-23-' + name)
+        folder.mkdir()
+        assigned = plan('ENGINEER')
+        adjusted = plan('ENGINEER_LITE')
+        c = client([contract('v1'), review('通过'), assigned, adjusted, impl('甲'), acceptance('通过')])
+        s = wc.start(cost_demo(folder), entry='run_cost.zs', mode='auto', confirm_after=['任务分配'], client=c)
+        changed = plan(role)
+        s = wc.approve(s['run'], result=changed,
+                       item_controls=[dict(model='cli:claude/old-card', confirm_before=True, confirm_after=True)], client=c)
+        assert s['cost_preview']['status'] == '超出' and s['cost_preview']['not_in_roster'] == outside
+        assert s['pending']['phase'] == 'before' and s['pending']['role'] == 'ENGINEER_LITE'
+        listing = wc.plan(s['run'])
+        assert listing['rows'][0]['control']['model'] is None
+        assert listing['rows'][0]['confirm_before'] and listing['rows'][0]['confirm_after']
+        s = wc.execute(s['run'], client=c)
+        assert s['pending']['phase'] == 'after'
+        execution = next(e for e in task_events(s['run']) if e['name'] == '任务实现')
+        assert execution.get('model_override') != 'cli:claude/old-card'
+        check(True, '23/28：超预算和清单外卡触发调整；换卡后保留确认、原模型作废')
+
+
+def test_plan_approve_validation_24(tmp):
+    s, c, assigned = _item_setup(tmp, 'plan-validation', [])
+    p = ROOT / s['run']
+    cf = wc._side(p, '.ctl')
+    before = (p.read_bytes(), cf.read_bytes())
+    bad_result = {'tasks': [dict(assigned['tasks'][0], agent='UNKNOWN')]}
+    raises(lambda: wc.approve(s['run'], result=bad_result, item_controls='bad', client=c), '不符合格式')
+    for controls in ['bad', [], [None], [None, None, None, None],
+                     [{'unknown': 1}, None, None], [True, None, None],
+                     [{'confirm_before': 1}, None, None], [{'confirm_after': 'yes'}, None, None],
+                     [{'model': 'bad'}, None, None], [{'model': 'cli:claude/\ud800'}, None, None]]:
+        raises(lambda: wc.approve(s['run'], item_controls=controls, client=c), '逐项设置第')
+        assert (p.read_bytes(), cf.read_bytes()) == before
+    raises(lambda: wc.approve(s['run'], result={'tasks': [dict(assigned['tasks'][0], content='\ud800')]}, client=c), 'UTF-8')
+    assert (p.read_bytes(), cf.read_bytes()) == before
+    plain = wc.start(demo_copy(tmp, 'no-plan-controls'), mode='auto', confirm_after=['接口约定'], client=client(REPLIES))
+    raises(lambda: wc.approve(plain['run'], item_controls=[], client=c), '逐项设置只能用在分配清单上')
+    check(True, '24：格式先于逐项设置校验；错误字段、长度、类型、模型和编码全部拒绝且文件不动')
+
+
+def test_plan_reject_27(tmp):
+    from test_wf_cost import plan
+    s, c, assigned = _item_setup(tmp, 'plan-27', [])
+    rows = _control_rows(assigned)
+    rows[0]['confirm_before'] = True
+    wc._set_item_controls(s['run'], 'assignment', s['pending']['step'], rows)
+    # 打回后模型重新分配，停在同一来源步的结束后。
+    retry = client([assigned])
+    s = wc.reject(s['run'], note='重新分配', client=retry)
+    cfg = wc._load(wc._side(ROOT / s['run'], '.ctl'))
+    assert 'assignment' not in cfg['item_controls']
+    assert any(h['op'] == 'reject' and h.get('record') == 'assignment' for h in cfg['history'])
+    assert all(r['control'] is None for r in wc.plan(s['run'])['rows'])
+    check(True, '27：打回清单删除逐项设置并记录 history，重分清单没有旧设置')
+
+
+def test_plan_states_33(tmp):
+    s, c, assigned = _item_setup(tmp, 'plan-33', [])
+    p, cf = ROOT / s['run'], wc._side(ROOT / s['run'], '.ctl')
+    before = (p.read_bytes(), cf.read_bytes())
+    listing = wc.plan(s['run'])
+    assert listing['total'] == listing['budget'] == 7
+    assert [r['state'] for r in listing['rows']] == ['todo'] * 3
+    assert listing['source_step'] == 3 and listing['format'] == 'cost_assignment'
+    assert listing['path'] == 'tasks' and listing['editable'] and listing['why_not'] is None
+    assert listing['roster'][0].keys() == {'name', 'cost', 'description'}
+    assert (p.read_bytes(), cf.read_bytes()) == before
+    s = wc.approve(s['run'], item_controls=[None, {'confirm_after': True}, {'confirm_before': True}], client=c)
+    listing = wc.plan(s['run'])
+    assert [r['state'] for r in listing['rows']] == ['done', 'held', 'todo']
+    assert listing['rows'][1]['step'] == s['pending']['step']
+    s = wc.approve(s['run'], client=c)
+    assert [r['state'] for r in wc.plan(s['run'])['rows']] == ['done', 'done', 'waiting']
+    s = wc.execute(s['run'], client=client(['不是JSON']))
+    assert wc.plan(s['run'])['rows'][2]['state'] == 'tried'
+    s = wc.execute(s['run'], client=c)
+    assert not wc.plan(s['run'])['editable'] and wc.plan(s['run'])['why_not']
+    raises(lambda: wc.plan(s['run'], '\ud800'), '没有可改的分配清单')
+    check(True, '33：只读 plan 返回成本、来源、规则开关以及 todo/done/held/waiting/tried 各状态')
+
+
+def test_plan_legacy_34(tmp):
+    from wf_fixtures import contract, review, impl, acceptance
+    assigned = {'tasks': [{'content': '旧流程任务', 'agent': 'ENGINEER'}]}
+    c = client([contract('v1'), review('通过'), assigned, impl('甲'), acceptance('通过')])
+    demo = demo_copy(tmp, 'plan-34')
+    s = wc.start(demo, mode='auto', confirm_after=['任务分配'], client=c)
+    listing = wc.plan(s['run'])
+    assert listing['budget'] is None and listing['status'] is None
+    assert listing['rows'][0]['item'] == assigned['tasks'][0]
+    s = wc.approve(s['run'], item_controls=[None], client=c)
+    assert s['cost_preview']['budget'] is None and s['cost_preview']['status'] is None
+    assert not any(e['name'] == '分配调整' for e in task_events(s['run']))
+    empty = wc.start(demo_copy(tmp, 'plan-empty'), client=client([]))
+    raises(lambda: wc.plan(empty['run']), '这次运行没有可改的分配清单')
+    check(True, '34：旧流程可列清单，无预算不判断超出；没有清单时报 ControlError')
+
+
+def _edit_setup(tmp, name, count=6, budget=12, edit=None):
+    from test_wf_cost import demo_copy as cost_demo, plan
+    from wf_fixtures import contract, review, impl, acceptance
+    folder = tmp / name
+    folder.mkdir()
+    assigned = plan(*(['ENGINEER_LITE'] * count))
+    c = client([contract('v1'), review('通过'), assigned]
+               + [impl(str(i)) for i in range(count)] + [acceptance('通过')])
+    s = wc.start(cost_demo(folder, budget=budget, edit=edit), entry='run_cost.zs', mode='auto',
+                 confirm_before=['任务实现'], client=c)
+    return s, c, assigned
+
+
+def test_edit_plan_29(tmp):
+    import copy
+    s, c, assigned = _edit_setup(tmp, 'edit-29')
+    run = s['run']
+    wc.execute(run, client=c)
+    s = wc.execute(run, client=c)
+    assert s['pending']['item']['index'] == 3
+    before = [e for e in task_events(run) if e.get('item') and e['status'] == 'ok']
+    calls = len(c.calls)
+    changed = copy.deepcopy(assigned['tasks'][:5])
+    changed[2].update(agent='ENGINEER', content='新的第三项')
+    changed[3].update(agent='ENGINEER', content='新的第四项')
+    changed.append(dict(content='追加项', agent='ENGINEER_LITE', reason='追加'))
+    s = wc.edit_plan(run, tasks=changed, client=c, actor='viewer')
+    assert len(c.calls) == calls
+    assert s['cost_preview']['total'] == 10
+    assert s['pending']['task'] == '新的第三项' and s['pending']['role'] == 'ENGINEER'
+    trace = wc._load(ROOT / run)
+    cost = next(e for e in trace['events'] if e['type'] == 'cost')
+    assert cost['total'] == 10 and cost['list_rev'] == 1
+    assert [e for e in task_events(run) if e.get('item') and e['status'] == 'ok'] == before
+    for _ in range(4):
+        s = wc.execute(run, client=c)
+    assert s['status'] == 'done'
+    events = [e for e in task_events(run) if e.get('item') and e['status'] == 'ok']
+    assert [(e['task'], e['role']) for e in events] == [(x['content'], x['agent']) for x in changed]
+    cfg = wc._load(wc._side(ROOT / run, '.ctl'))
+    assert cfg['history'][-1]['actor'] == 'workflow_ctl'
+    revision = cfg['revisions']['3'][-1]
+    assert revision['kind'] == 'plan_edit' and revision['actor'] == 'viewer' and 'attempt' not in revision
+    check(True, '29：修改未跑项、增删清单，已跑项不重跑，成本和 pending 刷新')
+
+
+def test_edit_plan_30(tmp):
+    import copy
+    s, c, assigned = _edit_setup(tmp, 'edit-30')
+    run = s['run']
+    s = wc.execute(run, client=c)
+    p, cf = ROOT / run, wc._side(ROOT / run, '.ctl')
+    before = (p.read_bytes(), cf.read_bytes())
+    changed = copy.deepcopy(assigned['tasks'])
+    changed[0]['content'] = '不能改'
+    raises(lambda: wc.edit_plan(run, tasks=changed), '第 1 项已经跑过')
+    raises(lambda: wc.edit_plan(run, tasks=[]), '第 1 项已经跑过')
+    raises(lambda: wc.edit_plan(run, item_controls=[{}, None, None, None, None, None]), '第 1 项已经跑过')
+    changed = copy.deepcopy(assigned['tasks'])
+    changed[1]['agent'] = 'ENGINEER_SENIOR'
+    raises(lambda: wc.edit_plan(run, tasks=changed), '改后合计 13，预算 12')
+    changed[1]['agent'] = 'ENGINEER_GPT'
+    raises(lambda: wc.edit_plan(run, tasks=changed), 'ENGINEER_GPT')
+    assert (p.read_bytes(), cf.read_bytes()) == before
+    fresh, c2, assigned2 = _edit_setup(tmp, 'edit-30-fresh')
+    assigned2['tasks'][0]['agent'] = 'ENGINEER_SENIOR'
+    out = wc.edit_plan(fresh['run'], tasks=assigned2['tasks'], client=c2)
+    assert out['cost_preview']['status'] == '超出'
+    assert out['pending']['name'] == '分配调整' and out['pending']['phase'] == 'before'
+    check(True, '30：冻结前缀和超预算拒绝时文件不变；尚未执行时允许进入分配调整')
+
+
+def test_edit_plan_31(tmp):
+    import subprocess
+    s, c, assigned = _edit_setup(tmp, 'edit-31')
+    run = s['run']
+    p, cf = ROOT / run, wc._side(ROOT / run, '.ctl')
+    proc = subprocess.Popen(['bash', '-c', 'exec -a workflow_ctl sleep 60'])
+    try:
+        cfg = wc._load(cf)
+        cfg['worker'] = proc.pid
+        wc._dump(cf, cfg)
+        before = (p.read_bytes(), cf.read_bytes())
+        changed = [dict(row) for row in assigned['tasks']]
+        changed[0]['content'] = '后台不能改'
+        raises(lambda: wc.edit_plan(run, tasks=changed), '后台还在跑，先 pause 等当前这步跑完再改清单')
+        assert (p.read_bytes(), cf.read_bytes()) == before
+        out = wc.edit_plan(run, item_controls=[{'confirm_after': True}] + [None] * 5, client=c)
+        assert out['worker_alive'] and len(c.calls) == 3
+        assert wc._load(cf)['item_controls']['assignment']['rows'][0]['confirm_after'] is True
+        assert p.read_bytes() == before[0]
+    finally:
+        proc.terminate()
+        proc.wait()
+    check(True, '31：后台运行时拒绝改内容，允许单改逐项设置且不覆盖运行记录')
+
+
+def test_edit_plan_32(tmp):
+    from tools.dsl import DSLEngine
+    from wf_fixtures import impl, acceptance
+    s, c, assigned = _edit_setup(tmp, 'edit-32', count=3)
+    run = s['run']
+    wc.execute(run, client=c)
+    wc.configure(run, confirm_after=['任务实现'])
+    s = wc.execute(run, client=c)
+    assert s['pending']['item']['index'] == 2 and s['pending']['phase'] == 'after'
+    first = next(e for e in task_events(run) if e.get('item') and e['item']['index'] == 1 and e['status'] == 'ok')
+    retry = client([impl('最终通过'), impl('第三项'), acceptance('通过')])
+    s = wc.reject(run, note='第二项重做', client=retry)
+    assert len(retry.calls) == 1 and s['pending']['item']['index'] == 2
+    snapshots = []
+    original = DSLEngine.store
+    def capture(engine, key, value):
+        if key == 'task_results':
+            snapshots.append(value)
+        return original(engine, key, value)
+    DSLEngine.store = capture
+    try:
+        s = wc.approve(run, client=retry)
+        s = wc.execute(run, client=retry)
+        s = wc.approve(run, client=retry)
+    finally:
+        DSLEngine.store = original
+    assert s['status'] == 'done' and len(retry.calls) == 3
+    events = task_events(run)
+    assert next(e for e in events if e.get('item') and e['item']['index'] == 1 and e['status'] == 'ok') == first
+    assert [e['status'] for e in events if e.get('item') and e['item']['index'] == 2] == ['rejected', 'ok']
+    assert snapshots[-1] == [first['result'], impl('最终通过'), impl('第三项')]
+    check(True, '32：仅被打回项重跑，其他事件不动，task_results 只存最终通过结果')
+
+
+def test_edit_plan_validation_rollback(tmp):
+    from unittest.mock import patch
+    s, c, assigned = _edit_setup(tmp, 'edit-validation')
+    run = s['run']
+    p, cf = ROOT / run, wc._side(ROOT / run, '.ctl')
+    before = (p.read_bytes(), cf.read_bytes())
+    raises(lambda: wc.edit_plan(run, actor='\ud800'), '来源无效')
+    raises(lambda: wc.edit_plan(run, record='\ud800'), '没有可改的分配清单')
+    raises(lambda: wc.edit_plan(run, tasks=[dict(assigned['tasks'][0], content='\ud800')]), 'UTF-8')
+    raises(lambda: wc.edit_plan(run, tasks=[{'content': '缺卡'}]), '结果不符合格式')
+    raises(lambda: wc.edit_plan(run, item_controls=[]), '逐项设置第')
+    raises(lambda: wc.edit_plan(run, item_controls=[{'model': 'cli:x/\ud800'}] + [None] * 5), '逐项设置第')
+    assert (p.read_bytes(), cf.read_bytes()) == before
+    failure = wc.ControlError('第 1 步回放对不上（测试）')
+    advance = wc._advance
+    def broken(*args, **kwargs):
+        advance(*args, **kwargs)
+        raise failure
+    with patch.object(wc, '_advance', broken):
+        try:
+            wc.edit_plan(run, tasks=assigned['tasks'], client=c)
+        except wc.ControlError as exc:
+            assert exc is failure
+        else:
+            raise AssertionError('回放错误应原样抛出')
+    assert (p.read_bytes(), cf.read_bytes()) == before
+    held, _, _ = _item_setup(tmp, 'edit-review', [])
+    raises(lambda: wc.edit_plan(held['run']), '这份清单还在等确认，用 approve 带上改后的结果')
+    empty = wc.start(demo_copy(tmp, 'edit-empty'), client=client([]))
+    raises(lambda: wc.edit_plan(empty['run']), '没有可改的分配清单')
+    check(True, 'edit_plan：入口校验、孤立代理字符、格式、设置和回放失败均不留下写入')
+
+
+def test_edit_plan_alignment(tmp):
+    from verbs.workflow._workflow import _item_key
+    s, c, assigned = _edit_setup(tmp, 'edit-align')
+    run = s['run']
+    controls = [dict(model='cli:claude/original', confirm_before=True)] + [None] * 5
+    wc.edit_plan(run, item_controls=controls, client=c)
+    tasks = [dict(x) for x in assigned['tasks']]
+    tasks[0], tasks[1] = tasks[1], tasks[0]
+    tasks[1]['agent'] = 'ENGINEER'
+    out = wc.edit_plan(run, tasks=tasks, client=c)
+    cfg = wc._load(wc._side(ROOT / run, '.ctl'))
+    rows = cfg['item_controls']['assignment']['rows']
+    assert rows[0] is None and rows[1]['agent'] == 'ENGINEER_LITE'
+    setting = wc._item_control(cfg, dict(record='assignment', index=2, agent='ENGINEER',
+                                        key=_item_key(tasks[1], dict(content_field='content'))))
+    assert setting['model'] is None and setting['confirm_before'] is True
+    source = next(e for e in task_events(run) if e['step'] == 3)
+    assert [r['rev'] for r in source['revisions']] == [1, 2]
+    assert source['result_model'] == assigned and source['result']['tasks'] == tasks
+    assert len(c.calls) == 3 and out['cost_preview']['total'] == 8
+    check(True, 'edit_plan：重复修订递增，指纹随重排对齐，换卡使原模型失效且保留确认开关')
+
+
+def test_edit_plan_replay_mismatch(tmp):
+    def edit(demo):
+        path = demo / 'cost_workflow.wf'
+        script = path.read_text()
+        script = script.replace('遍历 task 于 assignment.tasks',
+                                '如果 spent.total == 5\n    插入节点\n        角色 ENGINEER_LITE\n'
+                                '        任务 新插入\n        格式 implementation\n        记录 inserted\n'
+                                '遍历 task 于 assignment.tasks')
+        path.write_text(script)
+    s, c, assigned = _edit_setup(tmp, 'edit-mismatch', edit=edit)
+    run = s['run']
+    wc.execute(run, client=c)
+    p, cf = ROOT / run, wc._side(ROOT / run, '.ctl')
+    before = (p.read_bytes(), cf.read_bytes())
+    calls = len(c.calls)
+    raises(lambda: wc.edit_plan(run, tasks=assigned['tasks'][:5], client=c), '第 4 步回放对不上')
+    assert (p.read_bytes(), cf.read_bytes()) == before and len(c.calls) == calls
+    check(True, 'edit_plan：实际分支变化导致回放错位，原错误抛出且记录和控制文件逐字节恢复')
+
+
 def run():
     (ROOT / 'data/tmp').mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix='wfconfirm-', dir=ROOT / 'data/tmp'))
     try:
-        for test in [test_api_phase, test_status_after_actor, test_api_revision, test_api_reject, test_api_reject_override,
+        for test in [test_edit_plan_29, test_edit_plan_30, test_edit_plan_31, test_edit_plan_32,
+                     test_edit_plan_validation_rollback, test_edit_plan_alignment, test_edit_plan_replay_mismatch,
+                     test_plan_approve_22, test_plan_approve_23_28, test_plan_approve_validation_24,
+                     test_plan_reject_27, test_plan_states_33, test_plan_legacy_34, test_item_controls_storage_validation, test_item_fingerprints, test_item_controls_25, test_item_controls_26,
+                     test_pending_plan_before_and_missing_budget, test_cost_summary, test_api_phase, test_status_after_actor, test_api_revision, test_api_reject, test_api_reject_override,
                      test_api_approve_true_to_one, test_api_approve_nested_false_to_zero,
                      test_api_approve_identical_json,
                      test_api_limit, test_api_validation, test_api_both_phases, test_api_interrupted,
@@ -1401,6 +2028,10 @@ def run():
                      test_note_with_override, test_configure_during_execute,
                      test_all_write_actors, test_all_write_actor_validation, test_deferred_actor]:
             test(tmp)
+        for test in [test_scan_each_source, test_scan_task_items, test_scan_outside_item,
+                     test_scan_unrevised_cost, test_scan_plans, test_scan_item_key,
+                     test_scan_controlled_replay, test_scan_request_item]:
+            test(tmp)
         print('workflow confirm passed')
     finally:
         shutil.rmtree(tmp)
@@ -1408,3 +2039,91 @@ def run():
 
 if __name__ == '__main__':
     run()
+
+
+def test_approve_legacy_positional_note(tmp):
+    c = client(REPLIES)
+    s = wc.start(demo_copy(tmp, 'approve-positional-note'), mode='auto',
+                 confirm_after=['接口约定'], client=c)
+    run = s['run']
+    out = wc.approve(run, None, '人工说明', client=c)
+    cfg = wc._load(wc._side(ROOT / run, '.ctl'))
+    assert out['status'] == 'done' and len(c.calls) == len(REPLIES)
+    assert cfg['after']['1']['action'] == 'approve'
+    assert cfg.get('revisions', {}) == {} and cfg.get('item_controls', {}) == {}
+    check(True, '旧 approve(run, None, note, client=...) 普通节点照常通过')
+
+
+def test_approve_legacy_all_positional_revised(tmp):
+    from unittest.mock import patch
+    from wf_fixtures import contract
+    c = client(REPLIES)
+    s = wc.start(demo_copy(tmp, 'approve-positional-revised'), mode='auto',
+                 confirm_after=['接口约定'], client=c)
+    run = s['run']
+    changed = contract('人工修订')
+    with patch.object(wc, '_continue', wraps=wc._continue) as continued:
+        out = wc.approve(run, changed, '人工说明', 1, 1, True, c, 'viewer')
+    continued.assert_called_once_with(ROOT / run, True, c)
+    cfg = wc._load(wc._side(ROOT / run, '.ctl'))
+    revision = cfg['revisions']['1'][0]
+    assert revision['result'] == changed and revision['note'] == '人工说明'
+    assert revision['attempt'] == 1 and revision['actor'] == 'viewer'
+    assert cfg['after']['1']['attempt'] == 1 and cfg['after']['1']['actor'] == 'viewer'
+    approval = next(h for h in cfg['history'] if h['op'] == 'approve')
+    assert approval['step'] == 1 and approval['attempt'] == 1 and approval['actor'] == 'viewer'
+    event = task_events(run)[0]
+    assert event['result'] == changed and event['result_model'] == REPLIES[0]
+    assert out['status'] == 'done' and len(c.calls) == len(REPLIES)
+    check(True, '改后通过的全部旧位置参数保持 result/note/step/attempt/wait/client/actor 绑定')
+
+
+def test_approve_legacy_positional_guards_and_item_controls(tmp):
+    from test_wf_cost import plan
+    s, c, assigned = _item_setup(tmp, 'approve-positional-controls', [])
+    run = s['run']
+    p, cf = ROOT / run, wc._side(ROOT / run, '.ctl')
+    step, attempt = s['pending']['step'], s['pending']['attempt']
+    before = (p.read_bytes(), cf.read_bytes(), len(c.calls))
+    raises(lambda: wc.approve(run, None, '人工说明', step + 1, attempt, True, c, 'viewer'),
+           f'不是第 {step + 1} 步')
+    raises(lambda: wc.approve(run, None, '人工说明', step, attempt + 1, True, c, 'viewer'),
+           '结果已经换了')
+    assert (p.read_bytes(), cf.read_bytes(), len(c.calls)) == before
+    changed = plan('ENGINEER_LITE', 'ENGINEER_LITE', 'ENGINEER_LITE')
+    out = wc.approve(run, changed, '修改清单', step, attempt, True, c, 'viewer',
+                     item_controls=[{'confirm_before': True}, None, None])
+    cfg = wc._load(cf)
+    revision = cfg['revisions'][str(step)][0]
+    assert revision['note'] == '修改清单' and revision['result'] == changed
+    assert revision['attempt'] == attempt and revision['actor'] == 'viewer'
+    control = cfg['item_controls']['assignment']
+    assert control['step'] == step and control['actor'] == 'viewer'
+    assert control['rows'][0]['confirm_before'] is True and len(control['rows']) == 3
+    assert out['pending']['phase'] == 'before' and out['pending']['item']['index'] == 1
+    assert len(c.calls) == 3
+    check(True, '旧 step/attempt 防呆拒绝且文件不变；旧位置参数可同时使用关键字 item_controls')
+
+
+def test_rewind_retains_item_controls_before_target(tmp):
+    s, c, assigned = _item_setup(tmp, 'rewind-retain-item-controls', [])
+    run, source_step = s['run'], s['pending']['step']
+    rows = _control_rows(assigned)
+    rows[0]['confirm_before'] = True
+    wc._set_item_controls(run, 'assignment', source_step, rows, 'viewer')
+    cf = wc._side(ROOT / run, '.ctl')
+    stored = wc._load(cf)['item_controls']['assignment']
+    out = wc.approve(run, client=c)
+    assert out['pending']['step'] > source_step
+    out = wc.rewind(run, out['pending']['step'], client=c)
+    assert wc._load(cf)['item_controls'] == {'assignment': stored}
+    assert out['pending']['step'] > source_step and len(c.calls) == 3
+    check(True, 'rewind 到来源步之后严格保留该 record 的真实 rows 和完整设置')
+
+
+if __name__ == '__main__':
+    with tempfile.TemporaryDirectory(prefix='wfconfirm-regression-', dir=ROOT / 'data/tmp') as folder:
+        for test in [test_approve_legacy_positional_note, test_approve_legacy_all_positional_revised,
+                     test_approve_legacy_positional_guards_and_item_controls,
+                     test_rewind_retains_item_controls_before_target]:
+            test(Path(folder))
