@@ -85,6 +85,13 @@ cd $M
 [ -d "$M/tests/e2e/node_modules/jsdom" ] || echo "!! 缺 jsdom，node E2E 会失败；先跑：npm ci --prefix $M/tests/e2e"
 # 查看器的 Python 测试（test_trace_view / test_trace_confirm）从 NODE_PATH 找 jsdom，不设就只跑 Python 那一半
 export NODE_PATH="${NODE_PATH:+$NODE_PATH:}$M/tests/e2e/node_modules"
+# 测试都用离线假模型，不调真模型，但构造智谱客户端时要求「有个 key」。config.json 里没填、环境里也没有时
+# （key 只放在服务进程环境里的机器，或 gsbatch 这种会洗掉凭证变量的执行端），给一个占位值，不是真 key。
+# 不设的话二十来组在启动时就报「缺少 API Key」，看着像代码坏了（阿里云那台踩过）。
+if [ -z "${ZHIPU_API_KEY:-}" ] && ! "$PY" -c "import json,sys; sys.exit(0 if json.load(open('$M/config.json')).get('api_key') else 1)" 2>/dev/null; then
+  export ZHIPU_API_KEY=offline-placeholder-not-a-key
+  echo "（config.json 和环境里都没有智谱 key，测试用占位值 ZHIPU_API_KEY 跑）"
+fi
 run 引擎        $PY -m tools.test_dsl
 run 序号和默认值 $PY tests/dsl/test_loop_default.py
 run 遍历JSON列表 $PY tests/dsl/test_each_json_list.py

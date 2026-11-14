@@ -1032,8 +1032,9 @@ _GSB_WAIT = {"probe": "probe_wait", "review": "review_wait"}
 
 
 def gsb_claude_bin():
-    """claude 可执行文件的绝对路径：GSB_CLAUDE_BIN > PATH > ~/.local/bin/claude；都没有返回 None。"""
-    for cand in (os.environ.get("GSB_CLAUDE_BIN"), shutil.which("claude"),
+    """claude 可执行文件的绝对路径：GSB_CLAUDE_BIN > PATH > /usr/local/bin/claude > ~/.local/bin/claude；
+    都没有返回 None。/usr/local/bin 是系统级安装的位置（阿里云那台就装在这里），systemd 起的服务 PATH 里不一定有。"""
+    for cand in (os.environ.get("GSB_CLAUDE_BIN"), shutil.which("claude"), "/usr/local/bin/claude",
                  str(Path.home() / ".local" / "bin" / "claude")):
         if cand and os.path.isfile(cand) and os.access(cand, os.X_OK):
             return os.path.abspath(cand)     # 不解开链接：claude 升级后链接指向新版本
