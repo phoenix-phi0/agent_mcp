@@ -206,6 +206,7 @@ run 编排人工确认 $PY tests/tools/test_wf_confirm.py
 run 编排查看器 $PY tests/tools/test_trace_view.py
 run 查看器人工确认 $PY tests/tools/test_trace_confirm.py
 run 查看器令牌 $PY tests/tools/test_trace_token.py
+run 流程管理MCP $PY tests/tools/test_wf_mcp.py
 run DSL规划读码 $PY tests/tools/test_dslagent_planread.py
 run DSL测试环境 $PY tests/tools/test_dslagent_testenv.py
 run DSL按步骤模型 $PY tests/tools/test_dslagent_models.py

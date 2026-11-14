@@ -246,110 +246,155 @@ def view_html(write=False):
     return VIEW.read_bytes().replace(b"<head>", meta, 1)
 
 
-def make_handler(runs, token=None, base="", write=False):
-    """token：给了就只认 /<token>/ 下面的地址，别的一律 404（经隧道公开到外网时用）。
-    base：挂在反向代理的子路径下（如 relay 把 /trace* 转过来），地址整体是 <base>/<token>/…
-    write：开放写接口（main 里只在绑定本机地址时给 True）。"""
+def respond(code, body, ctype, extra=None):
+    data = body if isinstance(body, bytes) else body.encode("utf-8")
+    head = {"Content-Type": ctype, "Cache-Control": "no-store",
+            # 地址里有令牌，不能作为来源地址带给外部资源。
+            "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff"}
+    head.update(extra or {})
+    head["Content-Length"] = str(len(data))
+    return code, head, data
+
+
+def respond_json(obj, code=200):
+    # 校验错误可能原样引用孤立代理字符，JSON 转义后仍能安全返回。
+    return respond(code, json.dumps(obj, ensure_ascii=True, default=str),
+                   "application/json; charset=utf-8")
+
+
+def validate_post_request(path, headers, token=None, base="", write=False):
+    """正文读取前的共用检查：返回允许的长度，或完整的拒绝响应。"""
     base = "/" + base.strip("/") if base and base.strip("/") else ""
     prefix = base + (f"/{token}" if token else "")
+    normalized_headers = {}
+    for key, value in headers.items():
+        normalized_headers.setdefault(key.lower(), value)
+    headers = normalized_headers
+    if prefix:
+        if not path.startswith(prefix + "/"):
+            return respond_json({"ok": False, "error": "没有这个地址"}, 404)
+        path = path[len(prefix):]
+    op = path[len("/api/"):] if path.startswith("/api/") else ""
+    if op not in _WRITE_OPS:
+        return respond_json({"ok": False, "error": "没有这个地址"}, 404)
+    if not write:
+        return respond_json({"ok": False, "error": "这个查看服务是只读的（没有绑定本机地址、加了 --readonly，或带 --token 而没加 --write），不能在页面上操作"}, 403)
+    # 别的网页不能借浏览器往这里发写请求：带 Origin 的要和 Host 是同一个；没有 --token 时 Host 还得是本机名
+    # （防 DNS 重绑定：外面的域名解析到 127.0.0.1）。带 --token 时地址本身就是口令，Host 可能是隧道的域名
+    host = (headers.get("host") or "").strip().lower()
+    origin = (headers.get("origin") or "").strip().lower()
+    if origin and origin != "null" and urlparse(origin).netloc != host:
+        return respond_json({"ok": False, "error": "不接受别的网页发来的写请求（Origin 和 Host 不一致）"}, 403)
+    if origin == "null" or (not token and not writable(_hostname(host))):
+        return respond_json({"ok": False, "error": "写接口只接受从本机地址打开的页面"}, 403)
+    # 只收 application/json：别的网页想跨站往本机发这种请求，浏览器会先预检，而这里不回预检
+    if (headers.get("content-type") or "").split(";")[0].strip().lower() != "application/json":
+        return respond_json({"ok": False, "error": "Content-Type 要是 application/json"}, 415)
+    try:
+        size = int(headers.get("content-length") or 0)
+    except ValueError:
+        size = -1
+    if size < 0 or size > _MAX_BODY:
+        return respond_json({"ok": False, "error": "请求体太大或没有长度"}, 413)
+    return size
 
+
+def route(runs, method, path, query, headers, body, token=None, base="", write=False):
+    """与 HTTP 服务器无关的路由，返回 (状态码, 响应头字典, 正文 bytes)。
+
+    runs 是 runs 目录的 Path；path 不含 query，query 是原始查询字符串（不含 ?）。
+    headers 接受普通 dict 或 HTTPMessage，按大小写不敏感的方式读取；body 是原始 bytes，
+    或接收长度并返回 bytes 的读取函数（仅在 POST 头部检查通过后调用）。
+    token / base 与 make_handler 相同；write 是调用方按绑定地址和开关算好的写权限。
+    文件读取和 control 写操作沿用原有实现，本函数不读写网络连接。
+    """
+    base = "/" + base.strip("/") if base and base.strip("/") else ""
+    prefix = base + (f"/{token}" if token else "")
+    normalized_headers = {}
+    for key, value in headers.items():
+        normalized_headers.setdefault(key.lower(), value)  # HTTPMessage.get 取第一个同名头
+    headers = normalized_headers
+
+    if method == "GET":
+        if prefix:
+            if path == prefix:
+                return respond(301, b"", "text/plain", {"Location": prefix + "/"})
+            if not path.startswith(prefix + "/"):
+                return respond_json({"error": "没有这个地址"}, 404)
+            path = path[len(prefix):]
+        if path in ("/", "/index.html"):
+            return respond(200, view_html(write), "text/html; charset=utf-8")
+        if path == "/api/runs":
+            return respond_json({"dir": runs.name if token else str(runs), "runs": list_runs(runs)})
+        if path in ("/api/run", "/api/plan"):
+            name = (parse_qs(query).get("name") or [""])[0]
+            if not _NAME.fullmatch(name):
+                return respond_json({"error": "文件名不对"}, 400)
+            p = (runs / name).resolve()
+            if p.parent != runs.resolve() or not p.is_file():
+                return respond_json({"error": f"没有 {name}"}, 400 if path == "/api/plan" else 404)
+            if path == "/api/plan":
+                wc = _ctl()
+                record = (parse_qs(query).get("record") or [None])[0]
+                try:
+                    return respond_json(wc.plan(p, record=record))
+                except wc.ControlError as e:
+                    return respond_json({"error": str(e)}, 400)
+            try:
+                return respond_json(read_trace(p))
+            except (OSError, ValueError) as e:
+                return respond_json({"error": f"读不了 {name}：{e}"}, 503)
+        return respond_json({"error": "没有这个地址"}, 404)
+
+    if method == "POST":
+        size = validate_post_request(path, headers, token, base, write)
+        if not isinstance(size, int):
+            return size
+        if prefix:
+            path = path[len(prefix):]
+        op = path[len("/api/"):]
+        # HTTP handler 延迟读取：拒绝地址、权限和头部时不能等待客户端正文。
+        if callable(body):
+            body = body(size)
+        try:
+            body = json.loads(body[:size].decode("utf-8") or "null")
+        except ValueError as e:
+            return respond_json({"ok": False, "error": f"请求体不是 JSON：{e}"}, 400)
+        if not isinstance(body, dict):
+            return respond_json({"ok": False, "error": "请求体要是 JSON 对象"}, 400)
+        name = body.get("name")
+        if not isinstance(name, str) or not _NAME.fullmatch(name):
+            return respond_json({"ok": False, "error": "文件名不对"}, 400)
+        p = (runs / name).resolve()
+        if p.parent != runs.resolve() or not p.is_file():
+            return respond_json({"ok": False, "error": f"没有 {name}"}, 404)
+        code, out = control(op, p, body)
+        return respond_json(out, code)
+    return respond_json({"error": "没有这个地址"}, 404)
+
+
+def make_handler(runs, token=None, base="", write=False):
+    """token / base：地址整体是 <base>/<token>/…；write 由调用方按绑定地址算好。"""
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
 
-        def send(self, code, body, ctype, extra=None):
-            data = body if isinstance(body, bytes) else body.encode("utf-8")
+        def _dispatch(self, method):
+            u = urlparse(self.path)
+            body = self.rfile.read if method == "POST" else b""
+            code, headers, data = route(runs, method, u.path, u.query, self.headers,
+                                        body, token, base, write)
             self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Cache-Control", "no-store")
-            # 地址里有令牌：不让浏览器在请求字体等外部资源时把它当来源地址带出去
-            self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            for k, v in (extra or {}).items():
-                self.send_header(k, v)
-            self.send_header("Content-Length", str(len(data)))
+            for key, value in headers.items():
+                self.send_header(key, value)
             self.end_headers()
             self.wfile.write(data)
 
-        def json(self, obj, code=200):
-            # 校验错误可能原样引用请求中的孤立代理字符；JSON 转义后仍能安全返回 400。
-            self.send(code, json.dumps(obj, ensure_ascii=True, default=str), "application/json; charset=utf-8")
-
         def do_GET(self):
-            u = urlparse(self.path)
-            path = u.path
-            if prefix:
-                if path == prefix:
-                    return self.send(301, b"", "text/plain", {"Location": prefix + "/"})
-                if not path.startswith(prefix + "/"):
-                    return self.json({"error": "没有这个地址"}, 404)
-                path = path[len(prefix):]
-            if path in ("/", "/index.html"):
-                return self.send(200, view_html(write), "text/html; charset=utf-8")
-            if path == "/api/runs":
-                return self.json({"dir": runs.name if token else str(runs), "runs": list_runs(runs)})
-            if path in ("/api/run", "/api/plan"):
-                name = (parse_qs(u.query).get("name") or [""])[0]
-                if not _NAME.fullmatch(name):
-                    return self.json({"error": "文件名不对"}, 400)
-                p = (runs / name).resolve()
-                if p.parent != runs.resolve() or not p.is_file():
-                    return self.json({"error": f"没有 {name}"}, 400 if path == "/api/plan" else 404)
-                if path == "/api/plan":
-                    wc = _ctl()
-                    record = (parse_qs(u.query).get("record") or [None])[0]
-                    try:
-                        return self.json(wc.plan(p, record=record))
-                    except wc.ControlError as e:
-                        return self.json({"error": str(e)}, 400)
-                try:
-                    return self.json(read_trace(p))
-                except (OSError, ValueError) as e:
-                    return self.json({"error": f"读不了 {name}：{e}"}, 503)
-            return self.json({"error": "没有这个地址"}, 404)
+            self._dispatch("GET")
 
         def do_POST(self):
-            path = urlparse(self.path).path
-            if prefix:
-                if not path.startswith(prefix + "/"):
-                    return self.json({"ok": False, "error": "没有这个地址"}, 404)
-                path = path[len(prefix):]
-            op = path[len("/api/"):] if path.startswith("/api/") else ""
-            if op not in _WRITE_OPS:
-                return self.json({"ok": False, "error": "没有这个地址"}, 404)
-            if not write:
-                return self.json({"ok": False, "error": "这个查看服务是只读的（没有绑定本机地址、加了 --readonly，或带 --token 而没加 --write），不能在页面上操作"}, 403)
-            # 别的网页不能借浏览器往这里发写请求：带 Origin 的要和 Host 是同一个；没有 --token 时 Host 还得是本机名
-            # （防 DNS 重绑定：外面的域名解析到 127.0.0.1）。带 --token 时地址本身就是口令，Host 可能是隧道的域名
-            host = (self.headers.get("Host") or "").strip().lower()
-            origin = (self.headers.get("Origin") or "").strip().lower()
-            if origin and origin != "null" and urlparse(origin).netloc != host:
-                return self.json({"ok": False, "error": "不接受别的网页发来的写请求（Origin 和 Host 不一致）"}, 403)
-            if origin == "null" or (not token and not writable(_hostname(host))):
-                return self.json({"ok": False, "error": "写接口只接受从本机地址打开的页面"}, 403)
-            # 只收 application/json：别的网页想跨站往本机发这种请求，浏览器会先预检，而这里不回预检
-            if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
-                return self.json({"ok": False, "error": "Content-Type 要是 application/json"}, 415)
-            try:
-                size = int(self.headers.get("Content-Length") or 0)
-            except ValueError:
-                size = -1
-            if size < 0 or size > _MAX_BODY:
-                return self.json({"ok": False, "error": "请求体太大或没有长度"}, 413)
-            try:
-                body = json.loads(self.rfile.read(size).decode("utf-8") or "null")
-            except ValueError as e:
-                return self.json({"ok": False, "error": f"请求体不是 JSON：{e}"}, 400)
-            if not isinstance(body, dict):
-                return self.json({"ok": False, "error": "请求体要是 JSON 对象"}, 400)
-            name = body.get("name")
-            if not isinstance(name, str) or not _NAME.fullmatch(name):
-                return self.json({"ok": False, "error": "文件名不对"}, 400)
-            p = (runs / name).resolve()
-            if p.parent != runs.resolve() or not p.is_file():
-                return self.json({"ok": False, "error": f"没有 {name}"}, 404)
-            code, out = control(op, p, body)
-            return self.json(out, code)
+            self._dispatch("POST")
     return H
 
 
