@@ -11,6 +11,7 @@
     GET /api/run?name=…   一份过程记录，多几个字段：_alive；_control（受控编排的模式、覆盖、
                           最近操作，没有控制文件就是 null）；_formats（脚本里用到的格式定义）；
                           _agents（工作目录 agents/ 下的角色卡：名字、模型、说明，换卡执行时选）
+    GET /api/plan?name=…&record=…  分配清单和逐项控制；record 可省
 
 写接口（POST，JSON 体，Content-Type 必须是 application/json；直接调 tools/workflow_ctl.py，校验和出错
 信息都是它的）。只在服务绑定本机地址（127.0.0.1 / ::1 / localhost）且没加 --readonly 时开放，否则 403；
@@ -19,6 +20,10 @@
     POST /api/execute     {name, model?, role?, step?} 用内置执行器跑这一步，可换模型 / 换卡
     POST /api/resume      {name}                       改成自动，往下跑
     POST /api/abort       {name}                       中止
+    POST /api/approve     {name, attempt, step?, result?, note?, item_controls?}
+    POST /api/reject      {name, attempt, note, step?, role?, model?}
+    POST /api/edit_plan   {name, tasks?, item_controls?, record?}
+    POST /api/pause       {name}
   带 Origin 头的请求，Origin 要和 Host 一致；没有 --token 时 Host 还得是本机名（127.0.0.1 / ::1 / localhost），否则 403。
   成功：200 {ok: true, status: workflow_ctl.status 的摘要}
   失败：400 {ok: false, error: 原样的出错信息, errors?: ["字段: 原因", …]}（格式不合格时带逐条字段错误）
@@ -43,7 +48,7 @@ from urllib.parse import parse_qs, urlparse
 VIEW = Path(__file__).resolve().with_name("trace_view.html")
 _NAME = re.compile(r"^[\w.-]+\.json$")
 _CARD = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
-_WRITE_OPS = ("submit", "execute", "resume", "abort")
+_WRITE_OPS = ("submit", "execute", "resume", "abort", "approve", "reject", "edit_plan", "pause")
 _MAX_BODY = 4 * 1024 * 1024
 _LOCK = threading.Lock()        # 写操作一次只做一个：控制文件只能有一个写的人
 
@@ -79,6 +84,8 @@ def control(op, path, body):
     step = body.get("step")
     try:
         with _LOCK:
+            if op in ("approve", "reject") and body.get("attempt") is None:
+                raise wc.ControlError("缺少 attempt")
             if op == "submit":
                 if "result" not in body:
                     raise wc.ControlError("缺少 result")
@@ -88,11 +95,23 @@ def control(op, path, body):
                                 step=step, wait=False)
             elif op == "resume":
                 st = wc.resume(path, wait=False)
+            elif op == "approve":
+                st = wc.approve(path, attempt=body["attempt"], step=step,
+                                result=body.get("result"), note=body.get("note"),
+                                item_controls=body.get("item_controls"), wait=False)
+            elif op == "reject":
+                st = wc.reject(path, attempt=body["attempt"], note=body.get("note"),
+                               step=step, role=body.get("role"), model=body.get("model"), wait=False)
+            elif op == "edit_plan":
+                st = wc.edit_plan(path, tasks=body.get("tasks"),
+                                  item_controls=body.get("item_controls"), record=body.get("record"))
+            elif op == "pause":
+                st = wc.pause(path)
             else:
                 st = wc.abort(path)
     except wc.ControlError as e:
         out = {"ok": False, "error": str(e)}
-        if op == "submit" and str(e).startswith("结果不符合格式"):     # 别的错（步号不对、后台还在跑）不带字段错误
+        if op in ("submit", "approve") and str(e).startswith("结果不符合格式"):     # 别的错（步号不对、后台还在跑）不带字段错误
             bad = _field_errors(path, body.get("result"))
             if bad:
                 out["errors"] = bad
@@ -147,6 +166,14 @@ def read_control(path):
     worker = c.get("worker")
     return {"mode": c.get("mode"), "stop_roles": c.get("stop_roles") or [], "models": c.get("models") or {},
             "roles": c.get("roles") or {}, "history": (c.get("history") or [])[-30:],
+            "confirm_before": c.get("confirm_before") or [],
+            "confirm_after": c.get("confirm_after") or [], "max_attempts": c.get("max_attempts"),
+            "notes": {step: rows[-10:] for step, rows in (c.get("notes") or {}).items()},
+            "revisions": {step: [{key: row.get(key) for key in
+                                   ("rev", "kind", "attempt", "actor", "at", "note")}
+                                  for row in rows]
+                          for step, rows in (c.get("revisions") or {}).items()},
+            "item_controls": c.get("item_controls") or {},
             "worker": worker, "worker_alive": pid_alive(worker) if worker else None}
 
 
@@ -245,7 +272,8 @@ def make_handler(runs, token=None, base="", write=False):
             self.wfile.write(data)
 
         def json(self, obj, code=200):
-            self.send(code, json.dumps(obj, ensure_ascii=False, default=str), "application/json; charset=utf-8")
+            # 校验错误可能原样引用请求中的孤立代理字符；JSON 转义后仍能安全返回 400。
+            self.send(code, json.dumps(obj, ensure_ascii=True, default=str), "application/json; charset=utf-8")
 
         def do_GET(self):
             u = urlparse(self.path)
@@ -260,13 +288,20 @@ def make_handler(runs, token=None, base="", write=False):
                 return self.send(200, view_html(write), "text/html; charset=utf-8")
             if path == "/api/runs":
                 return self.json({"dir": runs.name if token else str(runs), "runs": list_runs(runs)})
-            if path == "/api/run":
+            if path in ("/api/run", "/api/plan"):
                 name = (parse_qs(u.query).get("name") or [""])[0]
                 if not _NAME.fullmatch(name):
                     return self.json({"error": "文件名不对"}, 400)
                 p = (runs / name).resolve()
                 if p.parent != runs.resolve() or not p.is_file():
-                    return self.json({"error": f"没有 {name}"}, 404)
+                    return self.json({"error": f"没有 {name}"}, 400 if path == "/api/plan" else 404)
+                if path == "/api/plan":
+                    wc = _ctl()
+                    record = (parse_qs(u.query).get("record") or [None])[0]
+                    try:
+                        return self.json(wc.plan(p, record=record))
+                    except wc.ControlError as e:
+                        return self.json({"error": str(e)}, 400)
                 try:
                     return self.json(read_trace(p))
                 except (OSError, ValueError) as e:

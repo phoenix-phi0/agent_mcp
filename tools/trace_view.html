@@ -55,6 +55,21 @@ button, label.btn, select { font: inherit; cursor: pointer; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .mono { font-family: var(--font-mono); }
 .num { font-variant-numeric: tabular-nums; }
+#run-plan { padding: 14px 18px; }
+.plan-state { font-weight: 600; white-space: nowrap; }
+.plan-state.done { color: #26834a; }
+.plan-state.held { color: #9a6700; }
+.plan-state.tried { color: #c43d49; }
+.plan-state.waiting { color: #8355bf; }
+.plan-state.todo { color: #477baf; }
+.plan-scroll { overflow-x: auto; }
+.plan-table { width: 100%; border-collapse: collapse; }
+.plan-table th, .plan-table td { padding: 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.plan-table th { white-space: nowrap; }
+.plan-table textarea { min-width: 200px; }
+.plan-table select, .plan-table input { min-width: 100px; }
+#plan-total { margin-top: 8px; font-weight: 600; }
+#plan-total.bad { color: var(--bad); }
 
 header.top { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .load { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -74,6 +89,10 @@ body.drag::after { content: "松开即可载入这份过程记录"; position: fi
 .pill.error, .pill.fix { color: var(--bad); }
 .pill.running { color: var(--warn); }
 .pill.agentic { color: var(--accent); }
+.pill.review { color: var(--r-glm); }
+.pill.rejected { color: var(--bad); }
+#flow .node.review .box { stroke: var(--r-glm); stroke-width: 3; }
+#flow .t-review { fill: var(--r-glm); font-weight: 600; font-size: 11.5px; }
 .pill.waiting { color: var(--accent); }
 .pill.aborted, .pill.interrupted { color: var(--bad); }
 .pill.src { color: var(--muted); font-weight: 500; }
@@ -241,6 +260,8 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
   <div class="summary" id="summary"></div>
   <div class="note" id="note" hidden></div>
 </section>
+
+<section class="panel" id="run-plan" aria-label="分配清单" hidden></section>
 
 <section class="panel strip" aria-label="耗时分布">
   <div class="head"><h2>耗时分布 · 按执行顺序，宽度 = 耗时</h2><span class="hint" id="strip-hint">点一段跳到对应节点</span></div>
@@ -436,6 +457,7 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     var all = S.byLine[line] || [];
     var evs = all.filter(isExec);
     var st = { runs: evs.length, secs: 0, errs: 0, t: 0, f: 0, last: evs[evs.length - 1], running: null,
+               review: evs.length && evs[evs.length - 1].status === "review" ? evs[evs.length - 1] : null,
                waiting: all.filter(function (e) { return !isExec(e); }).pop() || null };
     evs.forEach(function (e) {
       if (e.status === "running") st.running = e;
@@ -512,7 +534,7 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     L.nodes.forEach(function (o) {
       var n = o.n, st = statsFor(n.line), sel = S.selLine === n.line;
       var ran = n.kind === "task" || n.kind === "if" || n.kind === "store" || n.kind === "roster" || n.kind === "cost" ? st.runs : runsOf(o);
-      var cls = "node" + (ran || st.waiting ? "" : " idle") + (sel ? " sel" : "") + (st.errs ? " err" : "") + (st.running ? " running" : "") + (st.waiting ? " waiting" : "");
+      var cls = "node" + (ran || st.waiting ? "" : " idle") + (sel ? " sel" : "") + (st.errs ? " err" : "") + (st.running ? " running" : "") + (st.waiting ? " waiting" : "") + (st.review ? " review" : "");
       var g = '<g class="' + cls + '" data-line="' + n.line + '" tabindex="0" role="button" aria-label="' + esc(n.name || n.cond || n.kind) + '">';
       if (n.kind === "start" || n.kind === "end") {
         var endTxt = n.kind === "start" ? "开始" : ({ done: "结束 · 已完成", error: "出错停止", running: "运行中（还没结束）", waiting: "暂停中（等外部决定）",
@@ -553,7 +575,9 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
           (swapTo && swapTo !== role ? "（换 " + esc(roleName(swapTo)) + "）" : "") + " → " + esc(n.fields["记录"] || "") + "</text>";
         var execs = (S.byLine[n.line] || []).filter(isExec);
         var last = st.running ? (st.runs > 1 ? execs[st.runs - 2] : null) : st.last, d = decideOf(last);
-        if (st.waiting) {
+        if (st.review) {
+          g += '<text class="t-review" x="' + (o.x + 16) + '" y="' + (o.y + 57) + '">待确认</text>';
+        } else if (st.waiting) {
           g += '<text class="t-wait" x="' + (o.x + 16) + '" y="' + (o.y + 57) + '">暂停 · 第 ' + esc(st.waiting.step) + " 步等外部</text>";
         } else if (st.running) {
           var ea = elapsedAttrs(st.running.started);
@@ -635,7 +659,14 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     if (running) items.push(["当前", roleChip(running.role) + " " + esc(running.name)]);
     if (pend) items.push(["停在", roleChip(pend.card || pend.role) + " " + esc(pend.name) + ' <span class="hint">第 ' + esc(pend.step) + " 步</span>"]);
     if (ctl) items.push(["外部控制", '<span style="font-size:13.5px;font-weight:500">' + (ctl.mode === "auto" ? "自动往下跑" : "逐步，每步停") +
-      (ctl.stop_roles.length ? " · 在 " + esc(ctl.stop_roles.join("、")) + " 前停" : "") + "</span>" + (t.resumes ? ' <span class="hint">继续过 ' + t.resumes + " 次</span>" : "")]);
+      ((ctl.stop_roles || []).length ? " · 在 " + esc(ctl.stop_roles.join("、")) + " 前停" : "") + "</span>" + (t.resumes ? ' <span class="hint">继续过 ' + t.resumes + " 次</span>" : "")]);
+    if (ctl) {
+      var rules = [];
+      if ((ctl.confirm_before || ctl.stop_roles || []).length) rules.push("开始前确认：" + (ctl.confirm_before || ctl.stop_roles).join("、"));
+      if ((ctl.confirm_after || []).length) rules.push("结束后确认：" + ctl.confirm_after.join("、"));
+      if (ctl.max_attempts != null) rules.push("最多尝试 " + ctl.max_attempts + " 次");
+      if (rules.length) items.push(["确认规则", esc(rules.join("；"))]);
+    }
     var inputs = t.inputs && Object.keys(t.inputs).length ? Object.keys(t.inputs).map(function (k) { return k + " = " + t.inputs[k]; }).join("；") : "";
     $("summary").innerHTML = items.map(function (it) { return '<div><span class="k">' + it[0] + '</span><span class="v">' + it[1] + "</span></div>"; }).join("") +
       (inputs ? '<div><span class="k">输入</span><span class="v" style="font-size:13.5px;font-weight:500">' + esc(inputs) + "</span></div>" : "") +
@@ -645,11 +676,12 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     if (t.status === "error" && t.error) note.push('<span class="err-box">出错原因：' + esc(t.error) + "</span>");
     if (t.status === "running" && !S.live) note.push("这份记录停在运行中：流程可能还在跑，也可能进程已经没了。要实时看，在项目里运行 python -m tools.trace_server 工作目录，再打开 http://127.0.0.1:8765 。");
     if (S.flash && S.flash.run === t._name && Date.now() - S.flash.at < 60000) note.push('<span style="color:var(--ok)">✓ ' + esc(S.flash.text) + "</span>");
-    if (pend) note.push('<span style="color:var(--accent)">停在第 ' + esc(pend.step) + "「" + esc(pend.name) + "」，等外部决定：交结果（workflow.submit）、用默认或换模型/卡执行（workflow.execute）、继续自动跑（workflow.resume）。" +
+    if (pend && pend.phase === "after") note.push("第 " + esc(pend.step) + " 步「" + esc(pend.name) + "」待确认，请在节点详情查看模型结果并通过、改了再通过或打回。");
+    if (pend && pend.phase !== "after") note.push('<span style="color:var(--accent)">停在第 ' + esc(pend.step) + "「" + esc(pend.name) + "」，等外部决定：交结果（workflow.submit）、用默认或换模型/卡执行（workflow.execute）、继续自动跑（workflow.resume）。" +
       (WRITE ? "也可以直接在节点详情最下面「由我来做」：填表交结果，或点按钮做其他决定。" : "") + "</span>" +
       (pend.last_error ? '<br><span class="err-box">这一步上次失败：' + esc(clip(pend.last_error, 300)) + "</span>" : ""));
-    if (ctl && (Object.keys(ctl.models).length || Object.keys(ctl.roles).length)) note.push("长期覆盖：" + esc(Object.keys(ctl.models).map(function (k) { return k + " 用 " + ctl.models[k]; })
-      .concat(Object.keys(ctl.roles).map(function (k) { return k + " 换成卡 " + ctl.roles[k]; })).join("；")));
+    if (ctl && (Object.keys(ctl.models || {}).length || Object.keys(ctl.roles || {}).length)) note.push("长期覆盖：" + esc(Object.keys(ctl.models || {}).map(function (k) { return k + " 用 " + ctl.models[k]; })
+      .concat(Object.keys(ctl.roles || {}).map(function (k) { return k + " 换成卡 " + ctl.roles[k]; })).join("；")));
     if (rs === "interrupted" && ctl) note.push('<span class="err-box">后台进程不在了：被杀掉或机器重启过。进度都在记录里，workflow.resume 会从断的那一步接着走。</span>');
     if (t.status === "running" && t._alive === false && !ctl) note.push('<span class="err-box">记录里的进程（pid ' + esc(t.pid) + "）已经不在了：流程被杀掉或机器重启过，最后停在「" + esc(running ? running.name : "?") + "」。</span>");
     $("note").hidden = !note.length;
@@ -741,6 +773,10 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
 
   function renderDetail() {
     var t = S.trace, line = S.selLine, box = $("detail");
+    // 同一运行、同一步、同一次尝试的未提交内容，轮询时保留原 DOM 和输入焦点。
+    var held = A && A.dirty && !A.busy && A.el && document.contains(A.el) && A.name === t._name &&
+      t.pending && t.pending.phase === "after" && A.pd.step === t.pending.step && A.pd.attempt === t.pending.attempt &&
+      A.pd.line === line ? A.el : null;
     var openNow = {};
     box.querySelectorAll("details.run").forEach(function (d) { openNow[d.getAttribute("data-seq")] = d.open; });
     var n = findNode(S.tree, line);
@@ -780,6 +816,7 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
               (pd.prompt ? field("提示词（外部自己执行时照这个发）", esc(pd.prompt), "task") : "") +
               (pd.system ? field("系统提示（角色卡）", esc(pd.system), "task") : "")
               : '<div class="hint">这条是当时停下等外部的记录，后来已经继续了。</div>') +
+            (e.item || pd && pd.item ? '<div class="hint">第 ' + esc((e.item || pd.item).index) + ' / ' + esc((e.item || pd.item).total) + ' 项</div>' : '') +
             field("任务", jsonBlock(e.task), "task") + (e.context != null ? field("参考文本", jsonBlock(e.context)) : "") +
             (pd && WRITE ? '<div class="act" id="act"></div>' : "") + "</div></details>";
           return;
@@ -788,6 +825,9 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
         html += '<details class="run' + (e.seq === openSeq ? " focus" : "") + '" data-seq="' + e.seq + '"' + (isOpen ? " open" : "") + ">" +
           "<summary><b>第 " + (i + 1) + " 次</b><span class=\"hint mono\">#" + e.seq + "</span><span class=\"num\">" + fmtSec(e.seconds) + "</span>" +
           (d ? '<span class="pill ' + (d === "通过" ? "pass" : "fix") + '">' + esc(d) + "</span>" : "") +
+          (e.status === "review" ? '<span class="pill review">待确认</span>' : "") +
+          (e.status === "rejected" ? '<span class="pill rejected">被打回</span>' : "") +
+          (e.item ? '<span class="hint">第 ' + esc(e.item.index) + ' / ' + esc(e.item.total) + ' 项</span>' : "") +
           (e.status === "error" ? '<span class="pill error">出错</span>' : "") +
           (e.status === "aborted" ? '<span class="pill aborted">中止</span>' : "") +
           (e.source && e.source !== "auto" ? '<span class="pill src">' + esc(SRC_TXT[e.source] || e.source) + "</span>" : "") +
@@ -805,7 +845,8 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
             (e.source ? "<span>来源 <b>" + esc(SRC_TXT[e.source] || e.source) + "</b></span>" : "") + "</div>" : "") +
           field("任务", jsonBlock(e.task), typeof e.task === "string" && e.task.trim().charAt(0) !== "{" ? "task" : "") +
           (e.context != null ? field("参考文本", jsonBlock(e.context)) : "") +
-          (e.status === "ok" ? field("返回结果", jsonBlock(e.result)) : "") + "</div></details>";
+          (e.reject ? field("打回说明", jsonBlock(e.reject.text), "task") : "") +
+          (["ok", "review", "rejected"].indexOf(e.status) >= 0 ? field("返回结果", jsonBlock(e.result)) : "") + "</div></details>";
       });
     } else if (n.kind === "if") {
       var st = statsFor(line);
@@ -837,6 +878,9 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
       html += '<div class="hint">跳转的落点，本身不执行任何东西。</div>';
     }
     html += scriptBox(t, line);
+    if (n.kind === "task" && t.pending && t.pending.phase === "after" && t.pending.line === line) {
+      html += '<div class="act" id="act"></div>';
+    }
     box.innerHTML = html;
     box.querySelectorAll("[data-copy]").forEach(function (b) {
       b.addEventListener("click", function () {
@@ -849,11 +893,12 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     });
     var hl = box.querySelector(".ln.hl"), sb = $("scriptbox");
     if (hl && sb) sb.scrollTop = Math.max(0, hl.offsetTop - sb.offsetTop - 60);
-    if ($("act")) mountAct($("act"), t, evs);
+    if (held && $("act")) $("act").replaceWith(held);
+    else if ($("act")) mountAct($("act"), t, evs);
   }
 
   // ---------- 由我来做：停住的节点按格式定义生成表单，交给查看服务的写接口 ----------
-  // A 是当前这一步的草稿：详情面板重画（换主题、点别的节点再回来）不丢；运行、步数或记录更新时间变了就换新的
+  // A 是当前这一步的草稿：结束后按运行、步号和尝试绑定；开始前沿用记录更新时间绑定。
   var A = { key: null };
   var LONG_KEY = /summary|detail|problem|suggestion|descri|content|task|reason|evidence|result|goal|when|text|note|plan|analysis|method|issue|risk|question/i;
   function isObj(v) { return v !== null && typeof v === "object" && !Array.isArray(v); }
@@ -1017,13 +1062,21 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
   }
 
   function mountAct(el, t, evs) {
-    var pd = t.pending, key = t._name + "|" + pd.step + "|" + t.updated;
+    var pd = t.pending, key = t._name + "|" + pd.step + "|" + (pd.phase || "before") + "|" + (pd.phase === "after" ? pd.attempt : t.updated);
     var schema = pd.schema || (pd.format && t._formats ? t._formats[pd.format] : null) || null;
     if (schema && sKind(schema) !== "object") schema = null;
     var last = evs.filter(function (e) { return isExec(e) && e.status === "ok" && isObj(e.result); }).pop();
     if (A.key !== key) {
       A = { key: key, mode: schema ? "form" : "json", val: schema ? fill(schema, {}) : {}, text: "{}", textErr: null, badJson: {},
-            msg: null, busy: false, confirm: false, card: "", model: "" };
+            msg: null, busy: false, confirm: false, card: "", model: "", note: "", dirty: false, revise: false, rejecting: false };
+      if (pd.phase === "after") {
+        A.val = schema ? fill(schema, copy(pd.result)) : copy(pd.result);
+        A.text = JSON.stringify(pd.result, null, 2);
+        if (pd.plan && !pd.item) {
+          A.planResult = copy(pd.result);
+          A.planControls = planItems(A.planResult, pd.plan).map(function () { return null; });
+        }
+      }
     }
     A.name = t._name; A.pd = pd; A.schema = schema; A.last = last ? last.result : null; A.agents = t._agents || []; A.el = el;
     el.addEventListener("input", actInput);
@@ -1032,6 +1085,7 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     renderAct();
   }
   function renderAct() {
+    if (A.pd.phase === "after") return renderReview();
     var pd = A.pd, el = A.el, dis = A.busy ? " disabled" : "";
     var who = roleName(pd.card || pd.role);
     var h = '<div class="act-head"><h3>由我来做（扮演 ' + esc(who) + "）</h3>" +
@@ -1070,6 +1124,241 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
       el.querySelectorAll("[data-ps]").forEach(function (x) { if (x.getAttribute("data-ps") === ps) x.classList.add("bad"); });
     });
   }
+  function planItems(result, plan) {
+    var value = result;
+    (plan.path || "").split(".").filter(Boolean).forEach(function (field) { value = value == null ? null : value[field]; });
+    return Array.isArray(value) ? value : [];
+  }
+  function planDefault(field, item, context) {
+    var a = context || A;
+    // row 的确认值已经合并逐项覆盖；“默认”必须按移除该覆盖后的规则计算。
+    var plan = a.pd.plan, cfg = S.trace._control || {}, role = item[plan.agent_field || "agent"];
+    var names = (plan.nodes || []).concat([role, (cfg.roles || {})[role] || role]);
+    if (field === "confirm_before" && cfg.mode === "step") return true;
+    var rules = cfg[field] || (field === "confirm_before" ? cfg.stop_roles : []) || [];
+    return rules.some(function (rule) {
+      return names.some(function (name) {
+        return typeof name === "string" && (name === rule || (rule.endsWith("*") && name.startsWith(rule.slice(0, -1))));
+      });
+    });
+  }
+  function planCost(item, context) {
+    var a = context || A;
+    var role = item[a.pd.plan.agent_field || "agent"];
+    var row = a.rows && a.rows[planItems(a.planResult, a.pd.plan).indexOf(item)];
+    if (row && role === row.item[a.pd.plan.agent_field || 'agent']) return row.cost == null ? null : row.cost;
+    var card = a.agents.find(function (a) { return a.name === role; });
+    return card && card.cost != null ? card.cost : null;
+  }
+  function planTotal(context) {
+    var a = context || A;
+    var costs = planItems(a.planResult, a.pd.plan).map(function (item) { return planCost(item, a); });
+    var sum = costs.reduce(function (sum, cost) { return sum + (cost || 0); }, 0);
+    var total = costs.some(function (cost) { return cost == null; }) ? null : Number(sum.toFixed(3));
+    // Python round(sum, 3) 在精确中点取偶数。三位小数的二进制精确中点是奇数 / 16。
+    if (total != null && Number.isInteger(sum * 16) && Math.abs(sum * 16) % 2 === 1) {
+      var lower = Math.floor(sum * 1000);
+      total = (lower % 2 === 0 ? lower : lower + 1) / 1000;
+    }
+    var budget = a.pd.plan.budget, el = a.el.querySelector('[data-plan-total]');
+    if (!el) return;
+    el.textContent = '合计 / 预算：' + (total == null ? '未知' : total) + ' / ' + (budget == null ? '未设置' : budget);
+    el.classList.toggle('bad', total != null && budget != null && total > budget);
+  }
+  function planTable(context) {
+    var a = context || A;
+    var plan = a.pd.plan, dis = a.busy ? ' disabled' : '';
+    var h = '<div class="plan-scroll"><table class="plan-table"><thead><tr>' +
+      (a.rows ? ['状态'] : []).concat(['序号', '内容摘要（展开看全文）', '角色卡', '成本', '模型', '开始前确认', '结束后确认']).map(function (s) { return '<th>' + s + '</th>'; }).join('') + '</tr></thead><tbody>';
+    planItems(a.planResult, plan).forEach(function (item, index) {
+      var row = a.rows && a.rows[index], writable = WRITE && (!a.rows || (a.editable && ['todo', 'waiting'].indexOf(row.state) >= 0));
+      var content = item[plan.content_field || 'content'], role = item[plan.agent_field || 'agent'];
+      var text = typeof content === 'string' ? content : JSON.stringify(content == null ? '' : content);
+      var attrs = function (field) { return ' data-plan-index="' + index + '" data-plan-field="' + field + '"'; };
+      var control = a.planControls[index] || {};
+      h += '<tr>' + (row ? '<td><span class="plan-state ' + esc(row.state) + '">' + esc(({ done: '完成', held: '待确认', tried: '试过', waiting: '停着', todo: '未跑' })[row.state] || row.state) + '</span></td>' : '') + '<td>' + (index + 1) + '</td><td><details><summary data-plan-summary>' + esc(text.slice(0, 60)) + (text.length > 60 ? '…' : '') + '</summary>' +
+        (writable ? '<textarea class="f-in" rows="4" aria-label="第 ' + (index + 1) + ' 项全文"' + attrs('content') + dis + '>' + esc(text) + '</textarea>' : '<pre>' + esc(text) + '</pre>') + '</details></td><td>';
+      h += writable ? '<select class="f-in" aria-label="第 ' + (index + 1) + ' 项角色卡"' + attrs('agent') + dis + '>' + (plan.roster || []).map(function (name) {
+        return '<option value="' + esc(name) + '"' + (name === role ? ' selected' : '') + '>' + esc(name) + '</option>';
+      }).join('') + '</select>' : esc(role);
+      h += '</td><td data-plan-cost>' + (planCost(item, a) == null ? '未知' : esc(planCost(item, a))) + '</td><td>' +
+        (writable ? '<input class="f-in" aria-label="第 ' + (index + 1) + ' 项模型" placeholder="默认"' + attrs('model') + ' value="' + esc(control.model || '') + '"' + dis + '>' : esc(control.model || (row && row.model) || ((S.trace._control || {}).models || {})[role] || '默认')) + '</td>';
+      ['confirm_before', 'confirm_after'].forEach(function (field) {
+        var actual = planDefault(field, item, a), val = control[field] == null ? '' : String(control[field]);
+        h += '<td>' + (writable ? '<select class="f-in" aria-label="第 ' + (index + 1) + ' 项' + (field === 'confirm_before' ? '开始前确认' : '结束后确认') + '"' + attrs(field) + dis + '>' +
+          [['', '默认（' + (actual ? '要' : '不要') + '）'], ['true', '要'], ['false', '不要']].map(function (pair) {
+            return '<option value="' + pair[0] + '"' + (pair[0] === val ? ' selected' : '') + '>' + pair[1] + '</option>';
+          }).join('') + '</select>' : (row ? (row[field] ? '要' : '不要') : '默认（' + (actual ? '要' : '不要') + '）')) + '</td>';
+      });
+      h += '</tr>';
+    });
+    return h + '</tbody></table></div><div data-plan-total id="' + (a.rows ? 'run-plan-total' : 'plan-total') + '" role="status"></div>';
+  }
+  function planInput(t, context) {
+    var a = context || A;
+    var index = Number(t.getAttribute('data-plan-index')), field = t.getAttribute('data-plan-field');
+    var plan = a.pd.plan, item = planItems(a.planResult, plan)[index], row = t.closest('tr');
+    if (field === 'agent' || field === 'content') {
+      if (field === 'agent' && (plan.roster || []).indexOf(t.value) < 0) return;
+      item[plan[field === 'agent' ? 'agent_field' : 'content_field'] || field] = t.value;
+      if (field === 'content') row.querySelector('[data-plan-summary]').textContent = t.value.slice(0, 60) + (t.value.length > 60 ? '…' : '');
+      else {
+        row.querySelector('[data-plan-cost]').textContent = planCost(item, a) == null ? '未知' : planCost(item, a);
+        ['confirm_before', 'confirm_after'].forEach(function (key) {
+          row.querySelector('[data-plan-field="' + key + '"]').options[0].textContent = '默认（' + (planDefault(key, item, a) ? '要' : '不要') + '）';
+        });
+      }
+      planTotal(a);
+    } else {
+      var control = a.planControls[index] || {};
+      if (t.value.trim() === '') delete control[field];
+      else control[field] = field === 'model' ? t.value.trim() : t.value === 'true';
+      a.planControls[index] = Object.keys(control).length ? control : null;
+    }
+  }
+  var P = null;
+  function runPlanInfo(plan) {
+    var pending = (S.trace || {}).pending || {};
+    var info = pending.plan && pending.plan.record === plan.record ? copy(pending.plan) : {};
+    // GET plan 的旧接口没有字段映射；从同一运行的脚本恢复，与 _plans 的遍历规则一致。
+    function scan(nodes) {
+      nodes.forEach(function (node) {
+        if (node.kind === 'each' && node.src.split('.')[0] === plan.record) {
+          info.agent_field = null; info.content_field = null; info.nodes = [];
+          function tasks(kids) {
+            kids.forEach(function (task) {
+              if (task.kind === 'if') tasks(task.kids || []);
+              else if (task.kind === 'task') {
+                info.nodes.push(task.name);
+                [['角色', 'agent_field'], ['任务', 'content_field']].forEach(function (pair) {
+                  var value = task.fields[pair[0]] || '', prefix = node.v + '.';
+                  if (value.indexOf(prefix) === 0 && /^\w+$/.test(value.slice(prefix.length))) info[pair[1]] = value.slice(prefix.length);
+                });
+              }
+            });
+          }
+          tasks(node.kids || []);
+        }
+        if (node.kids) scan(node.kids);
+      });
+    }
+    scan(parseScript((S.trace || {}).script || ''));
+    ['agent_field', 'content_field', 'nodes'].forEach(function (field) {
+      if (plan[field] != null) info[field] = copy(plan[field]);
+    });
+    info.path = ''; // 表格的 planResult 已经是 rows.item 的列表。
+    info.roster = (plan.roster || []).map(function (card) { return card.name; });
+    info.budget = plan.budget;
+    return info;
+  }
+  function runPlan(plan, name) {
+    var el = $('run-plan');
+    if (P && P.name === name && (P.dirty || P.busy)) return;
+    if (!plan || !Array.isArray(plan.rows) || !plan.rows.length) {
+      P = null; el.hidden = true; el.innerHTML = ''; return;
+    }
+    var controls = plan.rows.map(function (row) {
+      var control = {};
+      ['model', 'confirm_before', 'confirm_after'].forEach(function (field) {
+        if (row.control && row.control[field] != null) control[field] = row.control[field];
+      });
+      return Object.keys(control).length ? control : null;
+    });
+    P = { name: name, el: el, rows: copy(plan.rows), editable: plan.editable !== false,
+      why: plan.why_not, record: plan.record, agents: plan.roster || [],
+      pd: { plan: runPlanInfo(plan) },
+      planResult: plan.rows.map(function (row) { return copy(row.item); }), planControls: controls,
+      dirty: false, busy: false, msg: '' };
+    P.originalTasks = copy(P.planResult); P.originalControls = copy(controls);
+    renderRunPlan();
+  }
+  function renderRunPlan() {
+    if (!P) return;
+    P.el.hidden = false;
+    P.el.innerHTML = '<h2>分配清单</h2>' + (P.why ? '<p>' + esc(P.why) + '</p>' : '') + planTable(P) +
+      (WRITE ? '<div class="act-row">' + (P.editable ? '<button type="button" data-run-plan="save"' : '<button type="button" data-run-plan="pause"') +
+        (P.busy ? ' disabled' : '') + '>' + (P.editable ? '保存清单' : '暂停') + '</button></div>' : '') +
+      '<div id="run-plan-msg" role="status">' + esc(P.msg) + '</div>';
+    planTotal(P);
+  }
+  function runPlanInput(event) {
+    var t = event.target;
+    if (!P || P.busy || !WRITE || !P.editable || !t.hasAttribute('data-plan-field')) return;
+    var row = P.rows[Number(t.getAttribute('data-plan-index'))];
+    if (!row || ['todo', 'waiting'].indexOf(row.state) < 0) return;
+    planInput(t, P);
+    P.dirty = !same(P.planResult, P.originalTasks) || !same(P.planControls, P.originalControls);
+  }
+  $('run-plan').addEventListener('input', runPlanInput);
+  $('run-plan').addEventListener('change', runPlanInput);
+  $('run-plan').addEventListener('click', function (event) {
+    var button = event.target.closest('[data-run-plan]');
+    if (!button || !P || P.busy || !WRITE) return;
+    var draft = P, op = button.getAttribute('data-run-plan'), body = { name: P.name };
+    if (op === 'save') {
+      if (!P.editable) return;
+      body.record = P.record;
+      if (!same(P.planResult, P.originalTasks)) body.tasks = copy(P.planResult);
+      if (!same(P.planControls, P.originalControls)) body.item_controls = copy(P.planControls);
+    }
+    P.busy = true; P.msg = '正在发送…'; renderRunPlan();
+    fetch('api/' + (op === 'save' ? 'edit_plan' : 'pause'), { method: 'POST', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().then(function (data) {
+        if (!r.ok || !data.ok) throw new Error(data.error || '没有成功');
+      }); })
+      .then(function () {
+        if (P !== draft) return;
+        P.busy = false; P.dirty = false; P.msg = op === 'save' ? '清单已保存' : '已请求暂停';
+        renderRunPlan(); return refresh();
+      }).catch(function (error) {
+        if (P !== draft) return;
+        P.busy = false; P.msg = error.message; renderRunPlan();
+      });
+  });
+
+  function renderReview() {
+    var pd = A.pd, dis = A.busy ? " disabled" : "", max = pd.max_attempts, capped = max != null && pd.attempt >= max;
+    var h = '<div class="act-head"><h3>等你确认（第 ' + esc(pd.attempt) + ' 次尝试' +
+      (max != null ? '，最多 ' + esc(max) + ' 次' : '') + '）</h3></div>' +
+      (pd.item ? '<div class="hint">第 ' + esc(pd.item.index) + ' / ' + esc(pd.item.total) + ' 项</div>' : '') +
+      '<div class="field"><h3>模型结果</h3><pre>' + jsonBlock(pd.result) + '</pre></div>';
+    if ((pd.notes || []).length) h += '<div class="field"><h3>历次说明</h3>' + pd.notes.map(function (note) {
+      return '<div class="callout">' + (note.attempt ? '第 ' + esc(note.attempt) + ' 次 · ' : '') + esc(note.text || '') + '</div>';
+    }).join('') + '</div>';
+    if (A.planControlsCleared) h += '<div class="callout" role="status">清单项数变了，逐项设置已清空，需要的话通过后在遍历清单里重新设置</div>';
+    if (A.planResult && !A.revise) h += planTable();
+    if (!WRITE) { A.el.innerHTML = h; if (A.planResult) planTotal(); return; }
+    h += '<div class="act-row"><button type="button" class="btn2 primary" data-act="approve"' + dis + '>通过</button>' +
+      '<button type="button" class="btn2" data-act="revise"' + dis + '>改了再通过</button>' +
+      '<button type="button" class="btn2 danger" data-act="reject"' + (capped ? ' disabled' : dis) + '>打回</button></div>';
+    if (capped) h += '<div class="hint">已经第 ' + esc(pd.attempt) + ' 次，不能再打回；可以通过或改了再通过。</div>';
+    if (A.revise) {
+      if (A.schema) h += '<div class="seg"><button type="button" data-mode="form"' + dis + '>表单</button><button type="button" data-mode="json"' + dis + '>JSON</button></div>';
+      if (A.mode === "form") h += '<div class="f-root" id="act-form">' + fieldHtml(A.schema, A.val, [], null, false) + '</div>';
+      else h += '<textarea class="f-in" id="act-json" aria-label="结果的原始 JSON">' + esc(A.text) + '</textarea><div id="act-json-state"></div>';
+      h += '<div class="hint">修改通过后会同时保留模型原结果。</div><div><button type="button" class="btn2 primary" data-act="approve-revised"' + dis + '>提交修改并通过</button></div>';
+    }
+    if (A.rejecting) {
+      h += '<label>打回说明（必填）<textarea class="f-in" id="act-note"' + dis + '>' + esc(A.note) + '</textarea></label>' +
+        '<div class="act-row"><label>换卡 <select class="f-in" id="act-card"' + dis + '><option value="">不换</option>' + A.agents.map(function (a) {
+          return '<option value="' + esc(a.name) + '"' + (A.card === a.name ? ' selected' : '') + '>' + esc(roleName(a.name) + ' · ' + a.name) + '</option>';
+        }).join('') + '</select></label><label>换模型 <input class="f-in short" id="act-model" value="' + esc(A.model) + '"' + dis + '></label></div>' +
+        '<div class="hint">打回后会接着当前工作目录重做，上一次修改的文件仍保留。</div>' +
+        '<div><button type="button" class="btn2 danger" data-act="reject-yes"' + (capped ? ' disabled' : dis) + '>确定打回</button></div>';
+    }
+    if (A.msg) h += '<div class="act-msg ' + A.msg.kind + '" id="act-msg" role="status">' + esc(A.msg.text) +
+      (A.msg.errors || []).map(function (e) { return '<div>' + esc(e) + '</div>'; }).join('') + '</div>';
+    h += '<div class="act-row" id="act-abort">' + (A.confirm
+      ? '<span class="err-box">确定中止这次运行？后台进程会被停掉。</span><button type="button" class="btn2 danger" data-act="abort-yes"' + dis + '>确定中止</button><button type="button" class="btn2" data-act="abort-no"' + dis + '>不中止</button>'
+      : '<button type="button" class="btn2 danger" data-act="abort"' + dis + '>中止</button>') + '</div>';
+    A.el.innerHTML = h;
+    if (A.planResult) planTotal();
+    A.el.querySelectorAll('[data-ps]').forEach(function (el) {
+      if (A.msg && (A.msg.marks || []).indexOf(el.getAttribute('data-ps')) >= 0) el.classList.add('bad');
+    });
+    if (A.busy) A.el.querySelectorAll('input, textarea, select, button').forEach(function (el) { el.disabled = true; });
+  }
   function parseText() {
     try {
       var v = JSON.parse(A.text);
@@ -1080,6 +1369,10 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
   }
   function actInput(ev) {
     var t = ev.target;
+    if (A.busy || !WRITE) return;
+    A.dirty = true;
+    if (t.hasAttribute('data-plan-field')) { planInput(t); return; }
+    if (t.id === "act-note") { A.note = t.value; return; }
     if (t.id === "act-card") { A.card = t.value; return; }
     if (t.id === "act-model") { A.model = t.value; return; }
     if (t.id === "act-json") {
@@ -1139,7 +1432,8 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     }).filter(Boolean);
   }
   function send(op, body, okText) {
-    if (A.busy) return;
+    if (A.busy || !WRITE) return;
+    if (op === "approve" && A.planControlsCleared) okText += "。清单项数变了，逐项设置已清空，需要的话通过后在遍历清单里重新设置";
     var key = A.key;
     body.name = A.name;
     A.busy = true; A.confirm = false;
@@ -1153,6 +1447,7 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
       .then(function (res) {
         if (A.key !== key) return;
         if (res.ok) {
+          A.dirty = false;
           // 成功：按钮保持不可点，立刻重拉运行状态；记录一变，这块就换成下一步的（或消失）
           S.flash = { run: A.name, text: okText, at: Date.now() };
           A.msg = { kind: "ok", text: okText + "，正在刷新运行状态…" };
@@ -1169,13 +1464,22 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
         }
         A.busy = false;
         var errors = res.d.errors || [];
-        A.msg = { kind: "bad", text: errors.length ? String(res.d.error || "").split("：")[0] + "：" : (res.d.error || "没有成功"), errors: errors, marks: marksOf(errors) };
+        A.msg = { kind: "bad", text: errors.length && !A.planResult ? String(res.d.error || "").split("：")[0] + "：" : (res.d.error || "没有成功"), errors: errors, marks: marksOf(errors) };
         renderAct();
       });
   }
+  function approvalControls(body, result) {
+    var items = planItems(result, A.pd.plan);
+    if (items.length !== planItems(A.pd.result, A.pd.plan).length) {
+      A.planControls = items.map(function () { return null; });
+      A.planControlsCleared = true;
+    }
+    if (A.planControls.some(function (control) { return control !== null; })) body.item_controls = copy(A.planControls);
+  }
   function actClick(ev) {
     var b = ev.target.closest ? ev.target.closest("button") : null, path, arr;
-    if (!b || b.disabled || !A.el || !A.el.contains(b)) return;
+    if (!WRITE || A.busy || !b || b.disabled || !A.el || !A.el.contains(b)) return;
+    A.dirty = true;
     if (b.hasAttribute("data-add")) {
       path = JSON.parse(b.getAttribute("data-add"));
       arr = getAt(A.val, path);
@@ -1192,7 +1496,42 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     }
     if (b.hasAttribute("data-mode")) return setMode(b.getAttribute("data-mode"));
     var act = b.getAttribute("data-act"), pd = A.pd, who = roleName(pd.card || pd.role);
-    if (act === "copy-last" && A.last) {
+    if (act === "approve") {
+      var approval = { attempt: pd.attempt };
+      if (A.planResult) {
+        if (A.revise) {
+          var edited = currentValue();
+          if (edited.errs.length) {
+            A.msg = { kind: 'bad', text: '结果不符合格式', errors: edited.errs.map(function (e) { return e.ps + ': ' + e.msg; }) };
+            return renderAct();
+          }
+          A.planResult = copy(edited.value);
+        }
+        var planErrors = [];
+        if (A.schema) check(A.schema, A.planResult, [], planErrors);
+        if (planErrors.length) {
+          A.msg = { kind: 'bad', text: '结果不符合格式', errors: planErrors.map(function (e) { return pstr(e.path) + ': ' + e.msg; }) };
+          return renderAct();
+        }
+        if (!same(A.planResult, pd.result)) approval.result = copy(A.planResult);
+        approvalControls(approval, A.planResult);
+      }
+      send("approve", approval, "已通过第 " + pd.attempt + " 次结果");
+    } else if (act === "revise") {
+      if (A.planResult) {
+        A.val = A.schema ? fill(A.schema, copy(A.planResult)) : copy(A.planResult);
+        A.text = JSON.stringify(A.planResult, null, 2);
+      }
+      A.revise = true; A.rejecting = false; A.msg = null; renderAct();
+    } else if (act === "reject") {
+      A.rejecting = true; A.revise = false; A.msg = null; renderAct();
+    } else if (act === "reject-yes") {
+      if (!(A.note || "").trim()) { A.msg = { kind: "bad", text: "打回要写意见" }; return renderAct(); }
+      var rejection = { attempt: pd.attempt, note: A.note.trim() };
+      if (A.card) rejection.role = A.card;
+      if (A.model.trim()) rejection.model = A.model.trim();
+      send("reject", rejection, "已打回重做");
+    } else if (act === "copy-last" && A.last) {
       if (A.mode === "json") { A.text = JSON.stringify(A.last, null, 2); A.textErr = null; }
       else { A.val = fill(A.schema, copy(A.last)); A.badJson = {}; }
       A.msg = { kind: "info", text: "已复制上次的结果，改好再提交。" };
@@ -1200,12 +1539,20 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     } else if (act === "clear") {
       A.val = A.schema ? fill(A.schema, {}) : {}; A.text = A.schema ? JSON.stringify(clean(A.schema, A.val), null, 2) : "{}"; A.textErr = null; A.msg = null; A.badJson = {};
       renderAct();
-    } else if (act === "submit") {
+    } else if (act === "submit" || act === "approve-revised") {
       var cv = currentValue();
       if (cv.errs.length) {
         A.msg = { kind: "bad", text: "还不能提交，先改这 " + cv.errs.length + " 处：", errors: cv.errs.map(function (x) { return x.ps + ": " + x.msg; }),
                   marks: cv.errs.map(function (x) { return x.ps; }) };
         return renderAct();
+      }
+      if (act === "approve-revised") {
+        var revised = { attempt: pd.attempt, result: cv.value };
+        if (A.planResult) {
+          if (same(cv.value, pd.result)) delete revised.result;
+          approvalControls(revised, cv.value);
+        }
+        send("approve", revised, "已修改并通过"); return;
       }
       send("submit", { step: pd.step, result: cv.value }, "已交第 " + pd.step + " 步「" + pd.name + "」的结果（扮演 " + who + "）");
     } else if (act === "exec") {
@@ -1239,12 +1586,13 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
   function load(trace, source, keep) {
     if (!trace || !Array.isArray(trace.events)) { showError("这不是编排过程记录：缺少 events 列表。请选 runs/ 目录下的 .json 文件。"); return; }
     if (!trace.script) { showError("这份记录里没有 script 字段，画不出流程结构。"); return; }
+    if (!S.live) runPlan(null, null);
     S.trace = trace;
     S.tree = [{ kind: "start", line: -1 }].concat(parseScript(trace.script), [{ kind: "end", line: -2 }]);
     S.byLine = indexEvents(trace.events);
     $("h-src").textContent = source;
     renderSummary(trace);
-    var run = trace.events.find(function (e) { return e.type === "task" && (e.status === "running" || (e.status === "waiting" && trace.status === "waiting")); });
+    var run = trace.events.find(function (e) { return e.type === "task" && (e.status === "running" || e.status === "review" || (e.status === "waiting" && trace.status === "waiting")); });
     var err = trace.events.find(function (e) { return e.type === "task" && e.status === "error"; });
     var firstTask = trace.events.find(function (e) { return e.type === "task"; });
     var follow = S.live && $("follow").checked && Date.now() - S.lastClick > 15000;
@@ -1305,10 +1653,15 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     }).then(function (t) {
       if (!t) return;
       var sig = t._name + "|" + t.updated + "|" + t.events.length + "|" + t._alive + "|" + t.status;
-      if (sig === cur.sig) return;
+      var latestPlan = fetchJson('api/plan?name=' + encodeURIComponent(t._name)).then(function (plan) {
+        if (S.trace && S.trace._name === t._name) runPlan(plan, t._name);
+      }, function () { if (S.trace && S.trace._name === t._name) runPlan(null, t._name); });
+      if (sig === cur.sig) return latestPlan;
       var same = cur.name === t._name;
       cur = { name: t._name, sig: sig };
       load(t, "实时：" + t._name, same);
+      if (P && P.name !== t._name) { P = null; $("run-plan").hidden = true; }
+      return latestPlan;
     }).catch(function (err) { setConn(false, "连不上查看服务（" + err.message + "），重试中…"); });
   }
   function poll() { pollOnce().then(function () { setTimeout(poll, 1500); }); }

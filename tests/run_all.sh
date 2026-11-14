@@ -83,6 +83,8 @@ cd $M
 # node E2E 要 jsdom（tests/e2e/package.json，node_modules 不进版本库）。缺了不静默跳过：
 # 提示一行，后面的 E2E 组会照常报错。
 [ -d "$M/tests/e2e/node_modules/jsdom" ] || echo "!! 缺 jsdom，node E2E 会失败；先跑：npm ci --prefix $M/tests/e2e"
+# 查看器的 Python 测试（test_trace_view / test_trace_confirm）从 NODE_PATH 找 jsdom，不设就只跑 Python 那一半
+export NODE_PATH="${NODE_PATH:+$NODE_PATH:}$M/tests/e2e/node_modules"
 run 引擎        $PY -m tools.test_dsl
 run 序号和默认值 $PY tests/dsl/test_loop_default.py
 run 遍历JSON列表 $PY tests/dsl/test_each_json_list.py
@@ -195,6 +197,7 @@ run 编排成本分配 $PY tests/tools/test_wf_cost.py
 run 编排代码重构 $PY tests/tools/test_wf_refactor.py
 run 编排人工确认 $PY tests/tools/test_wf_confirm.py
 run 编排查看器 $PY tests/tools/test_trace_view.py
+run 查看器人工确认 $PY tests/tools/test_trace_confirm.py
 run 查看器令牌 $PY tests/tools/test_trace_token.py
 run DSL规划读码 $PY tests/tools/test_dslagent_planread.py
 run DSL测试环境 $PY tests/tools/test_dslagent_testenv.py

@@ -156,6 +156,11 @@ class Server:
 
 def server_checks(tmp, e, re_):
     """E 的服务端一半：真的起服务，POST 写接口。"""
+    try:
+        free_port()
+    except OSError:
+        print('跳过：不能开端口')
+        return
     name = Path(re_).name
     srv = Server(e, tmp / 'server-e.log')
     try:
