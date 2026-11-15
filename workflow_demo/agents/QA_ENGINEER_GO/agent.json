@@ -1,0 +1,30 @@
+{
+  "model": "cli:claude/sonnet",
+  "cost": 4,
+  "description": "Go 项目专用的 QA（sonnet）。只用于 Go 项目：逐条对照验收目标查实现和测试，跑 go test（含 -race）、go vet、gofmt -l，给出通过或返工要求；验收项多时用探针并行查。启动时用 roles={\"QA_ENGINEER\": \"QA_ENGINEER_GO\"} 换上。",
+  "packages": [],
+  "skills": [
+    "skills/acceptance.md"
+  ],
+  "effort": "medium",
+  "agentic": {
+    "cwd": "work/{project}",
+    "allowed_tools": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(ls:*)",
+      "Bash(go version:*)",
+      "Bash(go list:*)",
+      "Bash(go mod verify:*)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go vet:*)",
+      "Bash(gofmt -l:*)"
+    ],
+    "timeout": 900,
+    "max_turns": 60,
+    "venv": false,
+    "mcp_tools": ["probe"]
+  }
+}

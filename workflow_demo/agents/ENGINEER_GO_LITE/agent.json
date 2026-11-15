@@ -1,0 +1,32 @@
+{
+  "model": "cli:claude/haiku",
+  "cost": 1,
+  "description": "Go 项目专用的便宜档工程师（haiku），没有探针和审查。只用于 Go 项目里边界清楚的小任务：go.mod 和包骨架、单个函数或结构体、纯计算和校验、照已有模式加一个分支。不适合跨包改动、并发、需求含糊要自己判断的任务。不要派给 Python 或其他语言的项目。",
+  "packages": [],
+  "skills": [
+    "skills/implementation.md"
+  ],
+  "agentic": {
+    "cwd": "work/{project}",
+    "allowed_tools": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Bash(ls:*)",
+      "Bash(go version:*)",
+      "Bash(go mod init:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(go get:*)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go vet:*)",
+      "Bash(go fmt:*)",
+      "Bash(gofmt:*)"
+    ],
+    "timeout": 600,
+    "max_turns": 40,
+    "venv": false
+  }
+}

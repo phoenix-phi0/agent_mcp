@@ -1,0 +1,29 @@
+{
+  "model": "cli:claude/sonnet",
+  "cost": 2,
+  "description": "Go 项目专用的测试工程师（sonnet，低思考强度）。只用于 Go 项目：给已经实现的功能补 _test.go 测试（边界、错误、组合场景、表驱动用例）；不改实现代码，发现的缺陷写进记录交给后面返工。不能用来实现功能，不要派给其他语言的项目。",
+  "packages": [],
+  "skills": [
+    "skills/testing.md"
+  ],
+  "effort": "low",
+  "agentic": {
+    "cwd": "work/{project}",
+    "allowed_tools": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Bash(ls:*)",
+      "Bash(go version:*)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go vet:*)",
+      "Bash(gofmt:*)"
+    ],
+    "timeout": 900,
+    "max_turns": 50,
+    "venv": false
+  }
+}
