@@ -43,7 +43,9 @@ function bridgeScript(initialRun, theme) {
   window.TRACE_HOST = {
     openScript: function (line, workflow, script, run) {
       vscode.postMessage({ type: "open-script", line: line, workflow: workflow, script: script, run: run });
-    }
+    },
+    pullWorkdir: function (run) { vscode.postMessage({ type: "pull-workdir", run: String(run || "") }); },
+    submitChanges: function (run) { vscode.postMessage({ type: "submit-changes", run: String(run || "") }); }
   };
   // 页面里换了运行（下拉框改 hash；「← 运行列表」用 pushState，不触发 hashchange）：告诉插件，好改标签页标题
   function tellView() {

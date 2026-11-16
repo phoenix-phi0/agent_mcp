@@ -21,6 +21,7 @@ function makeVscode() {
   class Range { constructor(a, b, c, d) { this.start = { line: a, character: b }; this.end = { line: c, character: d }; } }
   const Uri = {
     parse: (s) => ({ toString: () => s }),
+    file: (p) => ({ fsPath: p, toString: () => "file://" + p }),
     from: (o) => ({ scheme: o.scheme, path: o.path, toString: () => o.scheme + ":" + o.path }),
   };
   const vscode = {
@@ -28,14 +29,23 @@ function makeVscode() {
     TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
     StatusBarAlignment: { Left: 1, Right: 2 }, ConfigurationTarget: { Global: 1 }, ViewColumn: { Active: -1, Beside: -2 },
     ColorThemeKind: { Light: 1, Dark: 2, HighContrast: 3, HighContrastLight: 4 },
+    ProgressLocation: { Notification: 15 },
     window: {
+      showOpenDialog: async (o) => { S.dialogs = (S.dialogs || []).concat([o]); return S.nextFolder ? [{ fsPath: S.nextFolder }] : undefined; },
+      showWarningMessage: async (msg, ...items) => { S.warnings = (S.warnings || []).concat([[msg, items]]); return S.nextWarning; },
+      withProgress: async (o, f) => { S.progress = (S.progress || []).concat([o.title]); return f(); },
+      createOutputChannel: () => (S.output = { lines: [], shown: 0, appendLine(x) { this.lines.push(x); }, show() { this.shown++; } }),
       activeColorTheme: { kind: 1 },
       createStatusBarItem: () => (S.status = { text: "", visible: false, show() { this.visible = true; }, hide() { this.visible = false; }, dispose() {} }),
       registerTreeDataProvider: (id, p) => { S.tree = p; return { dispose() {} }; },
       showInformationMessage: (msg, ...items) => { S.info.push([msg, items]); return Promise.resolve(undefined); },
       showErrorMessage: (msg) => { S.errors.push(msg); return Promise.resolve(); },
-      showInputBox: async (o) => { S.inputs.push(o); return S.nextInput; },
-      showQuickPick: async (items) => (S.quick = items, items[0]),
+      showInputBox: async (o) => { S.inputs.push(o); return Array.isArray(S.nextInput) ? S.nextInput.shift() : S.nextInput; },
+      showQuickPick: async (items, o) => {
+        S.quick = items;
+        if (o && o.canPickMany) return items.filter((x) => x.picked);
+        return items[0];
+      },
       createWebviewPanel: (type, title, col, opts) => {
         const p = { type, title, opts, sent: [], disposeL: [], msgL: null, revealed: 0,
           webview: { html: "", postMessage(m) { p.sent.push(m); return Promise.resolve(true); }, onDidReceiveMessage(f) { p.msgL = f; } },
@@ -47,6 +57,8 @@ function makeVscode() {
       onDidChangeActiveColorTheme: () => ({ dispose() {} }),
     },
     workspace: {
+      workspaceFolders: undefined,
+      updateWorkspaceFolders: (i, n, f) => { S.added = f; return true; },
       getConfiguration: () => ({
         get: (k, d) => (("agentMcp." + k) in S.config ? S.config["agentMcp." + k] : d),
         update: async (k, v) => { if (v === undefined) delete S.config["agentMcp." + k]; else S.config["agentMcp." + k] = v; },
@@ -69,7 +81,7 @@ function makeVscode() {
 }
 
 // ---------- 假的查看服务 ----------
-const svc = { runs: [], fetched: [] };
+const svc = { runs: [], fetched: [], submitReplies: [] };
 global.fetch = async (url, init) => {
   init = init || {};
   svc.fetched.push({ url, method: init.method || "GET", headers: init.headers, body: init.body });
@@ -77,7 +89,12 @@ global.fetch = async (url, init) => {
   const rest = url.slice(ROOT.length);
   if (rest === "") return { status: 200, text: async () => "<!DOCTYPE html><html><head><title>t</title></head><body><script>var LIVE=1</script></body></html>" };
   if (rest === "api/runs") return { status: 200, text: async () => JSON.stringify({ dir: "runs", runs: svc.runs }) };
-  if (rest.startsWith("api/run?")) return { status: 200, text: async () => JSON.stringify({ _name: "a.json" }) };
+  if (rest.startsWith("api/run?")) return { status: 200, text: async () => JSON.stringify(svc.run || { _name: "a.json" }) };
+  if (rest.startsWith("api/workfiles?")) return { status: svc.workfilesStatus || 200, text: async () => JSON.stringify(svc.workfiles) };
+  if (rest === "api/submit_files") {
+    const reply = svc.submitReplies.shift();
+    return { status: reply[0], text: async () => JSON.stringify(reply[1]) };
+  }
   if (init.method === "POST") return { status: 200, text: async () => JSON.stringify({ ok: true }) };
   return { status: 404, text: async () => "{}" };
 };
@@ -203,6 +220,103 @@ test("页面里换运行、回列表：标签页标题跟着改", async () => {
 test("在浏览器里打开：用带口令的地址，运行项带 #run=", async () => {
   await S.commands["agentMcp.openInBrowser"]({ id: "run:c.json" });
   assert.deepStrictEqual(S.external, [ROOT + "#run=c.json"]);
+});
+
+// ---------- 实现步骤：拉到本地、交代码 ----------
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const W = require("../lib/workdir");
+const wtmp = fs.mkdtempSync(path.join(os.tmpdir(), "amext-"));
+test.after(() => fs.rmSync(wtmp, { recursive: true, force: true }));
+const PEND = { step: 6, attempt: 1, phase: "before", name: "任务实现", cwd: "work/demo", test_cmd: "pytest -q" };
+
+test("拉到本地：请求 api/workfiles，选空文件夹写进去，问要不要加到工作区", async () => {
+  svc.workfiles = { step: 6, attempt: 1, phase: "before", cwd: "work/demo", files: [{ path: "user.py", content: "x = 1\n" }],
+                    skipped: [{ path: "b.bin", reason: "二进制" }] };
+  S.nextFolder = path.join(wtmp, "w");
+  fs.mkdirSync(S.nextFolder);
+  S.info = [];
+  await S.commands["agentMcp.pullWorkdir"]({ id: "run:a.json" });
+  assert.ok(svc.fetched.some((f) => f.url === ROOT + "api/workfiles?name=a.json"));
+  assert.strictEqual(fs.readFileSync(path.join(S.nextFolder, "user.py"), "utf8"), "x = 1\n");
+  assert.strictEqual(W.readMarker(S.nextFolder).run, "a.json");
+  assert.match(S.info[0][0], /已拉到 .*：1 个文件，跳过 1 个（b\.bin：二进制）/);
+  assert.deepStrictEqual(S.info[0][1], ["加到工作区", "在新窗口打开"]);
+});
+
+test("拉不了：服务器的报错原样告诉人", async () => {
+  svc.workfilesStatus = 400;
+  svc.workfiles = { error: "这一步的角色没有工作目录" };
+  S.errors = [];
+  await S.commands["agentMcp.pullWorkdir"]("a.json");
+  assert.deepStrictEqual(S.errors, ["拉不了工作目录：这一步的角色没有工作目录"]);
+  svc.workfilesStatus = 200;
+});
+
+test("交代码：找到拉过的文件夹，交改动的文件，带步号、尝试次数、摘要；交完本地基线前移", async () => {
+  const dir = path.join(wtmp, "w");
+  vscode.workspace.workspaceFolders = [{ uri: { fsPath: dir } }];
+  fs.writeFileSync(path.join(dir, "user.py"), "x = 2\n");
+  fs.writeFileSync(path.join(dir, "test_user.py"), "def test(): pass\n");
+  svc.run = { _name: "a.json", status: "waiting", pending: PEND };
+  svc.submitReplies = [[200, { ok: true, status: { submitted_files: {
+    changes: [{ target: "test_user.py" }, { target: "user.py" }], record: { verification: { result: "通过（退出码 0）：2 passed" } },
+    test: { tail: "2 passed" } } } }]];
+  S.nextInput = ["实现了 create_user", "没做校验；没做分页"];
+  S.info = [];
+  await S.commands["agentMcp.submitChanges"]("a.json");
+  const post = svc.fetched.filter((f) => f.url === ROOT + "api/submit_files").pop();
+  const body = JSON.parse(post.body);
+  assert.deepStrictEqual([body.name, body.step, body.attempt, body.summary, body.status, body.open_issues],
+    ["a.json", 6, 1, "实现了 create_user", "完成", ["没做校验", "没做分页"]]);
+  assert.deepStrictEqual(body.files, [{ path: "test_user.py", content: "def test(): pass\n" }, { path: "user.py", content: "x = 2\n" }]);
+  assert.strictEqual(post.headers["Content-Type"], "application/json");
+  assert.ok(!("allow_fail" in body));
+  assert.match(S.progress.pop(), /跑测试/);
+  assert.deepStrictEqual(S.info.map((x) => x[0]), ["已交第 6 步：2 个文件改动；验证：通过（退出码 0）：2 passed"]);
+  assert.deepStrictEqual(await W.collectChanges(dir), [], "交完本地没有改动了");
+});
+
+test("交代码：没有改动就不交；工作目录对不上就不交", async () => {
+  S.info = []; S.errors = [];
+  const n = svc.fetched.length;
+  await S.commands["agentMcp.submitChanges"]("a.json");
+  assert.deepStrictEqual(S.info.map((x) => x[0]), ["和拉下来时比没有改动，没什么可交的"]);
+  fs.writeFileSync(path.join(wtmp, "w", "user.py"), "x = 3\n");
+  svc.run = { _name: "a.json", status: "waiting", pending: Object.assign({}, PEND, { cwd: "work/other" }) };
+  await S.commands["agentMcp.submitChanges"]("a.json");
+  assert.match(S.errors[0], /工作目录是 work\/other，本地拉的是 work\/demo/);
+  assert.ok(!svc.fetched.slice(n).some((f) => f.url.endsWith("api/submit_files")), "都没往服务器交");
+  S.errors = [];
+});
+
+test("交代码：测试没过，输出放进输出面板；人选「仍然交」就带 allow_fail 再交一次", async () => {
+  svc.run = { _name: "a.json", status: "waiting", pending: Object.assign({}, PEND, { step: 7 }) };
+  svc.submitReplies = [
+    [400, { ok: false, error: "测试没过（退出码 1），文件已撤回，没有提交。输出最后：\n1 failed" }],
+    [200, { ok: true, status: { submitted_files: { changes: [{ target: "user.py" }], record: { verification: { result: "失败（退出码 1）" } } } } }],
+  ];
+  S.nextInput = ["先交一半", ""];
+  S.nextWarning = "仍然交（状态记为部分完成）";
+  S.info = [];
+  await S.commands["agentMcp.submitChanges"]("a.json");
+  const posts = svc.fetched.filter((f) => f.url === ROOT + "api/submit_files").slice(-2).map((f) => JSON.parse(f.body));
+  assert.deepStrictEqual(posts.map((b) => [b.step, b.allow_fail]), [[7, undefined], [7, true]]);
+  assert.ok(S.output.lines.some((l) => /1 failed/.test(l)) && S.output.shown >= 1, "测试输出进了输出面板");
+  assert.deepStrictEqual(S.info.map((x) => x[0]), ["已交第 7 步：1 个文件改动；验证：失败（退出码 1）"]);
+  vscode.workspace.workspaceFolders = undefined;
+});
+
+test("运行页里的按钮：拉到本地、交代码走同一套命令", async () => {
+  const p = S.panels[0];
+  svc.workfiles = { step: 9, attempt: 1, phase: "after", cwd: "work/demo", files: [], skipped: [] };
+  S.nextFolder = path.join(wtmp, "w2");
+  S.info = [];
+  await p.msgL({ type: "pull-workdir", run: "c.json" });
+  await tick(50);
+  assert.ok(svc.fetched.some((f) => f.url === ROOT + "api/workfiles?name=c.json"));
+  assert.strictEqual(W.readMarker(S.nextFolder).run, "c.json");
 });
 
 test("连不上：侧边栏和状态栏说清楚，手动刷新时弹错误", async () => {

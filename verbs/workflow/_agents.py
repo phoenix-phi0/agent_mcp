@@ -206,6 +206,15 @@ def describe(engine, name, task, context=None, model=None, node=None, fmt=None, 
            "cost": profile.get("cost")}
     if fmt:
         out.update(format=fmt[0], schema=fmt[1])
+    agentic = profile.get("agentic")
+    if agentic:
+        # 人工交代码用（workflow_ctl.submit_files）：这一步在哪个目录干活、用不用项目 venv、测试命令
+        root = engine.workdir.resolve()
+        out["cwd"] = Path(agentic["cwd"]).relative_to(root).as_posix() or "."
+        out["venv"] = bool(agentic.get("venv"))
+        test_cmd = engine.expand("{test_cmd 或 }")
+        if isinstance(test_cmd, str) and test_cmd.strip():
+            out["test_cmd"] = test_cmd.strip()
     return out
 
 

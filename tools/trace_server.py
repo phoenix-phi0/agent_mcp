@@ -49,7 +49,7 @@ from urllib.parse import parse_qs, urlparse
 VIEW = Path(__file__).resolve().with_name("trace_view.html")
 _NAME = re.compile(r"^[\w.-]+\.json$")
 _CARD = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
-_WRITE_OPS = ("submit", "execute", "resume", "abort", "approve", "reject", "edit_plan", "pause")
+_WRITE_OPS = ("submit", "execute", "resume", "abort", "approve", "reject", "edit_plan", "pause", "submit_files")
 _MAX_BODY = 4 * 1024 * 1024
 _LOCK = threading.Lock()        # 写操作一次只做一个：控制文件只能有一个写的人
 
@@ -84,6 +84,14 @@ def control(op, path, body):
     wc = _ctl()
     step = body.get("step")
     try:
+        if op == "submit_files":
+            # 不占全局写锁：要跑测试，可能几分钟；同一份记录由 workflow_ctl 的记录锁互斥。
+            # 测试命令只用这次流程自己的 test_cmd，请求里不能指定。
+            st = wc.submit_files(path, body.get("files"), body.get("summary"),
+                                 open_issues=body.get("open_issues"), status=body.get("status") or "完成",
+                                 step=step, attempt=body.get("attempt"), allow_fail=bool(body.get("allow_fail")),
+                                 note=body.get("note"), wait=False, actor="viewer")
+            return 200, {"ok": True, "status": st}
         with _LOCK:
             if op in ("approve", "reject") and body.get("attempt") is None:
                 raise wc.ControlError("缺少 attempt")
@@ -340,13 +348,22 @@ def route(runs, method, path, query, headers, body, token=None, base="", write=F
             return respond(200, view_html(write), "text/html; charset=utf-8")
         if path == "/api/runs":
             return respond_json({"dir": runs.name if token else str(runs), "runs": list_runs(runs)})
-        if path in ("/api/run", "/api/plan"):
+        if path in ("/api/run", "/api/plan", "/api/workfiles"):
             name = (parse_qs(query).get("name") or [""])[0]
             if not _NAME.fullmatch(name):
                 return respond_json({"error": "文件名不对"}, 400)
             p = (runs / name).resolve()
             if p.parent != runs.resolve() or not p.is_file():
                 return respond_json({"error": f"没有 {name}"}, 400 if path == "/api/plan" else 404)
+            if path == "/api/workfiles":
+                # 工作目录的源码只给能写的查看服务（本机，或带 token 加 --write）：和交代码同一道门
+                if not write:
+                    return respond_json({"error": "这个查看服务是只读的，不能拉取工作目录"}, 403)
+                wc = _ctl()
+                try:
+                    return respond_json(wc.workfiles(p))
+                except wc.ControlError as e:
+                    return respond_json({"error": str(e)}, 400)
             if path == "/api/plan":
                 wc = _ctl()
                 record = (parse_qs(query).get("record") or [None])[0]

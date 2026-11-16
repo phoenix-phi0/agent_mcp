@@ -27,6 +27,8 @@
   rewind(run, step)          丢掉第 step 步及以后的结果，停在第 step 步
   abort(run)                 杀掉后台进程，状态 aborted
   list_runs(workdir)
+  workfiles(run)             停在实现步骤时，拉取这一步工作目录里的文本文件
+  submit_files(run, files, summary, …)   人工交代码：写进工作目录、跑 test_cmd、生成实现记录，再 submit / approve
 
 控制文件只由这些接口函数写；后台进程只读它。
 """
@@ -1091,6 +1093,323 @@ def abort(run, actor="workflow_ctl"):
         _log(cfg, "abort", actor=actor)
         _dump(cf, cfg)
     return status(p)
+
+
+# ---- 人工交代码：实现步骤停着时，人把改好的文件交上来，服务器写进这一步的工作目录、跑测试、
+#      按实际改动生成实现记录，再走 submit（开始前）或 approve（结束后）。----
+
+_SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache",
+              ".ruff_cache", ".tox", "dist", "build", ".idea", ".vscode"}
+_SECRET = re.compile(r"(^|/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_rsa.*|\.netrc|\.pypirc)$", re.I)
+_FILE_MAX = 1024 * 1024          # 单个文件
+_PULL_MAX = 20 * 1024 * 1024     # 拉取总量
+_PUSH_MAX = 3 * 1024 * 1024      # 一次交的总量（查看器请求体上限 4MB）
+_PUSH_FILES = 300
+_TEST_TIMEOUT = 900
+_TAIL = 4000
+
+
+def _work_dir(t, pend):
+    """这一步的工作目录（绝对路径）。只有带工作目录的角色（agentic）才有。"""
+    rel = (pend or {}).get("cwd")
+    if not rel:
+        raise ControlError("这一步的角色没有工作目录（不是会写代码的角色），不能交代码")
+    root = Path(t["workdir"])
+    if not root.is_absolute():
+        root = ROOT / root
+    root = root.resolve()
+    wd = (root / rel).resolve()
+    if wd != root and root not in wd.parents:
+        raise ControlError("工作目录越出了流程目录")
+    return wd
+
+
+def _check_rel(path):
+    if not isinstance(path, str) or not path or len(path) > 400:
+        raise ControlError(f"文件路径不对：{path!r}")
+    if "\\" in path or path.startswith("/") or "\x00" in path or re.match(r"^[A-Za-z]:", path):
+        raise ControlError(f"文件路径要用相对路径和 /：{path}")
+    parts = path.split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        raise ControlError(f"文件路径不能有空段、. 或 ..：{path}")
+    if any(p in _SKIP_DIRS for p in parts[:-1]) or parts[-1] in (".git",):
+        raise ControlError(f"不能改这个目录下的文件：{path}")
+    if _SECRET.search(path):
+        raise ControlError(f"不收密钥类文件：{path}")
+    return parts
+
+
+def _inside(wd, parts):
+    """目标路径，逐级核对没有经过符号链接、没有越出工作目录。"""
+    cur = wd
+    for p in parts:
+        cur = cur / p
+        if cur.is_symlink():
+            raise ControlError(f"路径经过符号链接，不写：{'/'.join(parts)}")
+    if wd not in cur.resolve().parents:
+        raise ControlError(f"路径越出工作目录：{'/'.join(parts)}")
+    return cur
+
+
+def _walk(wd):
+    for dirpath, dirnames, filenames in os.walk(wd):
+        dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS and not d.endswith(".egg-info")
+                             and not os.path.islink(os.path.join(dirpath, d)))
+        for name in sorted(filenames):
+            f = Path(dirpath) / name
+            if not f.is_symlink():
+                yield f.relative_to(wd).as_posix(), f
+
+
+def workfiles(run):
+    """当前停着的这一步的工作目录：文本文件全文（跳过虚拟环境、缓存、密钥、二进制和超大文件）。"""
+    p, cf, cfg, t = _open(run)
+    pend = t.get("pending") if t.get("status") == "waiting" else None
+    if not pend:
+        raise ControlError(f"现在没有停在节点上（状态 {t.get('status')}）")
+    wd = _work_dir(t, pend)
+    files, skipped, total = [], [], 0
+    if wd.is_dir():
+        for rel, f in _walk(wd):
+            if _SECRET.search(rel):
+                skipped.append({"path": rel, "reason": "密钥类文件"})
+                continue
+            size = f.stat().st_size
+            if size > _FILE_MAX:
+                skipped.append({"path": rel, "reason": f"超过 {_FILE_MAX // 1024} KB"})
+                continue
+            raw = f.read_bytes()
+            try:
+                text = raw.decode("utf-8")
+                if "\x00" in text:
+                    raise ValueError
+            except ValueError:
+                skipped.append({"path": rel, "reason": "二进制"})
+                continue
+            total += size
+            if total > _PULL_MAX:
+                raise ControlError(f"工作目录的文本文件超过 {_PULL_MAX // 1024 // 1024} MB，不整体拉取")
+            files.append({"path": rel, "content": text})
+    return {"run": _rel(p), "step": pend["step"], "attempt": pend.get("attempt", 1),
+            "phase": pend.get("phase", "before"), "cwd": pend["cwd"], "files": files, "skipped": skipped}
+
+
+def _line_delta(old, new):
+    import difflib
+    add = rem = 0
+    for line in difflib.unified_diff((old or "").splitlines(), (new or "").splitlines(), lineterm="", n=0):
+        if line.startswith("+") and not line.startswith("+++"):
+            add += 1
+        elif line.startswith("-") and not line.startswith("---"):
+            rem += 1
+    return add, rem
+
+
+def _plan_files(wd, files):
+    """核对要交的文件，算出每个文件的动作；不写盘。返回 [(rel, target, new_text_or_None, old_bytes_or_None, change)]。"""
+    if not isinstance(files, list) or not files:
+        raise ControlError("没有要交的文件")
+    if len(files) > _PUSH_FILES:
+        raise ControlError(f"一次最多交 {_PUSH_FILES} 个文件")
+    seen, plan, total = set(), [], 0
+    for f in files:
+        if not isinstance(f, dict) or set(f) - {"path", "content"} or "path" not in f:
+            raise ControlError("每个文件写成 {path, content}；删除文件 content 写 null")
+        rel = f["path"]
+        parts = _check_rel(rel)
+        if rel in seen:
+            raise ControlError(f"文件重复：{rel}")
+        seen.add(rel)
+        content = f.get("content")
+        if content is not None and not isinstance(content, str):
+            raise ControlError(f"文件内容要是文本：{rel}")
+        if content is not None:
+            size = len(content.encode("utf-8"))
+            if size > _FILE_MAX:
+                raise ControlError(f"文件超过 {_FILE_MAX // 1024} KB：{rel}")
+            total += size
+            if total > _PUSH_MAX:
+                raise ControlError(f"一次交的文件总共不能超过 {_PUSH_MAX // 1024 // 1024} MB")
+        target = _inside(wd, parts)
+        if target.exists() and not target.is_file():
+            raise ControlError(f"这个路径是目录：{rel}")
+        old = target.read_bytes() if target.is_file() else None
+        if content is None:
+            if old is None:
+                raise ControlError(f"要删的文件不存在：{rel}")
+            rem = len(old.decode("utf-8", "replace").splitlines())
+            change = {"target": rel, "action": "删除", "detail": f"删掉整个文件（{rem} 行）"}
+        else:
+            if old is not None and old == content.encode("utf-8"):
+                continue                    # 没变
+            if old is None:
+                change = {"target": rel, "action": "新增", "detail": f"新文件 {len(content.splitlines())} 行"}
+            else:
+                add, rem = _line_delta(old.decode("utf-8", "replace"), content)
+                change = {"target": rel, "action": "修改", "detail": f"+{add} −{rem} 行"}
+        plan.append((rel, target, content, old, change))
+    if not plan:
+        raise ControlError("交的文件和服务器上的完全一样，没有改动")
+    return plan
+
+
+def _apply(plan):
+    for rel, target, content, old, _ in plan:
+        if content is None:
+            target.unlink()
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content.encode("utf-8"))
+
+
+def _restore(plan):
+    for rel, target, content, old, _ in plan:
+        try:
+            if old is None:
+                if target.is_file():
+                    target.unlink()
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(old)
+        except OSError:
+            pass
+
+
+def _run_tests(wd, cmd, venv, timeout=_TEST_TIMEOUT):
+    from tools.llm_router import _agentic_env
+    env = _agentic_env(wd, venv)
+    started = time.time()
+    try:
+        r = subprocess.run(["bash", "-c", cmd], cwd=wd, env=env, stdin=subprocess.DEVNULL,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
+        out, rc = r.stdout.decode("utf-8", "replace"), r.returncode
+    except subprocess.TimeoutExpired as e:
+        out, rc = (e.stdout or b"").decode("utf-8", "replace") + f"\n（超过 {timeout} 秒，已停止）", None
+    lines = [x for x in out.strip().splitlines() if x.strip()]
+    last = lines[-1].strip() if lines else ""
+    return {"rc": rc, "passed": rc == 0, "seconds": round(time.time() - started, 1),
+            "tail": out[-_TAIL:], "last": last[:300]}
+
+
+def _check_text(name, value, required=False, limit=4000):
+    if value is None and not required:
+        return None
+    if not isinstance(value, str) or (required and not value.strip()):
+        raise ControlError(f"{name}要写")
+    if len(value) > limit:
+        raise ControlError(f"{name}最多 {limit} 字")
+    return value.strip()
+
+
+def _accepted(cf, pend, phase):
+    """submit/approve 已经把这一步记进控制文件了吗（之后的回放出错时文件不能撤）。"""
+    try:
+        cfg = _load(cf)
+    except (OSError, ValueError):
+        return False
+    key = str(pend["step"])
+    if phase == "before":
+        return key in cfg.get("submitted", {})
+    a = cfg.get("after", {}).get(key) or {}
+    return a.get("action") == "approve" and a.get("attempt") == pend.get("attempt", 1)
+
+
+def _unlog(cf, op, step):
+    try:
+        cfg = _load(cf)
+    except (OSError, ValueError):
+        return
+    h = cfg.get("history", [])
+    if h and h[-1].get("op") == op and h[-1].get("step") == step:
+        h.pop()
+        _dump(cf, cfg)
+
+
+def submit_files(run, files, summary, open_issues=None, status="完成", step=None, attempt=None,
+                 allow_fail=False, note=None, wait=None, client=None, actor="workflow_ctl"):
+    """人工交代码：files = [{path, content}]（相对这一步的工作目录；删除写 content=None）。
+
+    写进工作目录 → 跑这次流程的测试命令（test_cmd，服务器端的设置，请求里不能指定）→
+    按实际改动生成实现记录（changes 由服务器算，verification 写真实的测试结果）→
+    开始前确认的步骤走 submit，结束后确认的走 approve（记录里保留模型那次的改动）。
+    测试没过默认撤回文件并报错（带输出尾部）；allow_fail=True 时照样交，状态写「部分完成」以下。
+    任何一步出错都把文件恢复成交之前的样子。"""
+    _check_actor(actor)
+    summary = _check_text("摘要", summary, required=True)
+    if open_issues is None:
+        open_issues = []
+    if (not isinstance(open_issues, list) or len(open_issues) > 50
+            or any(not isinstance(x, str) or not x.strip() or len(x) > 1000 for x in open_issues)):
+        raise ControlError("遗留问题要是非空字符串列表")
+    if status not in ("完成", "部分完成", "无法完成"):
+        raise ControlError("状态只能是 完成 / 部分完成 / 无法完成")
+    _check_note(note)
+    with _ctl_lock(run):
+        p, cf, cfg, t = _open(run)
+        _idle(cfg)
+        t = _settle(p, cfg, t, client)
+        pend = _pending(t, step)
+        phase = pend.get("phase", "before")
+        _check_phase(pend, phase, attempt if phase == "after" else None)
+        if attempt is not None and phase == "before" and attempt != pend.get("attempt", 1):
+            raise ControlError(f"这一步现在是第 {pend.get('attempt', 1)} 次，刷新后再交")
+        props = (pend.get("schema") or {}).get("properties") or {}
+        if not {"changes", "verification", "summary", "status"} <= set(props):
+            raise ControlError(f"这一步的格式（{pend.get('format') or '无'}）不是实现记录，不能交代码")
+        wd = _work_dir(t, pend)
+        wd.mkdir(parents=True, exist_ok=True)
+        plan = _plan_files(wd, files)
+        cmd = pend.get("test_cmd")
+        _apply(plan)
+        try:
+            if cmd:
+                test = _run_tests(wd, cmd, pend.get("venv", False))
+                if not test["passed"] and not allow_fail:
+                    raise ControlError(f"测试没过（{'退出码 ' + str(test['rc']) if test['rc'] is not None else '超时'}），"
+                                       f"文件已撤回，没有提交。输出最后：\n{test['tail'][-1500:]}")
+                verification = {"executed": True, "method": cmd,
+                                "result": ("通过" if test["passed"] else "失败")
+                                + (f"（退出码 {test['rc']}）" if test["rc"] is not None else "（超时）")
+                                + (f"：{test['last']}" if test["last"] else "")}
+            else:
+                test = None
+                verification = {"executed": False, "method": "（这次流程没有设测试命令 test_cmd）",
+                                "result": "未执行"}
+            if test is not None and not test["passed"] and status == "完成":
+                status = "部分完成"
+            mine = [c for *_, c in plan]
+            changes = list(mine)
+            prev = pend.get("result") if phase == "after" else None
+            if isinstance(prev, dict):
+                touched = {c["target"] for c in mine}
+                changes = [c for c in prev.get("changes", []) if c.get("target") not in touched] + changes
+            record = {"status": status, "summary": "人工提交：" + summary,
+                      "changes": changes, "error_handling": list((prev or {}).get("error_handling", [])),
+                      "verification": verification, "open_issues": list(open_issues),
+                      "need_architect": list((prev or {}).get("need_architect", []))}
+            if isinstance(prev, dict) and prev.get("fix_for"):
+                record["fix_for"] = prev["fix_for"]
+            record = {k: v for k, v in record.items() if k in props}
+            _check_result(pend, record)
+            # 先记下这次交了哪些文件、测试结果（submit/approve 会重新读控制文件，这条会留着）
+            _log(cfg, "submit_files", step=pend["step"], attempt=pend.get("attempt", 1), actor=actor,
+                 files=[c["target"] for c in mine],
+                 test=None if test is None else {k: test[k] for k in ("rc", "seconds", "last")})
+            _dump(cf, cfg)
+            if phase == "before":
+                out = submit(p, record, step=pend["step"], wait=wait, client=client, actor=actor)
+            else:
+                out = approve(p, result=record, note=note, step=pend["step"], attempt=pend.get("attempt", 1),
+                              wait=wait, client=client, actor=actor)
+        except BaseException:
+            if not _accepted(cf, pend, phase):
+                _restore(plan)
+                _unlog(cf, "submit_files", pend["step"])
+            raise
+    out = dict(out)
+    out["submitted_files"] = {"changes": mine, "record": record,
+                              "test": None if test is None else {k: test[k] for k in ("rc", "passed", "seconds", "last", "tail")}}
+    return out
 
 
 def list_runs(workdir):

@@ -1,24 +1,37 @@
 {
   "name": "agent-mcp-trace",
   "displayName": "agent_mcp 编排查看器",
-  "description": "在 VS Code 里看 agent_mcp 流程管理的运行：侧边栏运行列表、运行页（流程图和节点详情）、待确认提醒、点节点打开流程脚本。",
-  "version": "0.1.0",
+  "description": "在 VS Code 里看 agent_mcp 流程管理的运行：侧边栏运行列表、运行页（流程图和节点详情）、待确认提醒、点节点打开流程脚本；实现步骤可以把工作目录拉到本地，改完把代码交回去。",
+  "version": "0.2.0",
   "publisher": "agent-mcp",
   "license": "UNLICENSED",
   "private": true,
-  "engines": { "vscode": "^1.85.0" },
-  "categories": ["Other"],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
   "main": "./extension.js",
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
-        { "id": "agentMcp", "title": "编排运行", "icon": "media/flow.svg" }
+        {
+          "id": "agentMcp",
+          "title": "编排运行",
+          "icon": "media/flow.svg"
+        }
       ]
     },
     "views": {
       "agentMcp": [
-        { "id": "agentMcpRuns", "name": "运行列表" }
+        {
+          "id": "agentMcpRuns",
+          "name": "运行列表"
+        }
       ]
     },
     "viewsWelcome": [
@@ -28,24 +41,92 @@
       }
     ],
     "commands": [
-      { "command": "agentMcp.connect", "title": "连接查看器", "category": "编排", "icon": "$(plug)" },
-      { "command": "agentMcp.disconnect", "title": "断开并清除口令", "category": "编排" },
-      { "command": "agentMcp.refresh", "title": "刷新", "category": "编排", "icon": "$(refresh)" },
-      { "command": "agentMcp.openWaiting", "title": "打开等确认的运行", "category": "编排" },
-      { "command": "agentMcp.openInBrowser", "title": "在浏览器里打开", "category": "编排", "icon": "$(link-external)" },
-      { "command": "agentMcp.openRun", "title": "打开运行", "category": "编排" }
+      {
+        "command": "agentMcp.connect",
+        "title": "连接查看器",
+        "category": "编排",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "agentMcp.disconnect",
+        "title": "断开并清除口令",
+        "category": "编排"
+      },
+      {
+        "command": "agentMcp.refresh",
+        "title": "刷新",
+        "category": "编排",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "agentMcp.openWaiting",
+        "title": "打开等确认的运行",
+        "category": "编排"
+      },
+      {
+        "command": "agentMcp.openInBrowser",
+        "title": "在浏览器里打开",
+        "category": "编排",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "agentMcp.openRun",
+        "title": "打开运行",
+        "category": "编排"
+      },
+      {
+        "command": "agentMcp.pullWorkdir",
+        "title": "拉取实现步骤的工作目录到本地",
+        "category": "编排",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "agentMcp.submitChanges",
+        "title": "交代码（把本地改动交给停着的实现步骤）",
+        "category": "编排",
+        "icon": "$(cloud-upload)"
+      }
     ],
     "menus": {
       "view/title": [
-        { "command": "agentMcp.refresh", "when": "view == agentMcpRuns", "group": "navigation" },
-        { "command": "agentMcp.connect", "when": "view == agentMcpRuns", "group": "navigation" },
-        { "command": "agentMcp.openInBrowser", "when": "view == agentMcpRuns", "group": "navigation" }
+        {
+          "command": "agentMcp.refresh",
+          "when": "view == agentMcpRuns",
+          "group": "navigation"
+        },
+        {
+          "command": "agentMcp.connect",
+          "when": "view == agentMcpRuns",
+          "group": "navigation"
+        },
+        {
+          "command": "agentMcp.openInBrowser",
+          "when": "view == agentMcpRuns",
+          "group": "navigation"
+        }
       ],
       "view/item/context": [
-        { "command": "agentMcp.openInBrowser", "when": "view == agentMcpRuns && viewItem =~ /^run/", "group": "inline" }
+        {
+          "command": "agentMcp.openInBrowser",
+          "when": "view == agentMcpRuns && viewItem =~ /^run/",
+          "group": "inline"
+        },
+        {
+          "command": "agentMcp.pullWorkdir",
+          "when": "view == agentMcpRuns && viewItem == run.waiting",
+          "group": "inline"
+        },
+        {
+          "command": "agentMcp.submitChanges",
+          "when": "view == agentMcpRuns && viewItem == run.waiting",
+          "group": "inline"
+        }
       ],
       "commandPalette": [
-        { "command": "agentMcp.openRun", "when": "false" }
+        {
+          "command": "agentMcp.openRun",
+          "when": "false"
+        }
       ]
     },
     "configuration": {

@@ -85,7 +85,8 @@ def test_6_1_auth_wrong_missing(tmp):
     assert isinstance(svc.mcp, FastMCP) and svc.mcp.name == 'workflow'
     assert set(svc.tools) == {
         'runs', 'start', 'status', 'submit', 'execute', 'approve', 'reject', 'plan',
-        'edit_plan', 'pause', 'resume', 'abort', 'configure', 'rewind', 'agents', 'viewer'}
+        'edit_plan', 'pause', 'resume', 'abort', 'configure', 'rewind', 'agents', 'viewer',
+        'workfiles', 'submit_files'}
     for invoke in (lambda: svc.tools['runs'](), lambda: svc.tools['runs'](None),
                    lambda: svc.tools['runs']('wrong-secret'),
                    lambda: svc.tools['runs']('\ud800'), lambda: svc.tools['runs'](42)):

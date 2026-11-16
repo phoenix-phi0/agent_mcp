@@ -28,6 +28,13 @@ const TRACE = {
   events: [{ type: "task", line: 1, seq: 1, step: 1, name: "实现", task: "写代码", role: "ENGINEER", status: "review",
              attempt: 1, result: { summary: "模型结果" } }],
 };
+// 实现步骤：格式是实现记录、角色有工作目录 → 页面给「拉到本地」「从 VS Code 交代码」
+const IMPL_SCHEMA = { type: "object", required: ["status", "summary"], properties: {
+  status: { enum: ["完成", "部分完成", "无法完成"] }, summary: { type: "string" },
+  changes: { type: "array", items: { type: "object" } }, verification: { type: "object" } } };
+const IMPL = Object.assign({}, TRACE, { pending: Object.assign({}, TRACE.pending,
+  { schema: IMPL_SCHEMA, cwd: "work/demo", test_cmd: "pytest -q", result: { status: "完成", summary: "模型结果" } }) });
+let CUR = TRACE;
 const RUNS = [{ name: "confirm.json", workflow: "test", status: "waiting", waiting_step: 1, controlled: true, calls: 1 },
               { name: "other.json", workflow: "test", status: "done", calls: 3 }];
 
@@ -55,7 +62,7 @@ function open(opts) {
           } else {
             asked.push(m.url);
             const data = m.url === "api/runs" ? { dir: "runs", runs: RUNS }
-              : m.url.startsWith("api/run?") ? Object.assign({}, TRACE, { _name: decodeURIComponent(m.url.split("name=")[1]) })
+              : m.url.startsWith("api/run?") ? Object.assign({}, CUR, { _name: decodeURIComponent(m.url.split("name=")[1]) })
               : null;
             reply = data ? { type: "fetch-result", id: m.id, status: 200, body: JSON.stringify(data) }
               : { type: "fetch-result", id: m.id, status: 400, body: JSON.stringify({ error: "没有清单" }) };
@@ -165,5 +172,51 @@ test("不在插件里（普通浏览器）：页面没有「在编辑器里打�
   await wait(300);
   assert.ok(dom.window.document.getElementById("summary").textContent.includes("test.wf"));
   assert.strictEqual(dom.window.document.querySelector("[data-open-script]"), null);
+  dom.window.close();
+});
+
+test("在 Webview 里：实现步骤停着时有「拉到本地」「从 VS Code 交代码」，点了告诉插件", { skip: !JSDOM && "没有 jsdom" }, async () => {
+  CUR = IMPL;
+  try {
+    const p = open({ run: "confirm.json" });
+    await wait(300);
+    const box = p.d.querySelector(".callout.code");
+    assert.ok(box, "有代码那一栏");
+    assert.match(box.textContent, /work\/demo/);
+    assert.match(box.textContent, /pytest -q/);
+    assert.match(box.textContent, /叠在它上面/, "结束后确认：说明是改了再通过");
+    p.d.querySelector('[data-host="submit"]').click();
+    p.d.querySelector('[data-host="pull"]').click();
+    const m = p.sent.filter((x) => x.type === "submit-changes" || x.type === "pull-workdir").map((x) => [x.type, x.run]);
+    assert.deepStrictEqual(m, [["submit-changes", "confirm.json"], ["pull-workdir", "confirm.json"]]);
+    assert.deepStrictEqual(p.errors, []);
+    p.w.close();
+  } finally {
+    CUR = TRACE;
+  }
+});
+
+test("在 Webview 里：不是实现记录的步骤没有交代码的按钮", { skip: !JSDOM && "没有 jsdom" }, async () => {
+  const p = open({ run: "confirm.json" });
+  await wait(300);
+  assert.ok(p.d.querySelector("#act"), "确认表单照常有");
+  assert.strictEqual(p.d.querySelector("[data-host]"), null);
+  p.w.close();
+});
+
+test("普通浏览器里的实现步骤：只说明工作目录，没有按钮", { skip: !JSDOM && "没有 jsdom" }, async () => {
+  const runs = { dir: "runs", runs: RUNS };
+  const dom = new JSDOM(SERVED, {
+    url: "http://127.0.0.1:8765/#run=confirm.json", runScripts: "dangerously", pretendToBeVisual: true,
+    beforeParse(w) {
+      w.scrollTo = () => {};
+      w.fetch = async (u) => ({ ok: true, status: 200,
+        json: async () => (u === "api/runs" ? runs : u.startsWith("api/run?") ? IMPL : {}) });
+    },
+  });
+  await wait(300);
+  const box = dom.window.document.querySelector(".callout.code");
+  assert.ok(box && /VS Code 插件/.test(box.textContent));
+  assert.strictEqual(dom.window.document.querySelector("[data-host]"), null);
   dom.window.close();
 });

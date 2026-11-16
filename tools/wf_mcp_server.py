@@ -276,6 +276,26 @@ def build_server(host, port, base, write, key, token, root=None, workdirs=None):
         return wc.submit(path, result=result, step=step, wait=False)
 
     @register
+    def workfiles(key: str, run: str) -> dict:
+        """拉取当前停着的实现步骤的工作目录：文本文件全文（跳过虚拟环境、缓存、密钥、二进制、超过 1MB 的文件）。
+        返回 step、attempt、phase、cwd、files=[{path, content}]、skipped。"""
+        return truncate(wc.workfiles(resolve_run(run, cfg)))
+
+    @register
+    def submit_files(key: str, run: str, files: list[dict], summary: str, open_issues: list[str] = None,
+                     status: str = "完成", step: int = None, attempt: int = None, allow_fail: bool = False,
+                     note: str = None) -> dict:
+        """人工交代码：files=[{path, content}]（相对这一步的工作目录，删除写 content=null）。服务器写入文件、
+        跑这次流程的测试命令（test_cmd），按实际改动生成实现记录，开始前确认的步骤 submit、结束后确认的 approve。
+        测试没过默认撤回文件并报错；allow_fail=True 照样交（状态降为部分完成）。summary 必填，attempt 结束后确认时必填。
+        """
+        path = resolve_run(run, cfg)
+        check_text([files, summary, open_issues, status, step, attempt, note])
+        out = wc.submit_files(path, files, summary, open_issues=open_issues, status=status, step=step,
+                              attempt=attempt, allow_fail=allow_fail, note=note, wait=False)
+        return out
+
+    @register
     def execute(key: str, run: str, model: str = None, role: str = None,
                 step: int = None, note: str = None) -> dict:
         """执行当前步骤并立即返回状态。run 指定运行；model/role 覆盖本次模型和角色卡，step 校验步号，note 添加说明。"""

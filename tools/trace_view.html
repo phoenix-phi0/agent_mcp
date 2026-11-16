@@ -184,6 +184,9 @@ body.run-missing .main, body.run-missing .strip, body.run-missing #run-plan { di
 details.fold > summary { cursor: pointer; color: var(--muted); font-size: 12.5px; list-style: revert; }
 details.fold > summary:hover { color: var(--ink); }
 details.fold[open] > summary { margin-bottom: 6px; }
+.callout.code { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, transparent); }
+.callout.code .code-acts { white-space: nowrap; }
+.callout.code .hint { margin-top: 4px; }
 .open-script { margin-left: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--accent); border-radius: 5px; padding: 0 8px; font-size: 12px; }
 .summary details.fold { flex-basis: 100%; }
 .summary details.fold .v { display: block; margin-bottom: 4px; }
@@ -904,7 +907,7 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
               : '<div class="hint">这条是当时停下等外部的记录，后来已经继续了。</div>') +
             (e.item || pd && pd.item ? '<div class="hint">第 ' + esc((e.item || pd.item).index) + ' / ' + esc((e.item || pd.item).total) + ' 项</div>' : '') +
             field("任务", jsonBlock(e.task), "task") + (e.context != null ? field("参考文本", jsonBlock(e.context)) : "") +
-            (pd && WRITE ? '<div class="act" id="act"></div>' : "") + "</div></details>";
+            (pd && WRITE ? codeBox(pd) + '<div class="act" id="act"></div>' : "") + "</div></details>";
           return;
         }
         var isOpen = S.keepOpen && (String(e.seq) in openNow) ? openNow[e.seq] : e.seq === openSeq;
@@ -965,7 +968,7 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     }
     html += scriptBox(t, line);
     if (n.kind === "task" && t.pending && t.pending.phase === "after" && t.pending.line === line) {
-      html += '<div class="act" id="act"></div>';
+      html += (WRITE ? codeBox(t.pending) : "") + '<div class="act" id="act"></div>';
     }
     box.innerHTML = html;
     box.querySelectorAll("[data-copy]").forEach(function (b) {
@@ -982,6 +985,32 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     if (held && $("act")) $("act").replaceWith(held);
     else if ($("act")) mountAct($("act"), t, evs);
   }
+
+  // ---------- 实现步骤：代码在工作目录里。VS Code 插件里可以拉到本地改，改完交回（服务器跑测试、生成实现记录）----------
+  function isImpl(pd) {
+    var p = pd && pd.schema && pd.schema.properties;
+    return !!(pd && pd.cwd && p && p.changes && p.verification && p.summary && p.status);
+  }
+  function codeBox(pd) {
+    if (!isImpl(pd)) return "";
+    var where = '这一步在 <span class="mono">' + esc(pd.cwd) + "</span> 里写代码" +
+      (pd.test_cmd ? "，测试命令 <span class=\"mono\">" + esc(pd.test_cmd) + "</span>" : "，这次流程没有设测试命令");
+    if (!HOST || !HOST.submitChanges)
+      return '<div class="callout code">' + where + '。<span class="hint">想自己写这一步的代码：用 VS Code 插件拉到本地，改完从插件交回。</span></div>';
+    return '<div class="callout code">' + where + '。<span class="code-acts">' +
+      '<button type="button" class="open-script" data-host="pull">拉到本地</button>' +
+      '<button type="button" class="open-script" data-host="submit">从 VS Code 交代码</button></span>' +
+      '<div class="hint">交的时候服务器写入文件、跑测试，改动列表和验证结果按实际生成；测试没过默认撤回。' +
+      (pd.phase === "after" ? "这一步模型已经交过一次，你的改动叠在它上面，算「改了再通过」。" : "这一步不调模型，算外部提交。") + "</div></div>";
+  }
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-host]");
+    if (!b || !HOST || !S.trace) return;
+    e.preventDefault();
+    var run = S.trace._name || "";
+    if (b.getAttribute("data-host") === "pull" && HOST.pullWorkdir) HOST.pullWorkdir(run);
+    if (b.getAttribute("data-host") === "submit" && HOST.submitChanges) HOST.submitChanges(run);
+  }, true);
 
   // ---------- 由我来做：停住的节点按格式定义生成表单，交给查看服务的写接口 ----------
   // A 是当前这一步的草稿：结束后按运行、步号和尝试绑定；开始前沿用记录更新时间绑定。
