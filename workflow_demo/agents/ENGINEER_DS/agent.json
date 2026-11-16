@@ -1,0 +1,33 @@
+{
+  "model": "cli:claude/bailian:deepseek-v4-pro",
+  "cost": 2,
+  "description": "中档 DeepSeek 工程师（deepseek-v4-pro，经百炼 Token Plan 包月、不占 Claude 额度；跑在 Claude Code 里，工具和权限同 ENGINEER，探针和审查走 Claude 订阅）。适合一般的模块实现：几个函数、几种错误码、要读懂已有代码再配合着写。试用中，效果还没对比过。",
+  "packages": [],
+  "skills": [
+    "skills/implementation.md"
+  ],
+  "agentic": {
+    "cwd": "work/{project}",
+    "allowed_tools": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Bash(ls:*)",
+      "Bash(pip install:*)",
+      "Bash(python -m pip install:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(pytest:*)",
+      "Bash(python -m unittest:*)",
+      "Bash(python -m py_compile:*)"
+    ],
+    "timeout": 1200,
+    "max_turns": 60,
+    "venv": true,
+    "mcp_tools": [
+      "probe",
+      "review"
+    ]
+  }
+}

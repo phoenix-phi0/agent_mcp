@@ -82,6 +82,14 @@ def _leaky_env(k: str, v: str = "") -> bool:
 for _k in [k for k in list(os.environ) if _leaky_env(k, os.environ.get(k, ""))]:
     os.environ.pop(_k, None)
 
+# 换端点的 claude（llm_router.claude_endpoint，如 DeepSeek 经百炼）挂本服务时，ANTHROPIC_AUTH_TOKEN 上面已经删了，
+# 只剩 BASE_URL 和模型名：探针、审查起的 claude 会带着空 key 打那个端点，报 401。这里一并去掉，
+# 让探针、审查照常走本机 Claude 订阅（审查员和写代码的不是同一个模型，也更独立）。
+_ENDPOINT_ENV = ("ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                 "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_SMALL_FAST_MODEL")
+for _k in _ENDPOINT_ENV:
+    os.environ.pop(_k, None)
+
 SERVER = {"name": "gsb_tools", "version": "1.0"}
 MAX_BLOCK = max(1, int(os.environ.get("GSB_MAX_BLOCK") or 270))
 LOG_DIR = os.environ.get("GSB_LOG_DIR") or "/tmp/gsb_tools"

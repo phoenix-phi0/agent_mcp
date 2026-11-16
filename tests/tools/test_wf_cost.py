@@ -25,7 +25,11 @@ COST = {'ARCHITECT': 5, 'ARCHITECT_GLM': 1, 'QA_ENGINEER': 4, 'ENGINEER_LITE': 1
         # 钱包需求实测两步约 $2.2，sonnet 架构师（cost 5）约 $0.39 → 约 28，取 30
         'ARCHITECT_FABLE': 30,
         # codex 审查员：ARCHITECT_GLM 审不完时换它（审得偏严，慎用）
-        'REVIEWER_GPT': 2}
+        'REVIEWER_GPT': 2,
+        # Go 项目专用的几张卡；QA_ENGINEER_GO 不在分配格式里，用 roles={"QA_ENGINEER": "QA_ENGINEER_GO"} 换上
+        'ENGINEER_GO_LITE': 1, 'ENGINEER_GO': 3, 'TEST_ENGINEER_GO': 2, 'QA_ENGINEER_GO': 4,
+        # DeepSeek（cli:claude/bailian:…，经百炼 Token Plan 包月）
+        'ENGINEER_DS_LITE': 1, 'ENGINEER_DS': 2}
 
 
 def check(cond, msg):

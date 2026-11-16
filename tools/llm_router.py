@@ -510,6 +510,14 @@ class ClaudeCLIClient(_CLIBackend):
                 "--system-prompt", system or DEFAULT_SYSTEM]
         # "sonnet@low"：@ 后面是努力程度，见 config.EFFORTS
         model, effort = config.split_effort(model or "")
+        env = None
+        if model and ":" in model:
+            # 换端点（bailian:deepseek-v4-pro 这类），见 claude_endpoint
+            if self.use_wsl():
+                raise BackendError("claude 换端点还不支持经 WSL 调")
+            from .cbatch import _child_env
+            env = _child_env()
+            model = claude_endpoint(model, env)
         if model:
             opts += ["--model", model]
         if effort:
@@ -520,7 +528,9 @@ class ClaudeCLIClient(_CLIBackend):
             p = run_wsl("claude", ["-p", *opts], prompt, timeout, label)
         else:
             label = "claude"
-            p = self._run_local([self.binary(), "-p", prompt, *opts], timeout)
+            cmd = [self.binary(), "-p", prompt, *opts]
+            # 只有换端点时才多传 env：测试里有替身按 (cmd, timeout) 两个参数替换 _run_local
+            p = self._run_local(cmd, timeout) if env is None else self._run_local(cmd, timeout, env)
         try:
             r = json.loads(p.stdout)
         except json.JSONDecodeError:
@@ -536,10 +546,11 @@ class ClaudeCLIClient(_CLIBackend):
         return r.get("result") or ""
 
     @staticmethod
-    def _run_local(cmd, timeout):
+    def _run_local(cmd, timeout, env=None):
         from .cbatch import _child_env
-        env = _child_env()
-        # 设了它 claude 就改走 API 计费，这里要的是订阅登录
+        if env is None:
+            env = _child_env()
+        # 设了它 claude 就改走 API 计费，这里要的是订阅登录（换端点时 claude_endpoint 已经清掉了）
         env.pop("ANTHROPIC_API_KEY", None)
         with tempfile.TemporaryDirectory(prefix="dsl_claude_") as cwd:
             try:
@@ -1114,6 +1125,39 @@ def _last_json(text):
     return None
 
 
+# 换端点跑 claude：模型写成 cli:claude/<端点>:<模型>（如 cli:claude/bailian:deepseek-v4-pro），
+# claude -p 还是同一个程序、同样的工具和权限，请求改发到这个 Anthropic 兼容端点。
+# 端点 → (ANTHROPIC_BASE_URL, 放 key 的环境变量名)。key 只从本进程环境里取，不写进任何文件。
+CLAUDE_ENDPOINTS = {
+    # 阿里云百炼 Token Plan（包月，不占 Claude 订阅额度）；模型名要和百炼的白名单逐字一致
+    "bailian": ("https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic", "DASHSCOPE_API_KEY"),
+}
+
+
+def claude_endpoint(name, env):
+    """模型名带「端点:」前缀时改 env，让 claude 走那个端点，返回去掉前缀的模型名；不带前缀原样返回。
+
+    探针、审查（gsb_tools_mcp）启动时会删掉 key 和这几个端点变量，照常走本机 Claude 订阅。"""
+    if not name or ":" not in name:
+        return name
+    ep, _, model = name.partition(":")
+    ep, model = ep.strip(), model.strip()
+    if ep not in CLAUDE_ENDPOINTS or not model:
+        raise BackendError(f"claude 的模型「{name}」：不认识的端点「{ep}」（可用 {'、'.join(CLAUDE_ENDPOINTS)}），"
+                           f"写成 <端点>:<模型>，如 bailian:deepseek-v4-pro")
+    base, key_env = CLAUDE_ENDPOINTS[ep]
+    key = os.environ.get(key_env) or env.get(key_env)
+    if not key:
+        raise BackendError(f"claude 走 {ep} 端点要环境变量 {key_env}，当前进程环境里没有")
+    for k in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"):
+        env.pop(k, None)
+    env.update(ANTHROPIC_BASE_URL=base, ANTHROPIC_AUTH_TOKEN=key, ANTHROPIC_MODEL=model,
+               ANTHROPIC_DEFAULT_OPUS_MODEL=model, ANTHROPIC_DEFAULT_SONNET_MODEL=model,
+               ANTHROPIC_DEFAULT_HAIKU_MODEL=model, ANTHROPIC_SMALL_FAST_MODEL=model,
+               CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1")
+    return model
+
+
 def claude_agentic(prompt, system, model, cwd, allowed_tools, timeout=600,
                    max_turns=40, venv=False, mcp_tools=None) -> str:
     """带工具的 claude -p：在 cwd 里按 allowed_tools 干活（acceptEdits），返回最后的回复文本。
@@ -1129,6 +1173,8 @@ def claude_agentic(prompt, system, model, cwd, allowed_tools, timeout=600,
     if ClaudeCLIClient().use_wsl():
         raise BackendError("agentic 还不支持经 WSL 调")
     name, effort = config.split_effort(spec.model or "")
+    env = _agentic_env(cwd, venv)
+    name = claude_endpoint(name, env)
     cmd = [ClaudeCLIClient.binary(), "-p", prompt, "--output-format", "json",
            "--strict-mcp-config", "--permission-mode", "acceptEdits",
            "--max-turns", str(max_turns),
@@ -1143,7 +1189,6 @@ def claude_agentic(prompt, system, model, cwd, allowed_tools, timeout=600,
     if servers:
         cmd += ["--mcp-config", json.dumps({"mcpServers": servers}, ensure_ascii=False)]
     cmd += ["--allowed-tools", *allowed_tools, *extra]
-    env = _agentic_env(cwd, venv)
     import time as _time
     t0 = _time.time()
     try:
@@ -1184,7 +1229,8 @@ def _agentic_env(cwd, venv):
             base = shutil.which("python3") or sys.executable
             r = subprocess.run([base, "-m", "venv", str(vdir)], capture_output=True, text=True, timeout=180)
             if r.returncode != 0:
-                raise BackendError(f"建虚拟环境失败：{_head(r.stderr)}")
+                # Debian/Ubuntu 缺 python3.x-venv 时提示打在标准输出上，stderr 是空的
+                raise BackendError(f"建虚拟环境失败：{_head(r.stderr) or _head(r.stdout)}")
             # 新环境先在沙箱外装好 pytest：codex 沙箱里联网装包很慢（实测第一个实施步骤 7 分钟耗在
             # pip install pytest 上），claude 也省一轮。装不上不拦，agent 自己还能装
             try:
@@ -1271,6 +1317,7 @@ def submit_call(prompt, system, model, schema, agentic=None, max_tries=3, timeou
                 cmd += ["--tools", "", "--max-turns", str(max_tries + 2),
                         "--system-prompt", system or DEFAULT_SYSTEM,
                         "--allowed-tools", wf_submit.CLAUDE_TOOL]
+            name = claude_endpoint(name, env)
             if name:
                 cmd += ["--model", name]
             if effort:
