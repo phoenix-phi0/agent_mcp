@@ -142,6 +142,25 @@ body.drag::after { content: "松开即可载入这份过程记录"; position: fi
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
 .dot.on { background: var(--ok); }
 .dot.off { background: var(--bad); }
+/* 运行列表（实时模式）：照批量任务管理页的样子，一行一次运行，点一行看它 */
+#runs-panel { margin-bottom: 14px; }
+.runs-head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 10px 16px; }
+.runs-head h2 { margin-right: auto; }
+#runs-toggle { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 4px 12px; }
+#runs-toggle:hover { border-color: var(--accent); }
+.runs-wrap { max-height: 252px; overflow: auto; border-top: 1px solid var(--line); }
+#runs-panel.collapsed .runs-wrap { display: none; }
+.runs-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.runs-table th { position: sticky; top: 0; z-index: 1; background: var(--panel); text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.runs-table td { padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.runs-table tr:last-child td { border-bottom: 0; }
+.runs-table tr.run-row { cursor: pointer; }
+.runs-table tr.run-row:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.runs-table tr.run-row.sel { background: var(--sel); }
+.runs-table td.nowrap { white-space: nowrap; }
+.runs-table .sub { color: var(--muted); font-size: 12px; }
+.runs-table .sub.bad { color: var(--bad); }
+.runs-table td.goal { color: var(--muted); max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .callout.run { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); }
 #flow .container { fill: none; stroke: var(--edge); stroke-dasharray: 5 4; }
 #flow .edge { fill: none; stroke: var(--edge); stroke-width: 1.4; }
@@ -156,6 +175,14 @@ body.drag::after { content: "松开即可载入这份过程记录"; position: fi
 #flow .verdict-fix { fill: var(--bad); font-weight: 600; font-size: 11.5px; }
 
 .detail { padding: 14px 0 16px; min-width: 0; }
+/* 网格子项默认最小宽度 = 内容宽度：脚本框是 white-space: pre，最长那行会把整栏撑到几千像素宽、整页横向滚动 */
+.detail .body > * { min-width: 0; }
+/* 可折叠的块（输入参数、脚本全文）：开合记在 localStorage，轮询重画后照旧 */
+details.fold > summary { cursor: pointer; color: var(--muted); font-size: 12.5px; list-style: revert; }
+details.fold > summary:hover { color: var(--ink); }
+details.fold[open] > summary { margin-bottom: 6px; }
+.summary details.fold { flex-basis: 100%; }
+.summary details.fold .v { display: block; margin-bottom: 4px; }
 .detail > h2 { padding: 0 18px 8px; }
 .detail .body { padding: 0 18px; display: grid; gap: 12px; }
 .meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 12.5px; align-items: center; }
@@ -256,6 +283,30 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
   </div>
 </header>
 
+<section class="panel" id="runs-panel" aria-label="运行列表" hidden>
+  <div class="runs-head">
+    <h2>运行列表 <span class="hint" id="runs-count"></span></h2>
+    <label class="hint" for="runs-filter">状态</label>
+    <select class="btn" id="runs-filter">
+      <option value="">全部</option>
+      <option value="active">进行中和暂停</option>
+      <option value="running">运行中</option>
+      <option value="waiting">暂停</option>
+      <option value="done">完成</option>
+      <option value="bad">出错、中止、中断</option>
+    </select>
+    <label class="hint" for="runs-wf">流程</label>
+    <select class="btn" id="runs-wf"><option value="">全部</option></select>
+    <button type="button" id="runs-toggle" aria-expanded="true" aria-controls="runs-wrap">收起</button>
+  </div>
+  <div class="runs-wrap" id="runs-wrap">
+    <table class="runs-table">
+      <thead><tr><th>运行</th><th>流程</th><th>状态</th><th>进度</th><th>开始</th><th>用时</th><th>成本</th><th>需求</th></tr></thead>
+      <tbody id="runs-body"></tbody>
+    </table>
+  </div>
+</section>
+
 <section class="panel" aria-label="概况">
   <div class="summary" id="summary"></div>
   <div class="note" id="note" hidden></div>
@@ -319,6 +370,22 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
 
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  // 折叠块（details.fold[data-fold]）的开合：默认收起，点开后记下，重画和刷新页面都照旧
+  var FOLD = {};
+  function foldOpen(key) {
+    if (!(key in FOLD)) { try { FOLD[key] = localStorage.getItem("trace-fold-" + key) === "1"; } catch (e) { FOLD[key] = false; } }
+    return FOLD[key];
+  }
+  // toggle 事件不冒泡：在捕获阶段统一收
+  document.addEventListener("toggle", function (e) {
+    var d = e.target, key = d && d.getAttribute && d.getAttribute("data-fold");
+    if (!key) return;
+    FOLD[key] = d.open;
+    try { localStorage.setItem("trace-fold-" + key, d.open ? "1" : "0"); } catch (err) { /* 存不了就只管这一页 */ }
+    // 脚本原文：折着的时候量不出位置，展开时再把高亮那行滚到眼前
+    var sb = d.open && d.querySelector(".script-box"), hl = sb && sb.querySelector(".ln.hl");
+    if (hl) sb.scrollTop = Math.max(0, hl.offsetTop - sb.offsetTop - 60);
+  }, true);
   function cssv(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
   function roleColor(r) { return cssv(roleVar(r)); }
   function fmtSec(s) {
@@ -630,11 +697,13 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     var ctl = t._control, pend = t.status === "waiting" ? t.pending : null;
     var errs = tasks.filter(function (e) { return e.status === "error"; }).length;
     var models = Array.from(new Set(tasks.map(function (e) { return e.model; }).filter(Boolean)));
-    var total = t.seconds != null ? t.seconds : tasks.reduce(function (a, e) { return a + (Number(e.seconds) || 0); }, 0);
+    // 跑完的按开始到结束算（同运行列表）；没有结束时间再用记录里的 seconds、各步之和
+    var wall = wallSec(t.started, t.finished);
+    var total = wall != null ? wall : t.seconds != null ? t.seconds : tasks.reduce(function (a, e) { return a + (Number(e.seconds) || 0); }, 0);
     var running = tasks.find(function (e) { return e.status === "running"; });
     var rs = runStatus(t), stTxt = RUN_TXT[rs] || rs, stCls = rs;
     if (rs === "running" && !S.live) { stTxt = "记录停在运行中"; }
-    var totalHtml = '<span class="num">' + fmtSec(total) + "</span>";
+    var totalHtml = '<span class="num">' + fmtLong(total) + "</span>";
     if (t.status === "running") {
       var ea = elapsedAttrs(t.started);
       totalHtml = '<span class="num"' + ea.attr + ' data-prefix="">' + fmtSec(ea.sec) + "</span>";
@@ -668,9 +737,12 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
       if (rules.length) items.push(["确认规则", esc(rules.join("；"))]);
     }
     var inputs = t.inputs && Object.keys(t.inputs).length ? Object.keys(t.inputs).map(function (k) { return k + " = " + t.inputs[k]; }).join("；") : "";
+    // 输入参数（需求全文、角色清单、测试命令）和模型清单常常好几行：默认折起来，标题里写个数
+    var more = (inputs ? '<span class="k">输入</span><span class="v" style="font-size:13.5px;font-weight:500">' + esc(inputs) + "</span>" : "") +
+      (models.length ? '<span class="k">用到的模型</span><span class="v mono" style="font-size:12.5px;font-weight:400">' + esc(models.join("  ·  ")) + "</span>" : "");
+    var moreTitle = [inputs ? Object.keys(t.inputs).length + " 项输入" : "", models.length ? models.length + " 个模型" : ""].filter(Boolean).join("，");
     $("summary").innerHTML = items.map(function (it) { return '<div><span class="k">' + it[0] + '</span><span class="v">' + it[1] + "</span></div>"; }).join("") +
-      (inputs ? '<div><span class="k">输入</span><span class="v" style="font-size:13.5px;font-weight:500">' + esc(inputs) + "</span></div>" : "") +
-      (models.length ? '<div><span class="k">用到的模型</span><span class="v mono" style="font-size:12.5px;font-weight:400">' + esc(models.join("  ·  ")) + "</span></div>" : "");
+      (more ? '<details class="fold" data-fold="inputs"' + (foldOpen("inputs") ? " open" : "") + "><summary>输入参数和模型（" + moreTitle + "）</summary>" + more + "</details>" : "");
     var note = [];
     if (t.note) note.push(esc(t.note));
     if (t.status === "error" && t.error) note.push('<span class="err-box">出错原因：' + esc(t.error) + "</span>");
@@ -759,8 +831,9 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
   }
   function scriptBox(t, line) {
     var lines = (t.script || "").replace(/\n$/, "").split("\n");
-    return '<div class="field"><h3><span>脚本 ' + esc(t.workflow || "") + ".wf（第 " + line + ' 行）</span></h3><div class="script-box" id="scriptbox">' +
-      lines.map(function (l, i) { return '<div class="ln' + (i + 1 === line ? " hl" : "") + '"><span>' + (i + 1) + "</span><span>" + esc(l || " ") + "</span></div>"; }).join("") + "</div></div>";
+    // 脚本全文默认折起来：流程图已经画了结构，要看原文再展开
+    return '<details class="field fold" data-fold="script"' + (foldOpen("script") ? " open" : "") + "><summary>脚本 " + esc(t.workflow || "") + ".wf 原文（第 " + line + ' 行）</summary><div class="script-box" id="scriptbox">' +
+      lines.map(function (l, i) { return '<div class="ln' + (i + 1 === line ? " hl" : "") + '"><span>' + (i + 1) + "</span><span>" + esc(l || " ") + "</span></div>"; }).join("") + "</div></details>";
   }
   function findNode(list, line) {
     for (var i = 0; i < list.length; i++) {
@@ -1631,6 +1704,99 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     });
   }, 1000);
 
+  // ---------- 运行列表（实时模式） ----------
+  var RL = { runs: [], sel: null, collapsed: false };
+  try { RL.collapsed = localStorage.getItem("trace-runs-collapsed") === "1"; } catch (e) { RL.collapsed = false; }
+  // [class, 文字]：class 用现成的 .pill 配色
+  function runState(r) {
+    if (r.status === "running") return r.alive === false ? ["interrupted", "已中断"] : ["running", "运行中"];
+    if (r.status === "waiting") return ["waiting", r.waiting_step != null ? "暂停在第 " + r.waiting_step + " 步" : "暂停"];
+    return [r.status || "unknown", { done: "完成", error: "出错", aborted: "已中止" }[r.status] || String(r.status || "?")];
+  }
+  // 记录里的时间是 2026-11-16T15:14:53+0800：列表只显示「11-16 15:14:53」
+  function runTime(s) {
+    var m = String(s || "").match(/^\d{4}-(\d\d-\d\d)T(\d\d:\d\d:\d\d)/);
+    return m ? m[1] + " " + m[2] : (s ? String(s).replace("T", " ").slice(0, 19) : "—");
+  }
+  function runMs(s) {
+    var t = Date.parse(String(s || "").replace(/([+-]\d\d)(\d\d)$/, "$1:$2"));
+    return isNaN(t) ? null : t;
+  }
+  // 列表里的用时：超过一小时写「几小时几分」，不写成「572 分 54 秒」
+  function fmtLong(s) {
+    if (s == null || isNaN(s)) return "—";
+    if (s < 3600) return fmtSec(s);
+    var h = Math.floor(s / 3600), m = Math.round((s - h * 3600) / 60);
+    if (m === 60) { h++; m = 0; }
+    return h + " 小时 " + (m < 10 ? "0" : "") + m + " 分";
+  }
+  // 开始到结束的墙钟秒数；没有结束时间返回 null。记录里的 seconds 只算最后一次接着跑的那段（中途停过的会偏小）
+  function wallSec(started, finished) {
+    var t0 = runMs(started), tf = runMs(finished);
+    return t0 != null && tf != null ? Math.max(0, (tf - t0) / 1000) : null;
+  }
+  function runDur(r) {
+    var w = wallSec(r.started, r.finished);
+    if (w != null) return fmtLong(w);
+    if (r.seconds != null) return fmtLong(Number(r.seconds));
+    var c = runState(r)[0], t0 = runMs(r.started);
+    if (t0 == null) return "—";
+    // 进行中或暂停：算到现在；中断的算到最后一次更新
+    var t1 = (c === "running" || c === "waiting") ? Date.now() : runMs(r.updated);
+    return t1 == null ? "—" : fmtLong(Math.max(0, (t1 - t0) / 1000));
+  }
+  function runVisible(r) {
+    var c = runState(r)[0], f = $("runs-filter").value, wf = $("runs-wf").value;
+    if (wf && r.workflow !== wf) return false;
+    if (f === "active") return c === "running" || c === "waiting";
+    if (f === "bad") return c === "error" || c === "aborted" || c === "interrupted";
+    return !f || c === f;
+  }
+  function renderRuns(runs, selName) {
+    RL.runs = runs; RL.sel = selName;
+    // 流程下拉：按出现过的流程名补齐，保留当前选择
+    var wfSel = $("runs-wf"), keep = wfSel.value, names = [];
+    runs.forEach(function (r) { if (r.workflow && names.indexOf(r.workflow) < 0) names.push(r.workflow); });
+    names.sort();
+    var opts = '<option value="">全部</option>' + names.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + "</option>"; }).join("");
+    if (wfSel.getAttribute("data-opts") !== opts) {
+      wfSel.innerHTML = opts; wfSel.setAttribute("data-opts", opts);
+      wfSel.value = names.indexOf(keep) >= 0 ? keep : "";
+    }
+    var rows = runs.filter(runVisible);
+    $("runs-count").textContent = rows.length === runs.length ? "共 " + runs.length + " 次" : rows.length + " / " + runs.length + " 次";
+    var focused = document.activeElement && document.activeElement.getAttribute ? document.activeElement.getAttribute("data-run") : null;
+    $("runs-body").innerHTML = rows.length ? rows.map(function (r) {
+      var st = runState(r), c = r.current, active = st[0] === "running" || st[0] === "waiting";
+      var prog = (r.calls || 0) + " 次调用" + (r.errors ? "，" + r.errors + " 次出错" : "");
+      var here = active && c ? "第 " + c.step + " 步 " + (c.name || "") + (c.role ? " · " + roleName(c.role) : "") : "";
+      var cost = r.cost_spent != null ? esc(String(r.cost_spent)) : "—";
+      if (r.usd_spent != null) cost += ' <span class="sub">$' + esc(Number(r.usd_spent).toFixed(2)) + "</span>";
+      var on = r.name === selName;
+      return '<tr class="run-row' + (on ? " sel" : "") + '" data-run="' + esc(r.name) + '" tabindex="0" aria-selected="' + on + '">' +
+        '<td class="mono nowrap">' + esc(String(r.name).replace(/\.json$/, "")) + "</td>" +
+        "<td>" + esc(r.workflow || "—") + "</td>" +
+        '<td class="nowrap"><span class="pill ' + esc(st[0]) + '">' + esc(st[1]) + "</span>" + (r.controlled ? ' <span class="chip">受控</span>' : "") + "</td>" +
+        "<td>" + esc(prog) + (here ? '<div class="sub">' + esc(here) + "</div>" : "") +
+          (r.error ? '<div class="sub bad">' + esc(r.error) + "</div>" : "") + "</td>" +
+        '<td class="num nowrap">' + esc(runTime(r.started)) + "</td>" +
+        '<td class="num nowrap">' + esc(runDur(r)) + "</td>" +
+        '<td class="num nowrap">' + cost + "</td>" +
+        '<td class="goal" title="' + esc(r.goal || "") + '">' + esc(r.goal || "—") + "</td></tr>";
+    }).join("") : '<tr><td colspan="8" class="hint">' + (runs.length ? "没有符合筛选条件的运行" : "还没有运行记录") + "</td></tr>";
+    if (focused) {
+      var back = $("runs-body").querySelector('tr[data-run="' + focused.replace(/["\\]/g, "\\$&") + '"]');
+      if (back) back.focus();
+    }
+  }
+  function setRunsCollapsed(v) {
+    RL.collapsed = v;
+    $("runs-panel").classList.toggle("collapsed", v);
+    $("runs-toggle").textContent = v ? "展开" : "收起";
+    $("runs-toggle").setAttribute("aria-expanded", String(!v));
+    try { localStorage.setItem("trace-runs-collapsed", v ? "1" : "0"); } catch (e) { /* 存不了就只管这一页 */ }
+  }
+
   // ---------- 实时模式 ----------
   var cur = { name: null, sig: "" };
   function setConn(ok, msg) { $("live-dot").className = "dot " + (ok ? "on" : "off"); $("live-msg").textContent = msg; }
@@ -1645,9 +1811,10 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
         if (r.controlled) st += " · 受控";
         return '<option value="' + esc(r.name) + '">' + esc(r.name.replace(/\.json$/, "")) + " · " + esc(st) + " · " + r.calls + " 次调用</option>";
       }).join("");
-      if (!runs.length) { setConn(true, "已连接 " + d.dir + "，还没有运行记录"); return null; }
+      if (!runs.length) { renderRuns([], null); setConn(true, "已连接 " + d.dir + "，还没有运行记录"); return null; }
       var want = $("follow").checked ? runs[0].name : (prev && runs.some(function (r) { return r.name === prev; }) ? prev : runs[0].name);
       sel.value = want;
+      renderRuns(runs, want);
       setConn(true, "已连接，每 1.5 秒刷新 · " + d.dir);
       return fetchJson("api/run?name=" + encodeURIComponent(want));
     }).then(function (t) {
@@ -1672,6 +1839,28 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     $("live-bar").hidden = false;
     $("static-bar").hidden = true;
     $("run-pick").addEventListener("change", function () { $("follow").checked = false; cur.sig = ""; });
+    // 运行列表：点一行（或回车）就看那次运行，同时取消「跟随最新」，免得下一轮又跳回最新的
+    $("runs-panel").hidden = false;
+    setRunsCollapsed(RL.collapsed);
+    function chooseRun(name) {
+      if (!name) return;
+      $("follow").checked = false;
+      $("run-pick").value = name;
+      renderRuns(RL.runs, name);
+      refresh();
+    }
+    $("runs-body").addEventListener("click", function (e) {
+      var tr = e.target.closest && e.target.closest("tr[data-run]");
+      if (tr) chooseRun(tr.getAttribute("data-run"));
+    });
+    $("runs-body").addEventListener("keydown", function (e) {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      var tr = e.target.closest && e.target.closest("tr[data-run]");
+      if (tr) { e.preventDefault(); chooseRun(tr.getAttribute("data-run")); }
+    });
+    $("runs-filter").addEventListener("change", function () { renderRuns(RL.runs, RL.sel); });
+    $("runs-wf").addEventListener("change", function () { renderRuns(RL.runs, RL.sel); });
+    $("runs-toggle").addEventListener("click", function () { setRunsCollapsed(!RL.collapsed); });
     poll();
   } else {
     loadSample("real");

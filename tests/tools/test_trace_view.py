@@ -39,6 +39,7 @@ ROOT = Path(__file__).resolve().parents[2]
 VIEW = ROOT / 'tools' / 'trace_view.html'
 CHECK = ROOT / 'tests' / 'e2e' / 'trace_view_check.js'
 FORM_CHECK = ROOT / 'tests' / 'e2e' / 'trace_view_form_check.js'
+RUNS_CHECK = ROOT / 'tests' / 'e2e' / 'trace_runs_list_check.js'
 
 
 def check(cond, msg):
@@ -98,6 +99,47 @@ def form_check(node, env, view_json, readonly=False):
     if out['errors']:
         raise AssertionError(f'页面脚本报错：{out["errors"]}')
     return out
+
+
+def runs_list_checks(node, env, view_json):
+    """实时模式上面的运行列表：tests/e2e/trace_runs_list_check.js 喂五次假运行，点、回车、筛选、收起。"""
+    r = subprocess.run([node, str(RUNS_CHECK), str(VIEW), str(view_json)], env=env, capture_output=True,
+                       text=True, timeout=60)
+    if r.returncode != 0:
+        raise AssertionError(f'node 出错：{r.stderr[-1500:]}')
+    o = json.loads(r.stdout)
+    check(not o['errors'], f'运行列表：页面没有脚本错误 {o["errors"][:2]}')
+    names = ['20261116-151453-cost_workflow.json', '20261116-120000-feature_workflow.json',
+             '20261115-100000-cost_workflow.json', '20261114-100000-refactor_workflow.json',
+             '20261113-100000-cost_workflow.json']
+    check(o['panelHidden'] is False and o['names'] == names and o['count'] == '共 5 次', '运行列表：五次运行各一行，新的在前')
+    check([p[1] for p in o['pills']] == ['运行中', '暂停在第 4 步', '完成', '出错', '已中断']
+          and [p[0].split()[-1] for p in o['pills']] == ['running', 'waiting', 'done', 'error', 'interrupted'],
+          '运行列表：状态文字和颜色（进程没了的算已中断）')
+    t = o['rowText']
+    check('第 8 步 任务实现' in t[0] and '6 次调用，1 次出错' in t[0] and '受控' in t[0] and '$0.50' in t[0]
+          and '11-16 15:14:53' in t[0] and '数据分析工具模块' in t[0], '运行中的那行：所在步、调用和出错次数、受控、成本、开始时间、需求')
+    check('10 分 00 秒' in t[2] and '22' in t[2] and '第' not in t[2].split('次调用')[1].split('11-15')[0],
+          '完成的那行：用时 10 分，成本 22，不显示所在步')
+    check('1 分 30 秒' in t[4], '已中断的那行：用时算到最后一次更新')
+    check(o['injected'] is False and '<script>' in t[3], '错误信息按文字显示，不当成 HTML')
+    check(o['wfOptions'] == ['', 'cost_workflow', 'feature_workflow', 'refactor_workflow'], '流程下拉：出现过的流程名')
+    check(o['sel'] == names[0] and o['askedFirst'] == names[0], '默认跟随最新：选中第一行，载入它的记录')
+    a = o['afterClick']
+    check(a['sel'] == names[2] and a['follow'] is False and a['pick'] == names[2] and names[2] in a['asked'],
+          '点第三行：选中它、取消跟随、载入那份记录')
+    check(o['afterPoll']['sel'] == names[2] and o['afterPoll']['lastAsked'] == names[2], '下一轮刷新后还停在点的那次')
+    check(o['afterEnter'] == names[4], '回车也能选')
+    f = o['foldDefault']
+    check(f['inputs'] is False and f['script'] is False and '项输入' in f['inputsTitle'],
+          f'输入参数和脚本原文默认折起来，标题写了几项输入（{f}）')
+    check(o['foldAfter'] == {'inputs': True, 'script': True, 'stored': ['1', '1']},
+          f'点开后换一次运行（整块重画）仍是开的，并记下来（{o["foldAfter"]}）')
+    check(o['filterBad'] == [names[3], names[4]] and o['countBad'] == '2 / 5 次', '筛选「出错、中止、中断」')
+    check(o['filterActive'] == [names[0], names[1]], '筛选「进行中和暂停」')
+    check(o['filterWf'] == [names[0], names[2], names[4]], '按流程筛选')
+    check(o['collapsed'] == {'cls': True, 'text': '展开', 'aria': 'false'} and o['expanded'] == {'cls': False, 'text': '收起'},
+          '收起、展开')
 
 
 def free_port():
@@ -286,6 +328,9 @@ def run():
         runs = trace_server.list_runs(a / 'runs')
         check(runs[0]['status'] == 'waiting' and runs[0]['waiting_step'] == 4 and runs[0]['controlled']
               and runs[0]['calls'] == 3, '运行列表：暂停在第 4 步、受控、3 次执行（停住那条不算）')
+        check(runs[0]['workflow'] == 'workflow' and (runs[0]['current'] or {}).get('step') == 4
+              and runs[0]['errors'] == 0 and runs[0]['error'] is None and isinstance(runs[0]['goal'], str),
+              '运行列表：流程名、所在步（停住的第 4 步）、出错次数、需求摘要')
 
         # B：第 1 步模型回的不是 JSON，停在第 1 步
         b = demo_copy(tmp, 'b')
@@ -308,6 +353,8 @@ def run():
             wc.execute(rd, wait=True, client=cd)
         runs = trace_server.list_runs(d / 'runs')
         check(runs[0]['status'] == 'done' and len(cd.calls) == 6, f'重构流程换卡后逐步跑完（{runs[0]["status"]}，{len(cd.calls)} 次调用）')
+        check(runs[0]['workflow'] == 'refactor_workflow' and runs[0]['current'] is None and runs[0]['goal'],
+              '运行列表：跑完的没有所在步，需求摘要取 goal')
 
         # E：停在第二次审查（第 4 步，这个节点上次有过结果）；先存一份给页面检查用，再起服务打写接口
         e = demo_copy(tmp, 'e')
@@ -369,6 +416,7 @@ def run():
         check(o['head'].startswith('现状分析'), '点第一个节点是现状分析')
 
         page_checks(node, env, view_e)
+        runs_list_checks(node, env, view_e)
         print('trace view passed')
     finally:
         shutil.rmtree(tmp)

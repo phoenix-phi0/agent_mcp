@@ -7,7 +7,8 @@
 
 读接口：
     GET /                 查看器页面（tools/trace_view.html）
-    GET /api/runs         runs/*.json 列表，新的在前：name、status、started、updated、alive
+    GET /api/runs         runs/*.json 列表，新的在前：name、status、started、updated、alive，
+                          以及列表页用的 workflow、current（所在步）、seconds、cost_spent、goal 等
     GET /api/run?name=…   一份过程记录，多几个字段：_alive；_control（受控编排的模式、覆盖、
                           最近操作，没有控制文件就是 null）；_formats（脚本里用到的格式定义）；
                           _agents（工作目录 agents/ 下的角色卡：名字、模型、说明，换卡执行时选）
@@ -228,12 +229,25 @@ def list_runs(runs):
             d = read_trace(p, brief=True)
         except (OSError, ValueError):
             continue        # 正在被替换的瞬间读坏了，下次轮询再看
-        tasks = [e for e in d.get("events", []) if e.get("type") == "task" and e.get("status") != "waiting"]
+        events = [e for e in d.get("events", []) if isinstance(e, dict)]
+        tasks = [e for e in events if e.get("type") == "task" and e.get("status") != "waiting"]
         pend = d.get("pending") if d.get("status") == "waiting" else None
+        # 列表页要的：现在在哪一步（跑着的那条，或者停住等外部的那一步）、需求摘要、花了多少
+        running = next((e for e in reversed(tasks) if e.get("status") == "running"), None)
+        here = running or pend
+        inputs = d.get("inputs") if isinstance(d.get("inputs"), dict) else {}
+        goal = next((str(inputs[k]) for k in ("goal", "content", "task") if inputs.get(k)), "")
         out.append({"name": p.name, "status": d.get("status"), "started": d.get("started"),
                     "updated": d.get("updated"), "alive": d["_alive"], "calls": len(tasks),
                     "controlled": d["_control"] is not None,
-                    "waiting_step": pend.get("step") if pend else None})
+                    "waiting_step": pend.get("step") if pend else None,
+                    "workflow": d.get("workflow"), "finished": d.get("finished"), "seconds": d.get("seconds"),
+                    "cost_spent": d.get("cost_spent"), "usd_spent": d.get("usd_spent"),
+                    "errors": sum(1 for e in tasks if e.get("status") == "error"),
+                    "current": ({"step": here.get("step"), "name": here.get("name"), "role": here.get("role")}
+                                if here else None),
+                    "error": str(d["error"])[:200] if d.get("error") else None,
+                    "goal": goal[:160]})
     return out
 
 
