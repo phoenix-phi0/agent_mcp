@@ -1,0 +1,76 @@
+{
+  "name": "agent-mcp-trace",
+  "displayName": "agent_mcp 编排查看器",
+  "description": "在 VS Code 里看 agent_mcp 流程管理的运行：侧边栏运行列表、运行页（流程图和节点详情）、待确认提醒、点节点打开流程脚本。",
+  "version": "0.1.0",
+  "publisher": "agent-mcp",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "agentMcp", "title": "编排运行", "icon": "media/flow.svg" }
+      ]
+    },
+    "views": {
+      "agentMcp": [
+        { "id": "agentMcpRuns", "name": "运行列表" }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "agentMcpRuns",
+        "contents": "还没连上编排查看器。\n[连接查看器](command:agentMcp.connect)\n粘贴查看器链接（带访问口令的那个地址），口令会存在 VS Code 的加密存储里。"
+      }
+    ],
+    "commands": [
+      { "command": "agentMcp.connect", "title": "连接查看器", "category": "编排", "icon": "$(plug)" },
+      { "command": "agentMcp.disconnect", "title": "断开并清除口令", "category": "编排" },
+      { "command": "agentMcp.refresh", "title": "刷新", "category": "编排", "icon": "$(refresh)" },
+      { "command": "agentMcp.openWaiting", "title": "打开等确认的运行", "category": "编排" },
+      { "command": "agentMcp.openInBrowser", "title": "在浏览器里打开", "category": "编排", "icon": "$(link-external)" },
+      { "command": "agentMcp.openRun", "title": "打开运行", "category": "编排" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "agentMcp.refresh", "when": "view == agentMcpRuns", "group": "navigation" },
+        { "command": "agentMcp.connect", "when": "view == agentMcpRuns", "group": "navigation" },
+        { "command": "agentMcp.openInBrowser", "when": "view == agentMcpRuns", "group": "navigation" }
+      ],
+      "view/item/context": [
+        { "command": "agentMcp.openInBrowser", "when": "view == agentMcpRuns && viewItem =~ /^run/", "group": "inline" }
+      ],
+      "commandPalette": [
+        { "command": "agentMcp.openRun", "when": "false" }
+      ]
+    },
+    "configuration": {
+      "title": "agent_mcp 编排查看器",
+      "properties": {
+        "agentMcp.viewerUrl": {
+          "type": "string",
+          "default": "",
+          "description": "查看服务的地址（不含口令），如 https://ali-demo.yscinternet.top/trace 。用「编排：连接查看器」粘贴完整链接时自动填，口令另存在加密存储里。"
+        },
+        "agentMcp.refreshSeconds": {
+          "type": "number",
+          "default": 5,
+          "minimum": 2,
+          "description": "侧边栏和状态栏多少秒刷新一次。运行页自己每 1.5 秒刷新。"
+        },
+        "agentMcp.notify": {
+          "type": "boolean",
+          "default": true,
+          "description": "有运行新停下来等确认时弹通知。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

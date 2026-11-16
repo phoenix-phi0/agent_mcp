@@ -102,44 +102,68 @@ def form_check(node, env, view_json, readonly=False):
 
 
 def runs_list_checks(node, env, view_json):
-    """实时模式上面的运行列表：tests/e2e/trace_runs_list_check.js 喂五次假运行，点、回车、筛选、收起。"""
-    r = subprocess.run([node, str(RUNS_CHECK), str(VIEW), str(view_json)], env=env, capture_output=True,
-                       text=True, timeout=60)
-    if r.returncode != 0:
-        raise AssertionError(f'node 出错：{r.stderr[-1500:]}')
-    o = json.loads(r.stdout)
-    check(not o['errors'], f'运行列表：页面没有脚本错误 {o["errors"][:2]}')
+    """两层页面：tests/e2e/trace_runs_list_check.js 喂六次假运行。列表页显示、筛选；点一行或回车进运行页；
+    「← 运行列表」回来；运行页的折叠块；直接用 #run=名字 打开（分享的链接）、名字不存在。"""
+    def go(*extra):
+        r = subprocess.run([node, str(RUNS_CHECK), str(VIEW), str(view_json), *extra], env=env, capture_output=True,
+                           text=True, timeout=60)
+        if r.returncode != 0:
+            raise AssertionError(f'node 出错：{r.stderr[-1500:]}')
+        o = json.loads(r.stdout)
+        check(not o['errors'], f'页面没有脚本错误 {o["errors"][:2]}')
+        return o
+
+    o = go()
     names = ['20261116-151453-cost_workflow.json', '20261116-120000-feature_workflow.json',
              '20261115-100000-cost_workflow.json', '20261114-100000-refactor_workflow.json',
-             '20261113-100000-cost_workflow.json']
-    check(o['panelHidden'] is False and o['names'] == names and o['count'] == '共 5 次', '运行列表：五次运行各一行，新的在前')
-    check([p[1] for p in o['pills']] == ['运行中', '暂停在第 4 步', '完成', '出错', '已中断']
-          and [p[0].split()[-1] for p in o['pills']] == ['running', 'waiting', 'done', 'error', 'interrupted'],
-          '运行列表：状态文字和颜色（进程没了的算已中断）')
+             '20261113-100000-cost_workflow.json', '20261110-100000-cost_workflow.json']
+    v = o['start']
+    check(v['list'] and not v['summary'] and not v['main'] and not v['back'] and not v['pick'] and not v['follow']
+          and 'view-list' in v['body'] and v['title'].startswith('运行列表'),
+          f'不带 #run= 打开是列表页：只有运行列表，没有概况、流程图、返回按钮和切换下拉（{v}）')
+    check(o['askedOnList'] == 0 and o['sel'] is None, '列表页只刷列表，不拉单次运行的记录，也没有选中行')
+    check(o['names'] == names and o['count'] == '共 6 次', '列表页：六次运行各一行，新的在前')
+    check([p[1] for p in o['pills']] == ['运行中', '暂停在第 4 步', '完成', '出错', '已中断', '完成']
+          and [p[0].split()[-1] for p in o['pills']] == ['running', 'waiting', 'done', 'error', 'interrupted', 'done'],
+          '状态文字和颜色（进程没了的算已中断）')
     t = o['rowText']
     check('第 8 步 任务实现' in t[0] and '6 次调用，1 次出错' in t[0] and '受控' in t[0] and '$0.50' in t[0]
           and '11-16 15:14:53' in t[0] and '数据分析工具模块' in t[0], '运行中的那行：所在步、调用和出错次数、受控、成本、开始时间、需求')
-    check('10 分 00 秒' in t[2] and '22' in t[2] and '第' not in t[2].split('次调用')[1].split('11-15')[0],
-          '完成的那行：用时 10 分，成本 22，不显示所在步')
+    check('10 分 00 秒' in t[2] and '22' in t[2], '完成的那行：用时按开始到结束算，成本 22')
     check('1 分 30 秒' in t[4], '已中断的那行：用时算到最后一次更新')
+    check('9 小时 33 分' in t[5], '超过一小时写成「几小时几分」')
     check(o['injected'] is False and '<script>' in t[3], '错误信息按文字显示，不当成 HTML')
     check(o['wfOptions'] == ['', 'cost_workflow', 'feature_workflow', 'refactor_workflow'], '流程下拉：出现过的流程名')
-    check(o['sel'] == names[0] and o['askedFirst'] == names[0], '默认跟随最新：选中第一行，载入它的记录')
+
     a = o['afterClick']
-    check(a['sel'] == names[2] and a['follow'] is False and a['pick'] == names[2] and names[2] in a['asked'],
-          '点第三行：选中它、取消跟随、载入那份记录')
-    check(o['afterPoll']['sel'] == names[2] and o['afterPoll']['lastAsked'] == names[2], '下一轮刷新后还停在点的那次')
-    check(o['afterEnter'] == names[4], '回车也能选')
+    check(a['view']['hash'] == '#run=' + names[2] and 'view-run' in a['view']['body'] and not a['view']['list']
+          and a['view']['summary'] and a['view']['main'] and a['view']['back'] and a['view']['pick']
+          and a['view']['title'].startswith(names[2][:-5]),
+          f'点第三行进运行页：地址 #run=名字，列表藏起来，概况、流程图、返回按钮出来（{a["view"]}）')
+    check(a['asked'] == [names[2]] and a['pick'] == names[2] and '.wf' in a['summary'] and 'agent 调用' in a['summary'],
+          '运行页载入那一次的记录，切换下拉也指着它')
+    check(o['afterPoll'] == {'hash': '#run=' + names[2], 'lastAsked': names[2]}, '下一轮刷新还在这次运行，不会跳到最新的')
     f = o['foldDefault']
     check(f['inputs'] is False and f['script'] is False and '项输入' in f['inputsTitle'],
-          f'输入参数和脚本原文默认折起来，标题写了几项输入（{f}）')
+          f'运行页：输入参数和脚本原文默认折起来（{f}）')
+    check(o['afterPick'] == {'hash': '#run=' + names[0], 'lastAsked': names[0]}, '运行页里用下拉换运行：改地址、载入那次')
     check(o['foldAfter'] == {'inputs': True, 'script': True, 'stored': ['1', '1']},
           f'点开后换一次运行（整块重画）仍是开的，并记下来（{o["foldAfter"]}）')
-    check(o['filterBad'] == [names[3], names[4]] and o['countBad'] == '2 / 5 次', '筛选「出错、中止、中断」')
+    b = o['back']
+    check(b['view']['list'] and not b['view']['main'] and '#' not in b['url'] and b['sel'] == names[0]
+          and b['askedAfter'] == 0 and b['view']['title'].startswith('运行列表'),
+          f'「← 运行列表」回列表页：地址不留 #，标出刚看的那次，不再拉单次记录（{b}）')
+    check(o['afterEnter'] == {'hash': '#run=' + names[4], 'lastAsked': names[4], 'list': False}, '列表行上回车也能进运行页')
+    check(o['filterBad'] == [names[3], names[4]] and o['countBad'] == '2 / 6 次', '筛选「出错、中止、中断」')
     check(o['filterActive'] == [names[0], names[1]], '筛选「进行中和暂停」')
-    check(o['filterWf'] == [names[0], names[2], names[4]], '按流程筛选')
-    check(o['collapsed'] == {'cls': True, 'text': '展开', 'aria': 'false'} and o['expanded'] == {'cls': False, 'text': '收起'},
-          '收起、展开')
+    check(o['filterWf'] == [names[0], names[2], names[4], names[5]], '按流程筛选')
+
+    d = go(names[1])
+    check(d['view']['hash'] == '#run=' + names[1] and d['view']['main'] and not d['view']['list']
+          and d['asked'] == [names[1]] and d['pick'] == names[1], '直接用 #run=名字 打开（分享的链接）：直接进那次运行的页面')
+    m = go('不存在的运行.json')
+    check('没有找到这次运行' in m['summary'] and '不存在的运行.json' in m['summary'] and m['asked'] == []
+          and not m['view']['main'] and m['view']['back'], '链接里的运行不在列表里：说没找到，不拉记录，不留别的图，能返回列表')
 
 
 def free_port():

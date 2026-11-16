@@ -39,7 +39,8 @@ function fakeFetch(url, opts) {
 }
 
 const dom = new JSDOM(page, {
-  runScripts: "dangerously", url: "http://127.0.0.1:8765/", pretendToBeVisual: true,
+  // 运行页：地址带 #run=名字（不带是列表页，不拉单次记录）
+  runScripts: "dangerously", url: "http://127.0.0.1:8765/#run=" + encodeURIComponent(T._name), pretendToBeVisual: true,
   beforeParse(w) {
     w.fetch = fakeFetch;
     w.addEventListener("error", (e) => errors.push(String(e.message || e.error)));

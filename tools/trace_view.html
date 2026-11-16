@@ -146,10 +146,13 @@ body.drag::after { content: "松开即可载入这份过程记录"; position: fi
 #runs-panel { margin-bottom: 14px; }
 .runs-head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 10px 16px; }
 .runs-head h2 { margin-right: auto; }
-#runs-toggle { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 4px 12px; }
-#runs-toggle:hover { border-color: var(--accent); }
-.runs-wrap { max-height: 252px; overflow: auto; border-top: 1px solid var(--line); }
-#runs-panel.collapsed .runs-wrap { display: none; }
+.runs-wrap { overflow: auto; border-top: 1px solid var(--line); }
+/* 两层：列表页（地址不带 #run=）只有运行列表；运行页（#run=名字）是概况、流程图和节点详情 */
+body.view-list .run-view, body.view-list .run-view-only { display: none !important; }
+body.view-run #runs-panel { display: none !important; }
+body.run-missing .main, body.run-missing .strip, body.run-missing #run-plan { display: none !important; }
+#back-list { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 4px 12px; }
+#back-list:hover { border-color: var(--accent); color: var(--accent); }
 .runs-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .runs-table th { position: sticky; top: 0; z-index: 1; background: var(--panel); text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .runs-table td { padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -181,6 +184,7 @@ body.drag::after { content: "松开即可载入这份过程记录"; position: fi
 details.fold > summary { cursor: pointer; color: var(--muted); font-size: 12.5px; list-style: revert; }
 details.fold > summary:hover { color: var(--ink); }
 details.fold[open] > summary { margin-bottom: 6px; }
+.open-script { margin-left: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--accent); border-radius: 5px; padding: 0 8px; font-size: 12px; }
 .summary details.fold { flex-basis: 100%; }
 .summary details.fold .v { display: block; margin-bottom: 4px; }
 .detail > h2 { padding: 0 18px 8px; }
@@ -265,10 +269,11 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     <div class="hint" id="h-src"></div>
   </div>
   <div class="live" id="live-bar" hidden>
+    <button type="button" id="back-list" class="run-view-only">← 运行列表</button>
     <span class="dot" id="live-dot"></span><span class="hint" id="live-msg">连接中…</span>
-    <label class="hint" for="run-pick">运行</label>
-    <select class="btn" id="run-pick"></select>
-    <label class="hint"><input type="checkbox" id="follow" checked> 跟随最新、跟随进行中的节点</label>
+    <label class="hint run-view-only" for="run-pick">运行</label>
+    <select class="btn run-view-only" id="run-pick"></select>
+    <label class="hint run-view-only"><input type="checkbox" id="follow" checked> 跟随进行中的节点</label>
   </div>
   <div class="load" id="static-bar">
     <label class="hint" for="pick">示例</label>
@@ -297,7 +302,6 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     </select>
     <label class="hint" for="runs-wf">流程</label>
     <select class="btn" id="runs-wf"><option value="">全部</option></select>
-    <button type="button" id="runs-toggle" aria-expanded="true" aria-controls="runs-wrap">收起</button>
   </div>
   <div class="runs-wrap" id="runs-wrap">
     <table class="runs-table">
@@ -307,20 +311,20 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
   </div>
 </section>
 
-<section class="panel" aria-label="概况">
+<section class="panel run-view" aria-label="概况">
   <div class="summary" id="summary"></div>
   <div class="note" id="note" hidden></div>
 </section>
 
-<section class="panel" id="run-plan" aria-label="分配清单" hidden></section>
+<section class="panel run-view" id="run-plan" aria-label="分配清单" hidden></section>
 
-<section class="panel strip" aria-label="耗时分布">
+<section class="panel strip run-view" aria-label="耗时分布">
   <div class="head"><h2>耗时分布 · 按执行顺序，宽度 = 耗时</h2><span class="hint" id="strip-hint">点一段跳到对应节点</span></div>
   <div class="bars" id="bars"></div>
   <div class="legend" id="legend"></div>
 </section>
 
-<div class="main">
+<div class="main run-view">
   <section class="panel chart" aria-label="流程结构">
     <div class="head"><h2>流程结构 · workflow.wf，叠加本次运行</h2><span class="hint">实线 = 走过，虚线 = 没走；红色回环 = 返工；角标 = 执行次数</span></div>
     <div id="flow"></div>
@@ -355,7 +359,9 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
   var S = { trace: null, tree: [], byLine: {}, selLine: null, focusSeq: null, live: false, lastClick: 0 };
   // 在本机 trace_server 里打开时是实时模式：定时拉 /api/run
   // trace_server 提供页面时会在 <head> 里加 <meta name="trace-live">：经隧道从外网打开（主机名不是 localhost）也进实时模式
-  var LIVE = /^https?:$/.test(location.protocol) &&
+  // VS Code 插件（tools/vscode）把页面放进 Webview：协议不是 http，插件在页面脚本前装好 window.TRACE_HOST、换掉 fetch
+  var HOST = window.TRACE_HOST || null;
+  var LIVE = (/^https?:$/.test(location.protocol) || !!HOST) &&
     (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || !!document.querySelector('meta[name="trace-live"]'));
   // 查看服务开放了写接口（只在绑定本机地址时）才有这个标记；直接打开 html 文件时没有服务，页面保持只读
   var WRITE = LIVE && !!document.querySelector('meta[name="trace-write"]');
@@ -376,6 +382,12 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     if (!(key in FOLD)) { try { FOLD[key] = localStorage.getItem("trace-fold-" + key) === "1"; } catch (e) { FOLD[key] = false; } }
     return FOLD[key];
   }
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-open-script]");
+    if (!b || !HOST || !HOST.openScript || !S.trace) return;
+    e.preventDefault(); e.stopPropagation();
+    HOST.openScript(Number(b.getAttribute("data-open-script")), S.trace.workflow || "workflow", S.trace.script || "", S.trace._name || "");
+  }, true);
   // toggle 事件不冒泡：在捕获阶段统一收
   document.addEventListener("toggle", function (e) {
     var d = e.target, key = d && d.getAttribute && d.getAttribute("data-fold");
@@ -832,7 +844,8 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
   function scriptBox(t, line) {
     var lines = (t.script || "").replace(/\n$/, "").split("\n");
     // 脚本全文默认折起来：流程图已经画了结构，要看原文再展开
-    return '<details class="field fold" data-fold="script"' + (foldOpen("script") ? " open" : "") + "><summary>脚本 " + esc(t.workflow || "") + ".wf 原文（第 " + line + ' 行）</summary><div class="script-box" id="scriptbox">' +
+    var open = HOST && HOST.openScript ? ' <button type="button" class="open-script" data-open-script="' + line + '">在编辑器里打开</button>' : "";
+    return '<details class="field fold" data-fold="script"' + (foldOpen("script") ? " open" : "") + "><summary>脚本 " + esc(t.workflow || "") + ".wf 原文（第 " + line + " 行）" + open + '</summary><div class="script-box" id="scriptbox">' +
       lines.map(function (l, i) { return '<div class="ln' + (i + 1 === line ? " hl" : "") + '"><span>' + (i + 1) + "</span><span>" + esc(l || " ") + "</span></div>"; }).join("") + "</div></details>";
   }
   function findNode(list, line) {
@@ -1705,8 +1718,7 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
   }, 1000);
 
   // ---------- 运行列表（实时模式） ----------
-  var RL = { runs: [], sel: null, collapsed: false };
-  try { RL.collapsed = localStorage.getItem("trace-runs-collapsed") === "1"; } catch (e) { RL.collapsed = false; }
+  var RL = { runs: [], sel: null };
   // [class, 文字]：class 用现成的 .pill 配色
   function runState(r) {
     if (r.status === "running") return r.alive === false ? ["interrupted", "已中断"] : ["running", "运行中"];
@@ -1789,16 +1801,30 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
       if (back) back.focus();
     }
   }
-  function setRunsCollapsed(v) {
-    RL.collapsed = v;
-    $("runs-panel").classList.toggle("collapsed", v);
-    $("runs-toggle").textContent = v ? "展开" : "收起";
-    $("runs-toggle").setAttribute("aria-expanded", String(!v));
-    try { localStorage.setItem("trace-runs-collapsed", v ? "1" : "0"); } catch (e) { /* 存不了就只管这一页 */ }
-  }
 
   // ---------- 实时模式 ----------
   var cur = { name: null, sig: "" };
+  // 两层：地址 #run=名字 是运行页，没有就是列表页。RUN = 运行页在看的那次；LAST = 最近看过的（回列表时标出来）
+  var RUN = null, LAST = null;
+  function hashRun() {
+    var m = location.hash.match(/^#run=(.+)$/);
+    try { return m ? decodeURIComponent(m[1]) : null; } catch (e) { return null; }
+  }
+  function applyView() {
+    RUN = hashRun();
+    if (RUN) LAST = RUN;
+    document.body.classList.toggle("view-list", !RUN);
+    document.body.classList.toggle("view-run", !!RUN);
+    document.body.classList.remove("run-missing");
+    document.title = (RUN ? RUN.replace(/\.json$/, "") + " · " : "运行列表 · ") + "编排过程查看器";
+    cur.sig = "";
+  }
+  function openRun(name) { if (name) location.hash = "#run=" + encodeURIComponent(name); }
+  function openList() {
+    // 不留空的 # 在地址里；pushState 不触发 hashchange，自己切
+    history.pushState(null, "", location.pathname + location.search);
+    applyView(); refresh(); window.scrollTo(0, 0);
+  }
   function setConn(ok, msg) { $("live-dot").className = "dot " + (ok ? "on" : "off"); $("live-msg").textContent = msg; }
   function fetchJson(url) { return fetch(url, { cache: "no-store" }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }); }
   function pollOnce() {
@@ -1811,14 +1837,22 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
         if (r.controlled) st += " · 受控";
         return '<option value="' + esc(r.name) + '">' + esc(r.name.replace(/\.json$/, "")) + " · " + esc(st) + " · " + r.calls + " 次调用</option>";
       }).join("");
-      if (!runs.length) { renderRuns([], null); setConn(true, "已连接 " + d.dir + "，还没有运行记录"); return null; }
-      var want = $("follow").checked ? runs[0].name : (prev && runs.some(function (r) { return r.name === prev; }) ? prev : runs[0].name);
-      sel.value = want;
-      renderRuns(runs, want);
+      renderRuns(runs, RUN || LAST);
+      if (!runs.length) { setConn(true, "已连接 " + d.dir + "，还没有运行记录"); return null; }
       setConn(true, "已连接，每 1.5 秒刷新 · " + d.dir);
-      return fetchJson("api/run?name=" + encodeURIComponent(want));
+      if (!RUN) return null;          // 列表页只刷新列表，不拉单次运行的记录
+      if (!runs.some(function (r) { return r.name === RUN; })) {
+        // 地址里的运行不在列表里（删了或写错了）：说一声，别留着上一次的图
+        document.body.classList.add("run-missing");
+        $("summary").innerHTML = '<div><span class="k">没有找到这次运行</span><span class="v mono" style="font-size:14px">' + esc(RUN) + "</span></div>";
+        $("note").hidden = true;
+        return null;
+      }
+      document.body.classList.remove("run-missing");
+      sel.value = RUN;
+      return fetchJson("api/run?name=" + encodeURIComponent(RUN));
     }).then(function (t) {
-      if (!t) return;
+      if (!t || t._name !== RUN) return;     // 等回来时已经换了运行或回了列表：丢掉
       var sig = t._name + "|" + t.updated + "|" + t.events.length + "|" + t._alive + "|" + t.status;
       var latestPlan = fetchJson('api/plan?name=' + encodeURIComponent(t._name)).then(function (plan) {
         if (S.trace && S.trace._name === t._name) runPlan(plan, t._name);
@@ -1838,29 +1872,25 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     S.live = true;
     $("live-bar").hidden = false;
     $("static-bar").hidden = true;
-    $("run-pick").addEventListener("change", function () { $("follow").checked = false; cur.sig = ""; });
-    // 运行列表：点一行（或回车）就看那次运行，同时取消「跟随最新」，免得下一轮又跳回最新的
+    // 运行页里换运行：改地址，由 hashchange 统一切
+    $("run-pick").addEventListener("change", function () { openRun($("run-pick").value); });
+    $("back-list").addEventListener("click", openList);
+    window.addEventListener("hashchange", function () { applyView(); refresh(); window.scrollTo(0, 0); });
+    window.addEventListener("popstate", function () { if (!hashRun()) { applyView(); refresh(); } });
+    // 列表页：点一行（或回车）进那次运行的页面
     $("runs-panel").hidden = false;
-    setRunsCollapsed(RL.collapsed);
-    function chooseRun(name) {
-      if (!name) return;
-      $("follow").checked = false;
-      $("run-pick").value = name;
-      renderRuns(RL.runs, name);
-      refresh();
-    }
     $("runs-body").addEventListener("click", function (e) {
       var tr = e.target.closest && e.target.closest("tr[data-run]");
-      if (tr) chooseRun(tr.getAttribute("data-run"));
+      if (tr) openRun(tr.getAttribute("data-run"));
     });
     $("runs-body").addEventListener("keydown", function (e) {
       if (e.key !== "Enter" && e.key !== " ") return;
       var tr = e.target.closest && e.target.closest("tr[data-run]");
-      if (tr) { e.preventDefault(); chooseRun(tr.getAttribute("data-run")); }
+      if (tr) { e.preventDefault(); openRun(tr.getAttribute("data-run")); }
     });
     $("runs-filter").addEventListener("change", function () { renderRuns(RL.runs, RL.sel); });
     $("runs-wf").addEventListener("change", function () { renderRuns(RL.runs, RL.sel); });
-    $("runs-toggle").addEventListener("click", function () { setRunsCollapsed(!RL.collapsed); });
+    applyView();
     poll();
   } else {
     loadSample("real");

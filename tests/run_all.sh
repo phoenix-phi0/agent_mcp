@@ -254,6 +254,7 @@ run 界面多语言E2E bash -c "cd $M/tests/e2e && node i18n_run.js"
 run 换端退出E2E bash -c "cd $M/tests/e2e && node switch_logout_run.js"
 run 老师设定E2E bash -c "cd $M/tests/e2e && node teacher_note_run.js"
 run 老师传达E2E bash -c "cd $M/tests/e2e && node teacher_relay_run.js"
+run VSCode插件  bash -c "cd $M/tools/vscode && NODE_PATH=$M/tests/e2e/node_modules node --test test/*.test.js"
 run app2编译    bash -c "cd $M/app2 && $PY build.py"
 
 # 上传要先起 dsl/ 的服务。

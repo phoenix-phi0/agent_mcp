@@ -28,7 +28,8 @@ async function page(readonly = false, trace = base, plan = null) {
   let tick, rev = 0;
   const dom = new JSDOM(html.replace('<head>', '<head><meta name="trace-live" content="1">' +
     (readonly ? '' : '<meta name="trace-write" content="1">')), {
-    runScripts: 'dangerously', url: 'http://127.0.0.1/',
+    // 运行页：地址带 #run=名字（不带是列表页，不拉单次记录）
+    runScripts: 'dangerously', url: 'http://127.0.0.1/#run=' + encodeURIComponent(trace._name),
     beforeParse(w) {
       // 手动触发真实的下一轮轮询，不等待 1.5 秒，也不改变页面代码。
       w.setTimeout = callback => { tick = callback; return 1; };
