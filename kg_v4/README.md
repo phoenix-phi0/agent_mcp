@@ -1,5 +1,7 @@
 # kg_v4：日语语法学习系统（前端迁移完成的新版后端）
 
+日本語版 README：[README.ja.md](README.ja.md)
+
 用 DSL 项目的写法做的：约定（contracts/）→ 实体（entities/）→ 服务（services/）→ 路由（routes/）→ 界面（ui/）。
 和旧 `kg/` 并存，互不依赖；旧 `kg/content/` 只作为数据初始化的来源。
 需求说明见 [req.md](req.md)（项目开始时写的需求，以 contracts/ 为准）。
