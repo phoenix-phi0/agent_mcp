@@ -1,0 +1,93 @@
+# 从一句需求做出一个多模块项目：
+# 架构设计（模块划分、模块之间的接口、数据模型、顺序、集成场景）→ 架构审查（最多改 2 轮）
+# → 按模块依次：任务分配（按成本，参考已完成模块的实际接口）→ 逐项实现 → 模块验收（不过就在模块内返工，每个模块最多 3 轮）
+#   → 记下这个模块实际的接口，后面的模块按它写
+# → 集成测试：把架构里的端到端场景逐个写成 tests/test_integration.py（验收的沙箱不让写脚本，场景要先变成能自动跑的测试）
+# → 集成验收：整体测试 + 每个场景的测试逐个核对（不过就返工，最多 3 轮）
+# 验收从严：checked 里有一项不满足或未验证，就不能判通过（模块验收由格式卡死，集成验收写在任务里）
+# 项目在 work/{project}（空目录起步，第一个模块搭骨架）。入口脚本要设：content stack goal project test_cmd budget roles
+角色清单 roster {roles}
+架构设计
+    任务 项目需求：{content}。技术栈：{stack}。约束：{goal}。项目目录是 work/{project}（现在是空的，工程师在里面写代码，你看不到也不用写文件）。整体测试命令：{test_cmd}。按「整个项目的架构设计」的要求写：模块按依赖排好，第一个模块搭项目骨架，让整体测试命令能跑通
+    角色 ARCHITECT
+    格式 architecture
+    记录 arch
+标记:a
+架构审查
+    任务 审查整个项目的架构设计（不是单个模块的接口约定）。需求：{content}。逐项看：1 模块划分覆盖了全部需求、职责不重叠；2 依赖无环、顺序可行（前面的不依赖后面的），第一个模块是项目骨架且能让测试命令跑通；3 模块之间的接口写清了（签名、数据结构、错误），uses 和对方 provides 的签名一致；4 数据模型支撑所有功能；5 集成场景覆盖主要的用户流程；6 每个模块的验收条件能用测试验证。不要提需求以外的新功能
+    角色 ARCHITECT_GLM
+    文本 arch
+    格式 review
+    记录 arch_review
+如果 arch_review.decide == 需修改
+    架构修改
+        任务 arch_review
+        文本 arch
+        角色 ARCHITECT
+        格式 architecture
+        记录 arch
+    跳转 a 最大 2
+遍历 module 于 arch.modules
+    清空 module_results
+    模块任务分配
+        任务 模块任务分配（按架构实现整个项目，现在只做这一个模块）。当前模块：{module}。已完成模块的实际接口和与架构的出入（以这个为准）：{built 或 还没有，这是第一个模块}。参考文本是整个架构。项目在 work/{project}，测试命令：{test_cmd}（每项 content 里原样写进验收命令）。技术栈：{stack}。约束：{goal}。这个模块的实施预算：{budget}（所有项的 cost 加起来不能超过它）。可用角色：{roster}
+        文本 arch
+        角色 ARCHITECT
+        格式 cost_assignment
+        记录 assignment
+    标记:c
+    成本合计 spent assignment.tasks 预算 {budget}
+    如果 spent.status == 超出
+        分配调整
+            任务 分配调整：上一次的分配超出了这个模块的实施预算或用了清单外的角色（见参考文本的 not_in_roster），只改 agent，让合计不超过预算、且只用可用角色。可用角色：{roster}
+            文本 spent
+            角色 ARCHITECT
+            格式 cost_assignment
+            记录 assignment
+        跳转 c 最大 2
+    遍历 task 于 assignment.tasks
+        任务实现
+            任务 task.content
+            角色 task.agent
+            文本 arch
+            格式 implementation
+            记录 task_result
+        存储 module_results task_result
+    标记:m
+    模块验收
+        任务 模块验收：按架构实现的项目里的一个模块。checked 里只要有一项是不满足或未验证，decide 就必须是需修改（环境限制导致没验证的，在 task 里要求补成能自动跑的测试）。当前模块：{module}。测试命令（以这个为准）：{test_cmd}。逐项核对：1 测试命令全部通过（前面模块的测试也要过）；2 这个模块的 acceptance 每一条；3 provides 里的接口都实现了，签名和行为与架构一致；4 tests 里写的测试都有，而且真在测这些行为；5 没做这个模块以外的事。不管通过与否，都看代码在 interfaces_actual 里写出这个模块实际对外的接口（签名和所在文件），和架构不一致的写进 deviations。项目原本的问题和验收环境的限制只写进 summary。参考文本是这个模块的实现记录（含返工）
+        角色 QA_ENGINEER
+        文本 module_results
+        格式 module_acceptance
+        记录 mcheck
+    如果 mcheck.decide == 需修改
+        模块返工
+            任务 mcheck.task
+            角色 ENGINEER
+            文本 arch
+            格式 implementation
+            记录 task_result
+        存储 module_results task_result
+        跳转 m 最大 3
+    存储 built mcheck
+集成测试
+    任务 集成测试：所有模块已经做完。把参考文本（架构）里 integration 的每个场景写成测试，放进 tests/test_integration.py：每个场景一个测试函数，docstring 写明是哪个场景；按 steps 一步一步做（用测试客户端或命令，沿用项目已有的测试写法和夹具），每一步都断言 expected 里写的结果。只写测试，不改实现代码；有场景过不了，就把场景名、失败的步骤和实际结果写进 open_issues，交给后面的集成验收。写完运行测试命令：{test_cmd}
+    角色 TEST_ENGINEER
+    文本 arch
+    格式 implementation
+    记录 itest
+标记:b
+集成验收
+    任务 集成验收：按架构实现的整个项目已经全部做完。需求：{content}。测试命令（以这个为准）：{test_cmd}。逐项核对：1 测试命令全部通过；2 参考文本（架构）里 integration 的每个场景，在 tests/test_integration.py 里都有对应的测试，而且真按 steps 在做、断言了 expected（逐个读，不抽查），这些测试都通过；3 需求里的每项功能都有着落；4 各模块实际接口互相对得上（见下面的实际接口）。各模块验收时记下的实际接口和出入：{built}。集成测试那一步的记录：{itest}。checked 里只要有一项是不满足或未验证，decide 就必须是需修改；task 写成工程师能照做的返工要求，写明涉及哪些模块和文件（场景没有测试或测试没覆盖到某一步，就要求补测试）
+    角色 QA_ENGINEER
+    文本 arch
+    格式 acceptance
+    记录 final
+如果 final.decide == 需修改
+    集成返工
+        任务 final.task
+        角色 ENGINEER
+        文本 arch
+        格式 implementation
+        记录 task_result
+    跳转 b 最大 3

@@ -204,6 +204,8 @@ run 编排成本分配 $PY tests/tools/test_wf_cost.py
 run claude换端点 $PY tests/tools/test_claude_endpoint.py
 run 编排代码重构 $PY tests/tools/test_wf_refactor.py
 run 编排人工确认 $PY tests/tools/test_wf_confirm.py
+run 编排块内跳转 $PY tests/tools/test_wf_block_jump.py
+run 整项目流程   $PY tests/tools/test_wf_project.py
 run 人工交代码   $PY tests/tools/test_wf_submit_files.py
 run 插件交代码链路 $PY tests/tools/test_vscode_submit_e2e.py
 run 编排查看器 $PY tests/tools/test_trace_view.py

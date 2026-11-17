@@ -124,7 +124,19 @@ def load_agent(engine, name, model_override=None):
         if (not isinstance(mcp_tools, list) or any(not isinstance(x, str) for x in mcp_tools)
                 or set(mcp_tools) - set(GSB_AGENT_TOOLS)):
             raise DSLError(f"agent「{name}」agentic.mcp_tools 只能从 {list(GSB_AGENT_TOOLS)} 里选")
-        agentic = {"cwd": cwd, "allowed_tools": [x.strip() for x in allowed],
+        allowed = [x.strip() for x in allowed]
+        if venv:
+            # 用项目虚拟环境时，测试命令常写成 .venv/bin/python -m pytest：卡上放行的 python / pip / pytest
+            # 命令自动加上 .venv/bin/ 的写法（实测整项目流程里 TEST_ENGINEER、QA 因此被拦，测试一次没跑成）
+            extra_venv = []
+            for x in allowed:
+                m = re.fullmatch(r"Bash\((python3?|pip3?|pytest)((?: [^)]*)?(?::\*)?)\)", x)
+                if m:
+                    v = f"Bash(.venv/bin/{m[1]}{m[2]})"
+                    if v not in allowed and v not in extra_venv:
+                        extra_venv.append(v)
+            allowed += extra_venv
+        agentic = {"cwd": cwd, "allowed_tools": allowed,
                    "timeout": timeout, "max_turns": turns, "venv": venv, "mcp_tools": list(mcp_tools)}
         if is_codex:
             agentic["sandbox"] = (data["agentic"].get("sandbox") or "workspace-write")

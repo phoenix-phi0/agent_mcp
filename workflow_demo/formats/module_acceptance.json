@@ -1,0 +1,147 @@
+{
+  "type": "object",
+  "description": "模块验收：逐条对照这个模块的验收条件和接口；不管通过与否，都按代码实际写出本模块对外接口，后面的模块按它来写。 checked 里有一项不满足或未验证，就不能判通过。",
+  "additionalProperties": false,
+  "required": [
+    "decide",
+    "summary",
+    "checked",
+    "not_verified",
+    "interfaces_actual",
+    "deviations"
+  ],
+  "properties": {
+    "decide": {
+      "enum": [
+        "通过",
+        "需修改"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "checked": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "item",
+          "result",
+          "evidence"
+        ],
+        "properties": {
+          "item": {
+            "type": "string",
+            "minLength": 1
+          },
+          "result": {
+            "enum": [
+              "满足",
+              "不满足",
+              "未验证"
+            ]
+          },
+          "evidence": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "not_verified": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "interfaces_actual": {
+      "type": "array",
+      "description": "看代码写：本模块实际对外提供的接口（以代码为准，不是照抄架构）",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "signature",
+          "location"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "signature": {
+            "type": "string",
+            "minLength": 1
+          },
+          "location": {
+            "type": "string",
+            "minLength": 1,
+            "description": "文件:行 或 文件里的符号"
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "deviations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "实际实现和架构设计不一致的地方（接口名、参数、错误、数据结构），后面的模块要知道"
+    },
+    "task": {
+      "type": "string",
+      "minLength": 1,
+      "description": "自包含的返工要求：修什么、期望行为、修完怎么证明。需修改时必填"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "decide": {
+            "const": "需修改"
+          }
+        },
+        "required": [
+          "decide"
+        ]
+      },
+      "then": {
+        "required": [
+          "task"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decide": {
+            "const": "通过"
+          }
+        },
+        "required": [
+          "decide"
+        ]
+      },
+      "then": {
+        "properties": {
+          "checked": {
+            "items": {
+              "properties": {
+                "result": {
+                  "const": "满足"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

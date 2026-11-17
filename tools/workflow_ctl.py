@@ -725,8 +725,12 @@ def _plan_card(t, name):
 
 def _plan_cost(t, info, items):
     from tools.wf_plan import cost_summary
-    normalized = [{"agent": item.get(info.get("agent_field") or "agent"),
-                   "content": item.get(info.get("content_field") or "content", "")} for item in items]
+    normalized = [{"agent": item.get(info.get("agent_field") or "agent") if isinstance(item, dict) else None,
+                   "content": item.get(info.get("content_field") or "content", "") if isinstance(item, dict) else ""}
+                  for item in items]
+    if any(not isinstance(row["agent"], str) or not row["agent"] for row in normalized):
+        # 遍历的清单不是按角色分配的（如整项目流程里遍历架构的 modules）：没有成本可算
+        return dict(total=None, budget=info.get("budget"), status=None, not_in_roster=[])
     costs = {row["agent"]: _plan_card(t, row["agent"])["cost"] for row in normalized}
     if any(cost is None for cost in costs.values()):
         return dict(total=None, budget=info.get("budget"), status=None, not_in_roster=[])

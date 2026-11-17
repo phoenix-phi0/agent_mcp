@@ -446,6 +446,7 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
       if ((m = t.match(/^跳转\s+(\w+)\s+最大\s+(\d+)$/))) return { kind: "jump", target: m[1], max: +m[2], line: r.line };
       if ((m = t.match(/^遍历\s+(\w+)\s+于\s+(.+)$/))) return { kind: "each", v: m[1], src: m[2], line: r.line, kids: kids };
       if ((m = t.match(/^存储\s+(\w+)\s+(.+)$/))) return { kind: "store", target: m[1], src: m[2], line: r.line };
+      if ((m = t.match(/^清空\s+(\w+)$/))) return { kind: "store", clear: true, target: m[1], line: r.line };
       // 按成本分配的两条语句：画成和「存储」一样的小节点
       if ((m = t.match(/^角色清单\s+(\w+)\s+(.+)$/))) return { kind: "roster", target: m[1], roles: m[2].trim().split(/\s+/), line: r.line };
       if ((m = t.match(/^成本合计\s+(\w+)\s+(\S+)/))) return { kind: "cost", target: m[1], src: m[2], line: r.line };
@@ -481,14 +482,19 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
       if (n.kind === "store" || n.kind === "roster" || n.kind === "cost") return [NW, SH];
       return [NW, NH];
     }
+    function firstReal(list) {
+      for (var k = 0; k < list.length; k++) if (list[k].kind !== "raw") return k;
+      return -1;
+    }
     // 返回 {first, last(可接下一步的节点或 null), endY}
-    function place(list, col, y) {
+    // owner：这一列属于哪个「如果」的分支（分支第一句就是跳转时，回环从判断框画出去）
+    function place(list, col, y, owner) {
       var prev = null, first = null, i;
       for (i = 0; i < list.length; i++) {
         var n = list[i];
         if (n.kind === "raw") continue;
         if (n.kind === "jump") {
-          jumps.push({ from: prev, n: n });
+          jumps.push({ from: prev || (i === firstReal(list) && owner ? owner : null), n: n });
           prev = null;            // 跳转之后这条路不再往下
           continue;
         }
@@ -516,7 +522,7 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
         y += sz[1] + VG;
         if (n.kind === "if") {
           var yb = node.y + (DH - NH) / 2;
-          var br = place(n.kids, col + 1, yb);
+          var br = place(n.kids, col + 1, yb, node);
           if (br.first) edges.push({ a: node, b: br.first, kind: "yes", ifNode: n });
           n.branchLast = br.last;
           y = Math.max(y, br.endY);
@@ -609,7 +615,10 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
       var tx = lane + 6, ty = (y0 + yt) / 2;
       s += '<g class="node" data-line="' + j.n.line + '" tabindex="0" role="button" aria-label="跳转 ' + esc(j.n.target) + '">' +
         '<text class="elabel' + (hot ? " hot" : "") + '" x="' + tx + '" y="' + (ty - 7) + '">跳回 ' + esc(j.n.target) + "</text>" +
-        '<text class="elabel' + (hot ? " hot" : "") + '" x="' + tx + '" y="' + (ty + 9) + '">' + cnt + " / " + j.n.max + " 次</text></g>";
+        (evs.some(function (e) { return e.item; })
+          ? '<text class="elabel' + (hot ? " hot" : "") + '" x="' + tx + '" y="' + (ty + 9) + '">共 ' + cnt + " 次</text>" +
+            '<text class="elabel' + (hot ? " hot" : "") + '" x="' + tx + '" y="' + (ty + 25) + '">每项最多 ' + j.n.max + "</text>"
+          : '<text class="elabel' + (hot ? " hot" : "") + '" x="' + tx + '" y="' + (ty + 9) + '">' + cnt + " / " + j.n.max + " 次</text>") + "</g>";
     });
 
     // 节点
@@ -628,8 +637,8 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
           '<text class="t-mono" x="' + (o.x + 12) + '" y="' + (o.y + 17) + '">标记 ' + esc(n.name) + "（跳转目标）</text>";
       } else if (n.kind === "store") {
         g += '<rect class="box" x="' + o.x + '" y="' + o.y + '" width="' + o.w + '" height="' + o.h + '" rx="17"/>' +
-          '<text x="' + (o.x + 14) + '" y="' + (o.y + 21) + '" style="font-size:12.5px">存入 ' + esc(n.target) + '</text>' +
-          (st.last ? '<text class="t-muted" x="' + (o.x + o.w - 12) + '" y="' + (o.y + 21) + '" text-anchor="end">共 ' + st.last.size + " 条</text>" : "");
+          '<text x="' + (o.x + 14) + '" y="' + (o.y + 21) + '" style="font-size:12.5px">' + (n.clear ? "清空 " : "存入 ") + esc(n.target) + '</text>' +
+          (st.last && !n.clear ? '<text class="t-muted" x="' + (o.x + o.w - 12) + '" y="' + (o.y + 21) + '" text-anchor="end">共 ' + st.last.size + " 条</text>" : "");
       } else if (n.kind === "roster" || n.kind === "cost") {
         // 角色清单：几张卡；成本合计：最后一次的「合计 / 预算」，超出标红
         var ce = st.last, right = "", over = false;
@@ -947,10 +956,14 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
       html += '<div class="meta"><span>' + (evs.length ? "共 <b>" + evs[evs.length - 1].count + "</b> 项" : "没有执行") + "</span></div>";
     } else if (n.kind === "jump") {
       $("d-head").textContent = "跳转 " + n.target;
-      html += '<div class="meta"><span>实际跳了 <b>' + evs.length + "</b> 次，最多 " + n.max + " 次。超过上限会报错，整个流程停下。</span></div>";
+      var perItem = evs.some(function (e) { return e.item; });
+      html += '<div class="meta"><span>实际跳了 <b>' + evs.length + "</b> 次，" + (perItem ? "在遍历里按项分开算，每项最多 " + n.max + " 次" : "最多 " + n.max + " 次") +
+        "。超过上限会报错，整个流程停下。</span></div>" +
+        (perItem ? '<div class="hint">依次：' + evs.map(function (e) { return "第 " + e.item.index + " 项第 " + e.count + " 次"; }).join("，") + "</div>" : "");
     } else if (n.kind === "store") {
-      $("d-head").textContent = "存入 " + n.target;
-      html += '<div class="meta"><span>存了 <b>' + evs.length + "</b> 次" + (evs.length ? "，最后共 " + evs[evs.length - 1].size + " 条" : "") + "</span></div>";
+      $("d-head").textContent = (n.clear ? "清空 " : "存入 ") + n.target;
+      html += n.clear ? '<div class="meta"><span>清空了 <b>' + evs.length + "</b> 次（每次把 " + esc(n.target) + " 设成空列表）</span></div>"
+        : '<div class="meta"><span>存了 <b>' + evs.length + "</b> 次" + (evs.length ? "，最后共 " + evs[evs.length - 1].size + " 条" : "") + "</span></div>";
     } else if (n.kind === "start" || n.kind === "end") {
       $("d-head").textContent = n.kind === "start" ? "开始" : "结束";
       html += '<div class="meta"><span>开始 <b class="num">' + esc((t.started || "—").replace("T", " ").slice(0, 19)) + '</b></span><span>结束 <b class="num">' + esc((t.finished || "—").replace("T", " ").slice(0, 19)) + "</b></span><span>状态 <b>" + esc(t.status || "?") + "</b></span></div>" +

@@ -15,6 +15,7 @@ _JUMP = re.compile(r"^跳转\s+(\w+)\s+最大\s+(\d+)\s*$")
 _LABEL = re.compile(r"^标记\s*:\s*(\w+)\s*$")
 _EACH = re.compile(r"^遍历\s+(\w+)\s+于\s+(.+)$")
 _STORE = re.compile(r"^存储\s+(\w+)\s+(.+)$")
+_CLEAR = re.compile(r"^清空\s+(\w+)\s*$")      # 清空 x：x 设成空列表（遍历里每一项重新收集）
 _REF = re.compile(r"^[\w]+(?:\.[\w]+)*$")
 # 角色清单 roster ENGINEER_LITE ENGINEER …：读这些卡的成本和说明，存成列表给派活的节点看
 # 也可以写变量：角色清单 roster {roles}，入口脚本里 设 roles = A,B,C（逗号或空格分隔）
@@ -49,6 +50,39 @@ def parse(script):
         return out, pos
 
     return block(0, 0)[0] if rows else []
+
+
+def _scope_labels(nodes):
+    """标记可以写在任何一层（最外层、如果、遍历的子块里），名字全脚本唯一。
+    跳转只能跳到同一层或外层的标记：从外面跳进一个子块，循环变量、第几项都说不清，解析时就拒。
+    返回 标记名 → 所在层的深度。"""
+    labels = {}
+
+    def scan(block, level):
+        for line, n, children in block:
+            m = _LABEL.fullmatch(line)
+            if m:
+                if children or m[1] in labels:
+                    raise DSLError(f"第 {n} 行：标记重复或带有子块：{m[1]}")
+                labels[m[1]] = level
+            elif children and (line.startswith("如果 ") or _EACH.fullmatch(line)):
+                scan(children, level + 1)
+
+    scan(nodes, 0)
+
+    # 标记都登记完了再核对跳转：每个跳转只能看见自己这一层和外层的标记
+    def check(block, visible):
+        here = {m[1] for line, _, _ in block for m in [_LABEL.fullmatch(line)] if m}
+        visible = visible | here
+        for line, n, children in block:
+            j = _JUMP.fullmatch(line)
+            if j and j[1] in labels and j[1] not in visible:
+                raise DSLError(f"第 {n} 行：跳转 {j[1]} 只能跳到同一层或外层的标记，不能跳进别的子块")
+            if children and (line.startswith("如果 ") or _EACH.fullmatch(line)):
+                check(children, visible)
+
+    check(nodes, set())
+    return labels
 
 
 def _plans(nodes):
@@ -199,14 +233,27 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
     steps = [0]
     allowed_roles = []        # 最近一次「角色清单」的卡名；成本合计用它挡住清单外的卡
     engine.store("workflow_trace", str(trace.path) if trace.path else "")
-    labels = {}
+    labels = _scope_labels(nodes)       # 标记名 → 所在层的深度（最外层 0）
     jumps = {}
-    for i, (line, n, children) in enumerate(nodes):
-        m = _LABEL.fullmatch(line)
-        if m:
-            if children or m[1] in labels:
-                raise DSLError(f"第 {n} 行：标记重复或带有子块：{m[1]}")
-            labels[m[1]] = i
+    depth = [0]                         # 正在执行的那一层的深度
+    each_depths = []                    # 和 each_stack 对齐：每个遍历的子块在第几层
+
+    def run_block(block, level):
+        """一层语句按顺序执行。跳转的目标在这一层就在这里接住，否则往外抛给外层。"""
+        here = {m[1]: i for i, (line, _, _) in enumerate(block) for m in [_LABEL.fullmatch(line)] if m}
+        pc = 0
+        while pc < len(block):
+            depth.append(level)
+            try:
+                execute([block[pc]])
+            except _Jump as jump:
+                if jump.target not in here:
+                    raise
+                pc = here[jump.target]
+                continue
+            finally:
+                depth.pop()
+            pc += 1
 
     def resolve(raw):
         raw = raw.strip()
@@ -238,10 +285,17 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                 target, max_count = m[1], int(m[2])
                 if target not in labels or not 1 <= max_count <= 1000:
                     raise DSLError(f"第 {n} 行：跳转目标或最大次数无效")
-                jumps[n] = jumps.get(n, 0) + 1
-                if jumps[n] > max_count:
+                # 次数按「目标所在那一层」的每一轮分开算：遍历里的返工循环，每一项各自最多 max 次。
+                # 包住目标那一层的遍历才算进去；目标在遍历外面时，跳过去就离开了遍历，不按项分开。
+                key = (n,) + tuple((e["each_line"], e["index"]) for e, d in zip(each_stack, each_depths)
+                                   if d <= labels[target])
+                jumps[key] = jumps.get(key, 0) + 1
+                if jumps[key] > max_count:
                     raise DSLError(f"第 {n} 行：跳转 {target} 超过最大 {max_count} 次")
-                trace.add(type="jump", line=n, target=target, count=jumps[n], max=max_count)
+                event = dict(type="jump", line=n, target=target, count=jumps[key], max=max_count)
+                if len(key) > 1:
+                    event["item"] = {"index": each_stack[-1]["index"], "total": each_stack[-1]["total"]}
+                trace.add(**event)
                 raise _Jump(target)
             if line.startswith("如果 "):
                 if not children:
@@ -251,7 +305,7 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                 ok = bool(engine._eval_condition(cond, n - 1))
                 trace.add(type="if", line=n, cond=line[3:].strip(), value=ok)
                 if ok:
-                    execute(children)
+                    run_block(children, depth[-1] + 1)
                 continue
             m = _EACH.fullmatch(line)
             if m:
@@ -269,11 +323,20 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                     each_stack.append(dict(index=i, total=len(items), each_line=n, record=root,
                                            source_step=src[0] if src else None,
                                            key=_item_key(item, plans.get(root))))
+                    each_depths.append(depth[-1] + 1)
                     try:
                         engine.store(m[1], item)
-                        execute(children)
+                        run_block(children, depth[-1] + 1)
                     finally:
                         each_stack.pop()
+                        each_depths.pop()
+                continue
+            m = _CLEAR.fullmatch(line)
+            if m:
+                if children:
+                    raise DSLError(f"第 {n} 行：清空不能带子块")
+                engine.store(m[1], [])
+                trace.add(type="clear", line=n, target=m[1])
                 continue
             m = _STORE.fullmatch(line)
             if m:
@@ -519,15 +582,8 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
         def __init__(self, target):
             self.target = target
 
-    pc = 0
     try:
-        while pc < len(nodes):
-            try:
-                execute([nodes[pc]])
-            except _Jump as jump:
-                pc = labels[jump.target]
-            else:
-                pc += 1
+        run_block(nodes, 0)
     except BaseException as e:
         if getattr(e, "wf_pause", False):
             raise
