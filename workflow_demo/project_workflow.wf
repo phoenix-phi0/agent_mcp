@@ -1,12 +1,17 @@
 # 从一句需求做出一个多模块项目：
 # 架构设计（模块划分、模块之间的接口、数据模型、顺序、集成场景）→ 架构审查（最多改 2 轮）
-# → 按模块依次：任务分配（按成本，参考已完成模块的实际接口）→ 逐项实现 → 模块验收（不过就在模块内返工，每个模块最多 3 轮）
-#   → 记下这个模块实际的接口，后面的模块按它写
+# → 按模块依次：任务分配（按成本）→ 逐项实现 → 模块验收（不过就在模块内返工，每个模块最多 3 轮）
+# 接口在架构里一次约定好：每个模块自带 provides（提供什么）和 uses（照抄对方约定的签名），实现必须和约定一致，不一致就返工
 # → 集成测试：把架构里的端到端场景逐个写成 tests/test_integration.py（验收的沙箱不让写脚本，场景要先变成能自动跑的测试）
 # → 集成验收：整体测试 + 每个场景的测试逐个核对（不过就返工，最多 3 轮）
+# 参考资料只给这一步要用的：分配和实现只拿本模块的约定和全项目约定，长度和模块数无关；集成几步只拿各模块提供的接口
+# 工程师报告约定有问题（need_architect）时先交架构师裁决，裁决记进 contract_notes，后面的工程师和验收都按它来
+# 测试时过时不过也算不通过，要查清原因修掉
 # 验收从严：checked 里有一项不满足或未验证，就不能判通过（模块验收由格式卡死，集成验收写在任务里）
 # 项目在 work/{project}（空目录起步，第一个模块搭骨架）。入口脚本要设：content stack goal project test_cmd budget roles
+# 可选：module_qa = 模块验收用的卡（默认 QA_ENGINEER；如 QA_PLATFORM，走 Claude Platform 沙箱）
 角色清单 roster {roles}
+清空 contract_notes
 架构设计
     任务 项目需求：{content}。技术栈：{stack}。约束：{goal}。项目目录是 work/{project}（现在是空的，工程师在里面写代码，你看不到也不用写文件）。整体测试命令：{test_cmd}。按「整个项目的架构设计」的要求写：模块按依赖排好，第一个模块搭项目骨架，让整体测试命令能跑通
     角色 ARCHITECT
@@ -14,7 +19,7 @@
     记录 arch
 标记:a
 架构审查
-    任务 审查整个项目的架构设计（不是单个模块的接口约定）。需求：{content}。逐项看：1 模块划分覆盖了全部需求、职责不重叠；2 依赖无环、顺序可行（前面的不依赖后面的），第一个模块是项目骨架且能让测试命令跑通；3 模块之间的接口写清了（签名、数据结构、错误），uses 和对方 provides 的签名一致；4 数据模型支撑所有功能；5 集成场景覆盖主要的用户流程；6 每个模块的验收条件能用测试验证。不要提需求以外的新功能
+    任务 审查整个项目的架构设计（不是单个模块的接口约定）。需求：{content}。逐项看：1 模块划分覆盖了全部需求、职责不重叠；2 依赖无环、顺序可行（前面的不依赖后面的），第一个模块是项目骨架且能让测试命令跑通；3 模块之间的接口写清了（签名、数据结构、错误）；每个 uses 都是前面模块 provides 里有的，签名、行为、错误和对方一字不差（工程师只看得到本模块，这里是唯一依据）；4 数据模型支撑所有功能；5 集成场景覆盖主要的用户流程；6 每个模块的验收条件能用测试验证。不要提需求以外的新功能
     角色 ARCHITECT_GLM
     文本 arch
     格式 review
@@ -30,8 +35,8 @@
 遍历 module 于 arch.modules
     清空 module_results
     模块任务分配
-        任务 模块任务分配（按架构实现整个项目，现在只做这一个模块）。当前模块：{module}。已完成模块的实际接口和与架构的出入（以这个为准）：{built 或 还没有，这是第一个模块}。参考文本是整个架构。项目在 work/{project}，测试命令：{test_cmd}（每项 content 里原样写进验收命令）。技术栈：{stack}。约束：{goal}。这个模块的实施预算：{budget}（所有项的 cost 加起来不能超过它）。可用角色：{roster}
-        文本 arch
+        任务 模块任务分配（按架构实现整个项目，现在只做这一个模块）。参考文本里 current_module 是当前模块的约定（provides 是要提供的，uses 是要调用的别的模块的接口，签名以这里为准），另有技术栈、目录结构、全项目约定和数据模型。工程师拿到的参考文本也只有这几项，每项 content 写清要做什么、要实现和要调用的签名。前面的模块都已按约定做完并验收。项目在 work/{project}，测试命令：{test_cmd}（每项 content 里原样写进验收命令）。技术栈：{stack}。约束：{goal}。这个模块的实施预算：{budget}（所有项的 cost 加起来不能超过它）。可用角色：{roster}
+        文本 current_module=module stack=arch.stack layout=arch.layout conventions=arch.conventions data_model=arch.data_model contract_notes
         角色 ARCHITECT
         格式 cost_assignment
         记录 assignment
@@ -47,47 +52,62 @@
         跳转 c 最大 2
     遍历 task 于 assignment.tasks
         任务实现
-            任务 task.content
+            任务 {task.content}。改测试的规矩：已有的测试不要为了让代码通过而修改、删除、跳过或放宽断言；只有测试和约定矛盾时才改，并在 need_architect 里写明哪个测试、和哪条约定矛盾、改成了什么。补测试按约定（provides、acceptance、errors）写，不要照着代码现有的行为写；代码和约定不一致就写进 open_issues，不要把测试改成迁就代码
             角色 task.agent
-            文本 arch
+            文本 current_module=module stack=arch.stack layout=arch.layout conventions=arch.conventions data_model=arch.data_model contract_notes
             格式 implementation
             记录 task_result
+        如果 task_result.need_architect != []
+            约定确认
+                任务 约定确认：工程师实现当前模块时报告了和架构约定有关的问题，见参考文本的 issues（冲突、缺漏、写不通）。约定是所有模块的唯一依据，逐条裁决：约定没问题就判按原约定，写清工程师该怎么改回去；约定没写到就补充约定；约定之间冲突或写不通就修改约定。detail 写出以后以什么为准（具体的签名、行为或测试断言），affected_modules 列出受影响的模块（包括已经做完的）。参考文本里还有当前模块的约定、全项目约定、数据模型和之前的裁决（contract_notes）
+                角色 ARCHITECT
+                文本 issues=task_result.need_architect current_module=module conventions=arch.conventions data_model=arch.data_model contract_notes
+                格式 contract_decision
+                记录 contract_fix
+            存储 contract_notes module=module.name decisions=contract_fix.decisions
         存储 module_results task_result
     标记:m
     模块验收
-        任务 模块验收：按架构实现的项目里的一个模块。checked 里只要有一项是不满足或未验证，decide 就必须是需修改（环境限制导致没验证的，在 task 里要求补成能自动跑的测试）。当前模块：{module}。测试命令（以这个为准）：{test_cmd}。逐项核对：1 测试命令全部通过（前面模块的测试也要过）；2 这个模块的 acceptance 每一条；3 provides 里的接口都实现了，签名和行为与架构一致；4 tests 里写的测试都有，而且真在测这些行为；5 没做这个模块以外的事。不管通过与否，都看代码在 interfaces_actual 里写出这个模块实际对外的接口（签名和所在文件），和架构不一致的写进 deviations。项目原本的问题和验收环境的限制只写进 summary。参考文本是这个模块的实现记录（含返工）
-        角色 QA_ENGINEER
-        文本 module_results
+        任务 模块验收：按架构实现的项目里的一个模块。checked 里只要有一项是不满足或未验证，decide 就必须是需修改（环境限制导致没验证的，在 task 里要求补成能自动跑的测试）。当前模块的约定见参考文本的 current_module。测试命令（以这个为准）：{test_cmd}。逐项核对：1 测试命令完整跑完、全部通过（前面模块的测试也要过）；跑测试时只要有一次出现失败，哪怕重跑通过，也算不满足：时过时不过的测试在 task 里写明是哪个、要求查清原因并修掉；2 这个模块的 acceptance 每一条；3 看代码核对约定（contract_notes 里架构师的裁决优先于原约定）：provides 里每个接口都实现了，名字、签名、返回、错误和约定一致；uses 里的接口按约定的签名调用；4 tests 里写的测试都有，而且是按约定在测这些行为（不是照着代码现有的行为写）；已有的测试被改、删、跳过（skip/xfail）或放宽断言的，逐个和约定对照：只有和约定矛盾、实现记录的 need_architect 里写明了、并且 contract_notes 里有架构师裁决的才算合理，否则算不满足，task 里要求恢复；5 没做这个模块以外的事。和约定不一致的每一处写进 deviations（约定是什么、代码里是什么、哪个文件），有一处就判需修改，task 里要求改回约定。项目原本的问题和验收环境的限制只写进 summary（测试失败不算这一类：不管失败的测试属于哪个模块、重跑过没有，都按第 1 条判不满足）。参考文本的 results 是这个模块的实现记录（含返工）
+        角色 {module_qa 或 QA_ENGINEER}
+        文本 current_module=module results=module_results conventions=arch.conventions data_model=arch.data_model contract_notes
         格式 module_acceptance
         记录 mcheck
     如果 mcheck.decide == 需修改
         模块返工
-            任务 mcheck.task
+            任务 {mcheck.task}。改测试的规矩：已有的测试不要为了让代码通过而修改、删除、跳过或放宽断言；只有测试和约定矛盾时才改，并在 need_architect 里写明哪个测试、和哪条约定矛盾、改成了什么。补测试按约定（provides、acceptance、errors）写，不要照着代码现有的行为写；代码和约定不一致就写进 open_issues，不要把测试改成迁就代码
             角色 ENGINEER
-            文本 arch
+            文本 current_module=module stack=arch.stack layout=arch.layout conventions=arch.conventions data_model=arch.data_model contract_notes
             格式 implementation
             记录 task_result
+        如果 task_result.need_architect != []
+            约定确认
+                任务 约定确认：工程师实现当前模块时报告了和架构约定有关的问题，见参考文本的 issues（冲突、缺漏、写不通）。约定是所有模块的唯一依据，逐条裁决：约定没问题就判按原约定，写清工程师该怎么改回去；约定没写到就补充约定；约定之间冲突或写不通就修改约定。detail 写出以后以什么为准（具体的签名、行为或测试断言），affected_modules 列出受影响的模块（包括已经做完的）。参考文本里还有当前模块的约定、全项目约定、数据模型和之前的裁决（contract_notes）
+                角色 ARCHITECT
+                文本 issues=task_result.need_architect current_module=module conventions=arch.conventions data_model=arch.data_model contract_notes
+                格式 contract_decision
+                记录 contract_fix
+            存储 contract_notes module=module.name decisions=contract_fix.decisions
         存储 module_results task_result
         跳转 m 最大 3
-    存储 built mcheck
 集成测试
-    任务 集成测试：所有模块已经做完。把参考文本（架构）里 integration 的每个场景写成测试，放进 tests/test_integration.py：每个场景一个测试函数，docstring 写明是哪个场景；按 steps 一步一步做（用测试客户端或命令，沿用项目已有的测试写法和夹具），每一步都断言 expected 里写的结果。只写测试，不改实现代码；有场景过不了，就把场景名、失败的步骤和实际结果写进 open_issues，交给后面的集成验收。写完运行测试命令：{test_cmd}
+    任务 集成测试：所有模块已经做完。把参考文本里 integration 的每个场景写成测试，放进 tests/test_integration.py：每个场景一个测试函数，docstring 写明是哪个场景；按 steps 一步一步做（用测试客户端或命令，沿用项目已有的测试写法和夹具），每一步都断言 expected 里写的结果。只写测试，不改实现代码；有场景过不了，就把场景名、失败的步骤和实际结果写进 open_issues，交给后面的集成验收。写完运行测试命令：{test_cmd}
     角色 TEST_ENGINEER
-    文本 arch
+    文本 integration=arch.integration modules=arch.modules[name,responsibility,provides] stack=arch.stack layout=arch.layout conventions=arch.conventions contract_notes
     格式 implementation
     记录 itest
 标记:b
 集成验收
-    任务 集成验收：按架构实现的整个项目已经全部做完。需求：{content}。测试命令（以这个为准）：{test_cmd}。逐项核对：1 测试命令全部通过；2 参考文本（架构）里 integration 的每个场景，在 tests/test_integration.py 里都有对应的测试，而且真按 steps 在做、断言了 expected（逐个读，不抽查），这些测试都通过；3 需求里的每项功能都有着落；4 各模块实际接口互相对得上（见下面的实际接口）。各模块验收时记下的实际接口和出入：{built}。集成测试那一步的记录：{itest}。checked 里只要有一项是不满足或未验证，decide 就必须是需修改；task 写成工程师能照做的返工要求，写明涉及哪些模块和文件（场景没有测试或测试没覆盖到某一步，就要求补测试）
+    任务 集成验收：按架构实现的整个项目已经全部做完。需求：{content}。测试命令（以这个为准）：{test_cmd}。逐项核对：1 测试命令完整跑完、全部通过；只要有一次出现失败，哪怕重跑通过，也算不满足，task 里写明是哪个测试、要求查清原因并修掉；2 参考文本里 integration 的每个场景，在 tests/test_integration.py 里都有对应的测试，而且真按 steps 在做、断言了 expected（逐个读，不抽查），这些测试都通过；3 需求里的每项功能都有着落；另外看 tests 下有没有为了通过而被改松的测试（删掉断言、改期望值、加 skip/xfail），有而且 contract_notes 里没有对应裁决的算不满足；4 各模块对外提供的接口和参考文本 modules 里的 provides 一致（contract_notes 里的裁决优先）。集成测试那一步的记录见参考文本的 itest。checked 里只要有一项是不满足或未验证，decide 就必须是需修改；task 写成工程师能照做的返工要求，写明涉及哪些模块和文件（场景没有测试或测试没覆盖到某一步，就要求补测试）
     角色 QA_ENGINEER
-    文本 arch
+    文本 summary=arch.summary integration=arch.integration modules=arch.modules[name,responsibility,provides] contract_notes itest
     格式 acceptance
     记录 final
 如果 final.decide == 需修改
     集成返工
-        任务 final.task
+        任务 {final.task}。改测试的规矩：已有的测试不要为了让代码通过而修改、删除、跳过或放宽断言；只有测试和约定矛盾时才改，并在 need_architect 里写明哪个测试、和哪条约定矛盾、改成了什么。补测试按约定（provides、acceptance、errors）写，不要照着代码现有的行为写；代码和约定不一致就写进 open_issues，不要把测试改成迁就代码
         角色 ENGINEER
-        文本 arch
+        文本 integration=arch.integration modules=arch.modules[name,responsibility,provides] stack=arch.stack layout=arch.layout conventions=arch.conventions data_model=arch.data_model contract_notes
         格式 implementation
         记录 task_result
     跳转 b 最大 3

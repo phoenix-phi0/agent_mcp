@@ -8,6 +8,8 @@ from tools.dsl_core import DSLError, ScriptReturn
 
 _NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _EFFORTS = set(config.EFFORTS)
+# platform:<模型 ID>[@effort]：走 Claude Platform 托管 agent，工具在阿里云自托管 worker 的沙箱里执行（见 tools/platform_agent.py）
+_PLATFORM = re.compile(r"platform:claude-[a-z0-9][a-z0-9.-]*(@(low|medium|high|xhigh|max))?")
 _KEYS = {"model", "effort", "tools", "skills", "packages", "max_tool_rounds", "agentic", "cost", "description",
          "timeout", "via"}
 
@@ -38,17 +40,24 @@ def load_agent(engine, name, model_override=None):
     if effort is not None:
         if not isinstance(effort, str) or effort not in _EFFORTS:
             raise DSLError(f"agent「{name}」effort 无效：{effort}")
-        if not model.startswith(("cli:claude/", "cli:codex/")) or "@" in model:
-            raise DSLError(f"agent「{name}」只有 cli:claude 和 cli:codex 模型支持独立 effort 配置")
+        if not model.startswith(("cli:claude/", "cli:codex/", "platform:")) or "@" in model:
+            raise DSLError(f"agent「{name}」只有 cli:claude、cli:codex 和 platform 模型支持独立 effort 配置")
         model += "@" + effort
     if model_override:
         if not isinstance(model_override, str) or not model_override.strip():
             raise DSLError(f"agent「{name}」覆盖的模型无效：{model_override}")
         model = model_override.strip()
-    try:
-        config.parse_model(model)
-    except (ValueError, config.ModelNameError) as e:
-        raise DSLError(f"agent「{name}」模型配置无效：{e}") from e
+    is_platform = model.startswith("platform:")
+    if is_platform:
+        if not _PLATFORM.fullmatch(model):
+            raise DSLError(f"agent「{name}」模型配置无效：{model}（写成 platform:claude-sonnet-5-5 或带 @effort）")
+        if data.get("agentic") is None:
+            raise DSLError(f"agent「{name}」platform 模型要写 agentic.cwd（工具在哪个项目目录里执行）")
+    else:
+        try:
+            config.parse_model(model)
+        except (ValueError, config.ModelNameError) as e:
+            raise DSLError(f"agent「{name}」模型配置无效：{e}") from e
     for key in ("tools", "skills", "packages"):
         if not isinstance(data.get(key, []), list) or any(not isinstance(x, str) or not x.strip() for x in data.get(key, [])):
             raise DSLError(f"agent「{name}」的 {key} 必须是非空字符串列表")
@@ -78,12 +87,14 @@ def load_agent(engine, name, model_override=None):
     if agentic is not None:
         # agentic：claude -p 自带工具在 cwd 里干活。只认 cli:claude；不能和 DSL 的 tools 混用
         if not isinstance(agentic, dict) or set(agentic) - {"cwd", "allowed_tools", "timeout", "max_turns", "venv",
-                                                             "mcp_tools", "sandbox"}:
+                                                             "mcp_tools", "sandbox", "min_reads"}:
             raise DSLError(f"agent「{name}」agentic 只能写 cwd、allowed_tools、timeout、max_turns、venv、mcp_tools、"
-                           f"sandbox")
+                           f"sandbox、min_reads")
         is_codex = model.startswith("cli:codex")
-        if not (model.startswith("cli:claude") or is_codex):
-            raise DSLError(f"agent「{name}」agentic 目前只支持 cli:claude 和 cli:codex 模型（现在是 {model}）")
+        if not (model.startswith("cli:claude") or is_codex or is_platform):
+            raise DSLError(f"agent「{name}」agentic 目前只支持 cli:claude、cli:codex 和 platform 模型（现在是 {model}）")
+        if is_platform and (agentic.get("allowed_tools") or agentic.get("mcp_tools") or "sandbox" in agentic):
+            raise DSLError(f"agent「{name}」platform 的权限由自托管 worker 的沙箱管，不写 allowed_tools、mcp_tools、sandbox")
         from tools.llm_router import CODEX_SANDBOXES
         if is_codex:
             # codex 的权限由它的系统级沙箱管：写 sandbox，不写 allowed_tools；探针 / 审查还没接
@@ -91,7 +102,7 @@ def load_agent(engine, name, model_override=None):
                 raise DSLError(f"agent「{name}」codex 的 agentic 用 sandbox 管权限，不写 allowed_tools、mcp_tools")
             if agentic.get("sandbox", "workspace-write") not in CODEX_SANDBOXES:
                 raise DSLError(f"agent「{name}」agentic.sandbox 只能是 {' / '.join(CODEX_SANDBOXES)}")
-        elif "sandbox" in agentic:
+        elif "sandbox" in agentic and not is_platform:
             raise DSLError(f"agent「{name}」sandbox 只给 cli:codex 用；claude 用 allowed_tools")
         if data.get("tools"):
             raise DSLError(f"agent「{name}」agentic 和 tools 不能同时写")
@@ -103,8 +114,10 @@ def load_agent(engine, name, model_override=None):
         cwd = (root / raw_cwd.strip()).resolve()
         if cwd != root and root not in cwd.parents:
             raise DSLError(f"agent「{name}」agentic.cwd 越出工作目录")
-        allowed = [] if is_codex else agentic.get("allowed_tools")
-        if not is_codex and (not isinstance(allowed, list) or not allowed
+        if is_platform and cwd.parent != root / "work":
+            raise DSLError(f"agent「{name}」platform 的 agentic.cwd 必须是 work/<项目>（worker 只开放这一层）")
+        allowed = [] if (is_codex or is_platform) else agentic.get("allowed_tools")
+        if not (is_codex or is_platform) and (not isinstance(allowed, list) or not allowed
                              or any(not isinstance(x, str) or not x.strip() for x in allowed)):
             raise DSLError(f"agent「{name}」agentic.allowed_tools 必须是非空字符串列表")
         if any(x.replace(" ", "") in ("Bash", "Bash(*)", "Bash(:*)") for x in allowed):
@@ -140,6 +153,14 @@ def load_agent(engine, name, model_override=None):
                    "timeout": timeout, "max_turns": turns, "venv": venv, "mcp_tools": list(mcp_tools)}
         if is_codex:
             agentic["sandbox"] = (data["agentic"].get("sandbox") or "workspace-write")
+        min_reads = data["agentic"].get("min_reads", 0)
+        if "min_reads" in data["agentic"] and not is_platform:
+            raise DSLError(f"agent「{name}」min_reads 只给 platform 模型用（按会话里的工具调用计数）")
+        if not isinstance(min_reads, int) or isinstance(min_reads, bool) or not 0 <= min_reads <= 50:
+            raise DSLError(f"agent「{name}」agentic.min_reads 必须是 0–50 的整数")
+        if is_platform:
+            agentic["project"] = cwd.name
+            agentic["min_reads"] = min_reads
     parts = [soul.read_text(encoding="utf-8").strip()]
     for rel in data.get("skills", []):
         path = (folder / rel).resolve()
@@ -203,7 +224,7 @@ def _prompt(task, context, node=None, fmt=None, submit=False, notes=None, previo
 
 def _uses_submit(engine, profile, fmt):
     """有格式、模型是 cli:claude / cli:goose、不是离线假客户端 → 用 submit 工具交。"""
-    if not fmt or getattr(engine.client, "offline", False) is True:
+    if not fmt or getattr(engine.client, "offline", False) is True or profile["model"].startswith("platform:"):
         return False
     spec = config.parse_model(profile["model"])
     return spec.channel == "cli" and spec.provider in ("claude", "goose", "codex")
@@ -264,6 +285,9 @@ def call_agent(engine, name, task, context=None, model=None, node=None, fmt=None
             reply = llm_router.submit_call(prompt, profile["system"], profile["model"], fmt[1],
                                            agentic=profile.get("agentic"), timeout=profile.get("timeout"),
                                            via=profile.get("via"))
+        elif profile["model"].startswith("platform:") and getattr(engine.client, "offline", False) is not True:
+            from tools import platform_agent
+            reply = platform_agent.call(prompt, profile["system"], profile["model"], profile["agentic"], card=name)
         elif profile.get("agentic") and getattr(engine.client, "offline", False) is not True:
             from tools import llm_router
             reply = llm_router.claude_agentic(prompt, profile["system"], profile["model"],

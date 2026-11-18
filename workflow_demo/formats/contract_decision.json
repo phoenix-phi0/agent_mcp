@@ -1,0 +1,51 @@
+{
+ "type": "object",
+ "description": "约定确认：工程师实现时报告了和架构约定有关的问题（冲突、缺漏、写不通），逐条裁决。约定是唯一依据，裁决会交给后面的工程师和验收",
+ "additionalProperties": false,
+ "required": [
+  "decisions"
+ ],
+ "properties": {
+  "decisions": {
+   "type": "array",
+   "minItems": 1,
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "issue",
+     "verdict",
+     "detail",
+     "affected_modules"
+    ],
+    "properties": {
+     "issue": {
+      "type": "string",
+      "minLength": 1,
+      "description": "工程师报告的问题，原样概括"
+     },
+     "verdict": {
+      "enum": [
+       "按原约定",
+       "补充约定",
+       "修改约定"
+      ],
+      "description": "按原约定：约定没问题，工程师照做；补充约定：约定没写到，现在补上；修改约定：约定有冲突或写不通，改掉"
+     },
+     "detail": {
+      "type": "string",
+      "minLength": 1,
+      "description": "以后以什么为准：写出具体的签名、行为或测试断言；按原约定时写清工程师该怎么改回去"
+     },
+     "affected_modules": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "受影响的模块名（含已经做完的）"
+     }
+    }
+   }
+  }
+ }
+}

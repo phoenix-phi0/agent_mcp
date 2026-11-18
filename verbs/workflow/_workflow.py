@@ -17,6 +17,10 @@ _EACH = re.compile(r"^遍历\s+(\w+)\s+于\s+(.+)$")
 _STORE = re.compile(r"^存储\s+(\w+)\s+(.+)$")
 _CLEAR = re.compile(r"^清空\s+(\w+)\s*$")      # 清空 x：x 设成空列表（遍历里每一项重新收集）
 _REF = re.compile(r"^[\w]+(?:\.[\w]+)*$")
+# 文本 / 存储 可以写几项拼成一个对象：文本 module built arch.stack，存储 built name=module.name api=mcheck.interfaces_actual
+# 每项是「引用」或「键=引用」（引用可带花括号），对象的键是引用原样或等号前的名字
+# 引用后面可以跟 [字段,字段]：对象只留这几个字段，对象列表每一项只留这几个字段，如 modules=arch.modules[name,provides]
+_PICK = re.compile(r"^(?:([A-Za-z_]\w*)=)?(?:\{([\w]+(?:\.[\w]+)*)\}|([\w]+(?:\.[\w]+)*))(?:\[(\w+(?:,\w+)*)\])?$")
 # 角色清单 roster ENGINEER_LITE ENGINEER …：读这些卡的成本和说明，存成列表给派活的节点看
 # 也可以写变量：角色清单 roster {roles}，入口脚本里 设 roles = A,B,C（逗号或空格分隔）
 _ROSTER = re.compile(r"^角色清单\s+(\w+)\s+([A-Za-z{][\w ,{}]*)$")
@@ -110,8 +114,11 @@ def _plans(nodes):
                     info["nodes"].append(name)
                     for field, target in (("角色", "agent_field"), ("任务", "content_field")):
                         value = fields.get(field, "")
-                        if re.fullmatch(re.escape(each[1]) + r"\.\w+", value):
-                            info[target] = value.partition(".")[2]
+                        # 任务 task.content，或 任务 {task.content}后面再接固定的说明
+                        m = (re.fullmatch(re.escape(each[1]) + r"\.(\w+)", value)
+                             or re.match(r"\{" + re.escape(each[1]) + r"\.(\w+)\}", value))
+                        if m:
+                            info[target] = m[1]
                 plans[root] = info
             cost = _COST.fullmatch(line)
             if cost:
@@ -267,6 +274,37 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                 return value
         return engine.expand(raw)
 
+    def pick(raw, n, what):
+        """几项拼成对象；不是这种写法返回 None（按原来的单值处理）"""
+        tokens = raw.split()
+        found = [_PICK.fullmatch(t) for t in tokens]
+        if not tokens or not all(found):
+            return None
+        named = any(m[1] or m[4] for m in found)
+        if len(tokens) < 2 and not named:
+            return None
+        values = [engine.lookup(m[2] or m[3]) for m in found]
+        if not named and all(v is None for v in values):
+            return None  # 一项都取不到：是普通的几个词，不是引用
+        out = {}
+        for m, v in zip(found, values):
+            ref = m[2] or m[3]
+            key = m[1] or ref
+            if key in out:
+                raise DSLError(f"第 {n} 行：{what}里 {key} 写了两次")
+            if v is None:
+                raise DSLError(f"第 {n} 行：{what}里的 {ref} 没有值")
+            if m[4]:
+                keys = m[4].split(",")
+
+                def only(x, ref=ref):
+                    if not isinstance(x, dict):
+                        raise DSLError(f"第 {n} 行：{what}里的 {ref}[…] 只能用在对象或对象列表上")
+                    return {k: x[k] for k in keys if k in x}
+                v = [only(x) for x in v] if isinstance(v, list) else only(v)
+            out[key] = v
+        return out
+
     def execute(nodes):
         for line, n, children in nodes:
             engine._at = n - 1
@@ -348,7 +386,8 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                     engine.store(m[1], old)
                 if not isinstance(old, list):
                     raise DSLError(f"第 {n} 行：{m[1]} 不是列表")
-                old.append(resolve(m[2]))
+                value = pick(m[2], n, "存储")
+                old.append(resolve(m[2]) if value is None else value)
                 trace.add(type="store", line=n, target=m[1], size=len(old))
                 continue
             m = _ROSTER.fullmatch(line) or _COST.fullmatch(line)
@@ -411,19 +450,24 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                                    for r in rows}, **({"list_rev": rev} if rev else {}))
                 continue
             if children:
-                fields = {}
+                fields, child_line_of = {}, {}
                 for child_line, child_n, grandchildren in children:
                     key, sep, value = child_line.partition(" ")
                     if grandchildren or not sep or key not in _TASK_FIELDS or key in fields:
                         raise DSLError(f"第 {child_n} 行：任务块只能包含任务、角色、文本、记录、格式各一项")
                     fields[key] = value.strip()
+                    child_line_of[key] = child_n
                 if not all(fields.get(x) for x in ("角色", "记录")):
                     raise DSLError(f"第 {n} 行：任务块需要角色、记录")
                 record = fields["记录"]
                 if not _REF.fullmatch(record) or "." in record:
                     raise DSLError(f"第 {n} 行：记录名无效：{record}")
                 task, role = to_text(resolve(fields.get("任务", line))), to_text(resolve(fields["角色"]))
-                context = resolve(fields["文本"]) if fields.get("文本") else None
+                context = None
+                if fields.get("文本"):
+                    context = pick(fields["文本"], child_line_of["文本"], "文本")
+                    if context is None:
+                        context = resolve(fields["文本"])
                 fmt = None
                 if fields.get("格式"):
                     if load_format is None:

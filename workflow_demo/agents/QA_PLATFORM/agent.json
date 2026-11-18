@@ -1,0 +1,16 @@
+{
+  "model": "platform:claude-sonnet-5-5",
+  "effort": "medium",
+  "cost": 4,
+  "description": "QA（sonnet，走 Claude Platform 托管 agent，工具在阿里云沙箱里执行，按 API 计费）。同 QA_ENGINEER：逐条对照验收目标查实现和测试，跑全量测试。",
+  "packages": [],
+  "skills": [
+    "skills/acceptance.md"
+  ],
+  "agentic": {
+    "cwd": "work/{project}",
+    "timeout": 900,
+    "venv": true,
+    "min_reads": 3
+  }
+}

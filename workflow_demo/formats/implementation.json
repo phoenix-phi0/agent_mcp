@@ -1,35 +1,102 @@
 {
-  "type": "object",
-  "description": "实现记录：工程师做了什么、怎么验证的。代码修改时带 fix_for。",
-  "additionalProperties": false,
-  "required": ["status", "summary", "changes", "error_handling", "verification", "open_issues", "need_architect"],
-  "properties": {
-    "status": {"enum": ["完成", "部分完成", "无法完成"]},
-    "summary": {"type": "string", "minLength": 1},
-    "changes": {
-      "type": "array",
-      "items": {
-        "type": "object", "additionalProperties": false,
-        "required": ["target", "action", "detail"],
-        "properties": {
-          "target": {"type": "string", "minLength": 1, "description": "文件/模块/接口"},
-          "action": {"enum": ["新增", "修改", "删除"]},
-          "detail": {"type": "string"}
-        }
-      }
+ "type": "object",
+ "description": "实现记录：工程师做了什么、怎么验证的。代码修改时带 fix_for。",
+ "additionalProperties": false,
+ "required": [
+  "status",
+  "summary",
+  "changes",
+  "error_handling",
+  "verification",
+  "open_issues",
+  "need_architect"
+ ],
+ "properties": {
+  "status": {
+   "enum": [
+    "完成",
+    "部分完成",
+    "无法完成"
+   ]
+  },
+  "summary": {
+   "type": "string",
+   "minLength": 1
+  },
+  "changes": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "target",
+     "action",
+     "detail"
+    ],
+    "properties": {
+     "target": {
+      "type": "string",
+      "minLength": 1,
+      "description": "文件/模块/接口"
+     },
+     "action": {
+      "enum": [
+       "新增",
+       "修改",
+       "删除"
+      ]
+     },
+     "detail": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "error_handling": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  },
+  "verification": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "executed",
+    "method",
+    "result"
+   ],
+   "properties": {
+    "executed": {
+     "type": "boolean",
+     "description": "真的跑过测试才写 true"
     },
-    "error_handling": {"type": "array", "items": {"type": "string"}},
-    "verification": {
-      "type": "object", "additionalProperties": false,
-      "required": ["executed", "method", "result"],
-      "properties": {
-        "executed": {"type": "boolean", "description": "真的跑过测试才写 true"},
-        "method": {"type": "string", "description": "实际运行的命令"},
-        "result": {"type": "string", "description": "通过/失败数和失败用例名；没跑写「未执行」"}
-      }
+    "method": {
+     "type": "string",
+     "description": "实际运行的命令"
     },
-    "open_issues": {"type": "array", "items": {"type": "string"}},
-    "need_architect": {"type": "array", "items": {"type": "string"}},
-    "fix_for": {"type": "string", "description": "代码修改时：针对返工要求里的哪一条"}
+    "result": {
+     "type": "string",
+     "description": "通过/失败数和失败用例名；没跑写「未执行」"
+    }
+   }
+  },
+  "open_issues": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  },
+  "need_architect": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   },
+   "description": "和约定有关、要架构师定的问题：约定之间冲突、约定没写到、照约定写不通。写了会先交架构师裁决；没有就留空"
+  },
+  "fix_for": {
+   "type": "string",
+   "description": "代码修改时：针对返工要求里的哪一条"
   }
+ }
 }

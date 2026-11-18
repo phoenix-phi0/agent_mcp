@@ -1,0 +1,40 @@
+[Unit]
+Description=Claude Platform self-hosted worker for agent_mcp (tools run in workflow_demo/work only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# 密钥文件由 systemd 读，worker 和它起的工具进程看不到 /root
+EnvironmentFile=/root/.config/agent_mcp/platform_env
+Environment=HOME=/var/lib/wfplat
+ExecStart=/usr/local/bin/ant beta:worker poll --on-work /opt/wfplat/on_work.sh
+Restart=on-failure
+RestartSec=10
+# 先让 worker 取消手上的活再退出
+KillSignal=SIGTERM
+TimeoutStopSec=60
+# 文件：/root 和 /home 不可见；全盘只读，只有项目目录和自己的状态目录可写（每个会话再收窄到自己的项目，见 on_work.sh）
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/workspace/agent_mcp/workflow_demo/work /var/lib/wfplat
+InaccessiblePaths=-/workspace/agent_mcp/config.json
+StateDirectory=wfplat
+PrivateTmp=yes
+# 进程：看不见别的进程（读不到它们的环境变量）
+ProtectProc=invisible
+ProcSubset=pid
+# 内核和设备
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+NoNewPrivileges=yes
+# sys_admin 留给 on_work.sh 做挂载，它挂好后自己丢掉
+CapabilityBoundingSet=~CAP_SYS_PTRACE CAP_SYS_MODULE CAP_SYS_RAWIO CAP_SYS_BOOT CAP_SYS_TIME CAP_NET_ADMIN CAP_MKNOD
+
+[Install]
+WantedBy=multi-user.target

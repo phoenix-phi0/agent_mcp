@@ -14,7 +14,7 @@
 | `workflow.wf` / `cost_workflow.wf` | 从一句需求做一个模块：接口约定 → 审查 → 分配（按成本）→ 实现 → 验收 | `run_cost.zs`、`run_algo.zs` |
 | `feature_workflow.wf` | 在已有项目上按写好的设计加功能（可以跨多个模块） | `run_confirm_p1.zs` |
 | `refactor_workflow.wf` | 重构已有代码，行为不变 | `run_refactor.zs` |
-| `project_workflow.wf` | 从一句需求做出多模块项目：架构设计 → 架构审查 → 按模块依次（分配 → 实现 → 模块验收，不过就模块内返工；记下实际接口给后面的模块）→ 集成测试（场景写成测试）→ 集成验收 | `run_project.zs` |
+| `project_workflow.wf` | 从一句需求做出多模块项目：架构设计 → 架构审查 → 按模块依次（分配 → 实现 → 模块验收，不过就模块内返工；接口在架构里一次约定好，实现和约定不一致就返工）→ 集成测试（场景写成测试）→ 集成验收 | `run_project.zs` |
 
 `project_workflow.wf` 用到块内跳转（标记写在遍历里，每个模块各自返工）和 `清空`（每个模块重新收集实现记录），
 格式见 `formats/architecture.json`、`formats/module_acceptance.json`，架构师的写法在 `agents/ARCHITECT/skills/architecture.md`。

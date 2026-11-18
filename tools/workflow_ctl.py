@@ -478,6 +478,11 @@ def _check_model(model):
         return None
     from tools import config
     # parse_model 对裸名字很宽容（会当别名或默认模型），外部覆盖一律要求写全「通道:提供方/模型」
+    if isinstance(model, str) and model.startswith("platform:"):
+        from verbs.workflow._agents import _PLATFORM
+        if not _PLATFORM.fullmatch(model):
+            raise ControlError(f"模型名无效：{model}（写成 platform:claude-sonnet-5-5）")
+        return model
     if not isinstance(model, str) or ":" not in model or "/" not in model:
         raise ControlError(f"模型名无效：{model}（要写全，如 cli:goose/glm-5.3）")
     try:
