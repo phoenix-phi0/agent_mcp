@@ -187,7 +187,11 @@ def _config_args(o: dict, t: dict) -> list:
 def _command(d: dict, t: dict, resume: str = None) -> list:
     o = d["options"]
     model = t.get("model") or o.get("model")
-    git = (Path(d["cwd"]) / ".git").exists()
+    _git = Path(d["cwd"]) / ".git"
+    # A bare `.git` path is not a repo: an empty directory (e.g. left by a
+    # failed `git init`, as happened in glm_eval 2026-11-15) must not
+    # suppress --skip-git-repo-check, or codex exits rc=1 at startup.
+    git = _git.is_file() or (_git / "HEAD").exists()
     if resume:
         # resume 不收 -s / -C / --color，见模块文档
         cmd = [CODEX_BIN, "exec", "resume", "--json"]

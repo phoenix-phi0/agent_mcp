@@ -201,12 +201,26 @@ def main():
     repo = TMP / "repo"
     repo.mkdir()
     (repo / ".git").mkdir()
+    # 真仓库的 .git 里有 HEAD；只有空目录不算仓库（见下一组）
+    (repo / ".git" / "HEAD").write_text("ref: refs/heads/master\n")
     LOG.unlink(missing_ok=True)
     j = cxbatch.submit(["在仓库里"], cwd=str(repo))
     cxbatch.wait(j["job_id"], timeout=20, every=0.2)
     c = calls()[0]
     check("--skip-git-repo-check" not in c["argv"] and arg(c, "-C") == str(repo),
           "有 .git 就不跳过检查", c["argv"])
+
+    print("空的 .git 目录不算仓库，照样加 --skip-git-repo-check")
+    # git init 失败会留下空的 .git 目录；当成仓库的话 codex 一启动就退出码 1
+    empty = TMP / "empty_git"
+    empty.mkdir()
+    (empty / ".git").mkdir()
+    LOG.unlink(missing_ok=True)
+    j = cxbatch.submit(["在空 .git 目录里"], cwd=str(empty))
+    cxbatch.wait(j["job_id"], timeout=20, every=0.2)
+    c = calls()[0]
+    check("--skip-git-repo-check" in c["argv"] and arg(c, "-C") == str(empty),
+          "空 .git 目录仍跳过检查", c["argv"])
 
     print("默认 cwd：任务目录下的空目录")
     LOG.unlink(missing_ok=True)
