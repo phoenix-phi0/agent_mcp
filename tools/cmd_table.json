@@ -1,0 +1,194 @@
+{
+  "callers": {
+    "tool_call": {
+      "levels": [
+        "read",
+        "write",
+        "service"
+      ]
+    },
+    "small_model": {
+      "levels": [
+        "read"
+      ],
+      "allow": [
+        "run_test"
+      ]
+    }
+  },
+  "commands": [
+    {
+      "name": "run_test",
+      "level": "write",
+      "doc": "运行指定测试；超过 170 秒的测试用 job 启动",
+      "params": {
+        "file": {
+          "type": "path",
+          "required": true,
+          "glob": "tests/**/*.py"
+        },
+        "tail": {
+          "type": "int",
+          "min": 1,
+          "max": 200,
+          "default": 40
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        ".venv/bin/python {file} > {log} 2>&1; rc=$?; printf \"EXIT=%s\\n\" \"$rc\" >> {log}; tail -n {tail} {log}; exit \"$rc\""
+      ],
+      "mode": "sync",
+      "timeout": 170
+    },
+    {
+      "name": "git_snapshot",
+      "level": "read",
+      "doc": "查看 Git 状态",
+      "params": {
+        "paths": {
+          "type": "path_list",
+          "glob": "*",
+          "default": []
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "git rev-parse HEAD && git branch --show-current && git status --short | grep -v \"^?? \" || true",
+        "git diff --stat -- {paths}"
+      ],
+      "mode": "sync",
+      "timeout": 60
+    },
+    {
+      "name": "git_commit",
+      "level": "write",
+      "doc": "提交指定文件",
+      "params": {
+        "files": {
+          "type": "path_list",
+          "required": true,
+          "glob": "*"
+        },
+        "message": {
+          "type": "text",
+          "required": true,
+          "max_len": 200
+        },
+        "push": {
+          "type": "bool",
+          "default": false
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "git add -- {files}",
+        "git commit --cleanup=verbatim -m {message} -- {files}",
+        "if {push}; then git push origin HEAD; fi"
+      ],
+      "mode": "sync",
+      "timeout": 60
+    },
+    {
+      "name": "restart_check",
+      "level": "service",
+      "doc": "重启服务并检查端口",
+      "params": {
+        "unit": {
+          "type": "enum",
+          "required": true,
+          "values": [
+            "ali-trace.service"
+          ]
+        },
+        "port": {
+          "type": "int",
+          "default": 8765,
+          "min": 1,
+          "max": 65535
+        },
+        "compile": {
+          "type": "path",
+          "glob": "tools/**/*.py"
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "if [ -n {compile} ]; then .venv/bin/python -m py_compile {compile}; fi",
+        "systemctl restart {unit}",
+        "sleep 6; printf \"ACTIVE=%s\\n\" \"$(systemctl is-active {unit})\"; printf \"LISTEN=%s\\n\" \"$(ss -ltn | grep -cE ':{port}[[:space:]]' || true)\""
+      ],
+      "mode": "sync",
+      "timeout": 60
+    },
+    {
+      "name": "tail_log",
+      "level": "read",
+      "doc": "查看过滤敏感行的日志",
+      "params": {
+        "path": {
+          "type": "path",
+          "required": true,
+          "roots": [
+            "/workspace/agent_mcp/data/tmp",
+            "/tmp"
+          ],
+          "glob": [
+            "*.log",
+            "*.txt",
+            "*.json",
+            "*.jsonl"
+          ]
+        },
+        "lines": {
+          "type": "int",
+          "min": 1,
+          "max": 400,
+          "default": 60
+        },
+        "grep": {
+          "type": "text",
+          "max_len": 8000,
+          "default": ""
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "tail -n {lines} -- {path} | grep -F -e {grep} | grep -viE \"(key|token|secret|password|passwd|authorization)[\\\"']?[[:space:]]*[:=]|bearer \"; true"
+      ],
+      "mode": "sync",
+      "timeout": 60
+    },
+    {
+      "name": "job",
+      "level": "read",
+      "doc": "后台任务",
+      "params": {
+        "action": {
+          "type": "enum",
+          "required": true,
+          "values": [
+            "start",
+            "status",
+            "result"
+          ]
+        },
+        "command": {
+          "type": "text",
+          "max_len": 100
+        },
+        "args": {
+          "type": "object"
+        },
+        "job": {
+          "type": "text",
+          "max_len": 32
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [],
+      "mode": "job",
+      "timeout": 60
+    }
+  ]
+}
