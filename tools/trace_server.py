@@ -24,6 +24,12 @@
     POST /api/approve     {name, attempt, step?, result?, note?, item_controls?}
     POST /api/reject      {name, attempt, note, step?, role?, model?}
     POST /api/edit_plan   {name, tasks?, item_controls?, record?}
+    GET  /api/entries     工作目录下能启动的入口脚本（调「编排执行」的 .zs）：文件名、说明、流程、节点名、角色；
+                          另带 agents/ 下的角色卡。只给能写的查看服务
+    POST /api/start       {entry, mode?, confirm_before?, confirm_after?, max_attempts?, models?, roles?}
+                          启动一次受控运行（会真的调模型），回 {ok, name, status}
+    POST /api/configure   {name, confirm_before?, confirm_after?, max_attempts?, models?, roles?}
+                          改整次运行的规则和按角色的长期覆盖（只影响还没跑的节点）；不给的键不改，给 []/{} 清空
     POST /api/pause       {name}
   带 Origin 头的请求，Origin 要和 Host 一致；没有 --token 时 Host 还得是本机名（127.0.0.1 / ::1 / localhost），否则 403。
   成功：200 {ok: true, status: workflow_ctl.status 的摘要}
@@ -49,7 +55,9 @@ from urllib.parse import parse_qs, urlparse
 VIEW = Path(__file__).resolve().with_name("trace_view.html")
 _NAME = re.compile(r"^[\w.-]+\.json$")
 _CARD = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
-_WRITE_OPS = ("submit", "execute", "resume", "abort", "approve", "reject", "edit_plan", "pause", "submit_files")
+_WRITE_OPS = ("submit", "execute", "resume", "abort", "approve", "reject", "edit_plan", "pause", "submit_files",
+              "configure", "start")
+_CONFIG_KEYS = ("confirm_before", "confirm_after", "max_attempts", "models", "roles")
 _MAX_BODY = 4 * 1024 * 1024
 _LOCK = threading.Lock()        # 写操作一次只做一个：控制文件只能有一个写的人
 
@@ -77,6 +85,118 @@ def _ctl():
         sys.path.insert(0, root)
     from tools import workflow_ctl
     return workflow_ctl
+
+
+_ENTRY = re.compile(r"^[\w.\-]+\.zs$")
+_RUN_WF = re.compile(r"^\s*编排执行\s+(\S+\.wf)\s*$", re.M)
+_ROLE_LINE = re.compile(r"^\s+角色\s+(?:([A-Z][A-Z0-9_]*)|\{\w+\s+或\s+([A-Z][A-Z0-9_]*)\})\s*$", re.M)
+_ROSTER_VAR = re.compile(r"^\s*设\s+roles\s*=\s*(.+)$", re.M)
+_NOT_NODE = ("如果", "遍历", "跳转", "存储", "清空", "标记", "角色清单", "成本合计", "#")
+_FIELDS = ("任务 ", "角色 ", "文本 ", "格式 ", "记录 ")
+
+
+def _wf_nodes(text):
+    """流程里的节点名：下一行缩进更深、而且是任务块字段（任务 / 角色 …）的那一行。"""
+    lines = [l for l in text.splitlines() if l.strip()]
+    out = []
+    for i, line in enumerate(lines[:-1]):
+        head, nxt = line.strip(), lines[i + 1]
+        ind = len(line) - len(line.lstrip())
+        if (len(nxt) - len(nxt.lstrip()) > ind and nxt.strip().startswith(_FIELDS)
+                and not head.startswith(_NOT_NODE) and head not in out):
+            out.append(head)
+    return out
+
+
+def list_entries(workdir):
+    """工作目录下调「编排执行」的入口脚本，带上流程里的节点名和角色（页面上做确认规则、换卡的候选）。"""
+    out = []
+    for f in sorted(workdir.glob("*.zs")):
+        try:
+            text = f.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        m = _RUN_WF.search(text)
+        if not m or not _ENTRY.fullmatch(f.name):
+            continue
+        first = next((l for l in text.splitlines() if l.strip()), "")
+        title = first.lstrip("#").strip() if first.startswith("#") else ""
+        try:
+            wf = (workdir / m[1]).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            wf = ""
+        roles = []
+        for a, b in _ROLE_LINE.findall(wf):
+            if (a or b) not in roles:
+                roles.append(a or b)
+        for m2 in _ROSTER_VAR.finditer(text):
+            for r in re.split(r"[,\s，]+", m2[1].strip()):
+                if _CARD.fullmatch(r) and r not in roles:
+                    roles.append(r)
+        out.append({"entry": f.name, "title": title, "workflow": m[1][:-3], "nodes": _wf_nodes(wf), "roles": roles})
+    return out
+
+
+def _check_roles_exist(roles, agents):
+    known = {a["name"] for a in agents}
+    missing = sorted({v for v in (roles or {}).values() if v not in known})
+    if missing:
+        from tools.workflow_ctl import ControlError
+        raise ControlError(f"没有这张角色卡：{'、'.join(map(str, missing))}")
+
+
+def _config_args(wc, body):
+    args = {k: body[k] for k in _CONFIG_KEYS if body.get(k) is not None}
+    for key in ("models", "roles"):
+        if key in args and not isinstance(args[key], dict):
+            raise wc.ControlError(f"{key} 要是对象（角色 → 模型 / 卡）")
+    for key in ("confirm_before", "confirm_after"):
+        if key in args and not isinstance(args[key], list):
+            raise wc.ControlError(f"{key} 要是列表")
+    return args
+
+
+def start_run(runs, body):
+    """页面上启动一次受控运行。工作目录是 runs 的上一层；入口必须是那里调「编排执行」的 .zs。"""
+    wc = _ctl()
+    workdir = runs.resolve().parent
+    try:
+        entry = body.get("entry")
+        if not isinstance(entry, str) or not _ENTRY.fullmatch(entry):
+            raise wc.ControlError("entry 要是工作目录下的 .zs 文件名")
+        if entry not in {e["entry"] for e in list_entries(workdir)}:
+            raise wc.ControlError(f"{entry} 不是能启动的入口脚本（工作目录里没有，或没调「编排执行」）")
+        mode = body.get("mode") or "auto"
+        args = _config_args(wc, body)
+        if args.get("roles"):
+            _check_roles_exist(args["roles"], read_agents({"workdir": str(workdir)}))
+        with _LOCK:
+            st = wc.start(workdir, entry=entry, mode=mode, wait=False, actor="viewer", **args)
+    except wc.ControlError as e:
+        return 400, {"ok": False, "error": str(e)}
+    except (TypeError, ValueError) as e:
+        return 400, {"ok": False, "error": f"参数不对：{e}"}
+    except Exception as e:      # 不让一次失败的操作把服务带倒
+        return 500, {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    name = Path(st["run"]).name
+    if (runs / name).resolve().parent != runs.resolve():
+        return 500, {"ok": False, "error": f"运行记录没有写到 {runs}：{st['run']}"}
+    return 200, {"ok": True, "name": name, "status": st}
+
+
+def _configure(wc, path, body):
+    """页面改运行配置：键都可选，不给的不改。换卡的目标必须是工作目录 agents/ 下真有的卡
+    （configure 本身只查名字格式，填错要等跑到那一步才炸）。"""
+    args = _config_args(wc, body)
+    if not args:
+        raise wc.ControlError("没有要改的配置")
+    if args.get("roles"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        _check_roles_exist(args["roles"], read_agents(data))
+    return wc.configure(path, actor="viewer", **args)
 
 
 def control(op, path, body):
@@ -116,6 +236,8 @@ def control(op, path, body):
                                   item_controls=body.get("item_controls"), record=body.get("record"))
             elif op == "pause":
                 st = wc.pause(path)
+            elif op == "configure":
+                st = _configure(wc, path, body)
             else:
                 st = wc.abort(path)
     except wc.ControlError as e:
@@ -348,6 +470,11 @@ def route(runs, method, path, query, headers, body, token=None, base="", write=F
             return respond(200, view_html(write), "text/html; charset=utf-8")
         if path == "/api/runs":
             return respond_json({"dir": runs.name if token else str(runs), "runs": list_runs(runs)})
+        if path == "/api/entries":
+            if not write:
+                return respond_json({"error": "这个查看服务是只读的，不能启动运行"}, 403)
+            wd = runs.resolve().parent
+            return respond_json({"entries": list_entries(wd), "agents": read_agents({"workdir": str(wd)})})
         if path in ("/api/run", "/api/plan", "/api/workfiles"):
             name = (parse_qs(query).get("name") or [""])[0]
             if not _NAME.fullmatch(name):
@@ -393,6 +520,9 @@ def route(runs, method, path, query, headers, body, token=None, base="", write=F
             return respond_json({"ok": False, "error": f"请求体不是 JSON：{e}"}, 400)
         if not isinstance(body, dict):
             return respond_json({"ok": False, "error": "请求体要是 JSON 对象"}, 400)
+        if op == "start":
+            code, out = start_run(runs, body)
+            return respond_json(out, code)
         name = body.get("name")
         if not isinstance(name, str) or not _NAME.fullmatch(name):
             return respond_json({"ok": False, "error": "文件名不对"}, 400)

@@ -56,6 +56,14 @@ button, label.btn, select { font: inherit; cursor: pointer; }
 .mono { font-family: var(--font-mono); }
 .num { font-variant-numeric: tabular-nums; }
 #run-plan { padding: 14px 18px; }
+#run-config { padding: 12px 18px; }
+#run-config h2 { display: inline; margin-right: 10px; }
+.cfg-grid { display: grid; gap: 12px; margin-top: 10px; }
+.cfg-rules { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; }
+.cfg-rules label { display: inline-flex; gap: 4px; align-items: center; }
+.cfg-sec h3 { font-size: 12.5px; color: var(--muted); font-weight: 500; margin: 0 0 4px; }
+#start-panel { padding: 12px 16px; border-top: 1px solid var(--line); }
+#start-panel h3 { margin: 0 0 4px; font-size: 14px; }
 .plan-state { font-weight: 600; white-space: nowrap; }
 .plan-state.done { color: #26834a; }
 .plan-state.held { color: #9a6700; }
@@ -150,7 +158,7 @@ body.drag::after { content: "松开即可载入这份过程记录"; position: fi
 /* 两层：列表页（地址不带 #run=）只有运行列表；运行页（#run=名字）是概况、流程图和节点详情 */
 body.view-list .run-view, body.view-list .run-view-only { display: none !important; }
 body.view-run #runs-panel { display: none !important; }
-body.run-missing .main, body.run-missing .strip, body.run-missing #run-plan { display: none !important; }
+body.run-missing .main, body.run-missing .strip, body.run-missing #run-plan, body.run-missing #run-config { display: none !important; }
 #back-list { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 4px 12px; }
 #back-list:hover { border-color: var(--accent); color: var(--accent); }
 .runs-table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -305,7 +313,9 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     </select>
     <label class="hint" for="runs-wf">流程</label>
     <select class="btn" id="runs-wf"><option value="">全部</option></select>
+    <button type="button" class="btn2 primary" id="new-run" hidden>新建运行</button>
   </div>
+  <div id="start-panel" aria-label="新建运行" hidden></div>
   <div class="runs-wrap" id="runs-wrap">
     <table class="runs-table">
       <thead><tr><th>运行</th><th>流程</th><th>状态</th><th>进度</th><th>开始</th><th>用时</th><th>成本</th><th>需求</th></tr></thead>
@@ -318,6 +328,8 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
   <div class="summary" id="summary"></div>
   <div class="note" id="note" hidden></div>
 </section>
+
+<section class="panel run-view" id="run-config" aria-label="运行配置" hidden></section>
 
 <section class="panel run-view" id="run-plan" aria-label="分配清单" hidden></section>
 
@@ -1445,6 +1457,272 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
       });
   });
 
+  // ---- 运行配置：改整次运行的确认规则、尝试上限、按角色换模型 / 换卡（workflow_ctl.configure） ----
+  // 打开编辑时轮询不重画这块，免得改到一半被刷新冲掉；保存或取消后再按最新记录画
+  var C = null;
+  function cfgCandidates(t) {
+    var nodes = [], roles = [];
+    function add(list, v) { if (v && list.indexOf(v) < 0) list.push(v); }
+    (function walk(list) {
+      (list || []).forEach(function (n) {
+        if (n.kind === "task") {
+          add(nodes, n.name);
+          var r = (n.fields || {})["角色"];
+          if (r && /^[A-Z][A-Z0-9_]*$/.test(r)) add(roles, r);
+        }
+        if (n.kids) walk(n.kids);
+      });
+    })(parseScript(t.script || ""));
+    (t.events || []).forEach(function (e) { if (e.type === "task" && e.role && /^[A-Z][A-Z0-9_]*$/.test(e.role)) add(roles, e.role); });
+    var ctl = t._control || {};
+    Object.keys(ctl.models || {}).concat(Object.keys(ctl.roles || {})).forEach(function (r) { add(roles, r); });
+    return { nodes: nodes, roles: roles };
+  }
+  function cfgFrom(ctl) {
+    var over = {};
+    Object.keys(ctl.models || {}).forEach(function (r) { (over[r] = over[r] || {}).model = ctl.models[r]; });
+    Object.keys(ctl.roles || {}).forEach(function (r) { (over[r] = over[r] || {}).card = ctl.roles[r]; });
+    return { confirm_before: copy(ctl.confirm_before && ctl.confirm_before.length ? ctl.confirm_before : (ctl.stop_roles || [])),
+      confirm_after: copy(ctl.confirm_after || []), max_attempts: ctl.max_attempts == null ? null : ctl.max_attempts, over: over };
+  }
+  function runConfig(t) {
+    var el = $("run-config");
+    var editable = WRITE && t && t._control && ["done", "aborted"].indexOf(t.status) < 0;
+    if (!editable) { C = null; el.hidden = true; el.innerHTML = ""; return; }
+    if (C && C.name === t._name && (C.open || C.busy)) return;
+    C = { name: t._name, el: el, open: false, busy: false, msg: C && C.name === t._name ? C.msg : "",
+      cand: cfgCandidates(t), agents: t._agents || [], orig: cfgFrom(t._control) };
+    renderConfig();
+  }
+  // 下面几个画法和读法给「运行配置」（data-cfg-*）和「新建运行」（data-start-*）共用
+  function rulesBox(attr, field, rules, cand) {
+    var picked = rules || [], extra = picked.filter(function (r) { return cand.nodes.indexOf(r) < 0 && cand.roles.indexOf(r) < 0; });
+    var boxes = cand.nodes.concat(cand.roles).map(function (name) {
+      return '<label><input type="checkbox" data-' + attr + '-rule="' + field + '" value="' + esc(name) + '"' + (picked.indexOf(name) >= 0 ? " checked" : "") + ">" + esc(name) + "</label>";
+    }).join("");
+    return '<div class="cfg-rules">' + boxes + "</div>" +
+      '<input class="f-in short" data-' + attr + '-extra="' + field + '" aria-label="' + (field === "confirm_before" ? "开始前确认" : "结束后确认") + '的其他规则" placeholder="其他规则，逗号分隔；* 是全部，ENGINEER* 匹配前缀" value="' + esc(extra.join(", ")) + '">';
+  }
+  function overTable(attr, roles, over, agents, dis) {
+    var models = [];
+    agents.forEach(function (a) { if (a.model && models.indexOf(a.model) < 0) models.push(a.model); });
+    return '<table class="plan-table"><thead><tr><th>角色</th><th>换模型</th><th>换卡</th></tr></thead><tbody>' +
+      roles.map(function (r) {
+        var x = over[r] || {};
+        return "<tr><td class=\"mono\">" + esc(r) + '</td><td><input class="f-in" list="' + attr + '-models" data-' + attr + '-role="' + esc(r) + '" data-' + attr + '-kind="model" aria-label="' + esc(r) + ' 换模型" placeholder="不换（要写全，如 cli:goose/glm-5.3）" value="' + esc(x.model || "") + '"' + dis + "></td>" +
+          '<td><select class="f-in" data-' + attr + '-role="' + esc(r) + '" data-' + attr + '-kind="card" aria-label="' + esc(r) + ' 换卡"' + dis + '><option value="">不换</option>' +
+          agents.map(function (a) { return '<option value="' + esc(a.name) + '"' + (x.card === a.name ? " selected" : "") + ">" + esc(a.name) + (a.model ? "（" + esc(a.model) + "）" : "") + "</option>"; }).join("") +
+          (x.card && !agents.some(function (a) { return a.name === x.card; }) ? '<option value="' + esc(x.card) + '" selected>' + esc(x.card) + "（找不到这张卡）</option>" : "") +
+          "</select></td></tr>";
+      }).join("") + '</tbody></table><datalist id="' + attr + '-models">' + models.map(function (m) { return '<option value="' + esc(m) + '">'; }).join("") + "</datalist>";
+  }
+  function readRules(el, attr, field) {
+    var list = [];
+    el.querySelectorAll("[data-" + attr + '-rule="' + field + '"]').forEach(function (b) { if (b.checked) list.push(b.value); });
+    var extra = el.querySelector("[data-" + attr + '-extra="' + field + '"]');
+    (extra ? extra.value : "").split(/[,，、\s]+/).forEach(function (r) { r = r.trim(); if (r && list.indexOf(r) < 0) list.push(r); });
+    return list;
+  }
+  function readOver(el, attr) {
+    var over = {};
+    el.querySelectorAll("[data-" + attr + "-role]").forEach(function (x) {
+      var v = x.value.trim(), r = x.getAttribute("data-" + attr + "-role");
+      if (v) (over[r] = over[r] || {})[x.getAttribute("data-" + attr + "-kind")] = v;
+    });
+    return over;
+  }
+  function overPick(over, kind) { var m = {}; Object.keys(over).forEach(function (r) { if (over[r][kind]) m[r] = over[r][kind]; }); return m; }
+  function badModels(models) {
+    var bad = Object.keys(models).filter(function (r) { return !/^[a-z]+:\S+$/.test(models[r]); });
+    return bad.length ? bad.join("、") + " 的模型要写全，如 cli:goose/glm-5.3 或 platform:claude-sonnet-5-5" : "";
+  }
+  function attemptsError(n) {
+    return Number.isInteger(n) && n >= 1 && n <= 50 ? "" : "最多尝试次数要是 1–50 的整数";
+  }
+  function cfgSummary(o) {
+    var parts = [];
+    parts.push("开始前确认：" + (o.confirm_before.length ? o.confirm_before.join("、") : "无"));
+    parts.push("结束后确认：" + (o.confirm_after.length ? o.confirm_after.join("、") : "无"));
+    parts.push("最多尝试：" + (o.max_attempts == null ? "默认" : o.max_attempts + " 次"));
+    var ov = Object.keys(o.over).map(function (r) {
+      var x = o.over[r];
+      return r + (x.card ? " 换卡 " + x.card : "") + (x.model ? " 用 " + x.model : "");
+    });
+    parts.push("按角色覆盖：" + (ov.length ? ov.join("；") : "无"));
+    return parts.join(" · ");
+  }
+  function renderConfig() {
+    if (!C) return;
+    var o = C.orig, dis = C.busy ? " disabled" : "";
+    C.el.hidden = false;
+    var h = "<h2>运行配置</h2>";
+    if (!C.open) {
+      h += '<button type="button" class="btn2" data-cfg="open"' + dis + ">编辑配置</button>" +
+        '<div class="hint" style="margin-top:6px">' + esc(cfgSummary(o)) + "</div>";
+    } else {
+      h += '<span class="hint">改的是整次运行，只影响还没跑的步骤；正在跑或停着的这一步不变</span><div class="cfg-grid">' +
+        '<div class="cfg-sec"><h3>开始前确认（跑到这些节点或角色前停下等你）</h3>' + rulesBox("cfg", "confirm_before", o.confirm_before, C.cand) + "</div>" +
+        '<div class="cfg-sec"><h3>结束后确认（这些节点或角色跑完先给你看结果）</h3>' + rulesBox("cfg", "confirm_after", o.confirm_after, C.cand) + "</div>" +
+        '<div class="cfg-sec"><h3>每一步最多尝试几次</h3><input class="f-in" style="width:120px" type="number" min="1" max="50" data-cfg-field="max_attempts" aria-label="最多尝试次数" placeholder="默认" value="' +
+          (o.max_attempts == null ? "" : esc(o.max_attempts)) + '"' + dis + "> <span class=\"hint\">1–50；" + (o.max_attempts == null ? "不填 = 用默认" : "不能清空，只能改成别的数") + "</span></div>" +
+        '<div class="cfg-sec"><h3>按角色长期覆盖</h3>' + overTable("cfg", C.cand.roles, o.over, C.agents, dis) + "</div></div>" +
+        '<div class="act-row" style="margin-top:10px"><button type="button" class="btn2 primary" data-cfg="save"' + dis + '>保存配置</button><button type="button" class="btn2" data-cfg="cancel"' + dis + ">取消</button></div>";
+    }
+    h += '<div id="run-config-msg" role="status">' + esc(C.msg) + "</div>";
+    C.el.innerHTML = h;
+  }
+  function cfgRead() {
+    var el = C.el, n = el.querySelector('[data-cfg-field="max_attempts"]').value.trim();
+    return { confirm_before: readRules(el, "cfg", "confirm_before"), confirm_after: readRules(el, "cfg", "confirm_after"),
+      max_attempts: n === "" ? null : Number(n), over: readOver(el, "cfg") };
+  }
+  function cfgBody(cur) {
+    var o = C.orig, body = {};
+    ["confirm_before", "confirm_after"].forEach(function (f) { if (!same(cur[f], o[f])) body[f] = cur[f]; });
+    if (cur.max_attempts !== o.max_attempts) {
+      if (cur.max_attempts == null) return { error: "最多尝试次数不能清空，只能改成 1–50 的数" };
+      if (attemptsError(cur.max_attempts)) return { error: attemptsError(cur.max_attempts) };
+      body.max_attempts = cur.max_attempts;
+    }
+    var models = overPick(cur.over, "model"), roles = overPick(cur.over, "card");
+    if (badModels(models)) return { error: badModels(models) };
+    if (!same(models, overPick(o.over, "model"))) body.models = models;
+    if (!same(roles, overPick(o.over, "card"))) body.roles = roles;
+    return Object.keys(body).length ? { body: body } : { error: "没有改动" };
+  }
+  $("run-config").addEventListener("click", function (event) {
+    var b = event.target.closest("[data-cfg]");
+    if (!b || !C || C.busy || !WRITE) return;
+    var op = b.getAttribute("data-cfg");
+    if (op === "open") { C.open = true; C.msg = ""; renderConfig(); return; }
+    if (op === "cancel") { C.open = false; C.msg = ""; renderConfig(); return refresh(); }
+    var made = cfgBody(cfgRead()), draft = C;
+    if (made.error) { C.msg = made.error; C.el.querySelector("#run-config-msg").textContent = C.msg; return; }
+    made.body.name = C.name;
+    C.busy = true; C.msg = "正在发送…";
+    C.el.querySelectorAll("button, input, select").forEach(function (x) { x.disabled = true; });
+    C.el.querySelector("#run-config-msg").textContent = C.msg;
+    fetch("api/configure", { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify(made.body) })
+      .then(function (r) { return r.json().then(function (d) { if (!r.ok || !d.ok) throw new Error(d.error || "没有成功"); },
+        function () { throw new Error("查看服务返回了 HTTP " + r.status); }); }, function (err) { throw new Error("连不上查看服务：" + err.message); })
+      .then(function () {
+        if (C !== draft) return;
+        C.busy = false; C.open = false; C.msg = "配置已保存，之后的步骤按新配置走";
+        renderConfig(); return refresh();
+      }).catch(function (error) {
+        if (C !== draft) return;
+        C.busy = false; C.msg = error.message;
+        C.el.querySelectorAll("button, input, select").forEach(function (x) { x.disabled = false; });
+        C.el.querySelector("#run-config-msg").textContent = C.msg;
+      });
+  });
+
+  // ---- 新建运行（列表页）：选入口脚本、模式、确认规则、尝试上限、按角色覆盖，POST api/start ----
+  var SP = null;
+  function spEntry() { return SP && SP.entries.filter(function (e) { return e.entry === SP.entry; })[0]; }
+  function renderStart() {
+    var el = $("start-panel");
+    if (!SP) { el.hidden = true; el.innerHTML = ""; return; }
+    el.hidden = false;
+    var h = "<h3>新建运行</h3>";
+    if (SP.loading) h += '<div class="hint">正在读入口脚本…</div>';
+    else if (!SP.entries.length) h += '<div class="hint">工作目录里没有能启动的入口脚本（要调「编排执行」的 .zs）</div>';
+    else {
+      var e = spEntry(), cand = { nodes: e.nodes || [], roles: e.roles || [] };
+      h += '<span class="hint">启动后按入口脚本里的需求真的调模型（按卡计费或占订阅额度）；配置以后还能在运行页改</span><div class="cfg-grid">' +
+        '<div class="cfg-sec"><h3>入口脚本</h3><select class="f-in" data-start-field="entry" aria-label="入口脚本">' +
+        SP.entries.map(function (x) { return '<option value="' + esc(x.entry) + '"' + (x.entry === SP.entry ? " selected" : "") + ">" + esc(x.entry) + " · " + esc(x.workflow) + "</option>"; }).join("") +
+        "</select>" + (e.title ? '<div class="hint" style="margin-top:4px">' + esc(e.title) + "</div>" : "") + "</div>" +
+        '<div class="cfg-sec"><h3>模式</h3><select class="f-in" data-start-field="mode" aria-label="模式">' +
+        '<option value="auto"' + (SP.mode === "auto" ? " selected" : "") + '>自动往下跑（只在下面勾的地方停）</option>' +
+        '<option value="step"' + (SP.mode === "step" ? " selected" : "") + ">逐步，每步开始前都停</option></select></div>" +
+        '<div class="cfg-sec"><h3>开始前确认（跑到这些节点或角色前停下等你）</h3>' + rulesBox("start", "confirm_before", [], cand) + "</div>" +
+        '<div class="cfg-sec"><h3>结束后确认（这些节点或角色跑完先给你看结果）</h3>' + rulesBox("start", "confirm_after", [], cand) + "</div>" +
+        '<div class="cfg-sec"><h3>每一步最多尝试几次</h3><input class="f-in" style="width:120px" type="number" min="1" max="50" data-start-field="max_attempts" aria-label="最多尝试次数" value="' + esc(SP.max) + '"></div>' +
+        '<div class="cfg-sec"><h3>按角色覆盖（可不填）</h3>' + overTable("start", cand.roles, {}, SP.agents, "") + "</div></div>";
+    }
+    h += '<div class="act-row" id="start-actions" style="margin-top:10px"></div><div id="start-msg" role="status"></div>';
+    el.innerHTML = h;
+    renderStartActions();
+  }
+  function renderStartActions() {
+    var a = $("start-actions"), dis = SP.busy ? " disabled" : "";
+    if (!a) return;
+    var ready = !SP.loading && SP.entries.length;
+    a.innerHTML = (ready ? (SP.confirm
+      ? '<button type="button" class="btn2 primary" data-start="go-yes"' + dis + ">确定启动（会真的调模型）</button>" +
+        '<button type="button" class="btn2" data-start="go-no"' + dis + ">再想想</button>"
+      : '<button type="button" class="btn2 primary" data-start="go"' + dis + ">启动</button>") : "") +
+      '<button type="button" class="btn2" data-start="close"' + dis + ">关闭</button>";
+    $("start-msg").textContent = SP.msg || "";
+  }
+  function startBody() {
+    var el = $("start-panel"), n = Number(el.querySelector('[data-start-field="max_attempts"]').value.trim());
+    var over = readOver(el, "start"), models = overPick(over, "model"), roles = overPick(over, "card");
+    if (attemptsError(n)) return { error: attemptsError(n) };
+    if (badModels(models)) return { error: badModels(models) };
+    var body = { entry: el.querySelector('[data-start-field="entry"]').value,
+      mode: el.querySelector('[data-start-field="mode"]').value, max_attempts: n };
+    var before = readRules(el, "start", "confirm_before"), after = readRules(el, "start", "confirm_after");
+    if (before.length) body.confirm_before = before;
+    if (after.length) body.confirm_after = after;
+    if (Object.keys(models).length) body.models = models;
+    if (Object.keys(roles).length) body.roles = roles;
+    return { body: body };
+  }
+  $("new-run").hidden = !WRITE;
+  $("new-run").addEventListener("click", function () {
+    if (!WRITE || SP) return;
+    var mine = SP = { loading: true, entries: [], agents: [], entry: null, mode: "auto", max: 4, confirm: false, busy: false, msg: "" };
+    renderStart();
+    fetchJson("api/entries").then(function (d) {
+      if (SP !== mine) return;
+      SP.loading = false; SP.entries = d.entries || []; SP.agents = d.agents || [];
+      SP.entry = SP.entries.length ? SP.entries[0].entry : null;
+      renderStart();
+    }, function (err) {
+      if (SP !== mine) return;
+      SP.loading = false; SP.msg = "读不到入口脚本：" + err.message; renderStart();
+    });
+  });
+  $("start-panel").addEventListener("change", function (event) {
+    var t = event.target;
+    if (!SP || SP.busy) return;
+    if (t.getAttribute("data-start-field") === "entry") {
+      // 换入口：节点名和角色跟着换，模式和次数留着
+      SP.mode = $("start-panel").querySelector('[data-start-field="mode"]').value;
+      SP.max = $("start-panel").querySelector('[data-start-field="max_attempts"]').value;
+      SP.entry = t.value; SP.confirm = false; SP.msg = ""; renderStart();
+    } else if (SP.confirm) { SP.confirm = false; renderStartActions(); }
+  });
+  $("start-panel").addEventListener("input", function () {
+    // 点了「启动」等确认时又改了内容：要重新点启动，免得确认的不是现在填的
+    if (SP && !SP.busy && SP.confirm) { SP.confirm = false; renderStartActions(); }
+  });
+  $("start-panel").addEventListener("click", function (event) {
+    var b = event.target.closest("[data-start]");
+    if (!b || !SP || SP.busy || !WRITE) return;
+    var op = b.getAttribute("data-start");
+    if (op === "close") { SP = null; renderStart(); return; }
+    if (op === "go-no") { SP.confirm = false; SP.msg = ""; renderStartActions(); return; }
+    var made = startBody();
+    if (made.error) { SP.confirm = false; SP.msg = made.error; renderStartActions(); return; }
+    if (op === "go") { SP.confirm = true; SP.msg = ""; renderStartActions(); return; }
+    var mine = SP;
+    SP.busy = true; SP.msg = "正在启动…"; renderStartActions();
+    fetch("api/start", { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify(made.body) })
+      .then(function (r) { return r.json().then(function (d) { if (!r.ok || !d.ok) throw new Error(d.error || "没有成功"); return d; },
+        function () { throw new Error("查看服务返回了 HTTP " + r.status); }); }, function (err) { throw new Error("连不上查看服务：" + err.message); })
+      .then(function (d) {
+        if (SP !== mine) return;
+        SP = null; renderStart();
+        location.hash = "#run=" + encodeURIComponent(d.name);
+      }).catch(function (error) {
+        if (SP !== mine) return;
+        SP.busy = false; SP.confirm = false; SP.msg = error.message; renderStartActions();
+      });
+  });
+
   function renderReview() {
     var pd = A.pd, dis = A.busy ? " disabled" : "", max = pd.max_attempts, capped = max != null && pd.attempt >= max;
     var h = '<div class="act-head"><h3>等你确认（第 ' + esc(pd.attempt) + ' 次尝试' +
@@ -1720,6 +1998,7 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     S.byLine = indexEvents(trace.events);
     $("h-src").textContent = source;
     renderSummary(trace);
+    runConfig(trace);
     var run = trace.events.find(function (e) { return e.type === "task" && (e.status === "running" || e.status === "review" || (e.status === "waiting" && trace.status === "waiting")); });
     var err = trace.events.find(function (e) { return e.type === "task" && e.status === "error"; });
     var firstTask = trace.events.find(function (e) { return e.type === "task"; });

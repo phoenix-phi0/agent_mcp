@@ -213,6 +213,8 @@ run 插件交代码链路 $PY tests/tools/test_vscode_submit_e2e.py
 run 编排查看器 $PY tests/tools/test_trace_view.py
 run 查看器人工确认 $PY tests/tools/test_trace_confirm.py
 run 查看器令牌 $PY tests/tools/test_trace_token.py
+run 查看器运行配置 $PY tests/tools/test_trace_config.py
+run 查看器启动运行 $PY tests/tools/test_trace_start.py
 run 流程管理MCP $PY tests/tools/test_wf_mcp.py
 run DSL规划读码 $PY tests/tools/test_dslagent_planread.py
 run DSL测试环境 $PY tests/tools/test_dslagent_testenv.py
