@@ -79,54 +79,22 @@
     返回 {"ext": "{ext}", "error": "{err}"}
   结束
 
-  函数 取格 row n
-    设 cell = {row}
-    如果 {n} 大于 0
-      设 pre = ^
-      重复 {n} 次
-        设 pre = {pre}[^,]*,
-      结束
-      设 pm = 匹配 {row} {pre}
-      如果 {pm.matched} 等于 是
-        设 cell = 替换 {row} {pre}
-      否则
-        设 cell = {zz 或}
-      结束
-    结束
-    设 cell = 替换 {cell} ,.*$
-    设 cell = 替换 {cell} ^\s+|\s+$
-    返回 {"v": "{cell}"}
-  结束
-
   函数 csv统计 file_path text
     设 nlo = {"n": "\n"}
     设 nl = {nlo.n}
-    设 lines = 按正则切分 {text} \r?\n
-    设 hdr = {zz 或}
-    设 data = []
-    遍历 ln 于 {lines}
-      设 t1 = 替换 {ln} ^\s+|\s+$
-      如果 {t1} 不为空
-        如果 {hdr} 为空
-          设 hdr = 替换 {ln} ^\ufeff
-        否则
-          设 data = 列表加项 {data} {ln}
-        结束
-      结束
-    结束
-    设 rowcnt = 列表长度 {data}
-    设 parts = 按正则切分 {hdr} ,
-    设 ncols = 列表长度 {parts}
-    设 shown = {ncols}
-    如果 {ncols} 大于 30
-      设 shown = 30
-    结束
+    设 pt = 解析CSV文本 {text}
+    设 rowcnt = {pt.total}
+    设 ncols = 列表长度 {pt.header}
     设 names = {zz 或}
     设 colstats = {zz 或}
-    重复 {shown} 次 计数 c
-      设 c0 = 计算 {c} - 1
-      设 nm = 调用 取格 row={hdr} n={c0}
-      设 cname = {nm.v}
+    设 c = 0
+    遍历 colo 于 {pt.columns}
+      设 c = 计算 {c} + 1
+      如果 {c} 大于 30
+        继续
+      结束
+      设 vals = {colo.values}
+      设 cname = {colo.name}
       如果 {c} 等于 1
         设 names = {cname}
       否则
@@ -140,9 +108,7 @@
       设 maxv = 0
       设 mintxt = {zz 或}
       设 maxtxt = {zz 或}
-      遍历 ln2 于 {data}
-        设 cv = 调用 取格 row={ln2} n={c0}
-        设 cell = {cv.v}
+      遍历 cell 于 {vals}
         如果 {cell} 为空
           设 miss = 计算 {miss} + 1
         否则
@@ -215,6 +181,9 @@
     结束
     如果 {rowcnt} 等于 0
       设 stats = 只有表头，没有数据行：{names}
+    结束
+    如果 {pt.error} 不为空
+      设 stats = {stats}{nl}（注意：{pt.error}）
     结束
     返回 {"rows": {rowcnt}, "stats": "{stats}"}
   结束

@@ -72,11 +72,12 @@
 
 函数 csv统计 file_path text
   返回 {rows, stats}；rows 是数据行数（不含表头）；stats 是给模型看的统计文本（数字全由这里算，模型不自己算）
-  伪代码 把 text（读文档 已按编码规则读好的全文，UTF-8 / GBK 都行）按行切（\r?\n），去掉首尾空白后为空的行跳过；第一行当表头（去掉开头的 BOM），其余每行按英文逗号切，每格去首尾空白（不处理引号，简单表够用）。不用 data 包的 读CSV：它按 UTF-8 读文件，GBK 文件会抛解码错，而「调用 … 出错时」接不住动词抛的这种错，存附件会整个失败（K195 实测）
-  伪代码 rows = 数据行数；列名按表头顺序
+  伪代码 按 CSV 规则解析（引号、引号内的逗号 / 换行、转义引号 ""）：用 data 包的 解析CSV文本 解析 text（读文档 已按编码规则解码好的全文，UTF-8 / GBK 都行；该动词按字符串解析，不碰文件和编码，坏格式不抛错），写法 `设 t = 解析CSV文本 {text}`，得 header（表头列表）、columns（按表头逐列的 {name, values}，values 是该列全部数据行的格子，缺的格是空串）、total（数据行数）、error。动词已处理 CRLF、开头 BOM、每格去首尾空白、跳过全空的行、第一行当表头，这里不再自己按行按逗号切（旧的 取格 不再需要）。不用 读CSV：它按 UTF-8 读文件，GBK 文件会抛解码错，「调用 … 出错时」接不住（K195 实测）；解析CSV文本 是 K196 为此新增的动词
+  伪代码 rows = total（数据行数，不含表头）；列数 = header 的项数，列名按表头顺序；逐列统计用 columns 里对应列的 values（不含无引号时与原先按行按逗号切的结果逐字一致）
   伪代码 逐列：去首尾空白后为空串的格记缺失；非缺失的格全都能按数字解析（整数或小数，允许负号）且至少一个时算数值列，否则算文本列
   伪代码 stats 第一行「共 rows 行，n 列：列名1、列名2、…」；数值列每列一行「列名：均值 x，最低 y，最高 z，缺失 k」（均值保留 2 位小数，最低最高按原文去掉多余的 0）；文本列每列一行「列名：文本列，缺失 k」；列超过 30 个时只写前 30 列并加「（另有 m 列未列出）」
   伪代码 rows 等于 0：stats 为「只有表头，没有数据行：列名…」
+  伪代码 解析CSV文本 的 error 不为空（引号没闭合等坏格式，动词已尽力解析）：照常统计，不报错，在上面得到的 stats 末尾另起一行加「（注意：{error}）」；error 为空时 stats 不加这一行
   伪代码 返回 {"rows": rows, "stats": stats}
 
 公开 函数 存附件 current_user file_path file_name? file_size? file_ext? current_role? auth_mode? subject?
@@ -230,6 +231,12 @@
   调用 存附件 current_user=t1 file_path=uploads/s.csv file_name=成绩.csv file_ext=csv
   得 ok=1 ext=csv rows=3
   库 teacher_assist_file 含 ext=csv rows=3 attached=1
+
+用例 存附件_csv引号内换行不拆行
+  先 文件 uploads/q.csv 内容=姓名,备注\n张三,"第一行\n第二行"\n李四,"好, 很好"
+  调用 存附件 current_user=t1 file_path=uploads/q.csv file_name=q.csv file_ext=csv
+  得 ok=1 ext=csv rows=2
+  库 teacher_assist_file 含 ext=csv rows=2 attached=1
 
 用例 存附件_新附件挂上旧的摘下
   先 数据 teacher_assist_file teacher=t1 subject_id=1 name=旧.txt ext=txt size=3 path=uploads/old.txt pages=0 chars=3 text=旧内容 stats=空 rows=0 status=ok attached=1 created_at=2026-01-01 last_used_at=2026-01-01
