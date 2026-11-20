@@ -1072,9 +1072,10 @@ say "收尾检查"
 bad=$(find "$OUT" \( -name 'config.json' -o -name '.auth_secret' -o -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' -o -name '*.pyc' \) 2>/dev/null)
 [ -z "$bad" ] || { echo "!! 包里发现不该有的文件：$bad"; exit 1; }
 grep -q '<填你的 API Key>' "$OUT/scripts/config.example.json" || { echo "!! config 样板里不是占位值，不能打包"; exit 1; }
-# 路径检查覆盖会随包发出去的全部文本；匹配本机特征路径（/workspace、agent_mcp、/home/box）。
+# 路径检查覆盖会随包发出去的全部文本；匹配本机特征路径（/workspace、路径里的 agent_mcp、/home/box）。
+# agent_mcp 只认路径写法（/agent_mcp、agent_mcp/）：llm_router.py 的函数名 agent_mcp() 不是路径，早先按裸词匹配会误拦（K194）。
 # engine 里泛化的文档示例（如 zcode_tool 的 /home/<user>）不算泄露。
-hits=$( { grep -rIl -e '/workspace' -e 'agent_mcp' -e '/home/box' \
+hits=$( { grep -rIl -e '/workspace' -e '/agent_mcp' -e 'agent_mcp/' -e '/home/box' \
     "$OUT/engine" "$OUT/scripts" "$OUT/project" "$OUT/content" "$OUT/requirements.txt" \
     "$OUT/wheels/WHEELS.txt" "$OUT/README.md" "$OUT/README.ja.md" "$OUT/VERSION" 2>/dev/null || true; } | head -5 )
 [ -z "$hits" ] || { echo "!! 包里有开发机绝对路径：$hits"; exit 1; }
