@@ -311,9 +311,15 @@ def run(name: str, args: dict = None) -> dict:
     return run_as('tool_call', name, args)
 
 
-def list() -> list:
+def list_as(caller) -> list:
     table = _table()
-    return [{k: c[k] for k in ('name', 'level', 'doc', 'params')} for c in table['commands'] if c['name'] == 'job' or _allowed(table, 'tool_call', c)]
+    if caller not in table.get('callers', {}):
+        return []
+    return [{k: c[k] for k in ('name', 'level', 'doc', 'params')} for c in table['commands'] if c['name'] == 'job' or _allowed(table, caller, c)]
+
+
+def list() -> list:
+    return list_as('tool_call')
 
 
 def describe() -> str:

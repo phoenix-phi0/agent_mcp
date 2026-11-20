@@ -2002,6 +2002,18 @@ VERIFY_TOOLS = [
          "required": ["verify_ids"]}},
 ]
 
+if os.environ.get("GSB_CMD") == "1":
+    TOOLS += [
+        {"name": "cmd_list", "description": "列出当前调用方可用的固定指令和参数。",
+         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+        {"name": "cmd_run", "description": (
+            "执行固定指令，不是 shell；先调 cmd_list 查看指令和参数。status=rejected 表示参数或权限不对，"
+            "命令没有执行，按 reason 改参数再试；长任务用 job 指令（start → status / result）。"),
+         "inputSchema": {"type": "object", "properties": {
+             "name": {"type": "string"}, "args": {"type": "object"}},
+             "required": ["name"], "additionalProperties": False}},
+    ]
+
 if PROBE_ON:
     TOOLS = TOOLS + PROBE_TOOLS
 if REVIEW_ON:
@@ -2031,6 +2043,8 @@ def _priority_instructions():
     没挂的不写（GSB_TOOLS_ONLY 子集也不会提示不存在的工具）。"""
     have = {t["name"] for t in TOOLS}
     p = []
+    if {"cmd_list", "cmd_run"} <= have:
+        p.append("先用 cmd_list 查看固定指令和参数，再用 cmd_run 执行；长任务用 job。")
     if "search" in have:
         p.append("不知道东西叫什么、要在大文件里定位、想知道以前查过没有，先用 search 找线索"
                  "（scope=exp 搜以前的任务和探针结论），再用 read_files 核实。")
@@ -2069,6 +2083,27 @@ def _send(obj):
 
 
 def _call(name, args, cancel):
+    if name in ("cmd_list", "cmd_run"):
+        root = str(Path(__file__).resolve().parent.parent)
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        from tools import cmd
+        caller = os.environ.get("GSB_CMD_CALLER") or "small_model"
+        if name == "cmd_list":
+            rows = []
+            for command in cmd.list_as(caller):
+                lines = [f"{command['name']} ({command['level']})：{command['doc']}"]
+                for key, spec in command['params'].items():
+                    details = [f"类型={spec['type']}", "必填" if spec.get('required') else "可选",
+                               "default=" + (json.dumps(spec['default'], ensure_ascii=False)
+                                             if 'default' in spec else "未设置")]
+                    for field in ('values', 'min', 'max', 'glob'):
+                        if field in spec:
+                            details.append(f"{field}={json.dumps(spec[field], ensure_ascii=False)}")
+                    lines.append(f"  {key}: " + ", ".join(details))
+                rows.append("\n".join(lines))
+            return "\n\n".join(rows)
+        return json.dumps(cmd.run_as(caller, args.get("name"), args.get("args")), ensure_ascii=False)
     if name == "read_files":
         return read_files(args.get("files"), args.get("max_chars_per_file"),
                           args.get("max_total_chars"))

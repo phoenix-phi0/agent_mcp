@@ -76,6 +76,8 @@ class Server:
         env.pop("GSB_VERIFY_MODEL", None)
         env.pop("GSB_BWRAP_BIN", None)
         env.pop("GSB_TOOLS_ONLY", None)
+        env.pop("GSB_CMD", None)
+        env.pop("GSB_CMD_CALLER", None)
         env["GSB_PROBE_BACKEND"] = "codex"  # 大部分用例用假 codex；默认 claude 另测
         env["GSB_REVIEW_BACKEND"] = "codex"
         env["GSB_VERIFY_BACKEND"] = "codex"
@@ -246,6 +248,59 @@ def recs(path):
         return [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
     except OSError:
         return []
+
+
+def command_tests():
+    table_path = TMP / "cmd_table.json"
+    table = json.loads((SCRIPT.parent / "cmd_table.json").read_text())
+    for command in table['commands']:
+        command['cwd'] = str(TMP)
+    restart = next(c for c in table['commands'] if c['name'] == 'restart_check')
+    restart['steps'] = ['touch service_side_effect; printf service']
+    table['commands'].append(dict(name='echo_safe', level='read', doc='echo',
+        params={'value': {'type': 'text', 'required': True}}, cwd=str(TMP),
+        steps=['printf %s {value}'], mode='sync', timeout=5))
+    table_path.write_text(json.dumps(table))
+    env = dict(CMD_TABLE=str(table_path), CMD_HOME=str(TMP / 'cmd_home'))
+    s = Server(**env)
+    try:
+        names = [t['name'] for t in s.req('tools/list')['result']['tools']]
+        check('cmd_list' not in names and 'cmd_run' not in names, '默认没有指令工具')
+        check('error' in s.req('tools/call', {'name': 'cmd_run', 'arguments': {}}), '默认调用指令工具报未知')
+    finally:
+        s.close()
+    s = Server(GSB_CMD='1', **env)
+    try:
+        names = [t['name'] for t in s.req('tools/list')['result']['tools']]
+        check({'cmd_list', 'cmd_run'} <= set(names), '开启指令工具')
+        listing, _ = s.call('cmd_list', {})
+        check('run_test' in listing and 'restart_check' not in listing and 'glob=' in listing, '列表按权限过滤并描述参数', listing)
+        result, _ = s.call('cmd_run', {'name': 'echo_safe', 'args': {'value': 'hello'}})
+        check(json.loads(result)['output'] == 'hello' and json.loads(result)['status'] == 'ok', 'read 指令可执行', result)
+        for extra in ({}, {'caller': 'tool_call', 'extra': True}):
+            result, _ = s.call('cmd_run', dict(name='restart_check', args={'unit': 'ali-trace.service'}, **extra))
+            check(json.loads(result)['status'] == 'rejected' and not (TMP / 'service_side_effect').exists(), 'service 拒绝且无副作用', result)
+        payload = f'; touch {TMP}/pwned'
+        result, _ = s.call('cmd_run', {'name': 'echo_safe', 'args': {'value': payload}})
+        check(json.loads(result)['output'] == payload and not (TMP / 'pwned').exists(), '参数注入不会执行')
+    finally:
+        s.close()
+    s = Server(GSB_CMD='1', GSB_CMD_CALLER='tool_call', **env)
+    try:
+        result, _ = s.call('cmd_run', {'name': 'restart_check', 'args': {'unit': 'ali-trace.service'}})
+        check(json.loads(result)['status'] == 'ok' and (TMP / 'service_side_effect').exists(), 'tool_call 可执行 service', result)
+    finally:
+        s.close()
+    s = Server(GSB_CMD='1', GSB_TOOLS_ONLY='cmd_list,cmd_run', **env)
+    try:
+        names = [t['name'] for t in s.req('tools/list')['result']['tools']]
+        instructions = s.req('initialize')['result']['instructions']
+        check(names == ['cmd_list', 'cmd_run'] and 'run_wait' not in instructions, '仅暴露指令工具', names)
+    finally:
+        s.close()
+    proc = subprocess.run([sys.executable, str(SCRIPT)], input='', text=True, capture_output=True,
+                          env=dict(os.environ, GSB_TOOLS_ONLY='cmd_run', GSB_CMD='0', **env))
+    check(proc.returncode != 0 and '没有这些工具' in proc.stderr, '未开启指令工具时子集启动失败', proc.stderr)
 
 
 def tools_only_tests():
@@ -1523,6 +1578,7 @@ def k47_tests():
 
 
 def main():
+    command_tests()
     (TMP / "a.txt").write_text("".join(f"line{i}\n" for i in range(1, 11)), encoding="utf-8")
     (TMP / "b.py").write_text("print('b')\r\nx = 1\r\n", encoding="utf-8")
     (TMP / "sub").mkdir()

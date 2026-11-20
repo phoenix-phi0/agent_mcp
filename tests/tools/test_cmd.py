@@ -13,6 +13,13 @@ from tools import cmd
 
 
 class CommandTests(unittest.TestCase):
+    def test_list_as_permissions(self):
+        names = {c['name'] for c in cmd.list_as('small_model')}
+        self.assertTrue({'run_test', 'job', 'echo'} <= names)
+        self.assertTrue({'restart_check', 'git_commit'}.isdisjoint(names))
+        self.assertEqual(cmd.list_as('nobody'), [])
+        self.assertEqual(cmd.list(), cmd.list_as('tool_call'))
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
