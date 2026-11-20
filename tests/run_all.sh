@@ -116,6 +116,7 @@ run 问老师人设   $PY tests/kg_v4/test_tutor_persona.py
 run 教师助手人设 $PY tests/kg_v4/test_assist_persona.py
 run 助手附件进回答 $PY tests/kg_v4/test_k194_assist_attach_prompt.py
 run 附件csv统计 $PY tests/kg_v4/test_k195_csv_stats.py
+LIMIT=300 run 上线脚本systemd模式 $PY tests/kg_v4/test_k195_deploy_systemd.py   # 约 110 秒：两份脚本各跑十几次部署
 run 空白传参与设定预览 $PY tests/kg_v4/test_k166_whitespace_preview.py
 run 最近学习按科目与对象传参 $PY tests/kg_v4/test_k170_subject_last_and_params.py
 run 选项解析拼JSON $PY tests/kg_v4/test_k173_json_literal.py

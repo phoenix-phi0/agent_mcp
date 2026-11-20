@@ -303,6 +303,8 @@ cat > "$OUT/scripts/bundle.conf.example" <<'XEOF_CONF'
 # : ${BACKUPS:=$HERE/backups}
 # 看门狗间隔秒数
 # : ${KG_INTERVAL:=60}
+# 服务由 systemd 托管时填 unit 名：deploy.sh 改用 systemctl stop/start，不起看门狗（见 README「更新上线」）
+# : ${KG_SYSTEMD_UNIT:=kg_v4.service}
 # 界面语言默认值（ja/zh）：init_data.sh 建的账号用它；改已有账号用 scripts/set_lang.py。
 # 新注册用户仍是服务默认 zh（做法见 README「界面语言」，不改服务代码）
 # : ${DEFAULT_LANG:=ja}
@@ -685,7 +687,14 @@ cat > "$OUT/scripts/deploy.sh" <<'XEOF_DEPLOY'
 # 停服之后任何一步失败：先从本次备份还原约定目录，再拉起服务（确认 GET / 200 且 server.pid
 #       就是监听端口的进程）之后才起看门狗，退出码 1。
 #
-# 可配置：环境变量 > bundle.conf > 默认。DATA_DIR RUN_DIR PORT BACKUPS
+# 可配置：环境变量 > bundle.conf > 默认。DATA_DIR RUN_DIR PORT BACKUPS KG_SYSTEMD_UNIT
+#
+# systemd 模式：服务由 systemd unit 托管时（unit 里 ExecStart 跑本包的 gen run，Restart=always 之类），设
+#   KG_SYSTEMD_UNIT=<unit名>.service（环境变量，或 bundle.conf 里 `: ${KG_SYSTEMD_UNIT:=xxx.service}`）。设了就用
+#   systemctl stop/start 停起服，就绪 = unit 的 MainPID 就是监听端口的进程 + GET / 200，不读写 server.pid、
+#   不起看门狗（看门狗在跑就拒绝上线，免得两套管理打架）；新版本 120 秒内没就绪也从备份还原约定目录
+#   再拉起。启动日志从 journalctl -u <unit> 取。没设就是原来的 pid 模式，行为不变；只多一条保护：端口被
+#   某个 systemd unit 的 MainPID 占着而 server.pid 不存在时，提示设 KG_SYSTEMD_UNIT 后退出（退出码 2，不停服）。
 set -u
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 [ -f "$HERE/bundle.conf" ] && . "$HERE/bundle.conf"
@@ -695,6 +704,10 @@ PORT=${PORT:-8119}
 BK=${BACKUPS:-$HERE/backups}
 DIRS="contracts entities queries routes scripts services ui setup i18n"   # i18n：K180 起的界面词表（旧数据目录没有，同步时 mkdir）
 FILES="plan/top.zs"
+UNIT=${KG_SYSTEMD_UNIT:-}
+READY=${KG_READY_TRIES:-240}   # systemd 模式等就绪的轮询次数（0.5 秒一次，默认 120 秒；测试用小值）
+[[ $READY =~ ^[1-9][0-9]*$ ]] || { echo "!! KG_READY_TRIES 不合法：$READY"; exit 2; }
+[ -z "$UNIT" ] || [[ $UNIT =~ ^[A-Za-z0-9@._:-]+$ ]] || { echo "!! KG_SYSTEMD_UNIT 不合法：$UNIT"; exit 2; }
 mkdir -p "$RUN"
 
 DRY=0
@@ -715,9 +728,17 @@ die(){
   case $STAGE in
     stopped|syncing)
       if [ $STAGE = syncing ]; then
+        [ -n "$UNIT" ] && systemctl stop "$UNIT" 2>/dev/null   # systemd 模式：新版本可能已被拉起（Restart=always），先停再还原
         echo "!! 从备份 $B 还原约定目录"
         for d in $DIRS; do rm -rf "${D:?}/$d" && cp -a "$B/$d" "$D/$d" || echo "!! 还原 $d 失败"; done
         for f in $FILES; do cp -a "$B/$f" "$D/$f" || echo "!! 还原 $f 失败"; done
+      fi
+      if [ -n "$UNIT" ]; then
+        echo "!! 拉起原服务（systemctl start $UNIT）"
+        systemctl start "$UNIT" || echo "!! systemctl start $UNIT 返回非 0"
+        if wait_ready "$READY"; then say "恢复：$UNIT 的 MainPID $(svc_pid) 就是监听 $PORT 的进程，GET / 200"
+        else echo "!! 恢复：服务 $((READY/2)) 秒内没就绪（MainPID=$(svc_pid)，监听 $PORT 的是 $(port_pid || echo 没有进程)）；看 journalctl -u $UNIT"; fi
+        exit 1
       fi
       echo "!! 拉起原服务（确认就绪之后才起看门狗，避免两者同一秒各拉一个）"
       start_server
@@ -758,13 +779,17 @@ watch_pgids(){
 lock_free(){ flock -n "$RUN/watch.lock" -c true; }
 # 监听 $PORT 的进程号（ss 拿不到就是空串）
 port_pid(){ ss -ltnp "sport = :$PORT" 2>/dev/null | grep -o 'pid=[0-9]\+' | head -1 | cut -d= -f2; }
-# 服务就绪 = server.pid 里的进程活着、就是监听 $PORT 的进程、GET / 200。
+# systemd 模式：unit 的 MainPID（没在跑是 0）
+svc_pid(){ systemctl show -p MainPID --value "$UNIT" 2>/dev/null; }
+# 当前服务进程：systemd 模式看 MainPID，pid 模式看 server.pid
+cur_pid(){ if [ -n "$UNIT" ]; then svc_pid; else cat "$RUN/server.pid" 2>/dev/null; fi; }
+# 服务就绪 = server.pid 里的进程（systemd 模式：unit 的 MainPID）活着、就是监听 $PORT 的进程、GET / 200。
 # 只看 GET 200 不行：孤儿服务占着端口时新服务起不来，200 是孤儿答的（正式部署踩过）。参数=轮询次数（0.5 秒一次）。
 wait_ready(){
   local i p c
   for i in $(seq 1 "${1:-120}"); do
-    p=$(cat "$RUN/server.pid" 2>/dev/null)
-    if [ -n "$p" ] && kill -0 "$p" 2>/dev/null && [ "$(port_pid)" = "$p" ]; then
+    p=$(cur_pid)
+    if [ -n "$p" ] && [ "$p" != 0 ] && kill -0 "$p" 2>/dev/null && [ "$(port_pid)" = "$p" ]; then
       c=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/" 2>/dev/null)
       [ "$c" = 200 ] && return 0
     fi
@@ -786,13 +811,47 @@ echo "  共 $n 处"
 extra=$(for d in $DIRS; do diff -rq "$SRC/$d" "$D/$d" 2>&1 | grep "^Only in $D/"; done)
 [ -n "$extra" ] && { echo "  （数据目录里有、源里没有的文件，不删，只列出）"; echo "$extra" | sed 's/^/    /'; }
 
+if [ -n "$UNIT" ]; then
+  LS=$(systemctl show -p LoadState --value "$UNIT" 2>/dev/null)
+  [ "$LS" = loaded ] || die "systemd unit $UNIT 不存在或没加载（LoadState=${LS:-取不到}），未停服"
+  SP=$(svc_pid); Q=$(port_pid)
+  say "systemd 模式：unit $UNIT（$(systemctl is-active "$UNIT" 2>/dev/null)），MainPID ${SP:-0}；监听 $PORT：${Q:-无}；不用 server.pid、不起看门狗"
+  [ -n "$Q" ] && [ "$Q" != "$SP" ] && die "监听 $PORT 的 PID $Q 不是 $UNIT 的 MainPID ${SP:-0}，先排查是谁占着端口（未停服）"
+  WP=$(watch_pgids | tr '\n' ' ')
+  [ -n "$WP" ] && die "systemd 模式下发现看门狗在跑（进程组 $WP），两套管理会打架：先停看门狗（未停服）"
+  [ -e "$RUN/server.pid" ] && echo "  （$RUN/server.pid 存在：systemd 模式不用它，也不删）"
+else
 WP=$(watch_pgids | tr '\n' ' '); SP=$(cat "$RUN/server.pid" 2>/dev/null)
 say "看门狗进程组：${WP:-（没找到）}；服务 PID：${SP:-（没有）}；监听 $PORT：$(port_pid || echo 无)"
+# 自动探测：端口被某个 systemd unit 的 MainPID 占着、server.pid 又不存在 → pid 模式停不掉它（systemd 会马上拉回），
+# 提示设 KG_SYSTEMD_UNIT 后退出；不猜着去停别的服务
+Q=$(port_pid)
+if [ ! -e "$RUN/server.pid" ] && [ -n "$Q" ]; then
+  U=$(systemctl status "$Q" --no-pager 2>/dev/null | head -1 | grep -o '[A-Za-z0-9@._:-]*\.service' | head -1)
+  if [ -n "$U" ] && [ "$(systemctl show -p MainPID --value "$U" 2>/dev/null)" = "$Q" ]; then
+    echo "!! 端口 $PORT 由 systemd unit $U 托管（MainPID $Q），$RUN/server.pid 不存在：pid 模式停不掉它"
+    echo "!! 请设 KG_SYSTEMD_UNIT=$U 后重跑（或写进 bundle.conf）；本脚本不会猜着去停别的服务。未停服、未备份、未同步"
+    exit 2
+  fi
+fi
+fi
 if [ $DRY = 1 ]; then
   echo "== --dry-run：不停服、不备份、不同步。真跑时备份到 $B"
   exit 0
 fi
 
+SINCE=$(date '+%Y-%m-%d %H:%M:%S')
+if [ -n "$UNIT" ]; then
+# 1+2（systemd 模式）没有看门狗要停；systemctl stop 后等旧 MainPID 退出、端口空出来
+T0=$(date +%s.%N); say "停服开始（systemctl stop $UNIT）"
+systemctl stop "$UNIT" || echo "!! systemctl stop $UNIT 返回非 0"
+for i in $(seq 1 40); do
+  if { [ -n "$SP" ] && [ "$SP" != 0 ] && kill -0 "$SP" 2>/dev/null; } || [ -n "$(port_pid)" ]; then sleep 0.25; else break; fi
+done
+if [ -n "$SP" ] && [ "$SP" != 0 ] && kill -0 "$SP" 2>/dev/null; then
+  systemctl start "$UNIT"; die "服务 $SP 没停（已 systemctl start 拉回）"
+fi
+else
 # 1 停看门狗（进程组）
 for g in $WP; do kill -TERM -- "-$g" 2>/dev/null; done
 for i in $(seq 1 20); do lock_free && break; sleep 0.5; done
@@ -803,6 +862,7 @@ T0=$(date +%s.%N); say "停服开始"
 bash "$HERE/scripts/stop.sh"
 if [ -n "$SP" ] && kill -0 "$SP" 2>/dev/null; then
   start_watch; die "服务 $SP 没停（服务仍在原样运行，已重新起看门狗）"
+fi
 fi
 STAGE=stopped
 Q=$(port_pid); [ -z "$Q" ] || die "停服后端口 $PORT 仍被 PID $Q 占着（不是本服务，先处理它；服务和看门狗即将拉回）"
@@ -829,9 +889,17 @@ for f in $FILES; do cmp -s "$SRC/$f" "$D/$f" || { echo "  $f 不一致"; bad=1; 
 # 5 起服
 STAGE=up
 LOG0=$(stat -c %s "$RUN/server.log" 2>/dev/null || echo 0)
+if [ -n "$UNIT" ]; then
+  systemctl start "$UNIT" || echo "!! systemctl start $UNIT 返回非 0"
+  # 新版本 120 秒内没就绪：按同步失败处理（停 unit → 从本次备份还原约定目录 → 再拉起），退出码 1
+  wait_ready "$READY" || { STAGE=syncing; die "新版本 $((READY/2)) 秒内没就绪（MainPID=$(svc_pid)，监听 $PORT 的是 $(port_pid || echo 没有进程)，GET / $(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/" 2>/dev/null)）"; }
+  P=$(svc_pid); say "新 MainPID $P"
+else
 start_server
 P=$(cat "$RUN/server.pid" 2>/dev/null); say "新 PID $P"
-if wait_ready 120; then c=200
+fi
+if [ -n "$UNIT" ]; then c=200
+elif wait_ready 120; then c=200
 else c=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/" 2>/dev/null); fi
 T1=$(date +%s.%N)
 DOWN=$(awk -v a="$T0" -v b="$T1" 'BEGIN{printf "%.1f", b-a}')
@@ -845,12 +913,14 @@ else
   RC=1
 fi
 
-# 6 起看门狗（新版本没起来也照样起：它每 60 秒重试 start.sh，有退避）
-if start_watch; then say "看门狗已在跑（watch.lock 被占用），进程组 $(watch_pgids | tr '\n' ' ')"
+# 6 起看门狗（新版本没起来也照样起：它每 60 秒重试 start.sh，有退避）；systemd 模式不起（由 unit 的 Restart= 负责）
+if [ -n "$UNIT" ]; then say "systemd 模式：不起看门狗（掉线由 $UNIT 拉起）"
+elif start_watch; then say "看门狗已在跑（watch.lock 被占用），进程组 $(watch_pgids | tr '\n' ' ')"
 else echo "!! watch.lock 空闲，看门狗没起来（手动起法见 scripts/watch.sh 头注）"; RC=1; fi
 
 # 7 启动日志里的警告
-NEW=$(tail -c +$((LOG0+1)) "$RUN/server.log" 2>/dev/null)
+if [ -n "$UNIT" ]; then NEW=$(journalctl -u "$UNIT" --since "$SINCE" --no-pager 2>/dev/null)
+else NEW=$(tail -c +$((LOG0+1)) "$RUN/server.log" 2>/dev/null); fi
 echo "== 本次启动日志：[迁移警告] $(grep -c '迁移警告' <<<"$NEW") 行，Traceback $(grep -c 'Traceback' <<<"$NEW") 处"
 grep -E '迁移|Traceback' <<<"$NEW" | head -5 | sed 's/^/  /'
 
@@ -933,6 +1003,9 @@ cat > "$OUT/README.md" <<'XEOF_README'
     bash scripts/deploy.sh /解压路径/kg_v4_bundle/project 某标签
 流程：停看门狗 → 停服 → 数据目录整份备份到 backups/（校验后才开始改）→ 同步 contracts entities queries routes scripts services ui setup + plan/top.zs（只覆盖/新增，数据目录多出的文件只列出不删）→ 起服等 GET / 200（且确认 server.pid 就是监听端口的进程）→ 起看门狗 → 打印迁移警告/Traceback 数、停服秒数、备份路径。停服后任何一步失败自动从本次备份还原并拉回原服务。
 
+**服务由 systemd 托管时**（自己写了 unit，ExecStart 跑本包的 gen run，不用 start.sh / 看门狗）：设 `KG_SYSTEMD_UNIT=<unit名>.service`（环境变量，或写进 bundle.conf）。这时 deploy.sh 改用 `systemctl stop/start` 停起服，就绪判定是 unit 的 MainPID 就是监听端口的进程且 GET / 200，不读写 server.pid、不起看门狗（发现看门狗在跑会拒绝上线，免得两套管理打架）；新版本 120 秒内没就绪也会停 unit、从备份还原约定目录再拉起；启动日志取 `journalctl -u <unit>`。备份、同步和 `--dry-run` 与上面相同。没设这个变量却发现端口被某个 systemd unit 的主进程占着、run/server.pid 又不存在时，deploy.sh 只提示该设什么就退出（退出码 2，不停服）。
+    KG_SYSTEMD_UNIT=kg_v4.service bash scripts/deploy.sh --dry-run /解压路径/kg_v4_bundle/project 某标签
+
 ### 7. 备份 / 回滚
 - 手工备份：`bash scripts/stop.sh` 后 `cp -a data backups/data_$(date +%F_%H%M)`；热备可用 sqlite backup API：`python -c "import sqlite3; s=sqlite3.connect('data/app.db'); d=sqlite3.connect('backups/bak.db'); s.backup(d)"`。
 - 回滚某次上线：`bash scripts/stop.sh` → `cp -a backups/kg_v4_<时间>_before_<标签>/. data/` → `bash scripts/start.sh`。
@@ -946,7 +1019,7 @@ cat > "$OUT/README.md" <<'XEOF_README'
 3. wheels/ 绑定 CPython 3.13 / linux x86_64；换平台要重新 pip download（见 wheels/WHEELS.txt）。
 4. 退出登录只是删 cookie：签发的令牌在过期（7 天）前一直有效，服务器无法吊销单个会话；删除/换 `data/.auth_secret` 等于让所有人重新登录。
 5. 登录限流：同一用户名或同一来源连续失败 5 次锁 5 分钟（内存计数，重启清零）。
-6. 本机不是 systemd 时，看门狗是 setsid 常驻进程：机器重启后要重新起（放进开机脚本或手动按第 5 步起）。
+6. 本机不是 systemd 时，看门狗是 setsid 常驻进程：机器重启后要重新起（放进开机脚本或手动按第 5 步起）。是 systemd 且用 unit 托管服务时不要再起看门狗，上线设 KG_SYSTEMD_UNIT（见第 6 步）。
 7. deploy.sh 的同步不删除数据目录里多出的文件（防误删），确认不要的文件要手动删。
 8. deploy.sh 的备份是数据目录整份拷（含 app.db、uploads、web），但只在上线时做：平时请自行定期备份 data/app.db 与 data/uploads/。
 9. 日文版限制：①带插值参数的消息与「共 3 条，第 1 页」这类混排文字仍显示中文——词表只做整串替换；②AI 生成的草稿/材料等给学生看的内容按科目内容语言保持中文；③日语科目（语法课）本身的内容是中文的——本日文版面向学日语的中国学生，只有 Python 科目带日文译文。
@@ -1026,6 +1099,9 @@ KG_INTERVAL（既定 60）秒ごとに start.sh を実行、flock で単一イ�
     bash scripts/deploy.sh /展開先/kg_v4_bundle_ja/project タグ
 流れ：ウォッチドッグ停止 → サービス停止 → データディレクトリー全体を backups/ へバックアップ（検証してから変更開始）→ contracts entities queries routes scripts services ui setup **i18n** + plan/top.zs を同期（上書き/追加のみ、余分なファイルは削除しない）→ 起動して GET / 200 を確認（server.pid が実際にポートを待つプロセスか確認）→ ウォッチドッグ起動 → マイグレーション警告/Traceback 数・停止秒数・バックアップ先を表示。停止後どこかで失敗したら、自動で今回のバックアップから復元し元のサービスを再起動します。
 
+**サービスを systemd で管理している場合**（自作の unit の ExecStart で本パッケージの gen run を起動し、start.sh やウォッチドッグを使わない）：`KG_SYSTEMD_UNIT=<unit名>.service` を設定してください（環境変数、または bundle.conf）。deploy.sh は `systemctl stop/start` で停止・起動し、unit の MainPID がポートを待ち受けていて GET / が 200 であることをもって起動完了と判定します。server.pid は読み書きせず、ウォッチドッグも起動しません（ウォッチドッグが動いていれば二重管理を避けるため配備を中止）。新版が 120 秒以内に起動しなければ unit を止め、バックアップから復元して再起動します。起動ログは `journalctl -u <unit>` から取得します。バックアップ・同期・`--dry-run` は上と同じです。この変数を設定していないのに、ポートを systemd unit のメインプロセスが使っていて run/server.pid も無い場合、deploy.sh は設定すべき変数を表示して終了します（終了コード 2、サービスは止めません）。
+    KG_SYSTEMD_UNIT=kg_v4.service bash scripts/deploy.sh --dry-run /展開先/kg_v4_bundle_ja/project タグ
+
 ### 7. バックアップ / ロールバック
 - 手動バックアップ：`bash scripts/stop.sh` の後に `cp -a data backups/data_$(date +%F_%H%M)`。ホットバックアップは sqlite backup API：`python -c "import sqlite3; s=sqlite3.connect('data/app.db'); d=sqlite3.connect('backups/bak.db'); s.backup(d)"`。
 - 配備のロールバック：`bash scripts/stop.sh` → `cp -a backups/kg_v4_<時刻>_before_<タグ>/. data/` → `bash scripts/start.sh`。
@@ -1039,7 +1115,7 @@ KG_INTERVAL（既定 60）秒ごとに start.sh を実行、flock で単一イ�
 3. wheels/ は CPython 3.13 / linux x86_64 に紐付け。別プラットフォームでは pip download をし直す（wheels/WHEELS.txt）。
 4. ログアウトは cookie を消すだけ：発行済みトークンは失効（7 日）まで有効で、個別失効は不可。`data/.auth_secret` の削除/差し替えは全員の再ログインを意味します。
 5. ログインは同じユーザー名または送信元で 5 回連続失敗すると 5 分ロック（メモリー計数、再起動でリセット）。
-6. systemd が無いマシンではウォッチドッグは setsid 常駐プロセス：マシン再起動後は手動（または起動スクリプト）でもう一度起動してください。
+6. systemd が無いマシンではウォッチドッグは setsid 常駐プロセス：マシン再起動後は手動（または起動スクリプト）でもう一度起動してください。systemd の unit でサービスを管理する場合はウォッチドッグを起動せず、配備時に KG_SYSTEMD_UNIT を設定してください（手順 6 参照）。
 7. deploy.sh の同期はデータディレクトリー内の余分なファイルを削除しません（誤削除防止）。不要なファイルは手動で。
 8. deploy.sh のバックアップは配備時のみ。日頃は data/app.db と data/uploads/ を自分で定期バックアップしてください。
 9. 日本語版の制限：①パラメーター挿入を含むメッセージや「共 3 条，第 1 页」のような混在テキストは中国語表示のまま（辞書は完全一致置換のみ）；②AI が生成する下書き・教材など生徒に見せる内容は科目コンテンツの言語（中国語）を維持；③「日本語科目」（文法科）自体のコンテンツは中国語——この日本語版は日本語を学ぶ中国人学生向けで、日本語訳を持つのは Python 科目のみです。
