@@ -43,6 +43,8 @@
       到 / 登录页（不再开新标签页）；学生登录进学生端
   9.  日语界面问老师（K181）：s1 lang=ja 问老师 → 答一轮提示词带「请用日语回答…」
       追加句（假模型规则命中回固定日语，气泡可见），结束把 lang 改回 zh
+  10. K194 教师助手：选文件后点底栏主按钮 / 按 Enter 都上传；挂着附件普通追问（chitchat）的回答用到
+      当前附件正文、不带换掉的旧附件；ja 底栏提示和按钮文案
 输出「通过 x/共 y」，失败列原因；退出码 0 全过 / 1 有失败 / 2 环境起不来。
 """
 import argparse
@@ -1514,6 +1516,12 @@ def write_assist_mock(proj, tmp):
         # 气泡里出现这句日语固定回复 = 提示词带了「请用日语回答…」
         {"when": ["请用日语回答，专业术语第一次出现时用括号标注中文"],
          "reply": "これは日本語の返信です。"},
+        # K194（放最前）：挂着附件的普通追问。分类强制 chitchat；回答提示词里【资料】带着当前附件 B 的正文才回「K194追问回答」，
+        # 带着换掉的附件 A 就回「K194旧附件串入」；修前回答提示词里没有正文，两条都不中，落到默认假回复
+        {"when": ["意图分类器", "K194追问"],
+         "reply": json.dumps({"intent": "chitchat"}, ensure_ascii=False)},
+        {"when": ["【资料】", "K194走查正文A"], "reply": "K194旧附件串入"},
+        {"when": ["【资料】", "K194走查正文B"], "reply": "K194追问回答：用到了附件正文。"},
         # M4-P3/P4（放最前，按走查顺序从后往前排：后发的话带着前面的对话，先写的规则先中会误判）
         {"when": ["意图分类器", "走查看趋势"],
          "reply": json.dumps({"intent": "deep_analysis", "analysis_kind": "trend"}, ensure_ascii=False)},
@@ -2245,6 +2253,103 @@ def kg_mgmt_flow(t1, t2, t3, ck, marks, tmp):
         ck(False, "t3 页面有「公共只读」说明", "15 秒没出现（can_write 没到 0？）")
 
 
+def k194_flow(browser, base, proj, tmp, ck, marks, new_page):
+    """K194：教师助手选了文件点底栏主按钮 / 按 Enter 都走上传；挂着附件普通追问（chitchat）时回答提示词带当前附件正文、
+    不带换掉的旧附件（假模型规则见 write_assist_mock 的 K194 三条）；ja 底栏提示和按钮文案。结束移除附件、把 t1 的 lang 改回原值。"""
+    name = "K194"
+
+    def set_lang(lang):
+        con = sqlite3.connect(proj / "app.db")
+        try:
+            con.execute("UPDATE account_user SET lang=? WHERE username=?", (lang, TEACHER_USER))
+            con.commit()
+        finally:
+            con.close()
+
+    def open_assist(tag):
+        p = new_page(browser.new_context(), tag)
+        p._allowed_status = (401,)
+        login(p, base, TEACHER_USER, "/teacher")
+        p._allowed_status = ()
+        p.evaluate("location.hash = encodeURIComponent('教师助手')")
+        wait_screen(p, "教师助手")
+        p.wait_for_timeout(1500)
+        return p
+
+    def bottom_buttons(p):
+        return [t.strip() for t in p.locator(".screen .bar-bottom button").all_inner_texts()]
+
+    con = sqlite3.connect(proj / "app.db")
+    try:
+        old = con.execute("SELECT lang FROM account_user WHERE username=?", (TEACHER_USER,)).fetchone()[0]
+    finally:
+        con.close()
+    p = None
+    try:
+        set_lang("zh")
+        p = open_assist("k194-zh")
+        a = tmp / "walk_k194_a.txt"
+        a.write_text("K194走查正文A：第一段。\n\n第二段讲旧资料。\n", encoding="utf-8")
+        b = tmp / "walk_k194_b.txt"
+        b.write_text("K194走查正文B：第一段。\n\n第二段讲助词。\n", encoding="utf-8")
+        ck(bottom_buttons(p) == ["发送"], f"{name}：没选文件时底栏只有「发送」", bottom_buttons(p))
+        # 选文件后点底栏主按钮（此时是「传附件」）
+        p.locator("input[type=file]").first.set_input_files(str(a))
+        p.wait_for_timeout(300)
+        ck(bottom_buttons(p) == ["传附件"], f"{name}：选了文件底栏主按钮变「传附件」", bottom_buttons(p))
+        p.locator(".screen .bar-bottom button").first.click()
+        p.locator("text=附件：walk_k194_a.txt").first.wait_for(timeout=60000)
+        ck(True, f"{name}：选文件后点底栏主按钮即上传，附件条显示 A")
+        # 再选一个文件，在输入框按 Enter（改挂 B）
+        p.locator("input[type=file]").first.set_input_files(str(b))
+        p.wait_for_timeout(300)
+        p.locator("textarea").last.press("Enter")
+        p.locator("text=附件：walk_k194_b.txt").first.wait_for(timeout=60000)
+        ck(True, f"{name}：选文件后按 Enter 即上传，附件条换成 B")
+        ck(bottom_buttons(p) == ["发送"], f"{name}：上传后底栏回到「发送」", bottom_buttons(p))
+        # 省略附件字样的普通追问：分类 chitchat，回答提示词要带 B 的正文
+        box = p.locator("textarea").last
+        box.fill("K194追问：第二段说了什么？")
+        box.press("Enter")
+        p.get_by_text("K194追问：第二段说了什么", exact=False).first.wait_for(timeout=60000)
+        try:
+            p.get_by_text("K194追问回答", exact=False).first.wait_for(timeout=60000)
+            got = True
+        except Exception:
+            got = False
+        tail = p.locator(".screen").first.inner_text(timeout=3000)[-400:]
+        ck(got, f"{name}：挂着附件普通追问（chitchat）时回答用到了当前附件正文（假模型见到【资料】+ B 的标记）", tail)
+        ck("K194旧附件串入" not in tail, f"{name}：换挂后旧附件 A 的正文不再进回答", tail)
+        p.locator("button", has_text="移除附件").first.click(timeout=8000)
+        p.locator("button", has_text="移除附件").first.wait_for(state="detached", timeout=30000)
+        p.context.close()
+        p = None
+        # ja 文案
+        set_lang("ja")
+        p = open_assist("k194-ja")
+        ph = p.locator("textarea").last.get_attribute("placeholder") or ""
+        ck("ファイルはそのまま送信でき" in ph and "送信だけでは添付されません" not in ph,
+           f"{name}：ja 底栏提示是新文案", ph)
+        ck(bottom_buttons(p) == ["送信"], f"{name}：ja 没选文件时是「送信」", bottom_buttons(p))
+        p.locator("input[type=file]").first.set_input_files(str(a))
+        p.wait_for_timeout(300)
+        ck(bottom_buttons(p) == ["添付を送る"], f"{name}：ja 选了文件是「添付を送る」", bottom_buttons(p))
+    except Exception as e:
+        seen = ""
+        if p is not None:
+            try:
+                seen = p.locator(".screen").first.inner_text(timeout=3000)[-600:]
+            except Exception:
+                pass
+        ck(False, name, f"{type(e).__name__}: {str(e)[:300]} 页面末尾：{seen!r}")
+    finally:
+        set_lang(old)
+        if p is not None:
+            p.context.close()
+    err = drain_errors(marks)
+    ck(not err, f"{name}流程无 JS 错误", err)
+
+
 def k192_flow(browser, base, proj, ck, marks, new_page):
     """K192：Python 默写。夹具自建自删：Python 科目（没有就建）caps 合并 dictation=1、
     专用学生 walk192s、两道题（术语 + 多行代码输出），结束时删净、caps 和语言改回。
@@ -2643,6 +2748,7 @@ def main(argv=None):
                 k190_flow(browser, base, proj, ck, marks, new_page)   # K190：游标分页、关浮层不盖筛选框、ja 残留、花括号值
                 k189_chat_flow(browser, base, proj, ck, marks, new_page)   # K189：问老师记录分页、看全文、筛选
                 k192_flow(browser, base, proj, ck, marks, new_page)   # K192：Python 默写（术语/代码输出、错题本、学情、ja），日语默写照旧
+                k194_flow(browser, base, proj, tmp, ck, marks, new_page)   # K194：选文件后点发送/Enter 上传、挂附件后普通追问用到正文、ja 文案
 
                 # ---- 390px 视口 ----
                 m = new_page(browser.new_context(viewport={"width": 390, "height": 844}),

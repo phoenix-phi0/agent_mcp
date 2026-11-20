@@ -114,6 +114,7 @@ run 助手学情     $PY tests/kg_v4/test_assist_insight.py
 run 科目等级     $PY tests/kg_v4/test_subject_levels.py
 run 问老师人设   $PY tests/kg_v4/test_tutor_persona.py
 run 教师助手人设 $PY tests/kg_v4/test_assist_persona.py
+run 助手附件进回答 $PY tests/kg_v4/test_k194_assist_attach_prompt.py
 run 空白传参与设定预览 $PY tests/kg_v4/test_k166_whitespace_preview.py
 run 最近学习按科目与对象传参 $PY tests/kg_v4/test_k170_subject_last_and_params.py
 run 选项解析拼JSON $PY tests/kg_v4/test_k173_json_literal.py
