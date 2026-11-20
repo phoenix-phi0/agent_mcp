@@ -214,3 +214,102 @@ def register(reg, workspace):
     def 条数(内容) -> str:
         data = _as_data(内容, [])
         return str(len(data)) if isinstance(data, (list, dict)) else "0"
+
+    # ------------------------------------------------------------------
+    # 解析已读成字符串的数据（不碰文件）
+    # ------------------------------------------------------------------
+
+    @reg.verb("把已经读成字符串的 CSV 文本按 CSV 规则解析（不碰文件）：解析CSV文本 <文本> [分隔符] [最大行数]。"
+              "处理引号、转义引号 \"\"、引号内的逗号和换行、CRLF、开头的 BOM；每格去首尾空白；全空的行跳过；"
+              "第一行当表头。返回 {header: 表头列表, rows: 数据行列表（每行是格子列表，最多 最大行数 行）, "
+              "columns: [{name, values}]（按表头逐列，values 取返回的 rows 里该列——给了最大行数就只有前 N 行，缺的格补空串）, "
+              "total: 全部数据行数（不受 最大行数 影响）, truncated: 是/否, error: 空串或格式问题说明}。"
+              "坏格式（引号没闭合等）不抛异常：尽力解析并在 error 里写明。分隔符默认英文逗号（可写 \\t 或 制表符）；"
+              "最大行数不给或 0 表示全部。例如 设 t = 解析CSV文本 {text}")
+    def 解析CSV文本(文本="", 分隔符: str = ",", 最大行数: str = "") -> dict:
+        # 为什么要有：读CSV 按 UTF-8 读文件，GBK 文件会抛解码错且「出错时」接不住；
+        # 附件的文字已经由 读文档 按编码规则解码好了，按字符串解析就不会再碰编码（K196）。
+        import io
+        out = {"header": [], "rows": [], "columns": [], "total": 0,
+               "truncated": "否", "error": ""}
+        text = 文本 if isinstance(文本, str) else ("" if 文本 is None else str(文本))
+        sep = "" if 分隔符 is None else str(分隔符)
+        if sep in ("", ","):
+            sep = ","
+        elif sep in ("\\t", "\t", "制表符", "tab"):
+            sep = "\t"
+        if len(sep) != 1 or sep in ('"', "\r", "\n"):
+            out["error"] = f"分隔符不合法：{分隔符}（要一个字符，不能是引号或换行）"
+            return out
+        lim_txt = str(最大行数 or "").strip()
+        # isdigit 之外再限长度：几千位的数字串 int() 会抛（Python 的整数位数上限），也不该当行数
+        if lim_txt and (not lim_txt.isascii() or not lim_txt.isdigit() or len(lim_txt) > 9):
+            out["error"] = f"最大行数不合法：{最大行数}（要非负整数）"
+            return out
+        limit = int(lim_txt) if lim_txt else 0
+        if text.startswith("﻿"):
+            text = text[1:]
+
+        def quote_problem():
+            """只做诊断，不影响解析结果：扫一遍引号，返回第一个格式问题（空串 = 没问题）。
+            算问题的只有两种：引号没闭合（一直到文本末尾）；闭合引号后面、分隔符 / 换行之前跟了非空白字符。
+            闭合引号后跟空格、制表符不算（"x" , 常见且无害，csv 模块的 strict 模式会误报，所以不用它）。"""
+            line, i, n = 1, 0, len(text)
+            at_start, quoted, closed, qline = True, False, False, 1
+            while i < n:
+                ch = text[i]
+                if quoted:
+                    if ch == '"':
+                        if i + 1 < n and text[i + 1] == '"':
+                            i += 1                      # "" 转义
+                        else:
+                            quoted, closed = False, True
+                    elif ch == "\n":
+                        line += 1
+                elif ch == sep or ch in "\r\n":
+                    if ch == "\n":
+                        line += 1
+                    at_start, closed = True, False
+                elif closed:
+                    if ch not in " \t":
+                        return f"第 {line} 行：闭合引号后面跟了「{ch}」"
+                elif at_start and ch == '"':
+                    quoted, at_start, qline = True, False, line
+                elif at_start and ch in " \t":
+                    pass                                # 开引号前的空白（skipinitialspace）
+                else:
+                    at_start = False
+                i += 1
+            if quoted:
+                return f"第 {qline} 行开始的引号没有闭合，后面的内容都算进了这一格"
+            return ""
+
+        hdr, rows, total, err = None, [], 0, ""
+        # 宽松模式（strict=False）：坏格式也尽力解析；问题由 quote_problem 单独报
+        rd = csv.reader(io.StringIO(text, newline=""), delimiter=sep, skipinitialspace=True)
+        try:
+            for rec in rd:
+                cells = [c.strip() for c in rec]
+                # 全空的行跳过（与原先「去首尾空白后为空的行跳过」一致；「,,」这种仍算一行）
+                if not cells or (len(cells) == 1 and not cells[0]):
+                    continue
+                if hdr is None:
+                    hdr = cells
+                    continue
+                total += 1
+                if not limit or len(rows) < limit:
+                    rows.append(cells)
+        except csv.Error as e:                          # 如格子超过 csv 的字段长度上限：保留已解析的部分
+            err = f"第 {rd.line_num} 行附近：{e}，后面没有解析"
+        qp = quote_problem()
+        if qp or err:
+            err = "CSV 格式有问题（" + "；".join(x for x in (qp, err) if x) + "），已尽力解析"
+        hdr = hdr or []
+        out["header"] = hdr
+        out["rows"] = rows
+        out["total"] = total
+        out["truncated"] = "是" if len(rows) < total else "否"
+        out["error"] = err
+        out["columns"] = [{"name": h, "values": [r[i] if i < len(r) else "" for r in rows]}
+                          for i, h in enumerate(hdr)]
+        return out

@@ -31,6 +31,9 @@
 ### doc 包（从上传的文档取纯文本，要先 用包 doc）
 - 读文档 路径 → {kind, text, pages, paragraphs, chars, error}：按扩展名读 pdf/docx/md/txt/csv/tsv（csv、tsv 按文本原样返回、不拆列，带 BOM 的 UTF-8 和 GBK 都认；空文件 text 是空串、不算错；xlsx 不收）；读不了（扫描版、密码、坏了）error 是一句人话给用户看，不抛错
 
+### data 包（要先 用包 data）
+- 解析CSV文本 文本 [分隔符=,] [最大行数] → {header, rows, columns, total, truncated, error}：把**已读成字符串**的 CSV（如 读文档 的 text，GBK 已解码）按 CSV 规则拆列，不碰文件和编码；处理引号、"" 转义、引号内的逗号和换行、CRLF、BOM，每格去首尾空白，全空的行跳过，第一行当表头；rows 每行是格子列表（最多 最大行数 行，不给或 0 = 全部），columns 是 [{name, values}]（按表头逐列，values 只含返回的 rows——给了最大行数就只有前 N 行；缺的格补空串），total 是全部数据行数，truncated 是/否；坏格式（引号没闭合等）不抛错：尽力解析并在 error 里写明
+
 ### common 包
 - 解析JSON 文本 → 结构；列表长度 列表 → 数；转数字 文本；取字段 JSON文本 路径；当前时间 [日期|时间戳]
 - 归一化 / 列表加项 {列表} {项}：见 DSL 速查
