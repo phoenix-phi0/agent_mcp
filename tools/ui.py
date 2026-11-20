@@ -53,6 +53,8 @@ not identifiers, and translating them would just add a lookup step.
 """
 
 from dataclasses import dataclass, field
+from html import escape
+from json import dumps
 from typing import Optional
 
 
@@ -190,7 +192,7 @@ class Node:
     cols: int = 0
     size: dict = field(default_factory=dict)
     clears: list = field(default_factory=list)
-    submit_action: str = ""      # 在这里按 Enter 触发的动作，渲染前由引擎填
+    submit_action: str = ""      # Vue 表达式：在这里按 Enter 触发的动作名
     modifiers: list = field(default_factory=list)
     children: list = field(default_factory=list)
     line: int = 0
@@ -1248,21 +1250,26 @@ def _tag_submit_action(screens) -> None:
     挂在节点上而不是当渲染参数传：layout.j2 是递归的，参数要穿过每一层
     宏调用才能到 widgets.j2，多加一个上下文变量就要改三个模板。
     """
-    def first_submit(box):
-        for a in box.children:
-            if a.kind == "动作" and a.has("提交") and a.has("远程"):
-                return a.name
-        return ""
+    def submit_expr(box):
+        actions = [a for a in box.children
+                   if a.kind == "动作" and a.has("提交") and a.has("远程")]
+        if not actions:
+            return ""
+        # 一组提交按钮各自以「当」切换时，Enter 也按这些条件选动作。
+        if len(actions) > 1 and all(a.when and not a.has("隐藏") for a in actions):
+            choices = [f"({a.when}) ? {dumps(a.name, ensure_ascii=False)} : " for a in actions]
+            return escape("".join(choices) + "''", quote=True)
+        return f"'{actions[0].name}'"
 
     def walk(box, inherited):
-        here = first_submit(box) or inherited
+        here = submit_expr(box) or inherited
         for n in box.children:
             n.submit_action = here
             if n.children:
                 walk(n, here)
 
     for screen in screens:
-        screen.submit_action = first_submit(screen)
+        screen.submit_action = submit_expr(screen)
         walk(screen, screen.submit_action)
 
 

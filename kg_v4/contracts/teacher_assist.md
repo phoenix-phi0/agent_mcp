@@ -201,7 +201,7 @@
   伪代码 返回 {"talk": 列表, "drafts": drafts, "readonly": readonly, "attach": attach, "files": files, "att_note": att_note}
 
 公开 函数 问助手页面 current_user message current_role? auth_mode? subject?
-  返回 问助手 的全部键 {ok, reply_id, reply, intent, student, point, status, draft_id, mat_id}，另加 page（列对话页面 的全部键）；只发文字（「发送」）走这里；要带文件走 挂附件页面（「传附件」，引擎的「上传」接口要求必须带文件，所以文件不能挂在本接口上，见 挂附件页面）；前端「发送」按输入框一句话走问助手，接口用 page 整页刷新（消息流整条替换成含本轮的历史、生成的草稿带按钮、待确认列表多一行），不再只追加一条纯文本回复
+  返回 问助手 的全部键 {ok, reply_id, reply, intent, student, point, status, draft_id, mat_id}，另加 page（列对话页面 的全部键）；底栏未选择新文件时，「发送」和 Enter 都把输入框文本交给本函数；选了新文件时走 挂附件页面。接口用 page 整页刷新（消息流整条替换成含本轮的历史、生成的草稿带按钮、待确认列表多一行），不再只追加一条纯文本回复
   报错 400 消息不能为空
   报错 400 助手暂时无法回答
   报错 400 subject 不对
@@ -277,7 +277,7 @@
   伪代码 调用 assist_draft.撤销草稿 current_user=current_user draft_id=draft_id subject=subject_id 得 r（错误原样抛：预检没过时 assist_draft 已把草稿回到原状态，不写对话）；调用 记一条 current_user=current_user content=r.summary subject_id=subject_id；其余同 确认草稿页面（列对话页面 + 取草稿）
 
 公开 函数 挂附件页面 current_user assist_file_path file_name? file_size? file_ext? message? current_role? auth_mode? subject?
-  返回 {ok, file_id, label, reused, reply, intent, status, page}；动作 assist_attach（底栏「传附件」，M4-P2）：接口声明「上传 assist_file 上限 10MB」，路由先 存文件（没带文件、超过上限时路由直接回 400，不进本函数；文案是引擎 存文件 的原话，如没选文件就点「传附件」得「[不在请求里，或者这次请求没带文件]」，生成的路由改不了文案，页面底栏提示里写明先选文件），把路径作为 assist_file_path、上传信息作为 file_name / file_size / file_ext 交过来；本函数把它记成当前附件，输入框里有话就接着按这句话问一轮（新附件这一轮就用上）；page 是 列对话页面 的全部键（接口 取=page 整页刷新：附件条出现、附件表多一行、对话里多一句「已挂上附件」）
+  返回 {ok, file_id, label, reused, reply, intent, status, page}；动作 assist_attach（底栏选中文件后点「传附件」或在输入框按 Enter，M4-P2）：接口声明「上传 assist_file 上限 10MB」，路由先 存文件（没带文件、超过上限时路由直接回 400，不进本函数；文案是引擎 存文件 的原话，如没选文件就点「传附件」得「[不在请求里，或者这次请求没带文件]」，生成的路由改不了文案，页面底栏提示里写明先选文件），把路径作为 assist_file_path、上传信息作为 file_name / file_size / file_ext 交过来；本函数把它记成当前附件，输入框里有话就接着按这句话问一轮（新附件这一轮就用上）；page 是 列对话页面 的全部键（接口 取=page 整页刷新：附件条出现、附件表多一行、对话里多一句「已挂上附件」）
   报错 400 文件路径不能为空
   报错 400 不支持 Excel 文件，请在 Excel 里另存为 csv（逗号分隔）再上传
   报错 400 本期不支持图片，可以把文字贴进对话里，或者传 PDF

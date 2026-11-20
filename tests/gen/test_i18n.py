@@ -124,6 +124,16 @@ def main() -> int:
             # 目录名与源同名：build 不传 title 时标题取目录名，要进 <title>
             proj = proj_copy(tmp, src, src)
             if src == "kg_v4":
+                # K194 底栏有条件提交，复原旧底栏以覆盖不使用它的生成物。
+                ui = proj / "ui/teacher_assist.ui"
+                t = ui.read_text(encoding="utf-8")
+                t = re.sub(r"(        字段 content 控件 多行 单行高 提示 ).*", r"\g<1>"
+                           "问助手…（例：小明最近怎么样？／按某个知识点出5道题／给小明发传达：周五小测／写一份某知识点的教案／"
+                           "最近四周的趋势／有没有掉队的学生／总结一下这份附件／按附件出5道题，Enter发送，Shift+Enter换行；"
+                           "传附件要先选文件再点「传附件」，只点发送不带文件）", t)
+                t = t.replace(" 当 !files[current.name]?.assist_file 发送", " 发送")
+                t = t.replace(" 当 files[current.name]?.assist_file 传附件", " 次要 传附件")
+                ui.write_text(t, encoding="utf-8")
                 # K192 Python 默写（题型下拉、术语/代码输入框、错题表、学情和进度的 Python 栏）不在基线 golden 里，还原成基线写法
                 ui = proj / "ui/quiz_dictation.ui"
                 t = ui.read_text(encoding="utf-8")

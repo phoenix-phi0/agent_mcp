@@ -30,9 +30,8 @@
 #
 # M4 P2 附件（约定见 contracts/assist_file.md 与 teacher_assist.md 的 挂附件页面 等；设计 K124 design.md §4，D5–D8）：
 #   底栏多一个文件字段 assist_file 和按钮「传附件」（assist_attach，接口 /teacher_assist/attach 声明了「上传 assist_file 上限 10MB」）。
-#   引擎的「上传」接口要求必须带文件（没文件时 存文件 回 400），所以文件不能挂在「发送」的 /teacher_assist/ask 上：
-#   「发送」只发文字（选了文件却点「发送」，文件随请求发到 /ask 但被忽略、字段被清空，底栏提示里写明）；「传附件」把文件和输入框里的话一起发，
-#   先挂上附件、再按这句话问一轮。有文件字段的界面所有提交都走 multipart（payload 是 JSON 串），后端取法不变。
+#   未选文件时，发送按钮和 Enter 走 /teacher_assist/ask；选了文件时，两者走 /teacher_assist/attach，先挂上附件，再处理输入框里的问题。
+#   有文件字段的界面所有提交都走 multipart（payload 是 JSON 串）。
 #   附件条（对话下方，shared.attach.file_id 有值时出现）：显示 attach.label（「附件：讲义.pdf（pdf · 3 页 · 1234 字）」）和「移除附件」。
 #   右边「附件」区域：本人在本科目存着的附件（最多 20 个），行上「挂上」「删除」。
 #   进入时 assist_state 回的整页状态多 attach、files、att_note 三个键；四个附件动作都回整页。
@@ -73,9 +72,9 @@
       结束
       分组 底栏 横排 底栏 间距 10px 对齐 flex-end 内边距 14px,20px
         字段 assist_file 接受 .txt,.md,.csv,.pdf,.docx 最大 10MB 附件
-        字段 content 控件 多行 单行高 提示 问助手…（例：小明最近怎么样？／按某个知识点出5道题／给小明发传达：周五小测／写一份某知识点的教案／最近四周的趋势／有没有掉队的学生／总结一下这份附件／按附件出5道题，Enter发送，Shift+Enter换行；传附件要先选文件再点「传附件」，只点发送不带文件）
-        动作 assist_send 提交 远程 回显 清空 发送
-        动作 assist_attach 提交 远程 回显 清空 次要 传附件
+        字段 content 控件 多行 单行高 提示 问助手…（Enter发送，Shift+Enter换行。选中文件后可直接发送，也可同时输入问题。）
+        动作 assist_send 提交 远程 回显 清空 当 !files[current.name]?.assist_file 发送
+        动作 assist_attach 提交 远程 回显 清空 当 files[current.name]?.assist_file 传附件
       结束
     结束
 
