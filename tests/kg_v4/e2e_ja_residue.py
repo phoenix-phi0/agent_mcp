@@ -38,7 +38,7 @@ from urllib.parse import quote
 
 HERE = Path(__file__).resolve()
 sys.path.insert(0, str(HERE.parent))
-from e2e_walk import REPO, REPO_PY, build_workspace, free_port, start_server, stop_server  # noqa: E402
+from e2e_walk import REPO, REPO_PY, build_workspace, find_chrome, free_port, start_server, stop_server  # noqa: E402
 
 WHITELIST = HERE.parent / "ja_residue_whitelist.tsv"
 PW = "k191-scan-temp"       # 只进自建的临时库
@@ -858,8 +858,13 @@ def main():
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        print("跳过：这个解释器没装 playwright")
+        print("跳过：这个解释器没装 playwright（用 /opt/kg_pw_venv/bin/python 跑）")
         return 2
+    chrome, how = find_chrome()
+    if not chrome:
+        print(f"跳过：找不到浏览器（{how}）。环境缺依赖，不算检查失败。")
+        return 2
+    print(f"浏览器：{chrome}（{how}）", flush=True)
     src = REPO / "kg_v4"
     dic = load_dict(src)
     wl = load_whitelist() if not a.no_whitelist else ({}, [])
@@ -897,8 +902,7 @@ def main():
         sc.full = a.full or a.deep
         a.full = sc.full
         with sync_playwright() as pw:
-            kw = {"executable_path": "/usr/bin/google-chrome"} if Path("/usr/bin/google-chrome").exists() else {"channel": "chrome"}
-            browser = pw.chromium.launch(**kw)
+            browser = pw.chromium.launch(executable_path=chrome)
             login_flow(sc, browser, base)
             print("登录页 完成", round(time.time() - t0), flush=True)
             py, emp = ids["py"], ids["empty"]

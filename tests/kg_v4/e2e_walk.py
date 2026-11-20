@@ -7,8 +7,10 @@
     .venv/bin/python tests/kg_v4/e2e_walk.py --no-subject-mgmt   # 基线（合并前）也该全过
     .venv/bin/python tests/kg_v4/e2e_walk.py --no-kg-mgmt       # 图谱管理未合并时跑全过
 
-浏览器：playwright + 系统 Chrome（/usr/bin/google-chrome 作 executable_path，
-不 playwright install 下载浏览器）。没装 playwright 就打「跳过」并退出码 2
+浏览器：playwright + 按顺序找到的 Chrome / Chromium（find_chrome，K196）：环境变量 KG_CHROME /
+PW_CHROMIUM_PATH → playwright 自带的 chromium（playwright install chromium）→ /usr/bin/google-chrome。
+持久环境：/opt/kg_pw_venv（python3.13 + playwright，chromium 在 ~/.cache/ms-playwright），
+run_all.sh 的 PW_PYTHON 默认指向它。没装 playwright 或一个浏览器都找不到就打「跳过」并退出码 2
 （环境缺依赖，不算走查失败）。
 
 自己搭环境：拷 kg_v4 到临时目录（不带 app.db / web / uploads），裁小的内容
@@ -108,6 +110,37 @@ class Checks:
         for f in self.fails:
             print(f"  失败：{f}")
         return 1 if self.failed else 0
+
+
+SYSTEM_CHROME = "/usr/bin/google-chrome"
+CHROME_ENV_VARS = ("KG_CHROME", "PW_CHROMIUM_PATH")
+
+
+def find_chrome():
+    """按顺序找浏览器（K196）：环境变量 KG_CHROME / PW_CHROMIUM_PATH → playwright 自带的 chromium →
+    /usr/bin/google-chrome。返回 (可执行文件路径, 来源说明)；一个都没有返回 (None, 逐项为什么没找到)。
+    环境变量设了但路径不对时不静默：记进说明里（用上别的也会一并打印）。不再依赖 /usr/bin 里的软链。"""
+    notes = []
+    for var in CHROME_ENV_VARS:
+        v = os.environ.get(var, "").strip()
+        if not v:
+            continue
+        if Path(v).is_file() and os.access(v, os.X_OK):
+            return v, f"环境变量 {var}"
+        notes.append(f"{var}={v} 不存在或不可执行")
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            p = pw.chromium.executable_path
+        if p and Path(p).is_file():
+            return p, "playwright 自带 chromium" + (f"（另：{'；'.join(notes)}）" if notes else "")
+        notes.append(f"playwright 自带 chromium 不在（{p}；可用 <PW_PYTHON> -m playwright install chromium 装）")
+    except Exception as e:      # 没装 playwright 或驱动起不来
+        notes.append(f"playwright 自带 chromium 取不到（{type(e).__name__}: {e}）")
+    if Path(SYSTEM_CHROME).is_file():
+        return SYSTEM_CHROME, "系统 Chrome " + SYSTEM_CHROME + (f"（另：{'；'.join(notes)}）" if notes else "")
+    notes.append(f"{SYSTEM_CHROME} 不在")
+    return None, "；".join(notes)
 
 
 def free_port():
@@ -2661,12 +2694,14 @@ def main(argv=None):
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        print("跳过：没装 playwright（pip install playwright 到临时 venv，"
-              "Chrome 用系统的 /usr/bin/google-chrome）。环境缺依赖，不算走查失败。")
+        print("跳过：没装 playwright（用 /opt/kg_pw_venv/bin/python 跑，或 pip install playwright 到独立 venv）。"
+              "环境缺依赖，不算走查失败。")
         return 2
-    if not Path("/usr/bin/google-chrome").exists():
-        print("跳过：/usr/bin/google-chrome 不在。环境缺依赖，不算走查失败。")
+    chrome, how = find_chrome()
+    if not chrome:
+        print(f"跳过：找不到浏览器（{how}）。环境缺依赖，不算走查失败。")
         return 2
+    print(f"浏览器：{chrome}（{how}）")
 
     ck = Checks()
     tmp = Path(tempfile.mkdtemp(prefix="k97_walk_"))
@@ -2683,7 +2718,7 @@ def main(argv=None):
             print("服务起来了")
             with sync_playwright() as pw:
                 browser = pw.chromium.launch(
-                    executable_path="/usr/bin/google-chrome", headless=True,
+                    executable_path=chrome, headless=True,
                     args=["--no-sandbox", "--disable-dev-shm-usage"])
                 _ALL_PAGES.clear()
 

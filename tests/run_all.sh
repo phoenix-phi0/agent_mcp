@@ -2,7 +2,7 @@
 # 跑全部测试，每组一行结果，失败的组才展开细节。
 #
 #     bash tests/run_all.sh          # 仓库根自动取脚本所在仓库，M=... 可覆盖
-#     PW_PYTHON=/tmp/k97_pw_venv/bin/python bash tests/run_all.sh   # 带上浏览器走查
+#     PW_PYTHON=/别处/bin/python bash tests/run_all.sh   # 浏览器走查换解释器（默认 /opt/kg_pw_venv 存在就用它）
 #     npm ci --prefix tests/e2e       # 首次：装 node E2E 要的 jsdom
 #
 # 全用绝对路径：在 cd 之后用相对路径找解释器，这个错犯过两次，而且错误
@@ -52,9 +52,10 @@ run() {
     printf '%s\n' "$out" | tail -6 | sed 's/^/    /'
     return
   fi
-  # 浏览器走查在 PW_PYTHON 指的解释器没装 playwright 时退出码 2 = 跳过，不计失败
-  if [ "$code" -eq 2 ] && [ "$name" = "kg_v4走查" ]; then
-    printf '%-12s 跳过（没装 playwright，不计失败）\n' "$name"
+  # 浏览器两组在 PW_PYTHON 指的解释器没装 playwright、或找不到浏览器时退出码 2 = 跳过，不计失败（原因打在下一行）
+  if [ "$code" -eq 2 ] && { [ "$name" = "kg_v4走查" ] || [ "$name" = "日语残留检查" ]; }; then
+    printf '%-12s 跳过（没装 playwright 或找不到浏览器，不计失败）\n' "$name"
+    printf '%s\n' "$out" | grep -m1 '跳过' | sed 's/^/    /'
     return
   fi
   last=$(printf '%s\n' "$out" | grep -E '通过 *[0-9]+|passed|OK|完成' | tail -1)
@@ -122,12 +123,16 @@ run 最近学习按科目与对象传参 $PY tests/kg_v4/test_k170_subject_last_
 run 选项解析拼JSON $PY tests/kg_v4/test_k173_json_literal.py
 # 浏览器走查（K97）：起服务 + playwright + 系统 Chrome，比别的组慢，时限给 600 秒。
 # 没 playwright 的机器上打「跳过」退出码 2——run() 里单独按「跳过」处理，详见脚本头部。
-# 解释器由 PW_PYTHON 指定（如 /tmp/k97_pw_venv/bin/python），不往 .venv 装 playwright。
+# 解释器由 PW_PYTHON 指定，不往 .venv 装 playwright。没设时默认用持久 venv /opt/kg_pw_venv（K196 装，存在才用）。
+# 浏览器由脚本自己找：KG_CHROME / PW_CHROMIUM_PATH → playwright 自带 chromium → /usr/bin/google-chrome（e2e_walk.find_chrome）。
+if [ -z "${PW_PYTHON:-}" ] && [ -x /opt/kg_pw_venv/bin/python ]; then
+  PW_PYTHON=/opt/kg_pw_venv/bin/python
+fi
 if [ -n "${PW_PYTHON:-}" ] && [ -x "$PW_PYTHON" ]; then
   LIMIT=600 run kg_v4走查  "$PW_PYTHON" tests/kg_v4/e2e_walk.py
   LIMIT=600 run 日语残留检查 "$PW_PYTHON" tests/kg_v4/e2e_ja_residue.py
 else
-  echo "kg_v4走查    跳过（未设 PW_PYTHON 或不可执行；设成装了 playwright 的 python 即可跑）"
+  echo "kg_v4走查    跳过（未设 PW_PYTHON 或不可执行，/opt/kg_pw_venv 也不在；设成装了 playwright 的 python 即可跑）"
 fi
 run 模板命名    $PY tests/gen/test_templates.py
 run 按端拆页面  $PY tests/gen/test_ends.py

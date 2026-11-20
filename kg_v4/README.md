@@ -109,19 +109,19 @@ M4 拆模块（K133，约定先行，实现见 `plan/m4_split_impl.md`）：对�
 ### 浏览器走查（K97）
 
 ```
-/tmp/pw/bin/python tests/kg_v4/e2e_walk.py               # 用装了 playwright 的解释器（见下）： 学生端/教师端全部界面 + 科目管理全流程（35 项）
-/tmp/pw/bin/python tests/kg_v4/e2e_walk.py --no-subject-mgmt   # 合并前的基线也该全过（证明脚本本身没错）
+/opt/kg_pw_venv/bin/python tests/kg_v4/e2e_walk.py               # 用装了 playwright 的解释器（见下）： 学生端/教师端全部界面 + 科目管理全流程（35 项）
+/opt/kg_pw_venv/bin/python tests/kg_v4/e2e_walk.py --no-subject-mgmt   # 合并前的基线也该全过（证明脚本本身没错）
 ```
 
 自己拷一份 kg_v4 到临时目录、init_data 灌裁小的库、建临时账号（t1/t2 教师、s1/s2 学生，口令是脚本内常量，只进自建的临时库）、`gen run --登录` 离线假模型、临时端口，结束按进程组停服、删临时目录。断言与数据内容无关（不数具体条数）：根地址落在问老师、两端每个界面都能开且无 JS 错误、导航分组（看看/管理）、科目管理全流程（建科目→加协作→分配→启用→学生顶栏切换→协作只见成员→停用回落→日语停用提示 409 原文）、390px 不横向溢出。
 
-浏览器用 playwright + 系统 `/usr/bin/google-chrome`（作 executable_path，不 playwright install 下载浏览器）；playwright 装在仓库 venv 之外的临时 venv（`python3 -m venv /tmp/pw && /tmp/pw/bin/pip install playwright`），没装时打「跳过」退出码 2，不算走查失败。已知控制台噪音：unpkg 的 vue-flow 报 `production is not defined`（外链脚本与 vue.global.prod 的兼容提示，不影响使用），脚本忽略。`tests/run_all.sh` 里有「kg_v4走查」一组（时限 300 秒）。
+浏览器用 playwright，可执行文件按顺序找（K196，`e2e_walk.find_chrome`）：环境变量 `KG_CHROME` / `PW_CHROMIUM_PATH` → playwright 自带 chromium → 系统 `/usr/bin/google-chrome`；playwright 装在仓库 venv 之外的持久 venv `/opt/kg_pw_venv`（python3.13，`playwright install chromium` + `playwright install-deps chromium`），`tests/run_all.sh` 没设 `PW_PYTHON` 时默认用它；没装 playwright 或找不到浏览器时打「跳过」退出码 2，不算走查失败。已知控制台噪音：unpkg 的 vue-flow 报 `production is not defined`（外链脚本与 vue.global.prod 的兼容提示，不影响使用），脚本忽略。`tests/run_all.sh` 里有「kg_v4走查」一组（时限 300 秒）。
 
 ### 日语残留检查（K191）
 
 ```
-/tmp/k97_pw_venv/bin/python tests/kg_v4/e2e_ja_residue.py     # 默认精简，进 run_all，约 5 分钟
-/tmp/k97_pw_venv/bin/python tests/kg_v4/e2e_ja_residue.py --data <数据目录> --port 8188 --full --out x.tsv   # 全量（--deep 再加非法值）
+/opt/kg_pw_venv/bin/python tests/kg_v4/e2e_ja_residue.py     # 默认精简，进 run_all，约 5 分钟
+/opt/kg_pw_venv/bin/python tests/kg_v4/e2e_ja_residue.py --data <数据目录> --port 8188 --full --out x.tsv   # 全量（--deep 再加非法值）
 ```
 
 ja 账号遍历所有界面、浮层（从 .ui 读，新加的自动进）、空状态和报错，查还带中文的文字；同时静态查 services、routes 的「报错」和 .ui 标签都有日文。新页面漏翻会失败：整串文案补 `i18n/ja.tsv`，带插值的在服务里加 ja 分支；确实不该翻的进 `tests/kg_v4/ja_residue_whitelist.tsv`，每条写理由。1 号科目（日语语法）的讲解和题目按设计 D3 是中文数据，只翻名字（`setup/names_ja.tsv`，init_data 写入）。
