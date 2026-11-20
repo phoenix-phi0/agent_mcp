@@ -170,7 +170,9 @@
           "values": [
             "start",
             "status",
-            "result"
+            "result",
+            "list",
+            "cancel"
           ]
         },
         "command": {
@@ -189,6 +191,214 @@
       "steps": [],
       "mode": "job",
       "timeout": 60
+    },
+    {
+      "name": "git_diff",
+      "level": "read",
+      "doc": "看工作区未提交的具体改动（diff 原文）；paths 不给就是全部，max_lines 限制行数",
+      "params": {
+        "paths": {
+          "type": "path_list",
+          "glob": "*",
+          "default": []
+        },
+        "max_lines": {
+          "type": "int",
+          "min": 1,
+          "max": 800,
+          "default": 200
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "git diff -- {paths} | head -n {max_lines}"
+      ],
+      "mode": "sync",
+      "timeout": 60
+    },
+    {
+      "name": "git_push",
+      "level": "write",
+      "doc": "把当前分支推送到 origin；先显示领先几个提交",
+      "params": {},
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "git status -sb | head -n 1",
+        "git push origin HEAD"
+      ],
+      "mode": "sync",
+      "timeout": 120
+    },
+    {
+      "name": "grep",
+      "level": "read",
+      "doc": "在目录里搜固定字符串（不是正则），返回 文件:行号:内容；include 限定文件名通配（如 *.py），path 可以是 /workspace 下任意目录",
+      "params": {
+        "pattern": {
+          "type": "text",
+          "required": true,
+          "max_len": 200
+        },
+        "path": {
+          "type": "path",
+          "roots": [
+            "/workspace"
+          ],
+          "glob": "*",
+          "default": "/workspace/agent_mcp"
+        },
+        "include": {
+          "type": "text",
+          "max_len": 60,
+          "pattern": "[A-Za-z0-9_.*?][A-Za-z0-9_.*?-]*",
+          "default": "*"
+        },
+        "max": {
+          "type": "int",
+          "min": 1,
+          "max": 300,
+          "default": 80
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "grep -rnIF --include={include} --exclude-dir=.git --exclude-dir=.venv --exclude-dir=node_modules --exclude-dir=__pycache__ --exclude=config.json -e {pattern} -- {path} | grep -viE \"(key|token|secret|password|passwd|authorization)[\\\"']?[[:space:]]*[:=]|bearer \" | cut -c1-240 | head -n {max}"
+      ],
+      "mode": "sync",
+      "timeout": 60
+    },
+    {
+      "name": "find",
+      "level": "read",
+      "doc": "按文件名通配找文件或目录，返回 修改日期 大小 路径，新的在前；depth 是目录深度，path 可以是 /workspace 下任意目录",
+      "params": {
+        "path": {
+          "type": "path",
+          "roots": [
+            "/workspace"
+          ],
+          "glob": "*",
+          "default": "/workspace/agent_mcp"
+        },
+        "name": {
+          "type": "text",
+          "max_len": 80,
+          "pattern": "[A-Za-z0-9_.*?\\[\\]][A-Za-z0-9_.*?\\[\\]-]*",
+          "default": "*"
+        },
+        "depth": {
+          "type": "int",
+          "min": 1,
+          "max": 8,
+          "default": 4
+        },
+        "max": {
+          "type": "int",
+          "min": 1,
+          "max": 300,
+          "default": 100
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "find {path} -maxdepth {depth} -name {name} -not -path '*/.git/*' -not -path '*/.venv/*' -not -path '*/__pycache__/*' -not -path '*/node_modules/*' -printf '%TY-%Tm-%Td %8s %p\\n' | sort -r | head -n {max}"
+      ],
+      "mode": "sync",
+      "timeout": 60
+    },
+    {
+      "name": "ps_check",
+      "level": "read",
+      "doc": "看命令行里含某段文字的进程在不在，返回 进程号 已运行秒数 命令行；没有输出就是不在",
+      "params": {
+        "pattern": {
+          "type": "text",
+          "required": true,
+          "max_len": 100
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "ps -eo pid,etimes,args | grep -F -e {pattern} | grep -v 'grep -F' | grep -viE \"(key|token|secret|password|passwd|authorization)[\\\"']?[[:space:]]*[:=]|bearer \" | cut -c1-200 | head -n 30"
+      ],
+      "mode": "sync",
+      "timeout": 60
+    },
+    {
+      "name": "batch_jobs",
+      "level": "read",
+      "doc": "列出某个批量队列最近的任务（任务号、名字、状态、进度），新的在前",
+      "params": {
+        "queue": {
+          "type": "enum",
+          "required": true,
+          "values": [
+            "gsbatch",
+            "cxbatch",
+            "cbatch",
+            "mbatch",
+            "gbatch",
+            "obatch",
+            "zbatch"
+          ]
+        },
+        "limit": {
+          "type": "int",
+          "min": 1,
+          "max": 20,
+          "default": 10
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        ".venv/bin/python -B -c 'import importlib,sys,json; print(json.dumps(importlib.import_module(\"tools.\" + sys.argv[1]).jobs(int(sys.argv[2])), ensure_ascii=False))' {queue} {limit}"
+      ],
+      "mode": "sync",
+      "timeout": 60
+    },
+    {
+      "name": "batch_status",
+      "level": "read",
+      "doc": "按任务号看某个批量任务的详情和输出预览；任务号从 batch_jobs 拿",
+      "params": {
+        "queue": {
+          "type": "enum",
+          "required": true,
+          "values": [
+            "gsbatch",
+            "cxbatch",
+            "cbatch",
+            "mbatch",
+            "gbatch",
+            "obatch",
+            "zbatch"
+          ]
+        },
+        "job_id": {
+          "type": "text",
+          "required": true,
+          "pattern": "[0-9]{8}-[0-9]{6}-[0-9a-f]+"
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        ".venv/bin/python -B -c 'import importlib,sys,json; print(json.dumps(importlib.import_module(\"tools.\" + sys.argv[1]).status(sys.argv[2]), ensure_ascii=False, indent=1))' {queue} {job_id} | grep -viE \"(key|token|secret|password|passwd|authorization)[\\\"']?[[:space:]]*[:=]|bearer \"; true"
+      ],
+      "mode": "sync",
+      "timeout": 60
+    },
+    {
+      "name": "run_all",
+      "level": "write",
+      "doc": "跑全量回归 tests/run_all.sh（很慢）；只能用 job 启动，结束后给出失败的组和末尾若干行",
+      "params": {},
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "bash tests/run_all.sh > {log} 2>&1; rc=$?; printf \"EXIT=%s\\n\" \"$rc\" >> {log}; grep -E \"失败|FAIL\" {log} | head -n 40; tail -n 15 {log}; exit \"$rc\""
+      ],
+      "mode": "job_only",
+      "timeout": 60,
+      "job_timeout": 3600
     }
   ]
 }

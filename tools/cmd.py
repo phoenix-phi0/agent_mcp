@@ -2,6 +2,7 @@
 """固定指令执行器；指令及权限由只读配置表定义。"""
 import builtins
 import fnmatch
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -100,6 +101,9 @@ def _validate(command, args):
         elif typ == 'text':
             if not isinstance(value, str) or len(value) > spec.get('max_len', 8000) or '\x00' in value:
                 raise ValueError(f'{name}: expected text max_len={spec.get("max_len", 8000)}')
+            # 格式约束全写在指令表的 pattern 里，这里不认具体参数名
+            if 'pattern' in spec and re.fullmatch(spec['pattern'], value) is None:
+                raise ValueError(f'{name}: expected format {spec["pattern"]}')
         elif typ == 'bool':
             if type(value) is not bool:
                 raise ValueError(f'{name}: expected bool')
@@ -127,7 +131,7 @@ def _prepare(command, values):
     return [s.format_map(fields) for s in command['steps']]
 
 
-def _execute(command, steps, timeout, full_output=False):
+def _execute(command, steps, timeout, full_output=False, job_directory=None):
     def result(status, exit_code=None, output="", reason=""):
         value = _result(status, exit_code, output, reason=reason)
         if full_output:
@@ -140,8 +144,15 @@ def _execute(command, steps, timeout, full_output=False):
         if remaining <= 0:
             return result('failed', output=''.join(chunks), reason='timeout')
         try:
-            p = subprocess.Popen(step, shell=True, cwd=command['cwd'], stdout=subprocess.PIPE,
-                                 stderr=subprocess.STDOUT, start_new_session=True)
+            if job_directory:
+                with (job_directory / 'lock').open('a') as lock:
+                    fcntl.flock(lock, fcntl.LOCK_EX)
+                    p = subprocess.Popen(step, shell=True, cwd=command['cwd'], stdout=subprocess.PIPE,
+                                         stderr=subprocess.STDOUT, start_new_session=True)
+                    (job_directory / 'child_pid').write_text(str(p.pid))
+            else:
+                p = subprocess.Popen(step, shell=True, cwd=command['cwd'], stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT, start_new_session=True)
             try:
                 out, _ = p.communicate(timeout=remaining)
             except subprocess.TimeoutExpired:
@@ -171,11 +182,33 @@ def _job(table, caller, values):
         jid = uuid.uuid4().hex
         directory = _home() / 'jobs' / jid
         directory.mkdir(parents=True)
-        (directory / 'meta.json').write_text(json.dumps({'caller': caller, 'command': name, 'definition': command, 'steps': steps, 'timeout': command.get('job_timeout', 3600)}), encoding='utf-8')
+        (directory / 'meta.json').write_text(json.dumps({'caller': caller, 'command': name, 'definition': command, 'steps': steps, 'timeout': command.get('job_timeout', 3600), 'started': datetime.now(timezone.utc).isoformat()}), encoding='utf-8')
         (directory / 'output.log').touch()
         _WORKERS[:] = [p for p in _WORKERS if p.poll() is None]
-        _WORKERS.append(subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '_worker', str(directory)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True))
+        worker = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '_worker', str(directory)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        _WORKERS.append(worker)
+        pid_temp = directory / 'pid.parent.tmp'
+        pid_temp.write_text(str(worker.pid))
+        os.replace(pid_temp, directory / 'pid')
         return _result('running', job=jid)
+    if action == 'list':
+        jobs = _home() / 'jobs'
+        rows = []
+        for directory in jobs.iterdir() if jobs.exists() else []:
+            try:
+                meta = json.loads((directory / 'meta.json').read_text(encoding='utf-8'))
+                command = _command(table, meta['command'])
+                if not command or not _allowed(table, caller, command):
+                    continue
+                try:
+                    status = json.loads((directory / 'result.json').read_text(encoding='utf-8'))['status']
+                except FileNotFoundError:
+                    status = 'running'
+                rows.append((meta.get('started', ''), directory.name, meta['command'], status))
+            except (OSError, ValueError, KeyError):
+                continue
+        rows.sort(reverse=True)
+        return _result('ok', 0, ''.join(f'{jid} {name} {status} {started}\n' for started, jid, name, status in rows[:20]))
     jid = values.get('job')
     if not isinstance(jid, str) or not re.fullmatch(r'[0-9a-f]{32}', jid):
         raise ValueError('job: expected job id')
@@ -187,26 +220,58 @@ def _job(table, caller, values):
     command = _command(table, meta['command'])
     if not command or not _allowed(table, caller, command):
         raise ValueError('job: caller is not permitted')
-    try:
-        result = json.loads((directory / 'result.json').read_text(encoding='utf-8'))
-    except FileNotFoundError:
+    with (directory / 'lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            result = json.loads((directory / 'result.json').read_text(encoding='utf-8'))
+        except FileNotFoundError:
+            result = None
+        if action == 'cancel' and result is None:
+            try:
+                pid = int((directory / 'pid').read_text())
+                os.kill(pid, 0)
+                try:
+                    child_pid = int((directory / 'child_pid').read_text())
+                    os.killpg(child_pid, signal.SIGKILL)
+                except (FileNotFoundError, ProcessLookupError):
+                    pass
+                os.killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                # worker 已经不在、又没留下结果：把状态落盘，否则这个任务会永远显示 running
+                result = dict(status='failed', exit_code=None, reason='worker 已不在，没有留下结果')
+                (directory / 'result.json').write_text(json.dumps(result), encoding='utf-8')
+                return _result('failed', job=jid, reason='已经结束')
+            result = dict(status='cancelled', exit_code=None, reason='cancelled')
+            (directory / 'result.json').write_text(json.dumps(result), encoding='utf-8')
+        elif action == 'cancel':
+            status = 'failed' if result['status'] == 'cancelled' else result['status']
+            return _result(status, result['exit_code'], job=jid, reason='已经结束')
+    if result is None:
         return _result('running', job=jid)
     output = (directory / 'output.log').read_text(encoding='utf-8', errors='replace') if action == 'result' else ''
-    return _result(result['status'], result['exit_code'], output, jid, result['reason'])
+    status = 'failed' if result['status'] == 'cancelled' else result['status']
+    return _result(status, result['exit_code'], output, jid, result['reason'])
 
 
 def _worker(directory):
     directory = Path(directory)
+    pid_temp = directory / 'pid.worker.tmp'
+    pid_temp.write_text(str(os.getpid()))
+    os.replace(pid_temp, directory / 'pid')
     meta = json.loads((directory / 'meta.json').read_text(encoding='utf-8'))
     try:
-        result = _execute(meta['definition'], meta['steps'], meta['timeout'], full_output=True)
+        result = _execute(meta['definition'], meta['steps'], meta['timeout'], full_output=True, job_directory=directory)
     except Exception as e:
         result = _result('failed', reason=str(e))
     (directory / 'output.log').write_text(result['output'], encoding='utf-8')
     (directory / 'exit_code').write_text(str(result['exit_code']), encoding='utf-8')
-    temp = directory / 'result.json.tmp'
-    temp.write_text(json.dumps({k: result[k] for k in ('status', 'exit_code', 'reason')}), encoding='utf-8')
-    os.replace(temp, directory / 'result.json')
+    with (directory / 'lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            with (directory / 'result.json').open('x', encoding='utf-8') as f:
+                json.dump({k: result[k] for k in ('status', 'exit_code', 'reason')}, f)
+        except FileExistsError:
+            pass
 
 
 def run_as(caller, name, args=None):
@@ -221,6 +286,8 @@ def run_as(caller, name, args=None):
             raise ValueError('caller: not permitted for command')
         if name == 'job' and caller not in table.get('callers', {}):
             raise ValueError('caller: unknown caller')
+        if command.get('mode') == 'job_only':
+            raise ValueError(f'用 job 启动：{{"action":"start","command":"{name}"}}')
         values = _validate(command, {} if args is None else args)
         _home().mkdir(parents=True, exist_ok=True)
         if name == 'job':
@@ -250,7 +317,7 @@ def list() -> list:
 
 
 def describe() -> str:
-    return '固定指令执行器：run(name, args) 执行，list() 查看可用指令；job 指令支持 start、status、result。'
+    return '固定指令执行器：run(name, args) 执行，list() 查看可用指令；job 指令支持 start、status、result、list、cancel。'
 
 
 if __name__ == '__main__' and len(sys.argv) == 3 and sys.argv[1] == '_worker':
