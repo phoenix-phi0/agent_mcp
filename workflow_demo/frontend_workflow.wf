@@ -1,0 +1,112 @@
+# 给已有 JSON 接口的后端做一个前端，全自动跑完；人随时可以在查看器上介入（暂停、设确认、替某一步交结果、退回重来）。
+# 界面设计（设计师读后端代码：页面清单、每页调的接口、元素、操作、状态、验收和测试、端到端场景；第一页固定是前端骨架）
+# → 设计评审会（review_attendees 轮流发言，可以点名追问；主持人每轮判断，最多三轮；人想发言就把 HUMAN 加进名单）
+# → 评审结论里有修改项就交设计师改一版
+# → 按页面依次：实现（写页面和页面测试：jsdom 加载真实页面，请求打到测试里起的真后端，按人的操作顺序点）
+#   → 页面验收（不过就在本页返工，每页最多 3 轮）；工程师报告设计和后端对不上时先交设计师裁决，裁决记进 design_notes
+# → 端到端测试（把 flows 每个场景写成测试）→ 整体验收（不过就返工，最多 3 轮）
+# 工程师每次只拿本页的设计和全前端约定（stack、layout、serve、test_harness、shared、conventions）。不改后端代码。
+# 入口脚本要设：content backend stack goal project web_dir test_cmd review_attendees
+# 可选：designer（默认 DESIGNER）、moderator（默认 MODERATOR）、page_engineer（默认 FRONTEND_ENGINEER）、page_qa（默认 FRONTEND_QA）
+清空 design_notes
+界面设计
+    任务 前端界面设计：给已有的后端做一个独立前端。需求：{content}。后端说明：{backend}。前端技术栈：{stack}。约束：{goal}。项目在 work/{project}，后端代码已经在里面（你只读不写），前端放在 {web_dir} 目录（现在还没有）。前端测试命令：{test_cmd}（骨架页要让它能跑通）。先读后端代码弄清每个接口真实的路径、请求、响应和错误，再按「前端界面设计」的要求写
+    角色 {designer 或 DESIGNER}
+    格式 frontend_design
+    记录 design
+清空 minutes
+清空 open_issues
+标记:r
+遍历 who 于 review_attendees
+    评审发言
+        任务 前端设计评审会。需求：{content}。你是参会的 {who}。参考文本里 design 是待评审的界面设计，minutes 是到目前为止所有人的发言，open_issues 是主持人上一轮指出、还没解决的分歧（第一轮为空，有就先回应）。从你的角度看：页面是否覆盖全部需求；每页调的接口和后端是否对得上；操作和状态（空数据、出错、未登录）是否写全；验收能不能用页面测试自动验证；端到端场景是否覆盖主要流程。只提需求范围内的问题，点名回应前面的人，不重复别人说过的。认可现在的设计、没有新意见就 agree=true。想问某个参会角色就在 ask 写它的名字、question 写问题，不问就都写空串
+        角色 who
+        文本 design minutes open_issues
+        格式 speech
+        记录 s
+    存储 minutes who=who text=s.speech agree=s.agree
+    如果 s.ask 不为空
+        评审追问
+            任务 前端设计评审会。{who} 在会上点名问你：{s.question}。参考文本里有界面设计和到目前为止的全部发言。直接回答这个问题；答完认可现在的设计就 agree=true。不要再追问别人：ask 和 question 都写空串
+            角色 s.ask
+            文本 design minutes
+            格式 speech
+            记录 reply
+        存储 minutes who=s.ask text=reply.speech agree=reply.agree
+评审判断
+    任务 前端设计评审会。按「主持会议」的要求判断这一轮之后能不能出结论。参考文本里 minutes 是全部发言
+    角色 {moderator 或 MODERATOR}
+    文本 design minutes
+    格式 meeting_check
+    记录 mc
+如果 mc.done == 否
+    清空 open_issues
+    存储 open_issues issues=mc.disagreements summary=mc.summary
+    跳转 r 最大 2
+评审结论
+    任务 前端设计评审会。按「主持会议」的要求写结论：decision 写设计要不要改、改哪些；todo 写成设计师能照做的修改项（who 写 DESIGNER），设计不用改就留空。参考文本里有界面设计、全部发言和主持人最后一轮的判断（check）
+    角色 {moderator 或 MODERATOR}
+    文本 design minutes check=mc
+    格式 meeting_decision
+    记录 review
+如果 review.todo != []
+    设计修改
+        任务 按评审结论修改前端界面设计：参考文本里 review 的 decision 和 todo 逐条处理，交完整的新版本，并在 changes 里逐条回应（已修改写改了什么，不修改写理由）。项目在 work/{project}，需要时再读后端代码核对
+        角色 {designer 或 DESIGNER}
+        文本 design review
+        格式 frontend_design
+        记录 design
+遍历 page 于 design.pages
+    清空 page_results
+    页面实现
+        任务 按界面设计实现前端的一页（现在只做这一页）。参考文本里 current_page 是这一页的设计（文件、调的接口、元素、操作、状态、验收、测试），另有前端技术栈、目录、怎么起服务、测试怎么跑、共用部分、全前端约定和设计师之前的裁决（design_notes）。前面的页面都已做完并验收。前端在 work/{project}/{web_dir}，不要改 {web_dir} 以外的文件（后端代码和后端测试都不动）。按「前端实现」的要求把 current_page 的 tests 写成页面测试，运行 {test_cmd}，全部通过（前面页面的测试也要过）。后端接口和设计对不上、或者设计写不通时，写进 need_architect，不要改后端，也不要把测试改成迁就现状
+        角色 {page_engineer 或 FRONTEND_ENGINEER}
+        文本 current_page=page stack=design.stack layout=design.layout serve=design.serve test_harness=design.test_harness shared=design.shared conventions=design.conventions design_notes
+        格式 implementation
+        记录 task_result
+    如果 task_result.need_architect != []
+        设计确认
+            任务 设计确认：工程师实现当前页面时报告了和界面设计有关的问题，见参考文本的 issues（设计和后端接口对不上、设计没写到、照设计写不通）。设计是所有页面的唯一依据，逐条裁决：设计没问题就判按原约定，写清工程师该怎么改回去；没写到就补充约定；写错了或写不通就修改约定（以后端代码的真实行为为准，前端不能要求改后端）。detail 写出以后以什么为准，affected_modules 写受影响的页面名（包括已经做完的）。项目在 work/{project}，需要时读后端代码核对
+            角色 {designer 或 DESIGNER}
+            文本 issues=task_result.need_architect current_page=page conventions=design.conventions design_notes
+            格式 contract_decision
+            记录 design_fix
+        存储 design_notes page=page.name decisions=design_fix.decisions
+    存储 page_results task_result
+    标记:m
+    页面验收
+        任务 页面验收：按界面设计实现的前端里的一页。checked 里只要有一项是不满足或未验证，decide 就必须是需修改。当前页的设计见参考文本的 current_page，设计师的裁决（design_notes）优先于原设计。测试命令（以这个为准）：{test_cmd}。按「前端页面验收」逐项核对：1 测试命令完整跑完、全部通过（前面页面的测试也要过），只要出现过一次失败，哪怕重跑通过，也算不满足；2 current_page 的 acceptance 每一条；3 读页面代码和测试：apis 里每个接口都按设计调用（方法、路径、请求字段），响应和每个错误在页面上都有对应的显示；elements 都在、带设计写的 id 或 data-* 属性；actions 和 states 每一条都有测试按人的操作顺序验证，断言的是页面上看得到的结果，不是只断言发了请求；4 页面测试真加载了 {web_dir} 里的页面、请求真打到了测试里起的后端（不是假 fetch 返回写死的数据）；已有的测试被改松、删掉、跳过的算不满足；5 没改 {web_dir} 以外的文件，没做这一页以外的事。和设计不一致的每一处写进 deviations（设计是什么、代码里是什么、哪个文件）。参考文本的 results 是这一页的实现记录（含返工）
+        角色 {page_qa 或 FRONTEND_QA}
+        文本 current_page=page results=page_results conventions=design.conventions test_harness=design.test_harness design_notes
+        格式 module_acceptance
+        记录 pcheck
+    如果 pcheck.decide == 需修改
+        页面返工
+            任务 {pcheck.task}。前端在 work/{project}/{web_dir}，不要改 {web_dir} 以外的文件。已有的测试不要为了让代码通过而修改、删除、跳过或放宽断言；测试和设计矛盾时写进 need_architect。改完运行 {test_cmd}，全部通过
+            角色 {page_engineer 或 FRONTEND_ENGINEER}
+            文本 current_page=page stack=design.stack layout=design.layout serve=design.serve test_harness=design.test_harness shared=design.shared conventions=design.conventions design_notes
+            格式 implementation
+            记录 task_result
+        存储 page_results task_result
+        跳转 m 最大 3
+端到端测试
+    任务 端到端测试：所有页面已经做完。把参考文本里 flows 的每个场景写成页面测试（测试文件按 test_harness 的约定放），每个场景一个测试，开头注释写明是哪个场景；从第一页开始按 steps 一步一步在真实页面上操作（填表、点按钮、跟着跳转换页），每一步都断言 expect 写的、页面上看得到的结果。只写测试，不改页面代码；有场景过不了，就把场景名、失败的步骤和实际看到的写进 open_issues。写完运行 {test_cmd}
+    角色 {page_engineer 或 FRONTEND_ENGINEER}
+    文本 flows=design.flows pages=design.pages[name,title,files,elements] serve=design.serve test_harness=design.test_harness shared=design.shared conventions=design.conventions design_notes
+    格式 implementation
+    记录 etest
+标记:b
+整体验收
+    任务 前端整体验收：所有页面已经做完。需求：{content}。测试命令（以这个为准）：{test_cmd}。逐项核对：1 测试命令完整跑完、全部通过，只要出现过一次失败，哪怕重跑通过，也算不满足；2 参考文本里 flows 的每个场景都有对应的测试，真在页面上按 steps 操作、断言了 expect（逐个读，不抽查），都通过；3 需求里的每项功能都有页面能做；看有没有为了通过而被改松的测试；4 按 serve 写的方式真把前端起起来，确认首页能打开、登录后能走通主要流程（起服务的命令和看到的结果写进 evidence），用完关掉；5 没改 {web_dir} 以外的文件。端到端测试那一步的记录见参考文本的 etest。checked 里只要有一项是不满足或未验证，decide 就必须是需修改；task 写成工程师能照做的返工要求，写明涉及哪些页面和文件
+    角色 {page_qa 或 FRONTEND_QA}
+    文本 summary=design.summary flows=design.flows pages=design.pages[name,title,files,acceptance] serve=design.serve test_harness=design.test_harness design_notes etest
+    格式 acceptance
+    记录 final
+如果 final.decide == 需修改
+    整体返工
+        任务 {final.task}。前端在 work/{project}/{web_dir}，不要改 {web_dir} 以外的文件。已有的测试不要为了让代码通过而修改、删除、跳过或放宽断言；测试和设计矛盾时写进 need_architect。改完运行 {test_cmd}，全部通过
+        角色 {page_engineer 或 FRONTEND_ENGINEER}
+        文本 flows=design.flows pages=design.pages[name,title,files,elements] serve=design.serve test_harness=design.test_harness shared=design.shared conventions=design.conventions design_notes
+        格式 implementation
+        记录 task_result
+    跳转 b 最大 3

@@ -209,6 +209,9 @@ run 编排块内跳转 $PY tests/tools/test_wf_block_jump.py
 run 编排参考资料取字段 $PY tests/tools/test_wf_pick.py
 run 编排Platform卡 $PY tests/tools/test_wf_platform.py
 run 整项目流程   $PY tests/tools/test_wf_project.py
+run AI会议       $PY tests/tools/test_wf_meeting.py
+run 前端流程     $PY tests/tools/test_wf_frontend.py
+run 会议启动和会议页 $PY tests/tools/test_meeting_start.py
 run 人工交代码   $PY tests/tools/test_wf_submit_files.py
 run 插件交代码链路 $PY tests/tools/test_vscode_submit_e2e.py
 run 编排查看器 $PY tests/tools/test_trace_view.py
@@ -235,6 +238,7 @@ run DSL简报约定闸 $PY tests/tools/test_dslagent_k174.py
 run DSL整份重写 $PY tests/tools/test_dslagent_k84.py
 run 批量opencode $PY tests/tools/test_obatch.py
 run 批量codex   $PY tests/tools/test_cxbatch.py
+run 指令执行器 $PY tests/tools/test_cmd.py
 run 批量goose   $PY tests/tools/test_gsbatch.py
 run 探针检索    $PY tests/tools/test_code_search.py
 run Colab启动   $PY tests/tools/test_colab_vllm.py

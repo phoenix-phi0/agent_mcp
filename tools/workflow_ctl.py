@@ -126,6 +126,13 @@ def _match(rules, names):
     return None
 
 
+def _is_human(workdir, role):
+    if not workdir or not role:
+        return False
+    from verbs.workflow._agents import is_human_card
+    return is_human_card(workdir, role)
+
+
 def _check_rules(rules):
     if not isinstance(rules, (list, tuple)):
         raise ControlError(f"确认规则无效：{rules!r}")
@@ -316,6 +323,9 @@ class _Control:
                                      "model": go.get("model"), "actor": go.get("actor", "workflow_ctl"),
                                      "at": go.get("at") or _stamp()}],
                         **after(go.get("role") or plan["role"])}
+        # 人的卡（model=human）：不调模型，一律停下等人交结果；换了模型或换成别的卡就照常跑
+        if not plan["model"] and not (item and ic.get("model")) and _is_human(getattr(self, "workdir", None), current_role):
+            return {**meta, "action": "wait", "reason": "human", **plan}
         matched = _match(_rules(cfg, "before"), names)
         if ic.get("confirm_before") is not None:
             if ic["confirm_before"]:
@@ -340,8 +350,10 @@ def _advance(trace, cfg, client=None, rewind=None, force_step=False, workdir=Non
         kw["client"] = client
     engine = DSLEngine(**kw)
     engine._wf_control = ctl
+    ctl.workdir = wd
     try:
-        engine.run_file(cfg["entry"])
+        # 启动时传的入口参数（vars）每次回放都带上；老的运行没有这一项，照旧不传
+        engine.run_file(cfg["entry"], params=cfg.get("vars"))
     except WorkflowPause:
         pass
     except Exception:
@@ -399,6 +411,25 @@ def _open(run):
     if not cf.is_file():
         raise ControlError(f"这份记录不是受控编排（没有 {cf.name}）：{run}")
     return p, cf, _load(cf), _load(p)
+
+
+def _wait_worker_exit(run, timeout=5.0):
+    """记录已经停下等人（waiting）的那一刻，后台进程可能还在收尾、还没退出：给它一点时间退出，
+    免得人刚看到「轮到你」就去交，撞上「后台还在跑」。真在跑（记录不是 waiting）就不等，照旧由 _idle 报。
+    在拿控制锁之前等：后台进程收尾时也要这把锁，拿着锁等会互相卡住。"""
+    try:
+        _, cf, cfg, t = _open(run)
+    except ControlError:
+        return
+    if t.get("status") != "waiting":
+        return
+    end = time.monotonic() + timeout
+    while _alive(cfg) and time.monotonic() < end:
+        time.sleep(0.05)
+        try:
+            cfg = _load(cf)
+        except (OSError, ValueError):
+            return
 
 
 def _idle(cfg):
@@ -515,9 +546,30 @@ def _rel(p):
 
 # ---- 接口 ----
 
+_VAR_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,31}$")
+
+
+def _check_vars(vars):
+    """入口参数：键是英文变量名，值是字符串。入口脚本用「# 参数：」声明要哪些，缺了、多了在启动时就报。"""
+    if vars is None:
+        return {}
+    if not isinstance(vars, dict):
+        raise ControlError("vars 要是对象（变量名 → 字符串）")
+    if len(vars) > 20:
+        raise ControlError("vars 最多 20 项")
+    for k, v in vars.items():
+        if not isinstance(k, str) or not _VAR_NAME.fullmatch(k):
+            raise ControlError(f"vars 的变量名不对：{k!r}（英文字母、数字、下划线，32 个字符以内）")
+        if not isinstance(v, str):
+            raise ControlError(f"vars.{k} 要是字符串")
+        if len(v) > 4000:
+            raise ControlError(f"vars.{k} 太长（最多 4000 字）")
+    return dict(vars)
+
+
 def start(workdir, entry="run.zs", mode="step", stop_roles=None, models=None, roles=None,
           wait=False, client=None, confirm_before=None, actor="workflow_ctl",
-          confirm_after=None, max_attempts=None):
+          confirm_after=None, max_attempts=None, vars=None):
     _check_actor(actor)
     wd = Path(workdir)
     if not wd.is_absolute():
@@ -537,16 +589,23 @@ def start(workdir, entry="run.zs", mode="step", stop_roles=None, models=None, ro
     if confirm_after is not None:
         _check_rules(confirm_after)
     _check_max_attempts(max_attempts)
+    params = _check_vars(vars)
     if before is None:
         before = []
     cfg = {"entry": entry, "mode": mode, "confirm_before": before, "stop_roles": before,
            "confirm_after": list(confirm_after or []), "max_attempts": 4 if max_attempts is None else max_attempts,
            "models": dict(models or {}),
            "roles": dict(roles or {}), "submitted": {}, "go": {}, "worker": None, "history": []}
+    cfg["vars"] = params        # 空的也存：入口声明了必填参数时，回放时按空的绑定会报「缺少必填参数」
     _log(cfg, "start", mode=mode, actor=actor,
          confirm_after=cfg["confirm_after"], max_attempts=cfg["max_attempts"])
     # 第一遍只走到第一个节点就停，不调模型；有了记录文件再按 mode 往下走
-    trace = _advance(None, cfg, client, force_step=True, workdir=wd)
+    try:
+        trace = _advance(None, cfg, client, force_step=True, workdir=wd)
+    except ControlError:
+        raise
+    except Exception as e:      # 编排开始前就错了（缺参数、参数名不对、脚本写错）：当成启动参数的问题报
+        raise ControlError(f"入口脚本没能开始编排：{e}") from e
     if trace is None:
         raise ControlError("入口脚本跑完了，没有执行编排")
     with _ctl_lock(trace):
@@ -589,7 +648,7 @@ def status(run, detail=False):
            "mode": cfg.get("mode"), "confirm_before": _rules(cfg, "before"),
            "stop_roles": _rules(cfg, "before"), "confirm_after": _rules(cfg, "confirm_after"),
            "max_attempts": cfg.get("max_attempts", 4),
-           "models": cfg.get("models", {}), "roles": cfg.get("roles", {}),
+           "models": cfg.get("models", {}), "roles": cfg.get("roles", {}), "vars": cfg.get("vars", {}),
            "worker_alive": alive, "resumes": t.get("resumes", 0), "steps": steps}
     pend = t.get("pending") if t.get("status") == "waiting" else None
     if pend:
@@ -630,6 +689,7 @@ def _check_phase(pend, phase, attempt=None):
 
 def submit(run, result, step=None, wait=None, client=None, actor="workflow_ctl"):
     _check_actor(actor)
+    _wait_worker_exit(run)
     with _ctl_lock(run):
         p, cf, cfg, t = _open(run)
         _idle(cfg)
@@ -646,6 +706,7 @@ def submit(run, result, step=None, wait=None, client=None, actor="workflow_ctl")
 
 def execute(run, model=None, role=None, step=None, wait=False, client=None, note=None, actor="workflow_ctl"):
     _check_actor(actor)
+    _wait_worker_exit(run)
     with _ctl_lock(run):
         p, cf, cfg, t = _open(run)
         _idle(cfg)
@@ -660,6 +721,9 @@ def execute(run, model=None, role=None, step=None, wait=False, client=None, note
         t = _settle(p, cfg, t, client)
         pend = _pending(t, step)
         _check_phase(pend, "before")
+        use_role = role or cfg.get("roles", {}).get(pend.get("role")) or pend.get("role")
+        if not (model or cfg.get("models", {}).get(pend.get("role"))) and _is_human(t.get("workdir"), use_role):
+            raise ControlError(f"第 {pend['step']} 步轮到人（{use_role}）：用 submit 交结果；要让 AI 代答就换卡或换模型再执行")
         key = str(pend["step"])
         attempt = 1 + sum(e.get("type") == "task" and e.get("step") == pend["step"]
                           and e.get("status") in ("error", "rejected") for e in t.get("events", []))
@@ -921,6 +985,7 @@ def edit_plan(run, tasks=None, item_controls=None, record=None, client=None, act
 def approve(run, result=None, note=None, step=None, attempt=None, wait=None, client=None,
             actor="workflow_ctl", item_controls=None):
     _check_actor(actor)
+    _wait_worker_exit(run)
     with _ctl_lock(run):
         p, cf, cfg, t = _open(run)
         _idle(cfg)
@@ -979,6 +1044,7 @@ def approve(run, result=None, note=None, step=None, attempt=None, wait=None, cli
 def reject(run, note, model=None, role=None, step=None, attempt=None, wait=False, client=None,
            actor="workflow_ctl"):
     _check_actor(actor)
+    _wait_worker_exit(run)
     with _ctl_lock(run):
         p, cf, cfg, t = _open(run)
         _idle(cfg)
@@ -1353,6 +1419,7 @@ def submit_files(run, files, summary, open_issues=None, status="完成", step=No
     if status not in ("完成", "部分完成", "无法完成"):
         raise ControlError("状态只能是 完成 / 部分完成 / 无法完成")
     _check_note(note)
+    _wait_worker_exit(run)
     with _ctl_lock(run):
         p, cf, cfg, t = _open(run)
         _idle(cfg)

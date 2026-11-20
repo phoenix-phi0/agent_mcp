@@ -14,6 +14,22 @@ _KEYS = {"model", "effort", "tools", "skills", "packages", "max_tool_rounds", "a
          "timeout", "via"}
 
 
+HUMAN = "human"     # 卡的 model 写 "human"：这个角色是人，不调模型，只等人在查看器上交结果
+
+
+def is_human_card(workdir, name):
+    """不走 load_agent 的快速判断（受控运行决定停不停时用）：卡在、而且 model 是 human。"""
+    roots = [Path(workdir) / "agents", Path(__file__).resolve().parents[2] / "tools/dslagent/agent_profiles"]
+    for root in roots:
+        f = root / str(name) / "agent.json"
+        if f.is_file():
+            try:
+                return json.loads(f.read_text(encoding="utf-8")).get("model") == HUMAN
+            except (OSError, ValueError):
+                return False
+    return False
+
+
 def load_agent(engine, name, model_override=None):
     """读角色卡。model_override：外部控制换模型时整串替换卡里的 model（effort 写在 @ 后面）。"""
     if not _NAME.fullmatch(name):
@@ -37,7 +53,7 @@ def load_agent(engine, name, model_override=None):
         raise DSLError(f"agent「{name}」必须配置 model")
     model = model.strip()
     effort = data.get("effort")
-    if effort is not None:
+    if effort is not None and model != HUMAN:
         if not isinstance(effort, str) or effort not in _EFFORTS:
             raise DSLError(f"agent「{name}」effort 无效：{effort}")
         if not model.startswith(("cli:claude/", "cli:codex/", "platform:")) or "@" in model:
@@ -47,6 +63,16 @@ def load_agent(engine, name, model_override=None):
         if not isinstance(model_override, str) or not model_override.strip():
             raise DSLError(f"agent「{name}」覆盖的模型无效：{model_override}")
         model = model_override.strip()
+    if model == HUMAN:
+        # 人：没有模型、工具、effort；卡上只留说明（SOUL.md 当作给人看的发言须知）
+        if effort is not None or data.get("agentic") is not None or data.get("tools") or data.get("packages"):
+            raise DSLError(f"agent「{name}」是人（model=human），不写 effort、agentic、tools、packages")
+        cost = data.get("cost")
+        if cost is not None and (not isinstance(cost, (int, float)) or isinstance(cost, bool) or not 0 < cost <= 1000):
+            raise DSLError(f"agent「{name}」cost 必须是 0–1000 之间的正数")
+        return {"name": name, "model": HUMAN, "tools": [], "packages": [], "rounds": 1,
+                "system": soul.read_text(encoding="utf-8").strip(), "agentic": None, "cost": cost,
+                "description": str(data.get("description", "")).strip(), "timeout": None, "via": None}
     is_platform = model.startswith("platform:")
     if is_platform:
         if not _PLATFORM.fullmatch(model):
@@ -276,6 +302,8 @@ def call_agent(engine, name, task, context=None, model=None, node=None, fmt=None
                 {"role": "user", "content": prompt}]
     if engine.dry_run:
         return {}
+    if profile["model"] == HUMAN:
+        raise DSLError(f"「{name}」是人：这一步要人在查看器上交结果（受控运行会在这里停下等），不会调模型")
     from tools import llm_router as _router
     _router.LAST_USAGE["value"] = None
     try:

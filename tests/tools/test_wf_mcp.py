@@ -216,7 +216,10 @@ def test_6_1_start_status(tmp):
                    models={'ENGINEER': 'cli:claude/haiku'}, roles={'ENGINEER': 'ENGINEER_LITE'})
     with patch.object(wc, 'start', return_value=state) as call:
         assert svc.tools['start'](KEY, 'workflow_demo', 'run.zs', **options) == state
-        call.assert_called_once_with((tmp / 'workflow_demo').resolve(), entry='run.zs', wait=False, **options)
+        call.assert_called_once_with((tmp / 'workflow_demo').resolve(), entry='run.zs', wait=False, vars=None, **options)
+    with patch.object(wc, 'start', return_value=state) as call:
+        svc.tools['start'](KEY, 'workflow_demo', 'meeting.zs', mode='auto', vars={'topic': '周会', 'attendees': 'HUMAN'})
+        assert call.call_args.kwargs['vars'] == {'topic': '周会', 'attendees': 'HUMAN'}   # 入口参数原样交给 workflow_ctl
 
 
 def test_6_1_start_entry_scope(tmp):
@@ -771,6 +774,52 @@ def test_6_1_http_launch(tmp):
         assert svc.cfg.write is True
 
 
+def test_6_1_header_key_parse(tmp):
+    assert server.header_key({}) is None
+    assert server.header_key({'authorization': 'Bearer ' + KEY}) == KEY
+    assert server.header_key({'authorization': 'bearer  ' + KEY + ' '}) == KEY
+    assert server.header_key({'authorization': KEY}) == KEY
+    assert server.header_key({'x-api-key': KEY}) == KEY
+    assert server.header_key({'api-key': KEY}) == KEY
+    assert server.header_key({'x-auth-token': ' ' + KEY}) == KEY
+    assert server.header_key({'api-key': 'a', 'x-api-key': 'b'}) == 'a'
+    # 顺序：authorization > api-key > x-api-key > x-auth-token；空的跳过，别的头不认。
+    assert server.header_key({'authorization': 'Bearer a', 'x-api-key': 'b'}) == 'a'
+    assert server.header_key({'authorization': '  ', 'x-api-key': 'b', 'x-auth-token': 'c'}) == 'b'
+    assert server.header_key({'cookie': KEY, 'x-key': KEY, 'authorization': None}) is None
+    # 不在 HTTP 请求里（这里就是）取不到头，返回空字典。
+    assert server._request_headers() == {}
+
+
+def test_6_1_auth_from_header(tmp):
+    svc = service(tmp)
+    with patch.object(server, '_request_headers', return_value={'authorization': 'Bearer ' + KEY}):
+        assert svc.tools['runs']() == []
+        assert svc.tools['runs'](None) == [] and svc.tools['runs']('') == []
+        assert svc.tools['runs'](workdir='other') == []
+        # 对照：参数传了就以参数为准，错了不回退到请求头。
+        assert rejects(ToolError, lambda: svc.tools['runs']('wrong-secret')) == '鉴权失败'
+        assert svc.tools['runs'](KEY) == []
+    for name in ('api-key', 'x-api-key', 'x-auth-token'):
+        with patch.object(server, '_request_headers', return_value={name: KEY}):
+            assert svc.tools['runs']() == []
+    for headers in ({}, {'authorization': 'Bearer wrong-secret'}, {'x-api-key': '\ud800'},
+                    {'cookie': KEY}, {'authorization': 'Basic ' + KEY}):
+        with patch.object(server, '_request_headers', return_value=headers):
+            assert rejects(ToolError, lambda: svc.tools['runs']()) == '鉴权失败'
+
+
+def test_6_1_key_optional_signature(tmp):
+    import inspect
+    svc = service(tmp)
+    for name, tool in svc.tools.items():
+        params = inspect.signature(tool).parameters
+        assert params['key'].default is None, name
+        assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in params.values()), name
+    # 其余必填参数仍然必填。
+    assert inspect.signature(svc.tools['status']).parameters['run'].default is inspect.Parameter.empty
+
+
 CASES = [test_6_1_startup_missing_key, test_6_1_startup_short_key,
          test_6_1_startup_key_file_and_environment, test_6_1_startup_trace_token,
          test_6_1_auth_wrong_missing, test_6_1_runs_name, test_6_1_resolve_run,
@@ -794,6 +843,9 @@ CASES += [test_6_1_web_page, test_6_1_web_wrong_token, test_6_1_web_runs,
 
 
 CASES += [test_6_1_asgi_body_read_order, test_6_1_asgi_body_limit, test_6_1_asgi_chunked_body]
+
+
+CASES += [test_6_1_header_key_parse, test_6_1_auth_from_header, test_6_1_key_optional_signature]
 
 
 def run():

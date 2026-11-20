@@ -1,0 +1,34 @@
+{
+  "model": "cli:claude/sonnet",
+  "cost": 4,
+  "effort": "medium",
+  "description": "前端 QA（sonnet）。逐条对照页面设计查页面代码和页面测试，跑前端测试，整体验收时把前端真起起来看一眼；给出通过或返工要求。只读不写。",
+  "packages": [],
+  "skills": [
+    "skills/frontend_acceptance.md"
+  ],
+  "agentic": {
+    "cwd": "work/{project}",
+    "allowed_tools": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(ls:*)",
+      "Bash(npm install:*)",
+      "Bash(npm test:*)",
+      "Bash(./web/run_tests.sh:*)",
+      "Bash(node:*)",
+      "Bash(timeout:*)",
+      "Bash(curl:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(python -m pytest:*)"
+    ],
+    "timeout": 1200,
+    "max_turns": 60,
+    "venv": true,
+    "mcp_tools": [
+      "probe"
+    ]
+  }
+}

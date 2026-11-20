@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "description": "会议结论。",
+  "additionalProperties": false,
+  "required": ["decision", "reasons", "dissent", "todo", "summary"],
+  "properties": {
+    "decision": {"type": "string", "minLength": 1, "description": "定下来的结论，写成后面的人能直接照做的话"},
+    "reasons": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1},
+                "description": "为什么这样定，引用会上谁的哪个论点"},
+    "dissent": {"type": "array", "items": {"type": "string", "minLength": 1},
+                "description": "保留意见：谁不同意、理由，没有就空列表"},
+    "todo": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["who", "what"],
+             "properties": {"who": {"type": "string", "minLength": 1}, "what": {"type": "string", "minLength": 1}}},
+             "description": "会后要做的事"},
+    "summary": {"type": "string", "minLength": 1, "description": "一句话总结"}
+  }
+}

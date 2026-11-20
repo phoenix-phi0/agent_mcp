@@ -58,6 +58,8 @@ def test_entries(tmp):
     assert {'ARCHITECT', 'QA_ENGINEER', 'TEST_ENGINEER', 'ENGINEER_LITE'} <= set(proj['roles']), proj['roles']
     assert '如果 arch_review.decide == 需修改' not in proj['nodes'], '「如果」不是节点'
     assert 'ENGINEER_GPT' in [a['name'] for a in out['agents']]
+    meet = next(e for e in out['entries'] if e['entry'] == 'run_meeting.zs')
+    assert meet['nodes'] == ['发言', '追问', '主持判断', '会议结论'] and {'MODERATOR', 'HUMAN', 'ARCHITECT'} <= set(meet['roles']), meet
     code, out = call(handler(wd, write=False), 'GET', '/api/entries')
     assert code == 403 and '只读' in out['error']
 

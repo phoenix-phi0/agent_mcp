@@ -7,6 +7,7 @@ import argparse
 from dataclasses import dataclass
 from functools import wraps
 import hmac
+import inspect
 import os
 from pathlib import Path
 import re
@@ -67,6 +68,45 @@ def load_trace_token(env=None):
     if not isinstance(token, str) or re.fullmatch(r'[A-Za-z0-9_-]{16,}', token) is None:
         raise StartupError('TRACE_TOKEN 缺失或无效：至少 16 位，只能含字母数字 _ -')
     return token
+
+
+# 连接器「Request headers」里能配的鉴权头，按这个顺序取第一个非空的。
+# claude.ai 上 agent_mcp_trace 这个连接器实际发的是 api-key（2026-11-20 看请求头名字确认）。
+KEY_HEADERS = ('authorization', 'api-key', 'x-api-key', 'x-auth-token')
+
+
+def header_key(headers):
+    """从请求头取访问密钥：Authorization（可带 Bearer 前缀）、API-Key、X-API-Key、X-Auth-Token；都没有返回 None。"""
+    for name in KEY_HEADERS:
+        value = headers.get(name)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        value = value.strip()
+        if name == 'authorization' and value[:7].lower() == 'bearer ':
+            value = value[7:].strip()
+        return value or None
+    return None
+
+
+def _request_headers():
+    """当前 HTTP 请求的头（名字小写）。不在请求里（测试直接调工具）或取不到时返回空字典，鉴权照样失败。"""
+    try:
+        from fastmcp.server.dependencies import get_http_request
+        return {name.lower(): value for name, value in get_http_request().headers.items()}
+    except Exception:
+        return {}
+
+
+def _optional_key(signature):
+    """把工具签名里的 key 改成可省略（key 也可以来自请求头）。key 后面还有必填参数，所以全部改成只按名字传；
+    MCP 调工具本来就按名字传参。"""
+    params = []
+    for param in signature.parameters.values():
+        param = param.replace(kind=inspect.Parameter.KEYWORD_ONLY)
+        if param.name == 'key':
+            param = param.replace(default=None)
+        params.append(param)
+    return signature.replace(parameters=params)
 
 
 def _path_input(value):
@@ -199,6 +239,9 @@ def build_server(host, port, base, write, key, token, root=None, workdirs=None):
     def register(fn):
         @wraps(fn)
         def guarded(key=None, *args, **kwargs):
+            if key is None or key == '':
+                # 没传 key 参数时用请求头里的（连接器配一次，不用每次传，key 也不进对话记录）。
+                key = header_key(_request_headers())
             if not _encodable(key) or not hmac.compare_digest(key.encode('utf-8'), secret):
                 raise ToolError('鉴权失败')
             try:
@@ -210,6 +253,7 @@ def build_server(host, port, base, write, key, token, root=None, workdirs=None):
                 for credential in (configured_key, token):
                     message = message.replace(credential, '[已隐藏]')
                 raise ToolError(f'内部错误：{type(error).__name__}: {message}') from None
+        guarded.__signature__ = _optional_key(inspect.signature(fn))
         svc.tools[fn.__name__] = guarded
         svc.mcp.tool(guarded)
         return guarded
@@ -248,17 +292,19 @@ def build_server(host, port, base, write, key, token, root=None, workdirs=None):
     def start(key: str, workdir: str, entry: str, mode: str = 'step',
               stop_roles: list[str] = None, confirm_before: list[str] = None,
               confirm_after: list[str] = None, max_attempts: int = None,
-              models: dict[str, str] = None, roles: dict[str, str] = None) -> dict:
+              models: dict[str, str] = None, roles: dict[str, str] = None,
+              vars: dict[str, str] = None) -> dict:
         """启动流程并立即返回状态。key 为访问密钥；workdir 为白名单工作目录，entry 为其中已有的 .zs 文件名。
         mode 为 step 或 auto；stop_roles/confirm_before 为开始前确认规则（同一设置），confirm_after 为结束后确认规则；
         max_attempts 为尝试上限，models/roles 为按角色名指定的模型/角色卡覆盖。推进使用 wait=False。
+        vars 为入口参数（入口脚本「# 参数：」声明的，如 meeting.zs 的 topic、attendees）。
         """
         directory = resolve_workdir(workdir, cfg)
         entry = check_entry(directory, entry)
-        check_text([mode, stop_roles, confirm_before, confirm_after, models, roles])
+        check_text([mode, stop_roles, confirm_before, confirm_after, models, roles, vars])
         return wc.start(directory, entry=entry, mode=mode, stop_roles=stop_roles,
                         confirm_before=confirm_before, confirm_after=confirm_after,
-                        max_attempts=max_attempts, models=models, roles=roles, wait=False)
+                        max_attempts=max_attempts, models=models, roles=roles, vars=vars, wait=False)
 
     @register
     def status(key: str, run: str, detail: bool = False) -> dict:

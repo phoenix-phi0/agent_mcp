@@ -90,7 +90,7 @@ def _ctl():
 _ENTRY = re.compile(r"^[\w.\-]+\.zs$")
 _RUN_WF = re.compile(r"^\s*编排执行\s+(\S+\.wf)\s*$", re.M)
 _ROLE_LINE = re.compile(r"^\s+角色\s+(?:([A-Z][A-Z0-9_]*)|\{\w+\s+或\s+([A-Z][A-Z0-9_]*)\})\s*$", re.M)
-_ROSTER_VAR = re.compile(r"^\s*设\s+roles\s*=\s*(.+)$", re.M)
+_ROSTER_VAR = re.compile(r"^\s*设\s+(?:roles|attendees|moderator)\s*=\s*(.+)$", re.M)   # 角色清单、参会名单、主持人
 _NOT_NODE = ("如果", "遍历", "跳转", "存储", "清空", "标记", "角色清单", "成本合计", "#")
 _FIELDS = ("任务 ", "角色 ", "文本 ", "格式 ", "记录 ")
 
@@ -133,7 +133,25 @@ def list_entries(workdir):
             for r in re.split(r"[,\s，]+", m2[1].strip()):
                 if _CARD.fullmatch(r) and r not in roles:
                     roles.append(r)
-        out.append({"entry": f.name, "title": title, "workflow": m[1][:-3], "nodes": _wf_nodes(wf), "roles": roles})
+        out.append({"entry": f.name, "title": title, "workflow": m[1][:-3], "nodes": _wf_nodes(wf), "roles": roles,
+                    "params": _entry_params(text)})
+    return out
+
+
+def _entry_params(text):
+    """入口脚本开头「# 参数：」声明的参数（启动时由 vars 传）：[{name, required, default}]。没声明是空列表。
+    可选参数（`名?`）的默认值写在脚本里 `设 名 = {名 或 默认}` 的，default 报那个默认值（页面预填用）。"""
+    from tools.verbs import parse_param_specs
+    specs, strict, _ = parse_param_specs(text)
+    out = []
+    for sp in specs:
+        default = sp.default
+        if default in (None, "") and not (sp.required and strict):
+            m = re.search(r"^[ \t]*设[ \t]+" + re.escape(sp.name) + r"[ \t]*=[ \t]*\{" + re.escape(sp.name)
+                          + r"[ \t　]+或[ \t　]+(.+)\}[ \t]*$", text, re.M)
+            if m:
+                default = m.group(1).strip()
+        out.append({"name": sp.name, "required": bool(sp.required and strict), "default": default})
     return out
 
 
@@ -168,6 +186,8 @@ def start_run(runs, body):
             raise wc.ControlError(f"{entry} 不是能启动的入口脚本（工作目录里没有，或没调「编排执行」）")
         mode = body.get("mode") or "auto"
         args = _config_args(wc, body)
+        if body.get("vars") is not None:
+            args["vars"] = body["vars"]
         if args.get("roles"):
             _check_roles_exist(args["roles"], read_agents({"workdir": str(workdir)}))
         with _LOCK:
@@ -305,6 +325,7 @@ def read_control(path):
                                   for row in rows]
                           for step, rows in (c.get("revisions") or {}).items()},
             "item_controls": c.get("item_controls") or {},
+            "vars": c.get("vars") or {},          # 启动时传的入口参数（会议页靠它显示议题、参会名单）
             "worker": worker, "worker_alive": pid_alive(worker) if worker else None}
 
 
@@ -352,6 +373,9 @@ def read_trace(path, brief=False):
     return data
 
 
+MEETING_FORMATS = {"speech", "meeting_check", "meeting_decision"}
+
+
 def list_runs(runs):
     out = []
     for p in sorted(runs.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
@@ -367,7 +391,13 @@ def list_runs(runs):
         here = running or pend
         inputs = d.get("inputs") if isinstance(d.get("inputs"), dict) else {}
         goal = next((str(inputs[k]) for k in ("goal", "content", "task") if inputs.get(k)), "")
-        out.append({"name": p.name, "status": d.get("status"), "started": d.get("started"),
+        # 会议页要的：单独开的会，还是别的流程里有会议步骤（按格式认：发言、主持判断、会议结论）
+        fmts = {e.get("format") for e in events if e.get("type") == "task"}
+        if pend:
+            fmts.add(pend.get("format"))
+        meeting = ("standalone" if d.get("workflow") == "meeting_workflow"
+                   else "embedded" if fmts & MEETING_FORMATS else None)
+        out.append({"name": p.name, "status": d.get("status"), "started": d.get("started"), "meeting": meeting,
                     "updated": d.get("updated"), "alive": d["_alive"], "calls": len(tasks),
                     "controlled": d["_control"] is not None,
                     "waiting_step": pend.get("step") if pend else None,
@@ -388,6 +418,35 @@ def view_html(write=False):
     if write:
         meta += b'\n<meta name="trace-write" content="1">'
     return VIEW.read_bytes().replace(b"<head>", meta, 1)
+
+
+MEETING_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+                 ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
+                 ".svg": "image/svg+xml", ".json": "application/json; charset=utf-8", ".png": "image/png"}
+
+
+def meeting_dir():
+    """会议页的静态文件目录：环境变量 TRACE_MEETING_DIR，默认 tools/meeting_web。"""
+    return Path(os.environ.get("TRACE_MEETING_DIR") or Path(__file__).resolve().parent / "meeting_web")
+
+
+def serve_meeting(rel, write=False):
+    """<前缀>/meeting/ 下的静态页（人参加会议的界面）。和查看器同源同口令，接口用 ../api/…。
+    html 和查看器页一样加上实时、可写的标记。"""
+    root = meeting_dir().resolve()
+    try:
+        f = (root / (rel or "index.html")).resolve()
+    except (OSError, ValueError):
+        return respond_json({"error": "没有这个地址"}, 404)
+    if root not in f.parents or not f.is_file() or f.suffix not in MEETING_TYPES:
+        return respond_json({"error": "没有这个地址"}, 404)
+    data = f.read_bytes()
+    if f.suffix == ".html":
+        meta = b'<head>\n<meta name="trace-live" content="1">'
+        if write:
+            meta += b'\n<meta name="trace-write" content="1">'
+        data = data.replace(b"<head>", meta, 1)
+    return respond(200, data, MEETING_TYPES[f.suffix])
 
 
 def respond(code, body, ctype, extra=None):
@@ -468,6 +527,10 @@ def route(runs, method, path, query, headers, body, token=None, base="", write=F
             path = path[len(prefix):]
         if path in ("/", "/index.html"):
             return respond(200, view_html(write), "text/html; charset=utf-8")
+        if path == "/meeting":
+            return respond(301, b"", "text/plain", {"Location": prefix + "/meeting/"})
+        if path.startswith("/meeting/"):
+            return serve_meeting(path[len("/meeting/"):], write)
         if path == "/api/runs":
             return respond_json({"dir": runs.name if token else str(runs), "runs": list_runs(runs)})
         if path == "/api/entries":

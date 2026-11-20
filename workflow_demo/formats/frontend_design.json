@@ -1,0 +1,76 @@
+{
+  "type": "object",
+  "description": "前端界面设计：给已有后端配前端。页面清单（第一个固定是前端骨架）、每页调哪些接口（照后端代码写真实的路径、请求、响应、错误）、元素、操作、状态、验收和测试，加上端到端场景。工程师每次只拿到一页的设计和全前端约定。",
+  "additionalProperties": false,
+  "required": ["summary", "stack", "layout", "serve", "test_harness", "shared", "pages", "flows", "conventions", "open_questions"],
+  "properties": {
+    "summary": {"type": "string", "minLength": 1, "description": "一两句：做什么前端、有几页、主要流程"},
+    "stack": {"type": "string", "minLength": 1, "description": "前端技术栈，照入口给的写，补上具体做法（模块怎么组织、样式放哪）"},
+    "layout": {
+      "type": "array", "minItems": 1,
+      "description": "前端目录下的文件和目录，路径相对项目根",
+      "items": {"type": "object", "additionalProperties": false, "required": ["path", "purpose"],
+                "properties": {"path": {"type": "string", "minLength": 1}, "purpose": {"type": "string", "minLength": 1}}}
+    },
+    "serve": {"type": "string", "minLength": 1, "description": "怎么起前端：页面和后端接口怎么做到同源（cookie 会话要能用）、起服务的命令、端口和后端地址从哪读"},
+    "test_harness": {"type": "string", "minLength": 1, "description": "测试命令怎么跑：怎么起一个用临时数据库的真后端、怎么加载真实页面（jsdom）、页面里的请求怎么打到真后端并带上 cookie、测试文件放哪、怎么清理"},
+    "shared": {
+      "type": "array",
+      "description": "几页共用的东西（接口客户端、登录状态、导航、样式、错误显示），由前端骨架提供，后面的页面照这里调用",
+      "items": {"type": "object", "additionalProperties": false, "required": ["name", "file", "provides"],
+                "properties": {"name": {"type": "string", "minLength": 1}, "file": {"type": "string", "minLength": 1},
+                               "provides": {"type": "string", "minLength": 1, "description": "导出的函数签名和行为、出错时怎么表现"}}}
+    },
+    "pages": {
+      "type": "array", "minItems": 1, "maxItems": 12,
+      "description": "按依赖排好，第一个固定是前端骨架（name=skeleton）",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "title", "files", "purpose", "apis", "elements", "actions", "states", "acceptance", "tests"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "英文标识"},
+          "title": {"type": "string", "minLength": 1},
+          "files": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "purpose": {"type": "string", "minLength": 1, "description": "这一页给谁用、做什么；同时写不负责什么"},
+          "apis": {
+            "type": "array",
+            "description": "这一页调的后端接口，照后端代码一字不差",
+            "items": {"type": "object", "additionalProperties": false, "required": ["method", "path", "request", "response", "errors"],
+                      "properties": {"method": {"type": "string", "minLength": 1}, "path": {"type": "string", "minLength": 1},
+                                     "request": {"type": "string"}, "response": {"type": "string", "minLength": 1},
+                                     "errors": {"type": "array", "items": {"type": "string"}}}}
+          },
+          "elements": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "页面上有什么：表单字段、按钮、列表、提示区，各带测试能定位的 id 或 data-* 属性"},
+          "actions": {
+            "type": "array",
+            "items": {"type": "object", "additionalProperties": false, "required": ["do", "expect"],
+                      "properties": {"do": {"type": "string", "minLength": 1, "description": "人怎么操作"},
+                                     "expect": {"type": "string", "minLength": 1, "description": "页面上看到什么、发了什么请求、跳到哪"}}}
+          },
+          "states": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "空数据、加载中、接口出错、未登录、无权限各怎么显示"},
+          "acceptance": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "description": "每条都能用页面测试验证"},
+          "tests": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "description": "测试文件名和覆盖的操作"}
+        }
+      }
+    },
+    "flows": {
+      "type": "array", "minItems": 1,
+      "description": "跨页面的端到端场景：用户从头到尾做一件事",
+      "items": {"type": "object", "additionalProperties": false, "required": ["name", "steps"],
+                "properties": {"name": {"type": "string", "minLength": 1},
+                               "steps": {"type": "array", "minItems": 1,
+                                         "items": {"type": "object", "additionalProperties": false, "required": ["page", "do", "expect"],
+                                                   "properties": {"page": {"type": "string", "minLength": 1}, "do": {"type": "string", "minLength": 1},
+                                                                  "expect": {"type": "string", "minLength": 1}}}}}}
+    },
+    "conventions": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "全前端约定：命名、错误提示、跳转、登录态检查、可访问性"},
+    "open_questions": {"type": "array", "items": {"type": "string"}},
+    "changes": {
+      "type": "array",
+      "description": "修改版才写：对评审结论的每条 todo 逐条回应",
+      "items": {"type": "object", "additionalProperties": false, "required": ["issue", "action", "detail"],
+                "properties": {"issue": {"type": "string", "minLength": 1}, "action": {"enum": ["已修改", "不修改"]},
+                               "detail": {"type": "string", "minLength": 1}}}
+    }
+  }
+}

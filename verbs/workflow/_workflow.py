@@ -7,7 +7,7 @@ import re
 import time
 from pathlib import Path
 
-from tools.dsl_core import DSLError, to_text
+from tools.dsl_core import DSLError, Unexpanded, split_items, to_text
 from tools.wf_plan import cost_summary
 
 _TASK_FIELDS = {"任务", "角色", "文本", "记录", "格式"}
@@ -350,6 +350,8 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                 if not children:
                     raise DSLError(f"第 {n} 行：遍历缺少子块")
                 items = resolve(m[2])
+                if isinstance(items, str) and not isinstance(items, Unexpanded):
+                    items = split_items(items)       # 「A,B,C」这样的逗号串当列表（如参会名单）
                 if not isinstance(items, list):
                     raise DSLError(f"第 {n} 行：遍历需要列表：{m[2]}")
                 root, _, path = m[2].strip().partition(".")

@@ -1228,7 +1228,9 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     if (A.pd.phase === "after") return renderReview();
     var pd = A.pd, el = A.el, dis = A.busy ? " disabled" : "";
     var who = roleName(pd.card || pd.role);
-    var h = '<div class="act-head"><h3>由我来做（扮演 ' + esc(who) + "）</h3>" +
+    // 人的卡（model=human）：这一步本来就是人来做，不能「按默认执行」，也不会因为「继续自动跑」就跳过
+    var human = pd.reason === "human";
+    var h = '<div class="act-head"><h3>' + (human ? "轮到你（" + esc(who) + "）" : "由我来做（扮演 " + esc(who) + "）") + "</h3>" +
       (A.schema ? '<span class="seg" role="group" aria-label="填写方式"><button type="button" data-mode="form" class="' + (A.mode === "form" ? "on" : "") + '" aria-pressed="' + (A.mode === "form") + '">表单</button>' +
         '<button type="button" data-mode="json" class="' + (A.mode === "json" ? "on" : "") + '" aria-pressed="' + (A.mode === "json") + '">JSON</button></span>' : "") + "</div>";
     h += '<div class="hint">看完上面的提示词、角色卡和参考文本，' + (A.schema ? "按格式 <span class=\"chip fmt\">" + esc(pd.format || "") + "</span> 填好后提交" : "这个节点没有格式定义，直接写一个 JSON 对象提交") +
@@ -1244,9 +1246,10 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     // 其他决定：让模型来做、继续自动跑、中止
     var models = [];
     A.agents.forEach(function (a) { if (a.model && models.indexOf(a.model) < 0) models.push(a.model); });
-    h += '<div class="act-other"><h3>或者不自己做</h3>' +
-      '<div class="act-row"><button type="button" class="btn2" data-act="exec"' + dis + '>按默认执行</button><span class="hint">卡 <span class="mono">' + esc(pd.card || pd.role) +
-      '</span> · 模型 <span class="mono">' + esc(pd.model || "?") + "</span></span></div>" +
+    h += '<div class="act-other"><h3>' + (human ? "或者让 AI 代你" : "或者不自己做") + "</h3>" +
+      (human ? '<div class="act-row hint" id="act-human">这一步是人（卡 <span class="mono">' + esc(pd.card || pd.role) + "</span> 不调模型）：交上面的结果，或者换一张卡、换一个模型让 AI 代答</div>"
+        : '<div class="act-row"><button type="button" class="btn2" data-act="exec"' + dis + '>按默认执行</button><span class="hint">卡 <span class="mono">' + esc(pd.card || pd.role) +
+      '</span> · 模型 <span class="mono">' + esc(pd.model || "?") + "</span></span></div>") +
       '<div class="act-row"><label>换卡 <select class="f-in" id="act-card"' + dis + '><option value="">不换</option>' + A.agents.map(function (a) {
         return '<option value="' + esc(a.name) + '"' + (A.card === a.name ? " selected" : "") + ' title="' + esc(a.description || "") + '">' +
           esc((ROLE_LABEL[a.name] ? ROLE_LABEL[a.name] + " · " : "") + a.name + (a.model ? " · " + a.model : "")) + "</option>";
@@ -1254,7 +1257,7 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
       '<label>换模型 <input class="f-in short" id="act-model" type="text" list="act-models" placeholder="不换（要写全，如 cli:goose/glm-5.3）" value="' + esc(A.model) + '"' + dis + "></label>" +
       '<datalist id="act-models">' + models.map(function (m) { return '<option value="' + esc(m) + '">'; }).join("") + "</datalist>" +
       '<button type="button" class="btn2" data-act="exec-as"' + dis + ">按所选执行</button></div>" +
-      '<div class="act-row"><button type="button" class="btn2" data-act="resume"' + dis + '>继续自动跑</button><span class="hint">从这一步起按默认往下跑，不再每步停</span></div>' +
+      (human ? "" : '<div class="act-row"><button type="button" class="btn2" data-act="resume"' + dis + '>继续自动跑</button><span class="hint">从这一步起按默认往下跑，不再每步停</span></div>') +
       '<div class="act-row" id="act-abort">' + (A.confirm
         ? '<span class="err-box">确定中止这次运行？后台进程会被停掉。</span><button type="button" class="btn2 danger solid" data-act="abort-yes"' + dis + ">确定中止</button>" +
           '<button type="button" class="btn2" data-act="abort-no"' + dis + ">不中止</button>"

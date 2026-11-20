@@ -1,0 +1,21 @@
+{
+  "model": "cli:claude/sonnet",
+  "cost": 4,
+  "effort": "high",
+  "description": "前端设计师（sonnet，高思考强度）。读后端代码，写前端界面设计（页面清单、每页调的接口、元素、操作、状态、验收、端到端场景）；参加设计评审会；按评审结论改设计；裁决工程师报告的设计问题。只读不写。",
+  "packages": [],
+  "skills": [
+    "skills/frontend_design.md"
+  ],
+  "agentic": {
+    "cwd": "work/{project}",
+    "allowed_tools": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(ls:*)"
+    ],
+    "timeout": 1200,
+    "max_turns": 60
+  }
+}

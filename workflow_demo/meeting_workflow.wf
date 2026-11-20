@@ -1,0 +1,41 @@
+# AI 会议：几张角色卡围绕一个议题按顺序轮流发言（可以有人参会：HUMAN），主持人每轮之后判断要不要再开一轮，最后出结论。
+# 入口脚本要设：topic（议题）、background（背景材料，没有就写「无」）、attendees（参会角色，逗号分隔，按发言顺序；人写 HUMAN）
+# 可选：moderator（主持人的卡，默认 MODERATOR；写 HUMAN 就是人来判断和拍板）
+# HUMAN 的卡 model=human：受控运行轮到它就停下，人在查看器上按格式交发言，不调模型。
+# 发言里点名追问（ask）时，被点名的角色紧跟着回答一次。最多开三轮（第一轮 + 跳回两次）。
+# 结论记在 decision（格式 meeting_decision），全部发言在 minutes。
+清空 minutes
+清空 open_issues
+标记:r
+遍历 who 于 attendees
+    发言
+        任务 会议议题：{topic}。你是参会的 {who}。参考文本里 background 是背景材料，minutes 是到目前为止所有人的发言（按顺序），open_issues 是主持人上一轮指出、还没解决的分歧（第一轮为空，有就先回应它们）。站在你的角色上发言：给出观点和理由，回应前面的人（点名说同意或反对谁的哪一点），不重复别人说过的。认可现在的方向、没有新意见就 agree=true 并简短说明。想当面问某个参会角色就在 ask 写它的名字、question 写问题，不问就都写空串
+        角色 who
+        文本 background minutes open_issues
+        格式 speech
+        记录 s
+    存储 minutes who=who text=s.speech agree=s.agree
+    如果 s.ask 不为空
+        追问
+            任务 会议议题：{topic}。{who} 在会上点名问你：{s.question}。参考文本里有背景材料和到目前为止的全部发言。直接回答这个问题；答完如果认可现在的方向就 agree=true。不要再追问别人：ask 和 question 都写空串
+            角色 s.ask
+            文本 background minutes
+            格式 speech
+            记录 reply
+        存储 minutes who=s.ask text=reply.speech agree=reply.agree
+主持判断
+    任务 会议议题：{topic}。按「主持会议」的要求判断这一轮之后能不能出结论。参考文本里 minutes 是全部发言
+    角色 {moderator 或 MODERATOR}
+    文本 background minutes
+    格式 meeting_check
+    记录 mc
+如果 mc.done == 否
+    清空 open_issues
+    存储 open_issues issues=mc.disagreements summary=mc.summary
+    跳转 r 最大 2
+会议结论
+    任务 会议议题：{topic}。按「主持会议」的要求写结论。参考文本里有背景材料、全部发言和主持人最后一轮的判断（check）
+    角色 {moderator 或 MODERATOR}
+    文本 background minutes check=mc
+    格式 meeting_decision
+    记录 decision

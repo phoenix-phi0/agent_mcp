@@ -1,0 +1,34 @@
+{
+  "model": "cli:claude/sonnet",
+  "cost": 3,
+  "effort": "high",
+  "description": "前端工程师（sonnet）。纯 HTML/CSS/原生 JS 页面和 jsdom 页面测试：按一页的设计实现，测试加载真实页面、请求打到真后端；也写端到端测试和返工。不改后端。",
+  "packages": [],
+  "skills": [
+    "skills/frontend_impl.md"
+  ],
+  "agentic": {
+    "cwd": "work/{project}",
+    "allowed_tools": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Bash(ls:*)",
+      "Bash(chmod:*)",
+      "Bash(node:*)",
+      "Bash(npm install:*)",
+      "Bash(npm test:*)",
+      "Bash(./web/run_tests.sh:*)",
+      "Bash(python -m pytest:*)"
+    ],
+    "timeout": 1800,
+    "max_turns": 80,
+    "venv": true,
+    "mcp_tools": [
+      "probe",
+      "review"
+    ]
+  }
+}

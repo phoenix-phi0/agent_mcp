@@ -1,0 +1,14 @@
+{
+  "type": "object",
+  "description": "会议发言：对议题的意见。没有新意见就简短表示同意。",
+  "additionalProperties": false,
+  "required": ["speech", "agree", "ask", "question"],
+  "properties": {
+    "speech": {"type": "string", "minLength": 1, "maxLength": 3000,
+               "description": "这一轮的发言：观点、理由、对前面发言的回应（点名说同意或反对谁的哪一点）。不重复别人说过的"},
+    "agree": {"type": "boolean", "description": "认可现在讨论出的方向、没有新的反对意见就是 true"},
+    "ask": {"type": "string", "pattern": "^$|^[A-Z][A-Z0-9_]*$",
+            "description": "要点名追问的参会角色（如 ARCHITECT）；不追问写空串"},
+    "question": {"type": "string", "maxLength": 1000, "description": "追问的问题；不追问写空串"}
+  }
+}

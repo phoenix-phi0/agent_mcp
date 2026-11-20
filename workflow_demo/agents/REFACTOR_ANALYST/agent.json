@@ -1,7 +1,7 @@
 {
-  "model": "cli:codex/gpt-6.1-sol",
+  "model": "cli:codex/gpt-6.2-sol",
   "cost": 2,
-  "description": "重构前的现状分析（Codex gpt-6.1-sol，ChatGPT 订阅），项目只读：读代码、跑全量测试记下基线、列出公开接口和值得重构的问题。不改任何文件；给架构师写重构方案、给 QA 做回归对照用。",
+  "description": "重构前的现状分析（Codex gpt-6.2-sol，ChatGPT 订阅），项目只读：读代码、跑全量测试记下基线、列出公开接口和值得重构的问题。不改任何文件；给架构师写重构方案、给 QA 做回归对照用。",
   "packages": [],
   "skills": [
     "skills/analysis.md"

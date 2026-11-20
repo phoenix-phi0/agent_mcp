@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "description": "主持人每轮之后的判断：能不能出结论。",
+  "additionalProperties": false,
+  "required": ["done", "disagreements", "summary"],
+  "properties": {
+    "done": {"enum": ["是", "否"], "description": "是 = 意见已经收敛或分歧已经说清、再开一轮也不会有新东西；否 = 还有值得再讨论的分歧"},
+    "disagreements": {"type": "array", "items": {"type": "string", "minLength": 1},
+                      "description": "还没解决的分歧，每条写清谁和谁、在哪一点上不一致"},
+    "summary": {"type": "string", "minLength": 1, "description": "这一轮讨论到哪了，一两句"}
+  }
+}
