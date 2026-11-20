@@ -190,7 +190,7 @@
   报错 403 该科目未分配给你
   报错 403 没有权限访问该科目
   报错 404 没有这个科目
-  伪代码 K191 日语：调用 subject.取界面语言 username=current_user 取 lang；lang 为 ja 时 att_note 写「保存済み {total} / {limit} 個の添付ファイル」；调用 assist_file 的列附件、取当前附件 传 lang。
+  伪代码 K191 日语：调用 subject.取界面语言 username=current_user 取 lang；lang 为 ja 时 att_note 写「保存済み {total} / {limit} 個の添付ファイル」；assist_file 的列附件、取当前附件 不收 lang，不用传：它们自己按 current_user 调 subject.取界面语言（同一个人，取到的语言和这里一样），返回的 label、att_info 已经是对应语言（见 assist_file 附件标签）。
   伪代码 科目：调用本模块 本科目 learner=current_user current_role=current_role auth_mode=auth_mode subject=subject 得 subject_id；current_role、auth_mode、subject 都可选（用户名取 current_user；路由层注入角色、登录模式和地址参数 subject；别的模块调用时传 subject=已解析的科目编号），都不传得 1，行为同旧；本函数在本模块内调用其它函数（含公开函数）时一律带 subject=subject_id（已解析，不再校验）
   伪代码 调用 列对话 current_user=current_user limit=40 subject=subject_id，得 messages
   伪代码 逐条转换：role 等于 assistant 则 who=助手、kind=空串，否则 who=你、kind=user；text=content
