@@ -1,0 +1,59 @@
+{
+  "name": "release",
+  "predicates": {"dirty": 0, "ahead": 0, "behind": 0},
+  "derived": [
+    {"head": "published()", "body": ["not dirty()", "not ahead()", "not behind()"]}
+  ],
+  "sensors": [
+    {
+      "name": "worktree",
+      "run": {"cmds": [["git", "status", "--porcelain"]]},
+      "extract": [
+        {"type": "regex", "pattern": "\\S", "facts": ["dirty()"]}
+      ]
+    },
+    {
+      "name": "upstream",
+      "run": {"cmds": [
+        ["git", "fetch", "--quiet"],
+        ["git", "rev-list", "--left-right", "--count", "HEAD...@{u}"]
+      ]},
+      "extract": [
+        {"type": "regex", "pattern": "^([1-9]\\d*)\\s+\\d+$", "facts": ["ahead()"]},
+        {"type": "regex", "pattern": "^\\d+\\s+([1-9]\\d*)$", "facts": ["behind()"]}
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "name": "commit",
+      "params": [],
+      "pre": ["dirty()"],
+      "add": ["ahead()"],
+      "del": ["dirty()"],
+      "run": {"cmds": [
+        ["git", "add", "-A"],
+        ["git", "commit", "-q", "-m", "planbot: publish changes"]
+      ]}
+    },
+    {
+      "name": "sync",
+      "params": [],
+      "pre": ["behind()", "not dirty()"],
+      "add": [],
+      "del": ["behind()"],
+      "run": {"cmds": [["git", "pull", "--rebase", "--quiet"]]},
+      "on_fail": {"cmds": [["git", "rebase", "--abort"]]}
+    },
+    {
+      "name": "push",
+      "params": [],
+      "pre": ["ahead()", "not behind()", "not dirty()"],
+      "add": [],
+      "del": ["ahead()"],
+      "run": {"cmds": [["git", "push", "--quiet"]]},
+      "irreversible": true
+    }
+  ],
+  "goals": ["published"]
+}

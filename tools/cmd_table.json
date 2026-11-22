@@ -12,7 +12,11 @@
         "read"
       ],
       "allow": [
-        "run_test"
+        "run_test",
+        "test_report",
+        "locate",
+        "probe",
+        "blame_change"
       ]
     }
   },
@@ -22,21 +26,26 @@
       "level": "write",
       "doc": "运行指定测试；超过 170 秒的测试用 job 启动",
       "params": {
-        "file": {
+        "path": {
           "type": "path",
           "required": true,
           "glob": "tests/**/*.py"
         },
-        "tail": {
+        "limit": {
           "type": "int",
           "min": 1,
           "max": 200,
           "default": 40
+        },
+        "case": {
+          "type": "text",
+          "max_len": 200,
+          "pattern": "[A-Za-z_][A-Za-z0-9_.]*"
         }
       },
       "cwd": "/workspace/agent_mcp",
       "steps": [
-        ".venv/bin/python {file} > {log} 2>&1; rc=$?; printf \"EXIT=%s\\n\" \"$rc\" >> {log}; tail -n {tail} {log}; exit \"$rc\""
+        "set -- {case}; [ -n \"$1\" ] || shift; printf \"LOG=%s\\n\" {log}; .venv/bin/python {path} \"$@\" > {log} 2>&1; rc=$?; printf \"EXIT=%s\\n\" \"$rc\" >> {log}; tail -n {limit} {log}; exit \"$rc\""
       ],
       "mode": "sync",
       "timeout": 170
@@ -65,12 +74,12 @@
       "level": "write",
       "doc": "提交指定文件",
       "params": {
-        "files": {
+        "paths": {
           "type": "path_list",
           "required": true,
           "glob": "*"
         },
-        "message": {
+        "text": {
           "type": "text",
           "required": true,
           "max_len": 200
@@ -82,8 +91,8 @@
       },
       "cwd": "/workspace/agent_mcp",
       "steps": [
-        "git add -- {files}",
-        "git commit --cleanup=verbatim -m {message} -- {files}",
+        "git add -- {paths}",
+        "git commit --cleanup=verbatim -m {text} -- {paths}",
         "if {push}; then git push origin HEAD; fi"
       ],
       "mode": "sync",
@@ -140,24 +149,22 @@
             "*.jsonl"
           ]
         },
-        "lines": {
+        "limit": {
           "type": "int",
           "min": 1,
           "max": 400,
           "default": 60
-        },
-        "grep": {
-          "type": "text",
-          "max_len": 8000,
-          "default": ""
         }
       },
       "cwd": "/workspace/agent_mcp",
       "steps": [
-        "tail -n {lines} -- {path} | grep -F -e {grep} | grep -viE \"(key|token|secret|password|passwd|authorization)[\\\"']?[[:space:]]*[:=]|bearer \"; true"
+        "test -f {path} && test -r {path}",
+        "cat -- {path}; true"
       ],
       "mode": "sync",
-      "timeout": 60
+      "timeout": 60,
+      "limit_mode": "tail",
+      "redact": true
     },
     {
       "name": "job",
@@ -195,14 +202,14 @@
     {
       "name": "git_diff",
       "level": "read",
-      "doc": "看工作区未提交的具体改动（diff 原文）；paths 不给就是全部，max_lines 限制行数",
+      "doc": "查看工作区改动",
       "params": {
         "paths": {
           "type": "path_list",
           "glob": "*",
           "default": []
         },
-        "max_lines": {
+        "limit": {
           "type": "int",
           "min": 1,
           "max": 800,
@@ -211,10 +218,12 @@
       },
       "cwd": "/workspace/agent_mcp",
       "steps": [
-        "git diff -- {paths} | head -n {max_lines}"
+        "git diff -- {paths} | head -n 200000"
       ],
       "mode": "sync",
-      "timeout": 60
+      "timeout": 60,
+      "limit_mode": "head",
+      "truncate": "head"
     },
     {
       "name": "git_push",
@@ -223,8 +232,7 @@
       "params": {},
       "cwd": "/workspace/agent_mcp",
       "steps": [
-        "git status -sb | head -n 1",
-        "git push origin HEAD"
+        "bash /workspace/agent_mcp/scripts/cmd/git_push.sh"
       ],
       "mode": "sync",
       "timeout": 120
@@ -232,9 +240,9 @@
     {
       "name": "grep",
       "level": "read",
-      "doc": "在目录里搜固定字符串（不是正则），返回 文件:行号:内容；include 限定文件名通配（如 *.py），path 可以是 /workspace 下任意目录",
+      "doc": "按固定字符串搜索文件",
       "params": {
-        "pattern": {
+        "text": {
           "type": "text",
           "required": true,
           "max_len": 200
@@ -247,13 +255,13 @@
           "glob": "*",
           "default": "/workspace/agent_mcp"
         },
-        "include": {
+        "name": {
           "type": "text",
           "max_len": 60,
           "pattern": "[A-Za-z0-9_.*?][A-Za-z0-9_.*?-]*",
           "default": "*"
         },
-        "max": {
+        "limit": {
           "type": "int",
           "min": 1,
           "max": 300,
@@ -262,15 +270,19 @@
       },
       "cwd": "/workspace/agent_mcp",
       "steps": [
-        "grep -rnIF --include={include} --exclude-dir=.git --exclude-dir=.venv --exclude-dir=node_modules --exclude-dir=__pycache__ --exclude=config.json -e {pattern} -- {path} | grep -viE \"(key|token|secret|password|passwd|authorization)[\\\"']?[[:space:]]*[:=]|bearer \" | cut -c1-240 | head -n {max}"
+        "grep -rnIF --include={name} --exclude-dir=.git --exclude-dir=.venv --exclude-dir=node_modules --exclude-dir=__pycache__ --exclude=config.json -e {text} -- {path} | head -n 200000"
       ],
       "mode": "sync",
-      "timeout": 60
+      "timeout": 60,
+      "limit_mode": "head",
+      "redact": true,
+      "max_output": 16000,
+      "truncate": "head"
     },
     {
       "name": "find",
       "level": "read",
-      "doc": "按文件名通配找文件或目录，返回 修改日期 大小 路径，新的在前；depth 是目录深度，path 可以是 /workspace 下任意目录",
+      "doc": "按名称查找文件或目录",
       "params": {
         "path": {
           "type": "path",
@@ -292,7 +304,7 @@
           "max": 8,
           "default": 4
         },
-        "max": {
+        "limit": {
           "type": "int",
           "min": 1,
           "max": 300,
@@ -301,17 +313,20 @@
       },
       "cwd": "/workspace/agent_mcp",
       "steps": [
-        "find {path} -maxdepth {depth} -name {name} -not -path '*/.git/*' -not -path '*/.venv/*' -not -path '*/__pycache__/*' -not -path '*/node_modules/*' -printf '%TY-%Tm-%Td %8s %p\\n' | sort -r | head -n {max}"
+        "find {path} -maxdepth {depth} -name {name} -not -path '*/.git/*' -not -path '*/.venv/*' -not -path '*/__pycache__/*' -not -path '*/node_modules/*' -printf '%T@ %TY-%Tm-%Td %TH:%TM %8s %p\\n' | sort -rn | head -n 200000 | cut -d' ' -f2-"
       ],
       "mode": "sync",
-      "timeout": 60
+      "timeout": 60,
+      "limit_mode": "head",
+      "max_output": 16000,
+      "truncate": "head"
     },
     {
       "name": "ps_check",
       "level": "read",
-      "doc": "看命令行里含某段文字的进程在不在，返回 进程号 已运行秒数 命令行；没有输出就是不在",
+      "doc": "查看匹配的进程",
       "params": {
-        "pattern": {
+        "text": {
           "type": "text",
           "required": true,
           "max_len": 100
@@ -319,15 +334,16 @@
       },
       "cwd": "/workspace/agent_mcp",
       "steps": [
-        "ps -eo pid,etimes,args | grep -F -e {pattern} | grep -v 'grep -F' | grep -viE \"(key|token|secret|password|passwd|authorization)[\\\"']?[[:space:]]*[:=]|bearer \" | cut -c1-200 | head -n 30"
+        "ps -eo pid,etimes,args | grep -F -e {text} | grep -v 'grep -F' | head -n 30"
       ],
       "mode": "sync",
-      "timeout": 60
+      "timeout": 60,
+      "redact": true
     },
     {
       "name": "batch_jobs",
       "level": "read",
-      "doc": "列出某个批量队列最近的任务（任务号、名字、状态、进度），新的在前",
+      "doc": "列出队列最近的任务",
       "params": {
         "queue": {
           "type": "enum",
@@ -359,7 +375,7 @@
     {
       "name": "batch_status",
       "level": "read",
-      "doc": "按任务号看某个批量任务的详情和输出预览；任务号从 batch_jobs 拿",
+      "doc": "查看批量任务详情",
       "params": {
         "queue": {
           "type": "enum",
@@ -374,7 +390,7 @@
             "zbatch"
           ]
         },
-        "job_id": {
+        "job": {
           "type": "text",
           "required": true,
           "pattern": "[0-9]{8}-[0-9]{6}-[0-9a-f]+"
@@ -382,15 +398,16 @@
       },
       "cwd": "/workspace/agent_mcp",
       "steps": [
-        ".venv/bin/python -B -c 'import importlib,sys,json; print(json.dumps(importlib.import_module(\"tools.\" + sys.argv[1]).status(sys.argv[2]), ensure_ascii=False, indent=1))' {queue} {job_id} | grep -viE \"(key|token|secret|password|passwd|authorization)[\\\"']?[[:space:]]*[:=]|bearer \"; true"
+        ".venv/bin/python -B -c 'import importlib,sys,json; print(json.dumps(importlib.import_module(\"tools.\" + sys.argv[1]).status(sys.argv[2]), ensure_ascii=False, indent=1))' {queue} {job}; true"
       ],
       "mode": "sync",
-      "timeout": 60
+      "timeout": 60,
+      "redact": true
     },
     {
       "name": "run_all",
       "level": "write",
-      "doc": "跑全量回归 tests/run_all.sh（很慢）；只能用 job 启动，结束后给出失败的组和末尾若干行",
+      "doc": "运行全量回归，须用 job 启动",
       "params": {},
       "cwd": "/workspace/agent_mcp",
       "steps": [
@@ -399,6 +416,483 @@
       "mode": "job_only",
       "timeout": 60,
       "job_timeout": 3600
+    },
+    {
+      "name": "show",
+      "level": "read",
+      "doc": "查看带行号的文件内容",
+      "params": {
+        "path": {
+          "type": "path",
+          "roots": [
+            "/workspace"
+          ],
+          "glob": "*",
+          "deny": [
+            "*/.git/*",
+            "*.env",
+            "*.key",
+            "*.pem",
+            "*/config.json",
+            "*/.config/*",
+            "*id_rsa*",
+            "*/.codex/*",
+            "*/.claude/*"
+          ]
+        },
+        "start": {
+          "type": "int",
+          "min": 1,
+          "max": 10000000,
+          "default": 1
+        },
+        "limit": {
+          "type": "int",
+          "min": 1,
+          "max": 2000,
+          "default": 400
+        },
+        "paths": {
+          "type": "path_list",
+          "roots": [
+            "/workspace"
+          ],
+          "glob": "*",
+          "deny": [
+            "*/.git/*",
+            "*.env",
+            "*.key",
+            "*.pem",
+            "*/config.json",
+            "*/.config/*",
+            "*id_rsa*",
+            "*/.codex/*",
+            "*/.claude/*"
+          ],
+          "default": []
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "python3 /workspace/agent_mcp/scripts/cmd/show.py {start} {limit} {paths}"
+      ],
+      "mode": "sync",
+      "timeout": 60,
+      "redact": true,
+      "max_output": 40000,
+      "truncate": "head"
+    },
+    {
+      "name": "git_log",
+      "level": "read",
+      "doc": "查看提交历史",
+      "params": {
+        "range": {
+          "type": "enum",
+          "values": [
+            "head",
+            "ahead",
+            "behind"
+          ],
+          "default": "head"
+        },
+        "limit": {
+          "type": "int",
+          "min": 1,
+          "max": 50,
+          "default": 10
+        },
+        "paths": {
+          "type": "path_list",
+          "glob": "*",
+          "default": []
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "bash /workspace/agent_mcp/scripts/cmd/git_log.sh {range} {limit} {paths}"
+      ],
+      "mode": "sync",
+      "timeout": 60
+    },
+    {
+      "name": "git_sync",
+      "level": "write",
+      "doc": "取回并变基同步当前分支",
+      "params": {},
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "bash /workspace/agent_mcp/scripts/cmd/git_sync.sh"
+      ],
+      "mode": "sync",
+      "timeout": 120
+    },
+    {
+      "name": "test_at_head",
+      "level": "write",
+      "doc": "在已提交代码副本中运行测试；超过 170 秒的测试用 job",
+      "params": {
+        "path": {
+          "type": "path",
+          "required": true,
+          "glob": "tests/**/*.py"
+        },
+        "paths": {
+          "type": "path_list",
+          "glob": "*",
+          "default": []
+        },
+        "limit": {
+          "type": "int",
+          "min": 1,
+          "max": 200,
+          "default": 40
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "bash /workspace/agent_mcp/scripts/cmd/test_at_head.sh {path} {limit} {paths}"
+      ],
+      "mode": "sync",
+      "timeout": 170
+    },
+    {
+      "name": "test_report",
+      "level": "write",
+      "doc": "运行测试并报告失败：用例、异常、出错的文件行和前后代码",
+      "params": {
+        "path": {
+          "type": "path",
+          "required": true,
+          "glob": "tests/**/*.py"
+        },
+        "case": {
+          "type": "text",
+          "max_len": 200,
+          "pattern": "[A-Za-z_][A-Za-z0-9_.]*"
+        },
+        "limit": {
+          "type": "int",
+          "min": 1,
+          "max": 20,
+          "default": 5
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        ".venv/bin/python -B tools/dbg.py test_report {path} --case {case} --limit {limit}"
+      ],
+      "mode": "sync",
+      "timeout": 170
+    },
+    {
+      "name": "locate",
+      "level": "write",
+      "doc": "故障定位：按通过与失败用例的覆盖差异给代码行排可疑度",
+      "params": {
+        "path": {
+          "type": "path",
+          "required": true,
+          "glob": "tests/**/*.py"
+        },
+        "paths": {
+          "type": "path_list",
+          "glob": "*",
+          "default": []
+        },
+        "limit": {
+          "type": "int",
+          "min": 1,
+          "max": 50,
+          "default": 10
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        ".venv/bin/python -B tools/dbg.py locate {path} --limit {limit} --paths {paths}"
+      ],
+      "mode": "sync",
+      "timeout": 170
+    },
+    {
+      "name": "probe",
+      "level": "write",
+      "doc": "运行测试，在 at（相对路径:行号）处记录 exprs 各表达式的值",
+      "params": {
+        "path": {
+          "type": "path",
+          "required": true,
+          "glob": "tests/**/*.py"
+        },
+        "at": {
+          "type": "text_list",
+          "required": true,
+          "max_items": 8,
+          "max_len": 200,
+          "pattern": "/?[A-Za-z0-9_][A-Za-z0-9_./-]*:[0-9]{1,7}"
+        },
+        "exprs": {
+          "type": "text_list",
+          "required": true,
+          "max_items": 8,
+          "max_len": 200
+        },
+        "case": {
+          "type": "text",
+          "max_len": 200,
+          "pattern": "[A-Za-z_][A-Za-z0-9_.]*"
+        },
+        "limit": {
+          "type": "int",
+          "min": 1,
+          "max": 100,
+          "default": 20
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        ".venv/bin/python -B tools/dbg.py probe {path} --case {case} --limit {limit} --at {at} --exprs {exprs}"
+      ],
+      "mode": "sync",
+      "timeout": 170
+    },
+    {
+      "name": "blame_change",
+      "level": "write",
+      "doc": "差异调试：找出让测试失败的最小一组未提交改动；慢的用 job 启动",
+      "params": {
+        "path": {
+          "type": "path",
+          "required": true,
+          "glob": "tests/**/*.py"
+        },
+        "case": {
+          "type": "text",
+          "max_len": 200,
+          "pattern": "[A-Za-z_][A-Za-z0-9_.]*"
+        },
+        "paths": {
+          "type": "path_list",
+          "glob": "*",
+          "default": []
+        },
+        "runs": {
+          "type": "int",
+          "min": 4,
+          "max": 200,
+          "default": 40
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        ".venv/bin/python -B tools/dbg.py blame_change {path} --case {case} --runs {runs} --paths {paths}"
+      ],
+      "mode": "sync",
+      "timeout": 170,
+      "job_timeout": 3600
+    },
+    {
+      "name": "exp_list",
+      "level": "read",
+      "doc": "查看实验及最近运行",
+      "params": {
+        "limit": {
+          "type": "int",
+          "min": 1,
+          "max": 20,
+          "default": 3
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "bash /workspace/agent_mcp/scripts/cmd/exp.sh list --recent {limit}"
+      ],
+      "mode": "sync",
+      "timeout": 60,
+      "redact": true,
+      "truncate": "head"
+    },
+    {
+      "name": "exp_status",
+      "level": "read",
+      "doc": "查看运行状态",
+      "params": {
+        "run": {
+          "type": "text",
+          "required": true,
+          "pattern": "[a-z0-9][a-z0-9_-]{0,39}-[0-9]{4,}"
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "bash /workspace/agent_mcp/scripts/cmd/exp.sh status {run}"
+      ],
+      "mode": "sync",
+      "timeout": 60,
+      "redact": true,
+      "truncate": "head"
+    },
+    {
+      "name": "exp_wait",
+      "level": "read",
+      "doc": "等待运行结束或超时",
+      "params": {
+        "run": {
+          "type": "text",
+          "required": true,
+          "pattern": "[a-z0-9][a-z0-9_-]{0,39}-[0-9]{4,}"
+        },
+        "wait": {
+          "type": "int",
+          "min": 1,
+          "max": 150,
+          "default": 120
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "bash /workspace/agent_mcp/scripts/cmd/exp.sh wait {run} --timeout {wait}"
+      ],
+      "mode": "sync",
+      "timeout": 170,
+      "redact": true,
+      "truncate": "head"
+    },
+    {
+      "name": "exp_results",
+      "level": "read",
+      "doc": "查看运行指标和日志",
+      "params": {
+        "run": {
+          "type": "text",
+          "required": true,
+          "pattern": "[a-z0-9][a-z0-9_-]{0,39}-[0-9]{4,}"
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "bash /workspace/agent_mcp/scripts/cmd/exp.sh results {run}"
+      ],
+      "mode": "sync",
+      "timeout": 60,
+      "redact": true,
+      "truncate": "head"
+    },
+    {
+      "name": "exp_compare",
+      "level": "read",
+      "doc": "比较两次运行",
+      "params": {
+        "run": {
+          "type": "text",
+          "required": true,
+          "pattern": "[a-z0-9][a-z0-9_-]{0,39}-[0-9]{4,}"
+        },
+        "against": {
+          "type": "text",
+          "required": false,
+          "pattern": "[a-z0-9][a-z0-9_-]{0,39}-[0-9]{4,}"
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "bash /workspace/agent_mcp/scripts/cmd/exp.sh compare {run} {against}"
+      ],
+      "mode": "sync",
+      "timeout": 60,
+      "redact": true,
+      "truncate": "head"
+    },
+    {
+      "name": "exp_start",
+      "level": "write",
+      "doc": "启动实验",
+      "params": {
+        "exp": {
+          "type": "text",
+          "required": true,
+          "pattern": "[a-z0-9][a-z0-9_-]{0,39}"
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "bash /workspace/agent_mcp/scripts/cmd/exp.sh start {exp}"
+      ],
+      "mode": "sync",
+      "timeout": 60
+    },
+    {
+      "name": "exp_cancel",
+      "level": "write",
+      "doc": "取消运行",
+      "params": {
+        "run": {
+          "type": "text",
+          "required": true,
+          "pattern": "[a-z0-9][a-z0-9_-]{0,39}-[0-9]{4,}"
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "bash /workspace/agent_mcp/scripts/cmd/exp.sh cancel {run}"
+      ],
+      "mode": "sync",
+      "timeout": 60
+    },
+    {
+      "name": "exp_register",
+      "level": "service",
+      "doc": "登记 Python 脚本实验",
+      "params": {
+        "exp": {
+          "type": "text",
+          "required": true,
+          "pattern": "[a-z0-9][a-z0-9_-]{0,39}"
+        },
+        "path": {
+          "type": "path",
+          "required": true,
+          "glob": [
+            "data/tmp/*.py",
+            "scripts/exp/*.py"
+          ]
+        },
+        "args": {
+          "type": "text_list",
+          "default": [],
+          "max_items": 12,
+          "pattern": "[A-Za-z0-9_.:=/@+-]{1,100}"
+        },
+        "result": {
+          "type": "text",
+          "required": true,
+          "pattern": "(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9_][A-Za-z0-9_./-]{0,199}"
+        },
+        "limit": {
+          "type": "int",
+          "min": 1,
+          "max": 86400,
+          "default": 3600
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "bash /workspace/agent_mcp/scripts/cmd/exp.sh register-script {exp} {path} {result} {limit} {args}"
+      ],
+      "mode": "sync",
+      "timeout": 60
     }
-  ]
+  ],
+  "common": {
+    "path": "文件或目录",
+    "paths": "文件或目录的列表",
+    "text": "一段文字：搜索词或说明",
+    "name": "文件名通配，如 *.py",
+    "limit": "最多返回多少行（条）",
+    "case": "只跑这个用例：类名 或 类名.方法名",
+    "job": "任务号",
+    "exp": "实验名",
+    "run": "实验运行号",
+    "out": "只读指令的输出后处理，见下"
+  }
 }

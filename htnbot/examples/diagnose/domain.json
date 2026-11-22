@@ -1,0 +1,71 @@
+{
+  "name": "test_triage",
+  "predicates": {
+    "test_ran": 1, "test_green": 1, "test_red": 1, "has_report": 1,
+    "locate_done": 1, "probe_done": 1, "cause_found": 1
+  },
+  "sensors": [
+    {
+      "name": "run",
+      "run": {"cmd": {"name": "diag_state", "args": {}}},
+      "extract": [
+        {"type": "json", "path": ["files"], "where": {"ran": "yes"}, "facts": ["test_ran({file})"]},
+        {"type": "json", "path": ["files"], "where": {"result": "green"}, "facts": ["test_green({file})"]},
+        {"type": "json", "path": ["files"], "where": {"result": "red"}, "facts": ["test_red({file})"]},
+        {"type": "json", "path": ["files"], "where": {"report": "yes"}, "facts": ["has_report({file})"]},
+        {"type": "json", "path": ["files"], "where": {"locate": "yes"}, "facts": ["locate_done({file})"]},
+        {"type": "json", "path": ["files"], "where": {"probe": "yes"}, "facts": ["probe_done({file})"]},
+        {"type": "json", "path": ["files"], "where": {"cause": "yes"}, "facts": ["cause_found({file})"]}
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "name": "run_test", "params": ["f"],
+      "pre": ["not test_ran(?f)"],
+      "add": ["test_ran(?f)", "test_green(?f)"], "del": [],
+      "run": {"cmd": {"name": "run_test", "args": {"path": "{f}"}}},
+      "irreversible": false
+    },
+    {
+      "name": "test_report", "params": ["f"],
+      "pre": ["test_red(?f)", "not has_report(?f)"],
+      "add": ["has_report(?f)"], "del": [],
+      "run": {"cmd": {"name": "test_report", "args": {"path": "{f}"}}},
+      "irreversible": false
+    },
+    {
+      "name": "locate", "params": ["f"],
+      "pre": ["has_report(?f)", "not locate_done(?f)"],
+      "add": ["locate_done(?f)", "cause_found(?f)"], "del": [],
+      "run": {"cmd": {"name": "locate", "args": {"path": "{f}"}}},
+      "irreversible": false
+    },
+    {
+      "name": "probe", "params": ["f"],
+      "pre": ["has_report(?f)", "not cause_found(?f)", "not probe_done(?f)"],
+      "add": ["probe_done(?f)", "cause_found(?f)"], "del": [],
+      "run": {"cmd": {"name": "probe", "args": {"path": "{f}"}}},
+      "irreversible": false
+    }
+  ],
+  "goals": ["has_report", "cause_found"],
+  "tasks": [
+    {"name": "diagnose", "params": ["f"]},
+    {"name": "find_cause", "params": ["f"]}
+  ],
+  "methods": [
+    {"name": "already_green", "task": "diagnose", "params": ["f"],
+     "pre": ["test_green(?f)"], "subtasks": []},
+    {"name": "first_run", "task": "diagnose", "params": ["f"],
+     "pre": ["not test_ran(?f)"], "subtasks": ["run_test(?f)"]},
+    {"name": "investigate", "task": "diagnose", "params": ["f"],
+     "pre": ["test_red(?f)"], "subtasks": [{"goal": ["has_report(?f)"]}, "find_cause(?f)"]},
+    {"name": "cause_known", "task": "find_cause", "params": ["f"],
+     "pre": ["cause_found(?f)"], "subtasks": []},
+    {"name": "by_locate", "task": "find_cause", "params": ["f"],
+     "pre": ["not locate_done(?f)"], "subtasks": ["locate(?f)"]},
+    {"name": "by_probe", "task": "find_cause", "params": ["f"],
+     "pre": ["locate_done(?f)", "not cause_found(?f)"], "subtasks": ["probe(?f)"]}
+  ]
+}

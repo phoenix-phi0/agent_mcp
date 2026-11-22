@@ -1,0 +1,38 @@
+{
+  "name": "services",
+  "python": "sim.py",
+  "predicates": {"running": 1, "depends": 2, "locked": 1},
+  "derived": [
+    {"head": "blocked(?s)", "body": ["depends(?s,?d)", "not running(?d)"]}
+  ],
+  "sensors": [
+    {
+      "name": "snapshot",
+      "run": {"callback": "snapshot"},
+      "extract": [
+        {"type": "json", "path": ["services"], "where": {"running": "true"}, "facts": ["running({name})"]},
+        {"type": "json", "path": ["services"], "where": {"locked": "true"}, "facts": ["locked({name})"]},
+        {"type": "json", "path": ["depends"], "facts": ["depends({service},{dep})"]}
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "name": "start",
+      "params": ["s"],
+      "pre": ["not running(?s)", "not blocked(?s)", "not locked(?s)"],
+      "add": ["running(?s)"],
+      "del": [],
+      "run": {"callback": "start"}
+    },
+    {
+      "name": "stop",
+      "params": ["s"],
+      "pre": ["running(?s)"],
+      "add": [],
+      "del": ["running(?s)"],
+      "run": {"callback": "stop"}
+    }
+  ],
+  "goals": ["running"]
+}
