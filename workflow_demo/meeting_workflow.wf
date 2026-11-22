@@ -32,9 +32,9 @@
 如果 mc.done == 否
     清空 open_issues
     存储 open_issues issues=mc.disagreements summary=mc.summary
-    跳转 r 最大 2
+    跳转 r 最大 2 用完继续
 会议结论
-    任务 会议议题：{topic}。按「主持会议」的要求写结论。参考文本里有背景材料、全部发言和主持人最后一轮的判断（check）
+    任务 会议议题：{topic}。按「主持会议」的要求写结论。参考文本里有背景材料、全部发言和主持人最后一轮的判断（check）。如果主持人最后一轮判断仍未定案（参考文本 check 里 done 为否），按多数意见和各方已有共识自己裁定结论，没被采纳但有人坚持的意见写进 dissent
     角色 {moderator 或 MODERATOR}
     文本 background minutes check=mc
     格式 meeting_decision

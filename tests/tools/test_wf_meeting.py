@@ -92,6 +92,23 @@ def test_all_ai(tmp):
     check('在要不要打包上不一致' in p[4], '第二轮发言的人看得到主持人上一轮指出的分歧')
 
 
+def test_three_rounds_unresolved(tmp):
+    demo = copy(tmp)
+    (demo / 'run_m.zs').write_text(entry('ARCHITECT,REVIEWER_GPT'), encoding='utf-8')
+    replies = []
+    for i in range(1, 4):
+        replies += [speech(f'第 {i} 轮意见'), speech(f'第 {i} 轮反对'), mcheck('否', f'第 {i} 轮分歧')]
+    c = client(replies + [DECISION])
+    e = DSLEngine(workdir=demo, verbs_root=ROOT / 'verbs', verbose=False, client=c)
+    e.run_file('run_m.zs')
+    events = json.loads(Path(e.vars['workflow_trace']).read_text(encoding='utf-8'))['events']
+    check(e.vars['decision'] == DECISION and len(c.calls) == 10, '三轮未定案后仍执行会议结论')
+    check(any(x['type'] == 'jump_exhausted' and x['target'] == 'r' and x['count'] == 3 for x in events),
+          '三轮未定案记录跳转用完事件')
+    check('第 3 轮分歧' in prompts(c)[-1] and '按多数意见' in prompts(c)[-1],
+          '结论拿到最后一轮判断和未定案裁定要求')
+
+
 def test_human_seat(tmp):
     demo = copy(tmp)
     (demo / 'run_m.zs').write_text(entry('ARCHITECT,HUMAN'), encoding='utf-8')
@@ -185,7 +202,7 @@ def test_page(tmp):
 def run():
     (ROOT / 'data/tmp').mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='wfmeet-', dir=ROOT / 'data/tmp') as folder:
-        for case in (test_all_ai, test_human_seat, test_human_moderator, test_override_and_plain, test_page):
+        for case in (test_all_ai, test_three_rounds_unresolved, test_human_seat, test_human_moderator, test_override_and_plain, test_page):
             tmp = Path(folder) / case.__name__
             tmp.mkdir()
             print(case.__name__)

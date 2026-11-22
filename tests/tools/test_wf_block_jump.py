@@ -109,6 +109,25 @@ def test_item_limit():
         print('  ✓ 一项返工超过上限：报错停下')
 
 
+def test_exhausted_continue():
+    with tempfile.TemporaryDirectory() as d:
+        profiles(d)
+        flow = FLOW.replace('跳转 r 最大 2', '跳转 r 最大 2 用完继续')
+        replies = REPLIES[:4] + [{'v': 'A3'}, {'decide': '需修改'},
+                                 {'v': 'B1'}, {'decide': '通过'}, {'summary': 'ok'}]
+        engine, c = run_flow(d, flow, replies)
+        events = [e for e in trace_of(engine)['events'] if e['type'] == 'jump_exhausted']
+        line = next(i for i, row in enumerate(flow.splitlines(), 1) if '跳转 r' in row)
+        check(len(events) == 1 and all(events[0].get(k) == v for k, v in {
+            'line': line, 'target': 'r', 'count': 3, 'max': 2,
+            'item': {'index': 1, 'total': 2}}.items()), '次数用完记录事件和遍历项')
+        check(engine.vars['done'] == [{'v': 'A3'}, {'v': 'B1'}] and len(c.calls) == 9
+              and engine.vars['summary'] == {'summary': 'ok'}, '用完后继续本项、下一项和收尾步骤')
+        with unittest.TestCase().assertRaisesRegex(DSLError, '超过最大 2 次'):
+            run_flow(d, FLOW, replies)
+        print('  ✓ 不带用完继续时仍然报超限')
+
+
 def test_parse_errors():
     with tempfile.TemporaryDirectory() as d:
         profiles(d)
@@ -211,7 +230,7 @@ def page_check(run_id, tmp):
 
 
 if __name__ == '__main__':
-    for test in (test_each_item_reworks_separately, test_item_limit, test_parse_errors,
+    for test in (test_each_item_reworks_separately, test_item_limit, test_exhausted_continue, test_parse_errors,
                  test_outer_jump_unchanged, test_controlled_replay):
         test()
     print('块内跳转：全部通过')

@@ -11,7 +11,7 @@ from tools.dsl_core import DSLError, Unexpanded, split_items, to_text
 from tools.wf_plan import cost_summary
 
 _TASK_FIELDS = {"任务", "角色", "文本", "记录", "格式"}
-_JUMP = re.compile(r"^跳转\s+(\w+)\s+最大\s+(\d+)\s*$")
+_JUMP = re.compile(r"^跳转\s+(\w+)\s+最大\s+(\d+)(?:\s+(用完继续))?\s*$")
 _LABEL = re.compile(r"^标记\s*:\s*(\w+)\s*$")
 _EACH = re.compile(r"^遍历\s+(\w+)\s+于\s+(.+)$")
 _STORE = re.compile(r"^存储\s+(\w+)\s+(.+)$")
@@ -328,12 +328,16 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                 key = (n,) + tuple((e["each_line"], e["index"]) for e, d in zip(each_stack, each_depths)
                                    if d <= labels[target])
                 jumps[key] = jumps.get(key, 0) + 1
-                if jumps[key] > max_count:
+                exhausted = jumps[key] > max_count
+                if exhausted and not m[3]:
                     raise DSLError(f"第 {n} 行：跳转 {target} 超过最大 {max_count} 次")
-                event = dict(type="jump", line=n, target=target, count=jumps[key], max=max_count)
+                event = dict(type="jump_exhausted" if exhausted else "jump",
+                             line=n, target=target, count=jumps[key], max=max_count)
                 if len(key) > 1:
                     event["item"] = {"index": each_stack[-1]["index"], "total": each_stack[-1]["total"]}
                 trace.add(**event)
+                if exhausted:
+                    continue
                 raise _Jump(target)
             if line.startswith("如果 "):
                 if not children:

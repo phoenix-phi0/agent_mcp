@@ -10,7 +10,7 @@
   "agentic": {
     "cwd": "work/{project}",
     "sandbox": "workspace-write",
-    "timeout": 2400,
+    "timeout": 3600,
     "max_turns": 80,
     "venv": true
   }

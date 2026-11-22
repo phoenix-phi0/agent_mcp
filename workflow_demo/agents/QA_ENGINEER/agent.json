@@ -20,7 +20,7 @@
       "Bash(pytest:*)",
       "Bash(python -m unittest:*)"
     ],
-    "timeout": 900,
+    "timeout": 1800,
     "max_turns": 60,
     "venv": true,
     "mcp_tools": ["probe"]

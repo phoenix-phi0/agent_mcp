@@ -23,7 +23,7 @@
       "Bash(python -m unittest:*)",
       "Bash(python -m py_compile:*)"
     ],
-    "timeout": 1500,
+    "timeout": 3600,
     "max_turns": 80,
     "venv": true,
     "mcp_tools": ["probe", "review"]

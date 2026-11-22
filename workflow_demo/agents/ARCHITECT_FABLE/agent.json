@@ -10,6 +10,6 @@
     "skills/refactor.md"
   ],
   "max_tool_rounds": 3,
-  "timeout": 600,
+  "timeout": 3600,
   "effort": "low"
 }
