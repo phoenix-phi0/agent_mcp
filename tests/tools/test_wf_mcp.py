@@ -284,10 +284,13 @@ def test_6_1_viewer_url(tmp):
     svc, state = start_offline(tmp)
     name = Path(state['run']).name
     with patch.dict(server.os.environ, {}, clear=True):
-        assert svc.tools['viewer'](KEY) == {'url': f'http://127.0.0.1:8765/trace/{TOKEN}/'}
-        assert svc.tools['viewer'](KEY, name)['url'] == f'http://127.0.0.1:8765/trace/{TOKEN}/#run={name}'
+        # 地址不带口令：第一次打开跳登录页（口令不进对话记录、浏览器历史和代理日志）
+        out = svc.tools['viewer'](KEY)
+        assert out['url'] == 'http://127.0.0.1:8765/trace/' and out['meeting'] == 'http://127.0.0.1:8765/trace/meeting/'
+        assert TOKEN not in json.dumps(out, ensure_ascii=False)
+        assert svc.tools['viewer'](KEY, name)['url'] == f'http://127.0.0.1:8765/trace/#run={name}'
     with patch.dict(server.os.environ, {'WF_PUBLIC_URL': 'https://example.test/workflow/'}):
-        assert svc.tools['viewer'](KEY, name) == {'url': f'https://example.test/workflow/{TOKEN}/#run={name}'}
+        assert svc.tools['viewer'](KEY, name)['url'] == f'https://example.test/workflow/#run={name}'
 
 
 def test_6_1_read_tools_errors(tmp):
@@ -503,10 +506,11 @@ def web_service(tmp, write=False, base='/trace'):
                                root=tmp, workdirs=['workflow_demo', 'other'])
 
 
-def web_post(svc, op, payload, headers=None):
+def web_post(svc, op, payload, headers=None, token=True):
     request_headers = {'origin': 'http://127.0.0.1:8765', 'content-type': 'application/json'}
     request_headers.update(headers or {})
-    return asgi_request(svc, f'{svc.cfg.base}/{TOKEN}/api/{op}', 'POST',
+    prefix = f'{svc.cfg.base}/{TOKEN}' if token else svc.cfg.base
+    return asgi_request(svc, f'{prefix}/api/{op}', 'POST',
                         body=json.dumps(payload).encode('utf-8'), headers=request_headers)
 
 
@@ -520,8 +524,33 @@ def test_6_1_web_page(tmp):
 
 
 def test_6_1_web_wrong_token(tmp):
-    code, _, body = asgi_request(web_service(tmp), '/trace/wrong-token/')
-    assert code == 404 and json.loads(body)['error'] == '没有这个地址'
+    # 口令不对的老地址：当成没登录的普通地址，页面跳登录页、接口 401
+    code, headers, _ = asgi_request(web_service(tmp), '/trace/wrong-token/')
+    assert code == 302 and headers[b'location'].startswith(b'/trace/login?next=')
+    code, _, body = asgi_request(web_service(tmp), '/trace/api/runs')
+    assert code == 401 and json.loads(body)['login'] == '/trace/login'
+
+
+def test_6_1_web_login(tmp):
+    """线上走的是这条路（ASGI）：登录发 cookie，带 cookie 的页面、读接口、写接口都能用，地址里不带口令。"""
+    svc, state = start_offline(tmp)
+    web = web_service(tmp, write=True)
+    form = urlencode({'key': TOKEN, 'next': '/trace/meeting/'}).encode()
+    fh = {'content-type': 'application/x-www-form-urlencoded', 'origin': 'http://127.0.0.1:8765'}
+    code, headers, _ = asgi_request(web, '/trace/login', 'POST', body=urlencode({'key': 'x' * 20}).encode(), headers=fh)
+    assert code == 401 and b'set-cookie' not in headers
+    code, headers, _ = asgi_request(web, '/trace/login', 'POST', body=form, headers=fh)
+    assert code == 303 and headers[b'location'] == b'/trace/meeting/'
+    cookie = headers[b'set-cookie'].decode().split(';', 1)[0]
+    assert cookie.startswith('trace_session=') and TOKEN not in cookie
+    code, _, body = asgi_request(web, '/trace/', headers={'cookie': cookie})
+    assert code == 200 and b'<html' in body.lower() and b'r.status===401' in body
+    code, _, body = asgi_request(web, '/trace/api/runs', headers={'cookie': cookie})
+    assert code == 200 and json.loads(body)['runs'][0]['name'] == Path(state['run']).name
+    code, _, body = web_post(web, 'abort', {'name': 'missing.json'}, {'cookie': cookie}, token=False)
+    assert code == 404 and '没有 missing.json' in json.loads(body)['error']     # 过了鉴权
+    code, _, _ = web_post(web, 'abort', {'name': 'missing.json'}, token=False)
+    assert code == 401
 
 
 def test_6_1_web_runs(tmp):
@@ -638,7 +667,7 @@ def test_6_1_handler_body_read_order(tmp):
 
     cases = [
         ('/wrong', TOKEN, True, {}, 404),
-        ('/trace/wrong/api/abort', TOKEN, True, {}, 404),
+        ('/trace/wrong/api/abort', TOKEN, True, {}, 401),          # 没登录
         (f'/trace/{TOKEN}/api/unknown', TOKEN, True, {}, 404),
         (f'/trace/{TOKEN}/api/abort', TOKEN, False, {}, 403),
         (f'/trace/{TOKEN}/api/abort', TOKEN, True, {'Origin': 'https://evil.example'}, 403),
@@ -681,7 +710,7 @@ def test_6_1_asgi_body_read_order(tmp):
     """头部拒绝必须在首次 receive 前完成，也检查多个错误的优先级。"""
     path = f'/trace/{TOKEN}/api/abort'
     cases = [
-        ('/trace/wrong/api/abort', False, {}, 404),
+        ('/trace/wrong/api/abort', False, {}, 401),          # 没登录（口令不对的老地址）
         (f'/trace/{TOKEN}/api/unknown', False, {}, 404),
         (path, False, {}, 403),
         (path, True, {'origin': 'https://evil.example'}, 403),
@@ -836,7 +865,7 @@ CASES += [test_6_1_submit_approve, test_6_1_execute_reject, test_6_1_edit_plan_c
           test_6_1_operation_unicode]
 
 
-CASES += [test_6_1_web_page, test_6_1_web_wrong_token, test_6_1_web_runs,
+CASES += [test_6_1_web_page, test_6_1_web_wrong_token, test_6_1_web_login, test_6_1_web_runs,
           test_6_1_web_run, test_6_1_web_plan, test_6_1_web_readonly,
           test_6_1_web_approve, test_6_1_web_cross_origin, test_6_1_web_request_validation,
           test_6_1_web_mcp_endpoint, test_6_1_http_launch, test_6_1_handler_body_read_order]

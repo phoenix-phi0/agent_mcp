@@ -13,4 +13,6 @@
 设 budget = 9
 设 roles = ENGINEER_LITE,ENGINEER,ENGINEER_SENIOR,TEST_ENGINEER
 编排执行 project_workflow.wf
+# 跑完把最终的架构和架构师的裁决写进项目：改项目流程（change_workflow.wf）以后按它来改
+存约定 work/{project}/CONTRACT.json arch contract_notes 整项目流程
 打印 {workflow_trace}

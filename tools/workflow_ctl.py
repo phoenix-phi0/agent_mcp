@@ -126,11 +126,16 @@ def _match(rules, names):
     return None
 
 
-def _is_human(workdir, role):
+def _external(workdir, role):
+    """这张卡是不是外部执行者：返回 "human" / "muse"，不是返回 None。"""
     if not workdir or not role:
-        return False
-    from verbs.workflow._agents import is_human_card
-    return is_human_card(workdir, role)
+        return None
+    from verbs.workflow._agents import card_executor
+    return card_executor(workdir, role)
+
+
+def _is_human(workdir, role):
+    return _external(workdir, role) is not None
 
 
 def _check_rules(rules):
@@ -300,10 +305,14 @@ class _Control:
         if not self.orders:
             reason = "error" if (self.old or {}).get("status") == "error" else "interrupted"
             return {**meta, "action": "wait", **plan, "reason": reason}
-        if key in cfg.get("submitted", {}):
+        submitted = next((h for h in reversed(cfg.get("history", []))
+                          if h.get("op") == "submit" and h.get("step") == k), {})
+        # 交的时候记下了是哪一步（名字、行号）。记录回退后重跑，同一个步号可能已经换成别的步骤
+        # （运行 20261123-090353：Muse 交给旧第 10 步「模块返工」的实现记录，被重跑出来的第 10 步「模块任务分配」拿去用了），
+        # 对不上的旧结果不用，照常往下走。旧控制文件的 history 没记名字和行号，照旧只按步号。
+        stale = any(submitted.get(f) is not None and submitted.get(f) != req.get(f) for f in ("name", "line"))
+        if key in cfg.get("submitted", {}) and not stale:
             # submitted 继续存原结果，来源从既有 history 取，兼容旧控制文件的形状。
-            submitted = next((h for h in reversed(cfg.get("history", []))
-                              if h.get("op") == "submit" and h.get("step") == k), {})
             actor = submitted.get("actor", "workflow_ctl")
             return {**meta, "action": "result", "result": cfg["submitted"][key], "actor": actor, "after": False,
                     "confirm": [{"phase": "before", "action": "submit", "actor": actor,
@@ -323,9 +332,11 @@ class _Control:
                                      "model": go.get("model"), "actor": go.get("actor", "workflow_ctl"),
                                      "at": go.get("at") or _stamp()}],
                         **after(go.get("role") or plan["role"])}
-        # 人的卡（model=human）：不调模型，一律停下等人交结果；换了模型或换成别的卡就照常跑
-        if not plan["model"] and not (item and ic.get("model")) and _is_human(getattr(self, "workdir", None), current_role):
-            return {**meta, "action": "wait", "reason": "human", **plan}
+        # 人的卡（model=human）、Muse 的卡（model=muse）：不调模型，一律停下等外部交结果；
+        # 换了模型或换成别的卡就照常跑。reason 是 human / muse，Muse 的唤醒按这个判断
+        ext = None if plan["model"] or (item and ic.get("model")) else _external(getattr(self, "workdir", None), current_role)
+        if ext:
+            return {**meta, "action": "wait", "reason": ext, **plan}
         matched = _match(_rules(cfg, "before"), names)
         if ic.get("confirm_before") is not None:
             if ic["confirm_before"]:
@@ -359,6 +370,14 @@ def _advance(trace, cfg, client=None, rewind=None, force_step=False, workdir=Non
     except Exception:
         if raise_errors or ctl.path is None:      # 编排还没开始就错了：没有记录可看，原样抛
             raise
+    if ctl.path is not None and client is None and os.environ.get("DSL_MUSE_WAKE") != "off":
+        # 真跑（不是测试喂的假客户端）停在 Muse 的卡上：往 musebatch 队列投一条任务（同一步同一次只投一条），
+        # 本机轮询看到就唤醒 Muse，Muse claim → 做 → set_task（见 tools/musebatch.py）。DSL_MUSE_WAKE=off 关掉
+        try:
+            from tools import musebatch
+            musebatch.post(ctl.path)
+        except Exception as e:        # 投不成不影响流程本身，记进日志，人可以手动投（python -m tools.musebatch）
+            print(f"Muse 任务没投成：{e}", file=sys.stderr)
     return ctl.path
 
 
@@ -375,7 +394,88 @@ def _alive(cfg):
     return state != "Z" and b"workflow_ctl" in cmd
 
 
-def _spawn(trace):
+def _cant_run_here():
+    """这个进程能不能起后台进程跑模型：不能就返回原因（只判断有没有 key，不读出来）。
+    Muse 之类在别的环境里交结果（tools.muse_flow / musebatch），那边没有模型的 key：
+    在那边起的后台进程一建引擎就退出，记录停在 running、看起来像中断。这时交给服务接手（见 pick_up）。
+    WF_WORKER_HERE=1 强制本地起，=0 强制交给服务。"""
+    force = os.environ.get("WF_WORKER_HERE")
+    if force == "1":
+        return None
+    if force == "0":
+        return "WF_WORKER_HERE=0"
+    try:
+        from tools.zhipu import ZhipuClient
+        ZhipuClient()           # 引擎一建就要它：建不了，后台进程开头就会退出
+    except Exception:
+        return "这个进程里没有智谱的 key（建不了默认客户端）"
+    return None
+
+
+def _handoff(trace, why):
+    """不在本进程起后台进程：记一笔「等服务接手」，服务里的 pick_up 轮询到就在服务的环境里起。"""
+    with _ctl_lock(trace):
+        cf = _side(trace, ".ctl")
+        t = _load(trace)
+        t.update(status="running", updated=_stamp())
+        _dump(trace, t)
+        cfg = _load(cf)
+        cfg["worker"] = None
+        cfg["handoff"] = {"at": _stamp(), "why": why}
+        _dump(cf, cfg)
+        with open(_side(trace, ".log"), "a", encoding="utf-8") as log:
+            log.write(f"\n=== {_stamp()} 交给服务接手（{why}）\n")
+
+
+def pick_up(workdir):
+    """服务里调：把「等服务接手」的运行在本进程的环境里起后台进程。返回接手的记录路径。"""
+    wd = Path(workdir)
+    out = []
+    for cf in sorted((wd / "runs").glob("*.ctl")):
+        try:
+            cfg = _load(cf)
+        except (OSError, ValueError):
+            continue
+        if not cfg.get("handoff") or _alive(cfg):
+            continue
+        trace = cf.with_name(cf.name[:-len(".ctl")] + ".json")
+        if not trace.is_file():
+            continue
+        with _ctl_lock(trace):
+            cfg = _load(cf)
+            if not cfg.get("handoff") or _alive(cfg):
+                continue
+            cfg.pop("handoff", None)
+            _dump(cf, cfg)
+            still = _load(trace).get("status") == "running"     # 这期间被中止、改过的不接
+        if still:
+            _spawn(trace, local=True)
+            out.append(trace)
+    return out
+
+
+def pick_up_loop(workdirs, interval=3.0, stop=None):
+    """服务启动时开一个后台线程跑这个（wf_mcp_server / trace_server 的 main）。"""
+    import threading
+    stop = stop or threading.Event()
+
+    def loop():
+        while not stop.is_set():
+            for wd in workdirs:
+                try:
+                    pick_up(wd)
+                except Exception as e:          # 轮询不能因为一份坏记录停掉
+                    print(f"pick_up 出错：{type(e).__name__}: {e}", file=sys.stderr, flush=True)
+            stop.wait(interval)
+    th = threading.Thread(target=loop, name="wf-pick-up", daemon=True)
+    th.start()
+    return stop
+
+
+def _spawn(trace, local=False):
+    why = None if local else _cant_run_here()
+    if why:
+        return _handoff(trace, why)
     with _ctl_lock(trace):
         cf = _side(trace, ".ctl")
         t = _load(trace)
@@ -432,9 +532,28 @@ def _wait_worker_exit(run, timeout=5.0):
             return
 
 
+HANDOFF_WAIT = 60      # 交给服务接手后多久还没人接，就当服务没开轮询（操作照常进行，标记作废）
+
+
+def _handoff_age(cfg):
+    h = cfg.get("handoff")
+    if not h:
+        return None
+    try:
+        from datetime import datetime
+        return time.time() - datetime.strptime(h.get("at", ""), "%Y-%m-%dT%H:%M:%S%z").timestamp()
+    except ValueError:
+        return HANDOFF_WAIT + 1
+
+
 def _idle(cfg):
     if _alive(cfg):
         raise ControlError("后台还在跑，先等它停下（pause 后等当前这步跑完）或 abort")
+    age = _handoff_age(cfg)
+    if age is not None:
+        if age < HANDOFF_WAIT:
+            raise ControlError("刚交给服务接手、后台马上就起，几秒后再试")
+        cfg.pop("handoff", None)        # 没人接：作废，这次操作照常（调用方会写回控制文件）
 
 
 def _settle(p, cfg, t, client=None):
@@ -622,7 +741,10 @@ def status(run, detail=False):
     p, cf, cfg, t = _open(p)
     alive = _alive(cfg)
     st = t.get("status")
-    if st == "running" and not alive:
+    handoff = cfg.get("handoff") if st == "running" and not alive else None
+    if handoff and _handoff_age(cfg) < HANDOFF_WAIT:
+        pass                        # 交给服务接手了，马上就起：照旧算 running
+    elif st == "running" and not alive:
         st = "interrupted"          # 记录说在跑，进程却没了：被杀或机器重启，resume 可接着走
     steps = []
     for e in t.get("events", []):
@@ -650,6 +772,8 @@ def status(run, detail=False):
            "max_attempts": cfg.get("max_attempts", 4),
            "models": cfg.get("models", {}), "roles": cfg.get("roles", {}), "vars": cfg.get("vars", {}),
            "worker_alive": alive, "resumes": t.get("resumes", 0), "steps": steps}
+    if handoff:
+        out["handoff"] = handoff    # 等服务接手（交结果的进程里没有模型的 key）；超过一分钟还在就是服务没开轮询
     pend = t.get("pending") if t.get("status") == "waiting" else None
     if pend:
         pend = {"phase": "before", "reason": "step", "attempt": 1, **pend}
@@ -698,7 +822,7 @@ def submit(run, result, step=None, wait=None, client=None, actor="workflow_ctl")
         result = _check_result(pend, result)
         _prune(cfg, pend["step"])
         cfg["submitted"][str(pend["step"])] = result
-        _log(cfg, "submit", step=pend["step"], actor=actor)
+        _log(cfg, "submit", step=pend["step"], actor=actor, name=pend.get("name"), line=pend.get("line"))
         _dump(cf, cfg)
     _continue(p, cfg["mode"] == "step" if wait is None else wait, client)
     return status(p)
@@ -722,7 +846,11 @@ def execute(run, model=None, role=None, step=None, wait=False, client=None, note
         pend = _pending(t, step)
         _check_phase(pend, "before")
         use_role = role or cfg.get("roles", {}).get(pend.get("role")) or pend.get("role")
-        if not (model or cfg.get("models", {}).get(pend.get("role"))) and _is_human(t.get("workdir"), use_role):
+        ext = None if (model or cfg.get("models", {}).get(pend.get("role"))) else _external(t.get("workdir"), use_role)
+        if ext == "muse":
+            raise ControlError(f"第 {pend['step']} 步交给 Muse（{use_role}）：等 Muse 认领 musebatch 的任务、set_task 交；"
+                               f"不等它就换卡或换模型再执行")
+        if ext:
             raise ControlError(f"第 {pend['step']} 步轮到人（{use_role}）：用 submit 交结果；要让 AI 代答就换卡或换模型再执行")
         key = str(pend["step"])
         attempt = 1 + sum(e.get("type") == "task" and e.get("step") == pend["step"]
@@ -1165,6 +1293,7 @@ def abort(run, actor="workflow_ctl"):
         t.pop("pending", None)
         t.update(status="aborted", error=f"外部中止（{actor}）", finished=_stamp(), updated=_stamp())
         _dump(p, t)
+        cfg.pop("handoff", None)            # 还没被服务接手的也作废
         _log(cfg, "abort", actor=actor)
         _dump(cf, cfg)
     return status(p)
@@ -1506,7 +1635,21 @@ def list_runs(workdir):
 def _main(argv):
     if len(argv) == 2 and argv[0] == "advance":
         trace = Path(argv[1])
-        _advance(trace, _load(_side(trace, ".ctl")))
+        try:
+            _advance(trace, _load(_side(trace, ".ctl")))
+        except Exception as e:
+            # 编排开始前就崩了（建不了引擎、缺 key……）：记录还停在 running，查看器上只能看到「中断」。
+            # 改成 error、写明原因，修好后 resume 接着走
+            import traceback
+            traceback.print_exc()
+            with _ctl_lock(trace):
+                t = _load(trace)
+                if t.get("status") == "running":
+                    t.update(status="error", updated=_stamp(),
+                             error=f"后台进程起不来：{type(e).__name__}: {str(e).splitlines()[0][:300] if str(e) else ''}")
+                    _dump(trace, t)
+            print(f"{_stamp()} 停下：error（后台进程起不来）", flush=True)
+            return 1
         print(f"{_stamp()} 停下：{_load(trace).get('status')}", flush=True)
         return 0
     print("用法：python -m tools.workflow_ctl advance <runs/xxx.json>", file=sys.stderr)

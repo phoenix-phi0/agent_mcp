@@ -428,8 +428,28 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
   // 一次运行的整体状态（受控编排多了 waiting / aborted；记录说在跑、进程没了 = interrupted）
   var RUN_TXT = { done: "已完成", error: "出错", running: "运行中", waiting: "暂停 · 等外部决定", aborted: "已中止", interrupted: "已中断（进程不在了）" };
   function runStatus(t) {
+    // 交给服务接手（交结果的进程里没有模型的 key）：后台几秒内就起，不算中断
+    if (t.status === "running" && t._control && t._control.handoff) return "running";
     if (t.status === "running" && (t._alive === false || (t._control && t._control.worker && t._control.worker_alive === false))) return "interrupted";
     return t.status || "?";
+  }
+  // 停下等外部时按原因说：muse 交给 Muse（看 musebatch 里这一步的任务：queued 等认领、running 在做、failed 做不了）；
+  // human 轮到人；其余是真的暂停、等外部决定。step 给了就带上「第 N 步」
+  function waitInfo(reason, muse, step) {
+    var at = step != null ? "第 " + step + " 步" : "";
+    if (reason === "muse") {
+      var ms = muse && muse.status;
+      if (ms === "running") return { txt: "Muse 在做" + (at ? " · " + at : ""), short: "Muse 在做", pill: "running" };
+      if (ms === "failed") return { txt: "Muse 做不了" + (at ? " · " + at : "") + "，等人换卡或换模型", short: "Muse 做不了", pill: "error" };
+      if (ms === "done") return { txt: "Muse 交了" + (at ? at : "") + "，流程接着往下", short: "Muse 已交", pill: "running" };
+      return { txt: "交给 Muse" + (at ? " · " + at : "") + " · 等它认领", short: "等 Muse 认领", pill: "waiting" };
+    }
+    if (reason === "human") return { txt: "轮到人" + (at ? " · " + at : ""), short: "轮到人", pill: "waiting" };
+    return { txt: (at ? "暂停在" + at : "暂停") + " · 等外部决定", short: at ? "暂停在" + at : "暂停", pill: "waiting" };
+  }
+  function traceWait(t, step) {
+    var pd = t.status === "waiting" ? t.pending : null;
+    return waitInfo(pd && (step == null || pd.step === step) ? pd.reason : null, t._muse, step != null ? step : pd && pd.step);
   }
   var SRC_TXT = { auto: "自动", execute: "外部指定执行", external: "外部提交结果" };
   function isExec(e) { return e.type !== "task" || e.status !== "waiting"; }   // waiting 是「停在这里」，不算一次执行
@@ -640,7 +660,7 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
       var cls = "node" + (ran || st.waiting ? "" : " idle") + (sel ? " sel" : "") + (st.errs ? " err" : "") + (st.running ? " running" : "") + (st.waiting ? " waiting" : "") + (st.review ? " review" : "");
       var g = '<g class="' + cls + '" data-line="' + n.line + '" tabindex="0" role="button" aria-label="' + esc(n.name || n.cond || n.kind) + '">';
       if (n.kind === "start" || n.kind === "end") {
-        var endTxt = n.kind === "start" ? "开始" : ({ done: "结束 · 已完成", error: "出错停止", running: "运行中（还没结束）", waiting: "暂停中（等外部决定）",
+        var endTxt = n.kind === "start" ? "开始" : ({ done: "结束 · 已完成", error: "出错停止", running: "运行中（还没结束）", waiting: traceWait(S.trace).txt,
           aborted: "已中止", interrupted: "中断（进程不在了）" }[runStatus(S.trace)] || "结束");
         g += '<rect class="box" x="' + o.x + '" y="' + o.y + '" width="' + o.w + '" height="' + o.h + '" rx="13"' + (n.kind === "end" && S.trace.status === "error" ? ' style="stroke:' + cssv("--bad") + '"' : "") + '/>' +
           '<text x="' + (o.x + o.w / 2) + '" y="' + (o.y + 17) + '" text-anchor="middle" style="font-size:12.5px;font-weight:600">' + esc(endTxt) + "</text>";
@@ -681,7 +701,7 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
         if (st.review) {
           g += '<text class="t-review" x="' + (o.x + 16) + '" y="' + (o.y + 57) + '">待确认</text>';
         } else if (st.waiting) {
-          g += '<text class="t-wait" x="' + (o.x + 16) + '" y="' + (o.y + 57) + '">暂停 · 第 ' + esc(st.waiting.step) + " 步等外部</text>";
+          g += '<text class="t-wait" x="' + (o.x + 16) + '" y="' + (o.y + 57) + '">' + esc(traceWait(S.trace, st.waiting.step).txt) + "</text>";
         } else if (st.running) {
           var ea = elapsedAttrs(st.running.started);
           g += '<text class="t-run" x="' + (o.x + 16) + '" y="' + (o.y + 57) + '"' + ea.attr + ' data-prefix="进行中 · 已 ">进行中 · 已 ' + fmtSec(ea.sec) + "</text>";
@@ -738,6 +758,8 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     var total = wall != null ? wall : t.seconds != null ? t.seconds : tasks.reduce(function (a, e) { return a + (Number(e.seconds) || 0); }, 0);
     var running = tasks.find(function (e) { return e.status === "running"; });
     var rs = runStatus(t), stTxt = RUN_TXT[rs] || rs, stCls = rs;
+    if (rs === "waiting") { var wi = traceWait(t); stTxt = wi.txt; stCls = wi.pill; }
+    if (rs === "running" && t._control && t._control.handoff) stTxt = "运行中（交给服务接手，后台马上就起）";
     if (rs === "running" && !S.live) { stTxt = "记录停在运行中"; }
     var totalHtml = '<span class="num">' + fmtLong(total) + "</span>";
     if (t.status === "running") {
@@ -917,10 +939,20 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
         if (!isExec(e)) {
           // 停在这里等外部：把 pending 里的完整请求摊开
           var pd = t.status === "waiting" && t.pending && t.pending.step === e.step ? t.pending : null;
-          html += '<details class="run' + (e.seq === openSeq ? " focus" : "") + '" data-seq="' + e.seq + '" open><summary><b>第 ' + esc(e.step) + " 步 · 暂停</b>" +
-            '<span class="pill waiting">等外部</span></summary><div class="inner">' +
-            (pd ? '<div class="callout wait"><b>默认会这样执行</b>　卡 <span class="mono">' + esc(pd.card || e.role) + '</span> · 模型 <span class="mono">' + esc(pd.model || "?") + "</span>" +
-              (pd.agentic ? " · 带工具" : "") + (pd.format ? " · 格式 " + esc(pd.format) : "") + "</div>" +
+          var wi = pd ? traceWait(t, e.step) : null, isMuse = pd && pd.reason === "muse", mj = isMuse ? t._muse : null;
+          html += '<details class="run' + (e.seq === openSeq ? " focus" : "") + '" data-seq="' + e.seq + '" open><summary><b>第 ' + esc(e.step) + " 步 · " +
+            (pd && pd.reason === "muse" ? "交给 Muse" : pd && pd.reason === "human" ? "轮到人" : "暂停") + "</b>" +
+            '<span class="pill ' + (wi ? wi.pill : "waiting") + '">' + esc(wi ? wi.short : "等外部") + "</span></summary><div class=\"inner\">" +
+            (isMuse ? '<div class="callout wait"><b>交给 Muse 做</b>　卡 <span class="mono">' + esc(pd.card || e.role) + "</span>" +
+              (pd.format ? " · 格式 " + esc(pd.format) : "") + "<br>" +
+              (mj ? "队列任务 <span class=\"mono\">" + esc(mj.job) + "</span>：" +
+                ({ queued: "排队等 Muse 认领（本机轮询约 2 分钟一次）", running: "Muse 已认领，在做" + (mj.claimed_at ? "（" + esc(runTime(mj.claimed_at)) + " 认领）" : ""),
+                   failed: "Muse 做不了" + (mj.error ? "：" + esc(mj.error) : ""), done: "Muse 已交" }[mj.status] || esc(mj.status))
+                : "队列里还没有这一步的任务（服务重启前起的运行不会投；Muse 也可以用 muse_flow 直接交）") +
+              "。做完以后流程自己往下走；不等它就在下面换卡或换模型执行。</div>" : "") +
+            (pd && !isMuse ? '<div class="callout wait"><b>默认会这样执行</b>　卡 <span class="mono">' + esc(pd.card || e.role) + '</span> · 模型 <span class="mono">' + esc(pd.model || "?") + "</span>" +
+              (pd.agentic ? " · 带工具" : "") + (pd.format ? " · 格式 " + esc(pd.format) : "") + "</div>" : "") +
+            (pd ? "" +
               (pd.last_error ? field("上次失败的原因", '<span class="err-box">' + esc(pd.last_error) + "</span>") : "") +
               (pd.card_error ? field("角色卡读不了", '<span class="err-box">' + esc(pd.card_error) + "</span>") : "") +
               (pd.prompt ? field("提示词（外部自己执行时照这个发）", esc(pd.prompt), "task") : "") +
@@ -1229,8 +1261,9 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     var pd = A.pd, el = A.el, dis = A.busy ? " disabled" : "";
     var who = roleName(pd.card || pd.role);
     // 人的卡（model=human）：这一步本来就是人来做，不能「按默认执行」，也不会因为「继续自动跑」就跳过
-    var human = pd.reason === "human";
-    var h = '<div class="act-head"><h3>' + (human ? "轮到你（" + esc(who) + "）" : "由我来做（扮演 " + esc(who) + "）") + "</h3>" +
+    // Muse 的卡（model=muse）：同样不能「按默认执行」（交给 Muse 了），人也可以替 Muse 交
+    var muse = pd.reason === "muse", human = pd.reason === "human" || muse;
+    var h = '<div class="act-head"><h3>' + (muse ? "也可以替 Muse 交（" + esc(who) + "）" : human ? "轮到你（" + esc(who) + "）" : "由我来做（扮演 " + esc(who) + "）") + "</h3>" +
       (A.schema ? '<span class="seg" role="group" aria-label="填写方式"><button type="button" data-mode="form" class="' + (A.mode === "form" ? "on" : "") + '" aria-pressed="' + (A.mode === "form") + '">表单</button>' +
         '<button type="button" data-mode="json" class="' + (A.mode === "json" ? "on" : "") + '" aria-pressed="' + (A.mode === "json") + '">JSON</button></span>' : "") + "</div>";
     h += '<div class="hint">看完上面的提示词、角色卡和参考文本，' + (A.schema ? "按格式 <span class=\"chip fmt\">" + esc(pd.format || "") + "</span> 填好后提交" : "这个节点没有格式定义，直接写一个 JSON 对象提交") +
@@ -1246,8 +1279,9 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     // 其他决定：让模型来做、继续自动跑、中止
     var models = [];
     A.agents.forEach(function (a) { if (a.model && models.indexOf(a.model) < 0) models.push(a.model); });
-    h += '<div class="act-other"><h3>' + (human ? "或者让 AI 代你" : "或者不自己做") + "</h3>" +
-      (human ? '<div class="act-row hint" id="act-human">这一步是人（卡 <span class="mono">' + esc(pd.card || pd.role) + "</span> 不调模型）：交上面的结果，或者换一张卡、换一个模型让 AI 代答</div>"
+    h += '<div class="act-other"><h3>' + (muse ? "或者不等 Muse" : human ? "或者让 AI 代你" : "或者不自己做") + "</h3>" +
+      (muse ? '<div class="act-row hint" id="act-human">这一步交给 Muse（卡 <span class="mono">' + esc(pd.card || pd.role) + "</span> 不调模型，Muse 做完自己交）：不想等就换一张卡、换一个模型让 AI 来做</div>"
+        : human ? '<div class="act-row hint" id="act-human">这一步是人（卡 <span class="mono">' + esc(pd.card || pd.role) + "</span> 不调模型）：交上面的结果，或者换一张卡、换一个模型让 AI 代答</div>"
         : '<div class="act-row"><button type="button" class="btn2" data-act="exec"' + dis + '>按默认执行</button><span class="hint">卡 <span class="mono">' + esc(pd.card || pd.role) +
       '</span> · 模型 <span class="mono">' + esc(pd.model || "?") + "</span></span></div>") +
       '<div class="act-row"><label>换卡 <select class="f-in" id="act-card"' + dis + '><option value="">不换</option>' + A.agents.map(function (a) {
@@ -2045,8 +2079,8 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
   var RL = { runs: [], sel: null };
   // [class, 文字]：class 用现成的 .pill 配色
   function runState(r) {
-    if (r.status === "running") return r.alive === false ? ["interrupted", "已中断"] : ["running", "运行中"];
-    if (r.status === "waiting") return ["waiting", r.waiting_step != null ? "暂停在第 " + r.waiting_step + " 步" : "暂停"];
+    if (r.status === "running") return r.alive === false ? ["interrupted", "已中断"] : ["running", r.handoff ? "运行中（服务接手中）" : "运行中"];
+    if (r.status === "waiting") return ["waiting", waitInfo(r.waiting_reason, r.muse, r.waiting_step).txt];   // 类名保持 waiting：筛选「暂停」照旧
     return [r.status || "unknown", { done: "完成", error: "出错", aborted: "已中止" }[r.status] || String(r.status || "?")];
   }
   // 记录里的时间是 2026-11-16T15:14:53+0800：列表只显示「11-16 15:14:53」
@@ -2157,7 +2191,7 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
       var sel = $("run-pick"), prev = sel.value;
       sel.innerHTML = runs.map(function (r) {
         var st = r.status === "running" ? (r.alive === false ? "已中断" : "运行中") : ({ done: "完成", error: "出错", aborted: "已中止",
-          waiting: "暂停在第 " + r.waiting_step + " 步" }[r.status] || r.status);
+          waiting: waitInfo(r.waiting_reason, r.muse, r.waiting_step).txt }[r.status] || r.status);
         if (r.controlled) st += " · 受控";
         return '<option value="' + esc(r.name) + '">' + esc(r.name.replace(/\.json$/, "")) + " · " + esc(st) + " · " + r.calls + " 次调用</option>";
       }).join("");

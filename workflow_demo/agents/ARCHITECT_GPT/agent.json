@@ -1,0 +1,17 @@
+{
+  "model": "cli:codex/gpt-6.2-astra",
+  "effort": "medium",
+  "cost": 4,
+  "description": "架构师（Codex gpt-6.2-astra，中等思考强度，走 ChatGPT 订阅、不占 Claude 额度）。和 ARCHITECT 同一套技能（照它复制，改那边要一起改）：写架构、接口约定或重构方案，按意见修改，拆任务按成本挑角色。用 medium 不用 high：顶档模型开 high 写架构会拆得过细（Fable 实测）。换掉流程里的架构师用 roles={\"ARCHITECT\": \"ARCHITECT_GPT\"}，也可以进评审会。",
+  "tools": [],
+  "packages": [],
+  "skills": [
+    "skills/contract.md",
+    "skills/cost_assignment.md",
+    "skills/refactor.md",
+    "skills/architecture.md",
+    "skills/change.md"
+  ],
+  "max_tool_rounds": 3,
+  "timeout": 900
+}

@@ -1,0 +1,13 @@
+{
+  "model": "muse",
+  "cost": 2,
+  "description": "工程师（Muse 自己做：流程停在这一步、往 musebatch 队列投任务，Muse 认领后在项目目录里写代码写测试跑测试，set_task 写回实现记录，当场校验）。慢：要等本机轮询到（约 2 分钟）再加上做的时间，轮询没开就一直停着。还没在真流程里实测过质量，先给规格写清楚、不赶时间的模块。",
+  "packages": [],
+  "skills": [
+    "skills/implementation.md"
+  ],
+  "agentic": {
+    "cwd": "work/{project}",
+    "venv": true
+  }
+}

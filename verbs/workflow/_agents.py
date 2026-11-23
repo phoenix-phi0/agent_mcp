@@ -15,19 +15,28 @@ _KEYS = {"model", "effort", "tools", "skills", "packages", "max_tool_rounds", "a
 
 
 HUMAN = "human"     # 卡的 model 写 "human"：这个角色是人，不调模型，只等人在查看器上交结果
+# 卡的 model 写 "muse"：这一步交给 Muse 自己做。受控运行停在这一步、往 musebatch 队列投一条任务，
+# Muse 认领、在项目目录里干活、set_task 写回结果（当场按格式校验）。见 tools/musebatch.py
+MUSE = "muse"
+EXTERNAL = (HUMAN, MUSE)     # 不调模型、停下等外部交结果的执行者
 
 
-def is_human_card(workdir, name):
-    """不走 load_agent 的快速判断（受控运行决定停不停时用）：卡在、而且 model 是 human。"""
+def card_executor(workdir, name):
+    """不走 load_agent 的快速判断（受控运行决定停不停时用）：卡在、而且 model 是 human / muse 就返回它，否则 None。"""
     roots = [Path(workdir) / "agents", Path(__file__).resolve().parents[2] / "tools/dslagent/agent_profiles"]
     for root in roots:
         f = root / str(name) / "agent.json"
         if f.is_file():
             try:
-                return json.loads(f.read_text(encoding="utf-8")).get("model") == HUMAN
+                model = json.loads(f.read_text(encoding="utf-8")).get("model")
             except (OSError, ValueError):
-                return False
-    return False
+                return None
+            return model if model in EXTERNAL else None
+    return None
+
+
+def is_human_card(workdir, name):
+    return card_executor(workdir, name) == HUMAN
 
 
 def load_agent(engine, name, model_override=None):
@@ -79,6 +88,11 @@ def load_agent(engine, name, model_override=None):
             raise DSLError(f"agent「{name}」模型配置无效：{model}（写成 platform:claude-sonnet-5-5 或带 @effort）")
         if data.get("agentic") is None:
             raise DSLError(f"agent「{name}」platform 模型要写 agentic.cwd（工具在哪个项目目录里执行）")
+    elif model == MUSE:
+        # Muse 自己做：工具、权限、模型都在它那边，卡上只有说明、技能和在哪个目录干活
+        bad = [k for k in ("tools", "packages", "via", "timeout", "max_tool_rounds") if data.get(k)]
+        if bad:
+            raise DSLError(f"agent「{name}」是 Muse（model=muse），不写 {'、'.join(bad)}")
     else:
         try:
             config.parse_model(model)
@@ -117,8 +131,14 @@ def load_agent(engine, name, model_override=None):
             raise DSLError(f"agent「{name}」agentic 只能写 cwd、allowed_tools、timeout、max_turns、venv、mcp_tools、"
                            f"sandbox、min_reads")
         is_codex = model.startswith("cli:codex")
-        if not (model.startswith("cli:claude") or is_codex or is_platform):
-            raise DSLError(f"agent「{name}」agentic 目前只支持 cli:claude、cli:codex 和 platform 模型（现在是 {model}）")
+        is_muse = model in ("cli:muse", MUSE)
+        if not (model.startswith("cli:claude") or is_codex or is_platform or is_muse):
+            raise DSLError(f"agent「{name}」agentic 目前只支持 cli:claude、cli:codex、cli:muse 和 platform 模型（现在是 {model}）")
+        if is_muse and (agentic.get("allowed_tools") or agentic.get("mcp_tools") or "sandbox" in agentic
+                        or "min_reads" in agentic):
+            # Muse 是轮询 mbatch 的执行端，工具和权限在它自己那边，编排管不到
+            raise DSLError(f"agent「{name}」{model} 的 agentic 只写 cwd、timeout、max_turns、venv，"
+                           f"不写 allowed_tools、mcp_tools、sandbox、min_reads")
         if is_platform and (agentic.get("allowed_tools") or agentic.get("mcp_tools") or "sandbox" in agentic):
             raise DSLError(f"agent「{name}」platform 的权限由自托管 worker 的沙箱管，不写 allowed_tools、mcp_tools、sandbox")
         from tools.llm_router import CODEX_SANDBOXES
@@ -142,8 +162,8 @@ def load_agent(engine, name, model_override=None):
             raise DSLError(f"agent「{name}」agentic.cwd 越出工作目录")
         if is_platform and cwd.parent != root / "work":
             raise DSLError(f"agent「{name}」platform 的 agentic.cwd 必须是 work/<项目>（worker 只开放这一层）")
-        allowed = [] if (is_codex or is_platform) else agentic.get("allowed_tools")
-        if not (is_codex or is_platform) and (not isinstance(allowed, list) or not allowed
+        allowed = [] if (is_codex or is_platform or is_muse) else agentic.get("allowed_tools")
+        if not (is_codex or is_platform or is_muse) and (not isinstance(allowed, list) or not allowed
                              or any(not isinstance(x, str) or not x.strip() for x in allowed)):
             raise DSLError(f"agent「{name}」agentic.allowed_tools 必须是非空字符串列表")
         if any(x.replace(" ", "") in ("Bash", "Bash(*)", "Bash(:*)") for x in allowed):
@@ -250,10 +270,11 @@ def _prompt(task, context, node=None, fmt=None, submit=False, notes=None, previo
 
 def _uses_submit(engine, profile, fmt):
     """有格式、模型是 cli:claude / cli:goose、不是离线假客户端 → 用 submit 工具交。"""
-    if not fmt or getattr(engine.client, "offline", False) is True or profile["model"].startswith("platform:"):
+    if (not fmt or getattr(engine.client, "offline", False) is True or profile["model"].startswith("platform:")
+            or profile["model"] in EXTERNAL):
         return False
     spec = config.parse_model(profile["model"])
-    return spec.channel == "cli" and spec.provider in ("claude", "goose", "codex")
+    return spec.channel == "cli" and spec.provider in ("claude", "goose", "codex", "muse")
 
 
 def describe(engine, name, task, context=None, model=None, node=None, fmt=None, notes=None, previous=None):
@@ -304,6 +325,9 @@ def call_agent(engine, name, task, context=None, model=None, node=None, fmt=None
         return {}
     if profile["model"] == HUMAN:
         raise DSLError(f"「{name}」是人：这一步要人在查看器上交结果（受控运行会在这里停下等），不会调模型")
+    if profile["model"] == MUSE:
+        raise DSLError(f"「{name}」交给 Muse 自己做：受控运行会在这里停下、往 musebatch 队列投任务，"
+                       f"Muse 认领后 set_task 交结果，不会调模型")
     from tools import llm_router as _router
     _router.LAST_USAGE["value"] = None
     try:

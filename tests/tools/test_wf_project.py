@@ -105,7 +105,8 @@ ROLES = ['ARCHITECT', 'ARCHITECT_GLM', 'ARCHITECT', 'ARCHITECT_GLM',
          'TEST_ENGINEER', 'QA_ENGINEER', 'ENGINEER', 'QA_ENGINEER']
 ENTRY = ('用包 workflow\n设 content = 做待办网站\n设 stack = Python3+Flask\n设 goal = 不要后台\n'
          '设 project = todo_test\n设 test_cmd = .venv/bin/python -m pytest -q\n设 budget = 4\n'
-         '设 roles = ENGINEER_LITE,ENGINEER,TEST_ENGINEER\n编排执行 project_workflow.wf\n')
+         '设 roles = ENGINEER_LITE,ENGINEER,TEST_ENGINEER\n编排执行 project_workflow.wf\n'
+         '存约定 work/todo_test/CONTRACT.json arch contract_notes 整项目流程\n')
 
 
 def run():
@@ -165,6 +166,10 @@ def run():
               '每个模块开头清空一次实现记录')
         spent = [e for e in t['events'] if e['type'] == 'cost']
         check(len(spent) == 3 and spent[1].get('status') == '超出', '成本合计三次：web 第一次分配用了清单外的卡')
+        ct = json.loads((demo / 'work/todo_test/CONTRACT.json').read_text(encoding='utf-8'))
+        check(ct['architecture']['summary'] == '待办网站 v2' and ct['source'] == '整项目流程'
+              and ct['contract_notes'][0]['decisions'][0]['detail'] == 'GET / 改为 302 到 /todos',
+              '跑完写了 CONTRACT.json：最终架构（v2）和架构师的裁决都在')
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print('整项目流程：全部通过')

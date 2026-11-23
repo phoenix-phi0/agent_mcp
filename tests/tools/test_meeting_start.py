@@ -231,9 +231,11 @@ def test_static(tmp):
         code, head, _ = ts.route(runs, 'GET', '/t0k/meeting/js/app.js', '', {}, b'', token='t0k')
         check(code == 200 and head['Content-Type'].startswith('text/javascript'), 'js 带对的类型')
         for bad in ('/t0k/meeting/../secret.html', '/t0k/meeting/%2e%2e/secret.html', '/t0k/meeting/nope.js',
-                    '/t0k/meeting/notes.txt', '/meeting/index.html'):
+                    '/t0k/meeting/notes.txt'):
             code, _, _ = ts.route(runs, 'GET', bad, '', {}, b'', token='t0k')
             check(code == 404, f'{bad} → 404')
+        code, head, _ = ts.route(runs, 'GET', '/meeting/index.html', '', {}, b'', token='t0k')
+        check(code == 302 and head['Location'].startswith('/login?next='), '不带口令、没登录：/meeting/index.html 跳登录页')
     finally:
         if old is None:
             os.environ.pop('TRACE_MEETING_DIR', None)

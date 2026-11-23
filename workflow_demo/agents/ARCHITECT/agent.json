@@ -8,9 +8,10 @@
     "skills/contract.md",
     "skills/cost_assignment.md",
     "skills/refactor.md",
-    "skills/architecture.md"
+    "skills/architecture.md",
+    "skills/change.md"
   ],
   "max_tool_rounds": 3,
-  "timeout": 600,
+  "timeout": 1800,
   "effort": "high"
 }

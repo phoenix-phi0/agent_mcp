@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tools.wf_submit import validate  # noqa: E402
+from tools.wf_submit import coerce, shape_hint, validate, wrong_level_hint  # noqa: E402
 
 SCHEMA = json.loads(Path(os.environ["WF_SCHEMA"]).read_text(encoding="utf-8"))
 OUT = Path(os.environ["WF_OUT"])
@@ -28,7 +28,7 @@ TRIES = [0]
 
 TOOL = {
     "name": "submit",
-    "description": ("提交这一步的结果。结果只能通过这个工具交，参数必须符合格式；"
+    "description": ("提交这一步的结果。结果只能通过这个工具交，参数必须符合格式；" + shape_hint(SCHEMA) +
                     "格式不对会返回具体错误，改了再交。提交成功后任务就结束了，不要再输出别的。"),
     # 有的模型接口不收顶层的 if/then/allOf 之类（工具参数要求是普通对象 schema）：
     # 声明给模型的去掉这些，校验仍按完整格式来，条件规则不满足时照样回错误
@@ -62,13 +62,15 @@ def _call(mid, params):
     if TRIES[0] >= MAX_TRIES:
         _text(mid, f"交错 {MAX_TRIES} 次，不再接受提交。", True)
         return
-    args = params.get("arguments")
+    # 数组 / 对象字段写成了 JSON 字符串（Claude 常见）：解开再校验，不算交错
+    args = coerce(SCHEMA, params.get("arguments"))
     errors = validate(SCHEMA, args)
     if errors:
         TRIES[0] += 1
         _log({"try": TRIES[0], "errors": errors, "arguments": args})
         left = MAX_TRIES - TRIES[0]
-        _text(mid, "格式不对，没有提交：\n- " + "\n- ".join(errors)
+        hint = wrong_level_hint(SCHEMA, args)
+        _text(mid, (hint + "\n" if hint else "") + "格式不对，没有提交：\n- " + "\n- ".join(errors)
               + (f"\n改正后再调用 submit（还能再交 {left} 次）。" if left else "\n次数用完，这一步失败。"), True)
         return
     tmp = OUT.with_name(OUT.name + ".tmp")

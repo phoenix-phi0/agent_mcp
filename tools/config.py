@@ -148,6 +148,8 @@ BACKENDS = {
     # codex exec（ChatGPT 账号登录，~/.codex/auth.json）：有系统级沙箱（read-only / workspace-write）
     ("cli", "codex"): Backend("本机 Codex（codex exec，ChatGPT 账号）", True, _CLI,
                               True, False),
+    # Muse：不是本机程序，是轮询 mbatch 队列的执行端（tools/muse_backend.py）；不能选模型，写 cli:muse
+    ("cli", "muse"): Backend("Muse（经 mbatch 队列，轮询认领）", True, _CLI, False, False),
 }
 
 CHANNELS = ("api", "cli")

@@ -438,15 +438,16 @@ def build_server(host, port, base, write, key, token, root=None, workdirs=None):
 
     @register
     def viewer(key: str, run: str = None) -> dict:
-        """返回含查看口令的 url。key 为访问密钥；可选 run 为运行文件名或白名单内相对路径，
-        提供时追加 #run=文件名。基址优先使用 WF_PUBLIC_URL，否则使用服务的 host、port、base。
+        """返回查看器的 url（不带口令）。第一次打开会跳登录页，输入访问口令（TRACE_TOKEN）后 7 天内不用再输。
+        key 为访问密钥；可选 run 为运行文件名或白名单内相对路径，提供时追加 #run=文件名。
+        基址优先使用 WF_PUBLIC_URL，否则使用服务的 host、port、base。会议页是 url 后面加 meeting/。
         """
         path = resolve_run(run, cfg) if run is not None else None
         base_url = os.environ.get('WF_PUBLIC_URL') or f'http://{host}:{port}{base}'
-        url = base_url.rstrip('/') + f'/{token}/'
+        url = base_url.rstrip('/') + '/'
         if path is not None:
             url += f'#run={path.name}'
-        return {'url': url}
+        return {'url': url, 'meeting': base_url.rstrip('/') + '/meeting/', 'login': '第一次打开要输入访问口令'}
 
     return svc
 
@@ -471,6 +472,8 @@ def main(argv=None):
     except (StartupError, ControlError) as error:
         print(str(error), file=sys.stderr)
         raise SystemExit(1) from None
+    # 别的环境（Muse 用 muse_flow / musebatch）交结果时那边没有模型的 key，后台进程交给本服务接手
+    wc.pick_up_loop(svc.cfg.workdirs)
     svc.mcp.run(transport='http', host=args.host, port=args.port,
                 path=args.base.rstrip('/') + '/mcp')
     return svc

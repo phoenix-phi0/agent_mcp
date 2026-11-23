@@ -33,7 +33,7 @@ from dsl.client import ScriptClient
 from tools import trace_server
 from tools import workflow_ctl as wc
 from wf_fixtures import REPLIES, acceptance, contract, impl, review, revision
-from test_wf_refactor import analysis, assign, plan
+from test_wf_refactor import analysis, assign, plan, contract_arch as project_arch
 
 ROOT = Path(__file__).resolve().parents[2]
 VIEW = ROOT / 'tools' / 'trace_view.html'
@@ -371,12 +371,12 @@ def run():
         # D：重构流程，启动时把架构师长期换成 Fable 卡，逐步跑完
         d = demo_copy(tmp, 'd')
         cd = client([analysis(), plan('v1'), review('通过'), assign('ENGINEER_LITE'), impl('抽函数'),
-                     acceptance('通过')])
+                     acceptance('通过'), project_arch('v1'), review('通过')])   # 最后两步：约定更新、约定核对
         rd = wc.start(d, entry='run_refactor.zs', roles={'ARCHITECT': 'ARCHITECT_FABLE'}, client=cd)['run']
-        for _ in range(6):
+        for _ in range(8):
             wc.execute(rd, wait=True, client=cd)
         runs = trace_server.list_runs(d / 'runs')
-        check(runs[0]['status'] == 'done' and len(cd.calls) == 6, f'重构流程换卡后逐步跑完（{runs[0]["status"]}，{len(cd.calls)} 次调用）')
+        check(runs[0]['status'] == 'done' and len(cd.calls) == 8, f'重构流程换卡后逐步跑完（{runs[0]["status"]}，{len(cd.calls)} 次调用）')
         check(runs[0]['workflow'] == 'refactor_workflow' and runs[0]['current'] is None and runs[0]['goal'],
               '运行列表：跑完的没有所在步，需求摘要取 goal')
 

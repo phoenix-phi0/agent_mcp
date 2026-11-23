@@ -1,6 +1,9 @@
 # 代码重构：对 work/{project} 里已有的代码做重构，行为不变。
 # 现状分析（读代码、跑测试记基线）→ 重构方案 → 审查（最多改 2 轮，避免审查员越挑越细把方案改大）
 # → 按成本分配 → 逐项实施 → 回归验收（对照基线：测试数不减、公开接口不变、已有断言没改）
+# → 约定更新：按重构后的代码更新项目的接口约定（architecture 格式；入口读进来的 contract 为空就整理一份）
+# → 约定核对：QA 读代码逐项核对约定和代码（对不上就以代码为准修正约定，最多 2 轮）。入口脚本跑完把 arch 写回 CONTRACT.json
+# 入口脚本另要设：contract（读约定 work/{project}/CONTRACT.json 的结果，没有约定就是空对象）
 角色清单 roster {roles}
 现状分析
     任务 重构目标：{goal}。技术栈：{stack}。测试命令（以这个为准，跑它记基线）：{test_cmd}
@@ -66,3 +69,24 @@
         格式 implementation
         记录 task_result
     跳转 b 最大 3
+约定更新
+    任务 重构已经通过回归验收。按重构后的代码写项目的接口约定（按「整个项目的架构设计」的格式）：以后改这个项目的流程按它来改，工程师只看得到自己模块的约定，所以要写准。参考文本里 contract 是重构前的约定（为空对象说明项目还没有约定：按现状分析、重构方案和实现记录整理一份）；analysis 是重构前的现状分析（public_api 是对外接口，files 是文件）；plan 是重构方案；task_results 是各项实现记录（changes 里写了动了哪些文件）。行为不变是硬约束：public_api 每一项、原约定里每个 provides 的签名、行为、错误都照旧写，不许改；要按新代码更新的是模块划分、files、layout、responsibility、uses（内部调用关系变了就照新代码写）。有原约定时在 changes 里逐条写和原约定比改了什么。项目在 work/{project}，技术栈：{stack}，测试命令：{test_cmd}
+    角色 ARCHITECT
+    文本 contract analysis plan task_results
+    格式 architecture
+    记录 arch
+标记:k
+约定核对
+    任务 约定核对：读 work/{project} 里重构后的代码，逐项核对参考文本里的接口约定 arch 和代码是否一致。只核对，不改任何文件。逐项看：1 每个模块的 files 都存在；2 provides 里每个接口在代码里按约定的签名存在，行为和错误对得上（看代码和测试）；3 uses 写的调用关系代码里真是这样调的，签名和对方 provides 一字不差；4 参考文本 public_api（重构前的对外接口）每一项都还在、写进了某个模块的 provides；5 layout、data_model 和代码一致。对不上的每一处写进 issues（location 写模块名和接口名，problem 写约定写的是什么、代码里是什么、哪个文件，suggestion 写约定该怎么改），有一处就判需修改
+    角色 QA_ENGINEER
+    文本 arch public_api=analysis.analysis.public_api
+    格式 review
+    记录 ccheck
+如果 ccheck.decide == 需修改
+    约定修正
+        任务 按约定核对的意见修正接口约定：参考文本里 ccheck 的 issues 逐条处理。以代码为准（代码是重构后验收过的），但 public_api 和原约定的 provides 不许改成和原来不一样（真不一样说明重构改了行为，在 changes 里写明）。交完整的新版本，changes 里逐条回应
+        角色 ARCHITECT
+        文本 arch ccheck contract
+        格式 architecture
+        记录 arch
+    跳转 k 最大 2

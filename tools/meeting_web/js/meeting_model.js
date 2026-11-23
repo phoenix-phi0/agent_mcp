@@ -5,7 +5,10 @@
 
 export const MEETING_WORKFLOW = 'meeting_workflow';
 export const MEETING_FORMATS = new Set(['speech', 'meeting_check', 'meeting_decision']);
-const WORKFLOW_LABEL = { frontend_workflow: '前端流程', project_workflow: '整项目流程', refactor_workflow: '重构流程' };
+const WORKFLOW_LABEL = {
+  frontend_workflow: '前端流程', project_workflow: '整项目流程', project_meeting_workflow: '整项目流程（架构评审会）',
+  refactor_workflow: '重构流程', change_workflow: '改项目流程',
+};
 
 export function splitNames(str) {
   if (str === null || str === undefined) return [];

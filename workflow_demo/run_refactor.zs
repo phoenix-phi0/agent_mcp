@@ -10,5 +10,9 @@
 设 test_cmd = .venv/bin/python -m pytest -p no:cacheprovider -q
 设 budget = 12
 设 roles = ENGINEER_LITE,ENGINEER_GPT_LITE,ENGINEER_GPT,ENGINEER,ENGINEER_GPT_SENIOR,ENGINEER_SENIOR,TEST_ENGINEER
+# 项目已有接口约定（整项目流程、改项目流程写的）就读进来，重构完按新代码更新；没有就是空对象，流程里整理一份
+设 contract = 读约定 work/{project}/CONTRACT.json
 编排执行 refactor_workflow.wf
+# 写回约定：架构师的裁决沿用原约定的（重构不产生新裁决）
+存约定 work/{project}/CONTRACT.json arch contract.contract_notes 重构流程
 打印 {workflow_trace}

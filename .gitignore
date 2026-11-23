@@ -34,6 +34,8 @@ data/gen/
 data/reports/
 # codex 事件流（带时间戳，tools/ts_tee.py 写的）：排查哪一步慢用，不进仓库
 data/codex_logs/
+# 模型用 submit 交错格式时的记录（tools/wf_submit.py 的 SubmitChannel.close 写的）：排查用，不进仓库
+data/submit_fails/
 
 # kg_v4（和 kg/ 并存的新版后端）：库由 kg_v4/setup/init_data.py 灌，web/ 由 gen build 生成，
 # uploads/ 是导入接口存的上传文件。上面的通用规则本来就覆盖，这里写明方便对照。

@@ -886,8 +886,29 @@ def _batchmgr_goose_json(prompt, system, model, schema, max_tries=3, timeout=900
     raise BackendError(f"goose（经 batchmgr）{max_tries} 次都没有按格式返回。最后：{feedback[-400:]}")
 
 
+class MuseClient(_CLIBackend):
+    """cli:muse：往 mbatch 投一条任务，等轮询的 Muse 认领、做完，取回回复（见 tools/muse_backend.py）。
+    慢：认领最多等一轮轮询（120 秒），做完要几分钟。超时：DSL_MUSE_TIMEOUT（默认 1800 秒）。"""
+
+    name = "muse"
+
+    @staticmethod
+    def binary() -> str:
+        return "mbatch"          # 不是本机程序：经 mbatch 队列
+
+    def use_wsl(self) -> bool:
+        return False
+
+    def complete(self, prompt, system, model) -> str:
+        from . import muse_backend
+        try:
+            return muse_backend.complete(prompt, system)
+        except muse_backend.MuseError as e:
+            raise BackendError(f"muse：{e}") from None
+
+
 _BACKENDS = {"claude": ClaudeCLIClient(), "zcode": ZCodeClient(),
-             "goose": GooseCLIClient(), "codex": CodexCLIClient()}
+             "goose": GooseCLIClient(), "codex": CodexCLIClient(), "muse": MuseClient()}
 
 
 class RouterClient:
@@ -1266,6 +1287,17 @@ def submit_call(prompt, system, model, schema, agentic=None, max_tries=3, timeou
     """
     from . import wf_submit
     r = route(model)
+    if r.backend is not None and r.backend.name == "muse":
+        # Muse：投进 mbatch 等它做完，最后的回复里取 JSON 再校验（没有 submit 工具）
+        from . import muse_backend
+        LAST_USAGE["value"] = None
+        try:
+            result, usage = muse_backend.submit(prompt, system or DEFAULT_SYSTEM, schema, agentic=agentic,
+                                                timeout=timeout)
+        except muse_backend.MuseError as e:
+            raise BackendError(f"muse：{e}") from None
+        LAST_USAGE["value"] = usage
+        return result
     if r.backend is None or r.backend.name not in ("claude", "goose", "codex"):
         raise CapabilityError(f"按格式提交只支持 cli:claude、cli:goose 和 cli:codex，收到 {model}")
     backend = r.backend
@@ -1282,6 +1314,7 @@ def submit_call(prompt, system, model, schema, agentic=None, max_tries=3, timeou
             LAST_USAGE["value"] = usage
             return result
     ask = ("\n\n结果必须调用 submit 工具提交（参数就是结果本身，格式由工具定义）。"
+           + wf_submit.shape_hint(schema) +
            "不要把结果写在回复里。提交成功后不要再输出任何内容。")
     ch = wf_submit.SubmitChannel(schema, max_tries)
     LAST_USAGE["value"] = None

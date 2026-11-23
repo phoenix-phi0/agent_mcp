@@ -1,0 +1,77 @@
+{
+  "type": "object",
+  "description": "改项目之前的基线：跑一遍测试记下结果，抽查约定和代码对不对得上。只看、只跑测试，不改文件。",
+  "additionalProperties": false,
+  "required": [
+    "summary_line",
+    "passed",
+    "failed",
+    "failing_tests",
+    "drift",
+    "summary"
+  ],
+  "properties": {
+    "summary_line": {
+      "type": "string",
+      "minLength": 1,
+      "description": "测试汇总行原文，如「42 passed in 3.1s」"
+    },
+    "passed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "failed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "failing_tests": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "改之前就失败的用例名"
+    },
+    "drift": {
+      "type": "array",
+      "description": "约定和代码对不上的地方（没有就空）",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "module",
+          "item",
+          "contract",
+          "code",
+          "file"
+        ],
+        "properties": {
+          "module": {
+            "type": "string",
+            "minLength": 1
+          },
+          "item": {
+            "type": "string",
+            "minLength": 1,
+            "description": "接口名或文件"
+          },
+          "contract": {
+            "type": "string",
+            "description": "约定里写的"
+          },
+          "code": {
+            "type": "string",
+            "description": "代码里实际是"
+          },
+          "file": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "description": "项目现在的状况，一两句"
+    }
+  }
+}

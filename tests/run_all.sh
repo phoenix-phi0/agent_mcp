@@ -207,6 +207,7 @@ run 编排示例   $PY tests/tools/test_workflow_demo.py
 run 编排记录   $PY tests/tools/test_workflow_trace.py
 run 编排实时   $PY tests/tools/test_workflow_live.py
 run 编排控制   $PY tests/tools/test_workflow_ctl.py
+run 外部结果对步 $PY tests/tools/test_wf_stale_submit.py
 run 编排提交   $PY tests/tools/test_wf_submit.py
 run 编排角色工具 $PY tests/tools/test_wf_gsb_tools.py
 run 编排成本分配 $PY tests/tools/test_wf_cost.py
@@ -217,6 +218,14 @@ run 编排块内跳转 $PY tests/tools/test_wf_block_jump.py
 run 编排参考资料取字段 $PY tests/tools/test_wf_pick.py
 run 编排Platform卡 $PY tests/tools/test_wf_platform.py
 run 整项目流程   $PY tests/tools/test_wf_project.py
+run 整项目流程开会版 $PY tests/tools/test_wf_project_meeting.py
+run 项目接口约定 $PY tests/tools/test_wf_contract.py
+run 改项目流程   $PY tests/tools/test_wf_change.py
+run Muse后端     $PY tests/tools/test_muse_backend.py
+run 流程停给Muse $PY tests/tools/test_muse_flow.py
+run Muse队列     $PY tests/tools/test_musebatch.py
+run 后台交服务   $PY tests/tools/test_wf_handoff.py
+run 查看器Muse   $PY tests/tools/test_trace_view_muse.py
 run AI会议       $PY tests/tools/test_wf_meeting.py
 run 前端流程     $PY tests/tools/test_wf_frontend.py
 run 会议启动和会议页 $PY tests/tools/test_meeting_start.py
@@ -247,6 +256,7 @@ run DSL整份重写 $PY tests/tools/test_dslagent_k84.py
 run 批量opencode $PY tests/tools/test_obatch.py
 run 批量codex   $PY tests/tools/test_cxbatch.py
 run 指令执行器 $PY tests/tools/test_cmd.py
+run HTN诊断    $PY tests/tools/test_htn_diag.py
 run 批量goose   $PY tests/tools/test_gsbatch.py
 run 探针检索    $PY tests/tools/test_code_search.py
 run Colab启动   $PY tests/tools/test_colab_vllm.py

@@ -21,7 +21,7 @@ COST = {'ARCHITECT': 5, 'ARCHITECT_GLM': 1, 'QA_ENGINEER': 4, 'ENGINEER_LITE': 1
         'ENGINEER_GPT_LITE': 1, 'ENGINEER_GPT': 2, 'ENGINEER_GPT_SENIOR': 4, 'QA_GPT': 2,
         # Fable 5.2（cli:claude/fable，Claude Code 2.1.322 起指向 5.2）：同一小任务实测约 opus 的 1.9 倍
         'ENGINEER_FABLE': 15,
-        # 架构师的 Fable 版（low 档）：不在分配格式里，用 roles={"ARCHITECT": "ARCHITECT_FABLE"} 换上；
+        # 架构师的 Fable 版（medium 档）：不在分配格式里，用 roles={"ARCHITECT": "ARCHITECT_FABLE"} 换上；
         # 钱包需求实测两步约 $2.2，sonnet 架构师（cost 5）约 $0.39 → 约 28，取 30
         'ARCHITECT_FABLE': 30,
         # codex 审查员：ARCHITECT_GLM 审不完时换它（审得偏严，慎用）

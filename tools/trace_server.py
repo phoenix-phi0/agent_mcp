@@ -36,21 +36,29 @@
   失败：400 {ok: false, error: 原样的出错信息, errors?: ["字段: 原因", …]}（格式不合格时带逐条字段错误）
   往下跑一律交给后台进程（workflow_ctl 自己起），接口立刻返回，页面靠轮询看进度。
 
+带 --token（TRACE_TOKEN）时要登录：<base>/login 输入口令，发一个签名 cookie（HttpOnly、SameSite=Lax，7 天，
+TRACE_SESSION_TTL 可改；经 https 代理时带 Secure），之后的地址 <base>/、<base>/meeting/、<base>/api/… 都不带口令。
+没登录：页面跳登录页，接口回 401（页面里加的脚本据此跳登录页）。<base>/logout 退出。换了 TRACE_TOKEN 旧 cookie 全部失效。
+老地址 <base>/<口令>/… 照旧能用（过渡）：页面顺手发 cookie，浏览器里确认 cookie 能用后把地址栏换成不带口令的。
+
 alive：记录里是 running 时，按记录里的 pid 查进程还在不在（同一台机器才准）。
 进程被杀、机器重启，记录会一直停在 running，靠它区分「还在跑」和「已经没了」。
 
 只监听 127.0.0.1；日志写 devnull，不接管道（每秒的轮询会把管道写满）。
 """
 import argparse
+import hashlib
+import hmac
 import ipaddress
 import json
 import os
 import re
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 VIEW = Path(__file__).resolve().with_name("trace_view.html")
 _NAME = re.compile(r"^[\w.-]+\.json$")
@@ -326,7 +334,26 @@ def read_control(path):
                           for step, rows in (c.get("revisions") or {}).items()},
             "item_controls": c.get("item_controls") or {},
             "vars": c.get("vars") or {},          # 启动时传的入口参数（会议页靠它显示议题、参会名单）
-            "worker": worker, "worker_alive": pid_alive(worker) if worker else None}
+            "worker": worker, "worker_alive": pid_alive(worker) if worker else None,
+            # 交结果的进程里没有模型的 key，后台进程等服务接手（见 workflow_ctl.pick_up）：这几秒不算中断
+            "handoff": c.get("handoff")}
+
+
+def muse_state(path, data):
+    """停在 Muse 的步骤上时（pending.reason=muse）：musebatch 里这一步的任务——queued 等认领、running 在做、
+    failed 做不了。查不到（还没投、读不了队列）返回 None。"""
+    pend = data.get("pending") if data.get("status") == "waiting" else None
+    if not pend or pend.get("reason") != "muse":
+        return None
+    try:
+        root = Path(__file__).resolve().parents[1]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        from tools import musebatch
+        rel = path.resolve().relative_to(root).as_posix()
+        return musebatch.job_for(rel, pend.get("step"), pend.get("attempt", 1))
+    except Exception:
+        return None
 
 
 def read_formats(data):
@@ -367,6 +394,7 @@ def read_trace(path, brief=False):
     data["_alive"] = pid_alive(data.get("pid")) if data.get("status") == "running" else None
     data["_name"] = path.name
     data["_control"] = read_control(path)
+    data["_muse"] = muse_state(path, data)
     if not brief:
         data["_formats"] = read_formats(data)
         data["_agents"] = read_agents(data)
@@ -397,10 +425,14 @@ def list_runs(runs):
             fmts.add(pend.get("format"))
         meeting = ("standalone" if d.get("workflow") == "meeting_workflow"
                    else "embedded" if fmts & MEETING_FORMATS else None)
+        handoff = (d["_control"] or {}).get("handoff")
         out.append({"name": p.name, "status": d.get("status"), "started": d.get("started"), "meeting": meeting,
-                    "updated": d.get("updated"), "alive": d["_alive"], "calls": len(tasks),
-                    "controlled": d["_control"] is not None,
+                    "updated": d.get("updated"), "alive": None if handoff else d["_alive"], "calls": len(tasks),
+                    "controlled": d["_control"] is not None, "handoff": handoff,
                     "waiting_step": pend.get("step") if pend else None,
+                    # 停下的原因：human 轮到人、muse 交给 Muse（muse 带队列里的状态）、其余是等外部决定
+                    "waiting_reason": pend.get("reason") if pend else None,
+                    "waiting_card": pend.get("card") if pend else None, "muse": d["_muse"],
                     "workflow": d.get("workflow"), "finished": d.get("finished"), "seconds": d.get("seconds"),
                     "cost_spent": d.get("cost_spent"), "usd_spent": d.get("usd_spent"),
                     "errors": sum(1 for e in tasks if e.get("status") == "error"),
@@ -411,13 +443,132 @@ def list_runs(runs):
     return out
 
 
-def view_html(write=False):
+def view_html(write=False, extra=b""):
     """查看器页面，加一个标记：页面靠它知道自己是由本服务提供的，进实时模式（经隧道访问时主机名不是 localhost）。
-    write：再加一个标记，页面才显示「由我来做」和执行、继续、中止这些按钮。"""
+    write：再加一个标记，页面才显示「由我来做」和执行、继续、中止这些按钮。extra：登录模式加的脚本（见 _page_script）。"""
     meta = b'<head>\n<meta name="trace-live" content="1">'
     if write:
         meta += b'\n<meta name="trace-write" content="1">'
-    return VIEW.read_bytes().replace(b"<head>", meta, 1)
+    return VIEW.read_bytes().replace(b"<head>", meta + extra, 1)
+
+
+# ---- 登录（带 --token 时）----
+# 访问口令就是 TRACE_TOKEN。登录后发一个签名 cookie（不是口令本身：HMAC(口令, 过期时间)），之后的地址不带口令：
+#   <base>/            查看器          <base>/meeting/   会议页        <base>/api/…   接口
+#   <base>/login       登录页（GET 表单，POST 验口令）     <base>/logout  退出
+# 没登录：页面跳登录页，接口回 401。换了 TRACE_TOKEN，所有旧 cookie 立刻失效。
+# 老地址 <base>/<口令>/… 照旧能用（过渡）：打开页面时顺手发 cookie，浏览器里确认 cookie 能用后把地址栏换成不带口令的。
+SESSION_COOKIE = "trace_session"
+SESSION_TTL = int(os.environ.get("TRACE_SESSION_TTL") or 7 * 86400)
+
+
+def _sign(token, exp):
+    return hmac.new(token.encode("utf-8"), f"trace-session:v1:{exp}".encode(), hashlib.sha256).hexdigest()
+
+
+def make_session(token, now=None):
+    exp = int(now if now is not None else time.time()) + SESSION_TTL
+    return f"{exp}.{_sign(token, exp)}"
+
+
+def check_session(token, value, now=None):
+    try:
+        exp_s, sig = (value or "").split(".", 1)
+        exp = int(exp_s)
+    except ValueError:
+        return False
+    if exp < (now if now is not None else time.time()):
+        return False
+    return hmac.compare_digest(sig.encode("ascii", "replace"), _sign(token, exp).encode())
+
+
+def _cookie(headers, name):
+    for part in (headers.get("cookie") or "").split(";"):
+        k, _, v = part.strip().partition("=")
+        if k == name:
+            return v
+    return None
+
+
+def _set_cookie(base, value, headers, max_age=None):
+    secure = ((headers.get("x-forwarded-proto") or "").lower() == "https"
+              or os.environ.get("TRACE_COOKIE_SECURE") == "1")
+    return (f"{SESSION_COOKIE}={value}; Path={base or '/'}; Max-Age={SESSION_TTL if max_age is None else max_age}; "
+            f"HttpOnly; SameSite=Lax" + ("; Secure" if secure else ""))
+
+
+def _norm_base(base):
+    return "/" + base.strip("/") if base and base.strip("/") else ""
+
+
+def _auth(path, headers, token, base):
+    """(去掉前缀后的路径, 方式)。方式：open（没设口令）、token（老地址）、cookie（已登录）、None（没登录）。
+    路径不在 base 下：(None, None)。"""
+    if not token:
+        if base and not (path == base or path.startswith(base + "/")):
+            return None, None
+        return path[len(base):], "open"
+    tp = base + "/" + token
+    if path == tp or path.startswith(tp + "/"):
+        return path[len(tp):], "token"
+    if base and not (path == base or path.startswith(base + "/")):
+        return None, None
+    rel = path[len(base):]
+    return rel, ("cookie" if check_session(token, _cookie(headers, SESSION_COOKIE)) else None)
+
+
+def _safe_next(base, nxt):
+    """登录后回到哪：只认本服务 base 下的路径（防跳到外站）。"""
+    nxt = nxt or ""
+    path = nxt.split("#", 1)[0].split("?", 1)[0]
+    if (not nxt.startswith((base or "") + "/") or nxt.startswith("//") or "\\" in nxt or any(c in nxt for c in "\r\n")
+            or "/../" in path + "/"):
+        return (base or "") + "/"
+    from urllib.parse import quote
+    return quote(nxt, safe="/?&=#%:+,;@!$'()*~-._")       # 放进 Location 头：非 ASCII 要转义
+
+
+def _page_script(base, rel, via):
+    """登录模式下页面里加的脚本：接口回 401（登录过期）就跳登录页；老地址打开时，确认 cookie 能用就把地址栏换成不带口令的。"""
+    login = json.dumps((base or "") + "/login")
+    js = ("(function(){var L=" + login + ";var f=window.fetch;if(!f)return;"
+          "window.fetch=function(){return f.apply(this,arguments).then(function(r){if(r.status===401)"
+          "location.href=L+'?next='+encodeURIComponent(location.pathname+location.search+location.hash);return r;});};")
+    if via == "token":
+        clean = json.dumps((base or "") + rel)
+        probe = json.dumps((base or "") + "/api/runs")
+        js += ("f(" + probe + ",{credentials:'same-origin',cache:'no-store'}).then(function(r){if(r.ok)"
+               "history.replaceState(null,'',(" + clean + ")+location.search+location.hash);}).catch(function(){});")
+    js += "})();"
+    return ("\n<script>" + js + "</script>").encode("utf-8")
+
+
+LOGIN_HTML = """<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>登录 · 编排查看器</title>
+<style>
+body{font:15px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#f6f6f4;color:#222;
+display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
+form{background:#fff;border:1px solid #ddd;border-radius:10px;padding:28px 28px 22px;width:min(360px,90vw);box-shadow:0 2px 10px #0001}
+h1{font-size:18px;margin:0 0 6px}p{margin:0 0 16px;color:#666;font-size:13px}
+input[type=password]{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #bbb;border-radius:6px;font-size:15px}
+button{margin-top:14px;width:100%;padding:9px;border:0;border-radius:6px;background:#2d5be3;color:#fff;font-size:15px;cursor:pointer}
+.err{color:#b3261e;font-size:13px;margin:10px 0 0}
+</style></head><body>
+<form method="post" action="login" autocomplete="off">
+<h1>编排查看器</h1><p>输入访问口令。登录后 __DAYS__ 天内不用再输。</p>
+<input type="password" name="key" placeholder="访问口令" autofocus required>
+<input type="hidden" name="next" value="__NEXT__">
+<button type="submit">登录</button>__ERR__
+</form></body></html>"""
+
+
+def login_page(base, nxt, error=""):
+    import html as _html
+    page = (LOGIN_HTML.replace("__NEXT__", _html.escape(_safe_next(base, nxt), quote=True))
+            .replace("__DAYS__", str(max(1, SESSION_TTL // 86400)))
+            .replace("__ERR__", f'<p class="err">{_html.escape(error)}</p>' if error else ""))
+    return page.encode("utf-8")
 
 
 MEETING_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -430,7 +581,7 @@ def meeting_dir():
     return Path(os.environ.get("TRACE_MEETING_DIR") or Path(__file__).resolve().parent / "meeting_web")
 
 
-def serve_meeting(rel, write=False):
+def serve_meeting(rel, write=False, extra=b""):
     """<前缀>/meeting/ 下的静态页（人参加会议的界面）。和查看器同源同口令，接口用 ../api/…。
     html 和查看器页一样加上实时、可写的标记。"""
     root = meeting_dir().resolve()
@@ -445,7 +596,7 @@ def serve_meeting(rel, write=False):
         meta = b'<head>\n<meta name="trace-live" content="1">'
         if write:
             meta += b'\n<meta name="trace-write" content="1">'
-        data = data.replace(b"<head>", meta, 1)
+        data = data.replace(b"<head>", meta + extra, 1)
     return respond(200, data, MEETING_TYPES[f.suffix])
 
 
@@ -467,25 +618,39 @@ def respond_json(obj, code=200):
 
 def validate_post_request(path, headers, token=None, base="", write=False):
     """正文读取前的共用检查：返回允许的长度，或完整的拒绝响应。"""
-    base = "/" + base.strip("/") if base and base.strip("/") else ""
-    prefix = base + (f"/{token}" if token else "")
+    base = _norm_base(base)
     normalized_headers = {}
     for key, value in headers.items():
         normalized_headers.setdefault(key.lower(), value)
     headers = normalized_headers
-    if prefix:
-        if not path.startswith(prefix + "/"):
-            return respond_json({"ok": False, "error": "没有这个地址"}, 404)
-        path = path[len(prefix):]
+    rel, via = _auth(path, headers, token, base)
+    if rel is None:
+        return respond_json({"ok": False, "error": "没有这个地址"}, 404)
+    host = (headers.get("host") or "").strip().lower()
+    origin = (headers.get("origin") or "").strip().lower()
+    if token and rel == "/login":
+        # 登录表单：同源才收；表单编码；正文很小
+        if origin and (origin == "null" or urlparse(origin).netloc != host):
+            return respond_json({"ok": False, "error": "不接受别的网页发来的登录"}, 403)
+        if (headers.get("content-type") or "").split(";")[0].strip().lower() != "application/x-www-form-urlencoded":
+            return respond_json({"ok": False, "error": "Content-Type 要是 application/x-www-form-urlencoded"}, 415)
+        try:
+            size = int(headers.get("content-length") or 0)
+        except ValueError:
+            size = -1
+        if size < 0 or size > 4096:
+            return respond_json({"ok": False, "error": "请求体太大或没有长度"}, 413)
+        return size
+    if via is None:
+        return respond_json({"ok": False, "error": "要先登录", "login": base + "/login"}, 401)
+    path = rel
     op = path[len("/api/"):] if path.startswith("/api/") else ""
     if op not in _WRITE_OPS:
         return respond_json({"ok": False, "error": "没有这个地址"}, 404)
     if not write:
         return respond_json({"ok": False, "error": "这个查看服务是只读的（没有绑定本机地址、加了 --readonly，或带 --token 而没加 --write），不能在页面上操作"}, 403)
     # 别的网页不能借浏览器往这里发写请求：带 Origin 的要和 Host 是同一个；没有 --token 时 Host 还得是本机名
-    # （防 DNS 重绑定：外面的域名解析到 127.0.0.1）。带 --token 时地址本身就是口令，Host 可能是隧道的域名
-    host = (headers.get("host") or "").strip().lower()
-    origin = (headers.get("origin") or "").strip().lower()
+    # （防 DNS 重绑定：外面的域名解析到 127.0.0.1）。带 --token 时要登录（或老地址带口令），Host 可能是隧道的域名
     if origin and origin != "null" and urlparse(origin).netloc != host:
         return respond_json({"ok": False, "error": "不接受别的网页发来的写请求（Origin 和 Host 不一致）"}, 403)
     if origin == "null" or (not token and not writable(_hostname(host))):
@@ -511,26 +676,47 @@ def route(runs, method, path, query, headers, body, token=None, base="", write=F
     token / base 与 make_handler 相同；write 是调用方按绑定地址和开关算好的写权限。
     文件读取和 control 写操作沿用原有实现，本函数不读写网络连接。
     """
-    base = "/" + base.strip("/") if base and base.strip("/") else ""
-    prefix = base + (f"/{token}" if token else "")
+    base = _norm_base(base)
     normalized_headers = {}
     for key, value in headers.items():
         normalized_headers.setdefault(key.lower(), value)  # HTTPMessage.get 取第一个同名头
     headers = normalized_headers
+    rel, via = _auth(path, headers, token, base)
+    if rel is None:
+        return respond_json({"ok": False, "error": "没有这个地址"} if method == "POST" else {"error": "没有这个地址"}, 404)
+    prefix = base + ("/" + token if via == "token" else "")       # 页面内跳转保持原来的地址形式
 
     if method == "GET":
-        if prefix:
-            if path == prefix:
-                return respond(301, b"", "text/plain", {"Location": prefix + "/"})
-            if not path.startswith(prefix + "/"):
-                return respond_json({"error": "没有这个地址"}, 404)
-            path = path[len(prefix):]
+        if rel == "":
+            return respond(301, b"", "text/plain", {"Location": prefix + "/"})
+        if token and rel == "/login":
+            if via == "cookie":
+                return respond(303, b"", "text/plain", {"Location": _safe_next(base, (parse_qs(query).get("next") or [""])[0])})
+            return respond(200, login_page(base, (parse_qs(query).get("next") or [""])[0]), "text/html; charset=utf-8")
+        if token and rel == "/logout":
+            return respond(303, b"", "text/plain", {"Location": base + "/login",
+                                                    "Set-Cookie": _set_cookie(base, "", headers, max_age=0)})
+        if via is None:
+            # 没登录：接口回 401（页面里的脚本据此跳登录页），页面直接跳登录页，登录后回来
+            if rel.startswith("/api/"):
+                return respond_json({"error": "要先登录", "login": base + "/login"}, 401)
+            nxt = base + rel + ("?" + query if query else "")
+            return respond(302, b"", "text/plain", {"Location": base + "/login?" + urlencode({"next": nxt})})
+        page_extra, page_head = b"", {}
+        if via in ("token", "cookie"):
+            page_extra = _page_script(base, rel, via)
+            if via == "token":           # 老地址打开页面：顺手发 cookie，脚本确认能用后把地址栏换成不带口令的
+                page_head = {"Set-Cookie": _set_cookie(base, make_session(token), headers)}
+        path = rel
         if path in ("/", "/index.html"):
-            return respond(200, view_html(write), "text/html; charset=utf-8")
+            return respond(200, view_html(write, page_extra), "text/html; charset=utf-8", page_head)
         if path == "/meeting":
             return respond(301, b"", "text/plain", {"Location": prefix + "/meeting/"})
         if path.startswith("/meeting/"):
-            return serve_meeting(path[len("/meeting/"):], write)
+            code, head, data = serve_meeting(path[len("/meeting/"):], write, page_extra)
+            if head.get("Content-Type", "").startswith("text/html"):
+                head.update(page_head)
+            return code, head, data
         if path == "/api/runs":
             return respond_json({"dir": runs.name if token else str(runs), "runs": list_runs(runs)})
         if path == "/api/entries":
@@ -571,12 +757,19 @@ def route(runs, method, path, query, headers, body, token=None, base="", write=F
         size = validate_post_request(path, headers, token, base, write)
         if not isinstance(size, int):
             return size
-        if prefix:
-            path = path[len(prefix):]
+        path = rel
         op = path[len("/api/"):]
         # HTTP handler 延迟读取：拒绝地址、权限和头部时不能等待客户端正文。
         if callable(body):
             body = body(size)
+        if token and path == "/login":
+            form = parse_qs(body[:size].decode("utf-8", "replace"))
+            key = (form.get("key") or [""])[0]
+            nxt = _safe_next(base, (form.get("next") or [""])[0])
+            if not hmac.compare_digest(key.encode("utf-8", "replace"), token.encode("utf-8")):
+                return respond(401, login_page(base, nxt, "口令不对"), "text/html; charset=utf-8")
+            return respond(303, b"", "text/plain", {"Location": nxt,
+                                                    "Set-Cookie": _set_cookie(base, make_session(token), headers)})
         try:
             body = json.loads(body[:size].decode("utf-8") or "null")
         except ValueError as e:
@@ -644,6 +837,7 @@ def main(argv=None):
     # 写接口：绑定本机地址才开放；带 --token 多半是经隧道公开给外面看，默认仍只读，要明说 --write
     write = writable(a.host) and not a.readonly and (not a.token or a.write)
     srv = ThreadingHTTPServer((a.host, a.port), make_handler(runs, a.token, a.base, write))
+    _ctl().pick_up_loop([runs.parent])      # 别的环境交结果时交给本服务起后台进程（见 workflow_ctl.pick_up）
     base = "/" + a.base.strip("/") if a.base.strip("/") else ""
     print(f"查看 {runs}：http://{a.host}:{a.port}{base}{'/' + a.token if a.token else ''}/  "
           f"（{'可在页面上提交、执行、继续、中止' if write else '只读'}；Ctrl+C 停止）", flush=True)

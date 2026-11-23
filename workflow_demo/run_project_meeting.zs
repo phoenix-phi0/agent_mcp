@@ -1,0 +1,19 @@
+# 整项目流程开会版（project_meeting_workflow.wf）的示例：和 run_project.zs 同一个待办网站，架构定稿前开一场架构评审会。
+# 想在评审会上发言就在 review_attendees 里加 HUMAN；想自己主持就传 moderator=HUMAN。会在会议页的会议室里开。
+# 每次换一个空的 project 目录。设 x = 值 的值里不能有空格（严格模式会把第一个词当动词）。
+# 启动：workflow.start(workflow_demo, entry=run_project_meeting.zs, mode=auto, vars={"review_attendees": "ARCHITECT,REVIEWER_GPT,HUMAN"})
+# 参数：content? project? review_attendees? moderator?
+# 上面这些参数启动时可以用 vars 传（会议室「交给流程」就是这么传的）；不传就用下面「或」后面的默认值。
+用包 workflow
+设 content = {content 或 做一个多人用的待办事项网站：注册、登录、登出（密码加盐哈希，会话用cookie）；登录后只看得到自己的待办；待办可以新增、修改标题、标记完成、删除，按完成状态筛选；有网页界面（服务端渲染的HTML表单即可，不要前端框架）和同样功能的JSON接口}
+设 stack = Python3+Flask3+SQLite（标准库sqlite3，不用ORM）+pytest，第三方包写进requirements.txt；测试用Flask的test_client，不起真服务
+设 goal = 数据库文件路径和密钥从环境变量读，有默认值；所有表在应用启动时自动建；不要用户管理后台；不要部署脚本
+设 project = {project 或 todo_meet1}
+设 test_cmd = .venv/bin/python -m pytest -q
+设 budget = 9
+设 roles = ENGINEER_LITE,ENGINEER,ENGINEER_SENIOR,TEST_ENGINEER
+设 review_attendees = {review_attendees 或 ARCHITECT,ARCHITECT_GLM,REVIEWER_GPT}
+编排执行 project_meeting_workflow.wf
+# 跑完把最终的架构和架构师的裁决写进项目：改项目流程（change_workflow.wf）以后按它来改
+存约定 work/{project}/CONTRACT.json arch contract_notes 整项目流程开会版
+打印 {workflow_trace}

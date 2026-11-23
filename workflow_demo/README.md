@@ -17,10 +17,23 @@
 | `meeting_workflow.wf` | AI 会议：参会角色按顺序轮流发言（可以有人：`HUMAN`），可点名追问，主持人每轮判断要不要再开一轮（最多三轮），最后出结论 | `run_meeting.zs` |
 | `frontend_workflow.wf` | 给已有 JSON 接口的后端做前端：界面设计 → 设计评审会 → 按结论改设计 → 按页面实现和验收（jsdom 加载真实页面、请求打到真后端）→ 端到端测试 → 整体验收 | `run_frontend.zs` |
 | `project_workflow.wf` | 从一句需求做出多模块项目：架构设计 → 架构审查 → 按模块依次（分配 → 实现 → 模块验收，不过就模块内返工；接口在架构里一次约定好，实现和约定不一致就返工）→ 集成测试（场景写成测试）→ 集成验收 | `run_project.zs` |
+| `change_workflow.wf` | 改已有项目：按项目的接口约定 `CONTRACT.json` 改。基线核对（跑测试、找约定和代码对不上的地方）→ 改动方案（只列要改、要新增的模块）→ 方案评审会 → 按改动的模块依次分配、实现、模块验收 → 新场景测试 → 集成和回归验收 → 合并回约定 | `run_change.zs` |
+| `project_meeting_workflow.wf` | 整项目流程的开会版：架构设计后开一场架构评审会（`review_attendees` 轮流发言、可点名追问、主持人判断，可以有 `HUMAN`），结论有 `todo` 才改架构，代替单人审查；后面和 `project_workflow.wf` 一字不差，集成验收多看一份评审会的保留意见 | `run_project_meeting.zs` |
 
 `project_workflow.wf` 用到块内跳转（标记写在遍历里，每个模块各自返工）和 `清空`（每个模块重新收集实现记录），
 格式见 `formats/architecture.json`、`formats/module_acceptance.json`，架构师的写法在 `agents/ARCHITECT/skills/architecture.md`。
-离线测试：`tests/tools/test_wf_project.py`。
+离线测试：`tests/tools/test_wf_project.py`。开会版 `project_meeting_workflow.wf` 的入口另可传 `review_attendees`、`moderator`，
+离线测试 `tests/tools/test_wf_project_meeting.py`（里面也核对后半段和整项目流程一致：改一边要两边一起改）。
+
+**接口约定和改项目。** 项目根目录的 `CONTRACT.json` 是这个项目的接口约定（architecture 格式的模块、provides/uses、数据模型、
+集成场景，加上架构师的裁决 `contract_notes` 和每次写入的 `history`）。整项目流程两版跑完由入口写（`存约定`）；
+重构流程最后多两步「约定更新 → 约定核对」（QA 读代码核对，对不上以代码为准修正，最多 2 轮），没有约定的项目也会整理出一份；
+改项目流程（`change_workflow.wf`）按它改，跑完由入口合并回去（`合并约定`：改动的模块整份替换、新模块加进来、删除的去掉，
+合并后查 uses 和 provides 对不对得上，对不上的记进 `warnings`；方案和约定对不上的硬伤直接报错、不写文件）。
+三个动词在 workflow 包里（`verbs/workflow/_contract.py`），写在入口脚本里：`设 contract = 读约定 work/{project}/CONTRACT.json`（没有就是空对象）、
+`存约定 文件 arch contract_notes 来源`、`合并约定 文件 plan contract_notes 来源`（后两个写变量名，不带花括号）。
+改动方案的格式是 `formats/change_plan.json`（从 architecture.json 生成：模块多 status、change），架构师的写法在 `agents/ARCHITECT/skills/change.md`。
+离线测试：`tests/tools/test_wf_contract.py`、`tests/tools/test_wf_change.py`。
 
 **会议和人。** `meeting_workflow.wf` 的入口要设 `topic`、`background`（没有就写「无」）、`attendees`（逗号分隔，按发言顺序），
 可选 `moderator`（默认 `MODERATOR`，写 `HUMAN` 就是人来判断和拍板）。全部发言在 `minutes`，结论在 `decision`

@@ -62,6 +62,75 @@ def validate(schema, obj):
     return out[:20]
 
 
+def coerce(schema, value):
+    """格式要数组 / 对象、交上来的却是一段能解析成数组 / 对象的字符串：解开再校验（递归到对象的字段和数组的每一项）。
+    Claude 调工具时常把嵌套的数组参数写成 JSON 字符串；不解开就算一次交错，它会以为整份结构不对，退而去交单项。"""
+    if not isinstance(schema, dict):
+        return value
+    want = schema.get("type")
+    if isinstance(value, str) and want in ("array", "object"):
+        s = value.strip()
+        if s[:1] in ("[", "{"):
+            try:
+                parsed = json.loads(s)
+            except ValueError:
+                parsed = None
+            if (want == "array" and isinstance(parsed, list)) or (want == "object" and isinstance(parsed, dict)):
+                value = parsed
+    if isinstance(value, dict) and isinstance(schema.get("properties"), dict):
+        props = schema["properties"]
+        value = {k: coerce(props[k], v) if k in props else v for k, v in value.items()}
+    elif isinstance(value, list) and isinstance(schema.get("items"), dict):
+        value = [coerce(schema["items"], v) for v in value]
+    return value
+
+
+def _array_items(schema):
+    """顶层的数组字段 → 它每一项的字段名（只看 items 是对象的）。"""
+    out = {}
+    for name, sub in (schema.get("properties") or {}).items():
+        items = sub.get("items") if isinstance(sub, dict) and sub.get("type") == "array" else None
+        if isinstance(items, dict) and isinstance(items.get("properties"), dict):
+            out[name] = set(items["properties"])
+    return out
+
+
+def shape_hint(schema):
+    """交之前给模型的话：submit 的参数是整份结果，最外层要有哪些字段；数组字段的每一项放进数组里。
+    （真跑里见过：验收做到最后在逐条核对，把 checked 里的一项当成整份结果交，连错三次。）"""
+    req = list(schema.get("required") or [])
+    props = list((schema.get("properties") or {}).keys())
+    s = "submit 的参数是这一步的整份结果，不是其中的一项：最外层就是格式定义的那个对象"
+    if req:
+        s += "，必须带齐 " + "、".join(req)
+    elif props:
+        s += "，字段是 " + "、".join(props)
+    arrays = _array_items(schema)
+    if arrays:
+        s += "。" + "；".join(f"{name} 是数组，每一项（含 {'、'.join(sorted(keys)[:4])}）放进 {name} 里"
+                             for name, keys in arrays.items())
+        s += "，不要只把其中一项单独交上去；数组就写成数组，不要写成一段 JSON 字符串"
+    # 整份结果太长，一次工具调用写不完就会被截断成坏的 JSON（真跑里交错的第一次就是这样）
+    return s + "。整份结果要在一次 submit 里写完：每条说明、证据写一两句（文件:行号、测试名、汇总行），不要贴大段原文。"
+
+
+def wrong_level_hint(schema, args):
+    """交错时：最外层的字段都是某个数组每一项的字段（交的是一项，不是整份结果）→ 点明，否则 None。"""
+    if not isinstance(args, dict) or not args:
+        return None
+    top = set((schema.get("properties") or {}).keys())
+    keys = set(args)
+    if keys & top:
+        return None
+    for name, item_keys in _array_items(schema).items():
+        if keys <= item_keys:
+            req = list(schema.get("required") or [])
+            return (f"你交的 {'、'.join(sorted(keys))} 是 {name} 里的一项，不是整份结果。"
+                    f"最外层要交整份结果" + (f"（必须有 {'、'.join(req)}）" if req else "")
+                    + f"，这一项放进 {name} 数组里。")
+    return None
+
+
 class SubmitError(RuntimeError):
     pass
 
@@ -142,6 +211,22 @@ class SubmitChannel:
         return [json.loads(x) for x in self.log.read_text(encoding="utf-8").splitlines() if x.strip()]
 
     def close(self):
+        # 交错过的，把每次交的参数和错误留一份（临时目录马上要删）：以后再出「连错三次」能看到它到底交了什么
+        # （JSON 被截断？数组写成了字符串？交成了一项？）。目录 data/submit_fails，WF_SUBMIT_FAILS 可改，空串不留
+        keep = os.environ.get("WF_SUBMIT_FAILS", str(ROOT / "data" / "submit_fails"))
+        if keep and self.log.is_file():
+            try:
+                d = Path(keep)
+                d.mkdir(parents=True, exist_ok=True)
+                rows = []
+                for row in self.errors():
+                    a = json.dumps(row.get("arguments"), ensure_ascii=False)
+                    rows.append(dict(row, arguments=row.get("arguments") if len(a) <= 50000 else a[:50000] + "…（已截断）",
+                                     submitted=self.out.exists()))
+                name = time.strftime("%Y%m%d-%H%M%S") + "_" + self.dir.name + ".jsonl"
+                (d / name).write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+            except (OSError, ValueError):
+                pass
         shutil.rmtree(self.dir, ignore_errors=True)
 
 
