@@ -25,6 +25,10 @@ verify / verify_wait（GSB_VERIFY=1）：假 codex 交回 JSON / 非 JSON / 往�
 验开关、参数校验、workspace-write + 临时目录 argv、JSON 解析成功 / 失败、违规改动
 （git 与非 git）、still_running + verify_wait、超时杀进程组；说明里提 verify。
 GSB_TOOLS_ONLY=read_files 时 tools/list 只有 read_files。
+finish / finish_wait（默认开，GSB_FINISH=0 关）：GSB_FINISH_SCRIPT 指向假 kfinish（把 stdin 收到的
+config 原样写到文件、按环境变量睡一会再输出一行 JSON），验默认出现 / 关掉 / GSB_TOOLS_ONLY 过滤、
+参数映射成 config（allow_deploy 不传时 deploy.allow=false）、cwd 是仓库根、still_running 后 finish_wait、
+非 JSON 输出给退出码和末尾。不碰真实打包。
 """
 
 import json
@@ -81,6 +85,9 @@ class Server:
         env["GSB_PROBE_BACKEND"] = "codex"  # 大部分用例用假 codex；默认 claude 另测
         env["GSB_REVIEW_BACKEND"] = "codex"
         env["GSB_VERIFY_BACKEND"] = "codex"
+        # finish 默认开启；老用例按原工具清单断言，这里统一先关，finish_tests 里传 GSB_FINISH=None 恢复默认
+        env["GSB_FINISH"] = "0"
+        env.pop("GSB_FINISH_SCRIPT", None)
         env.update(extra)
         env = {k: v for k, v in env.items() if v is not None}
         self.p = subprocess.Popen([sys.executable, str(SCRIPT)], cwd=str(TMP), env=env,
@@ -1577,6 +1584,115 @@ def k47_tests():
     (engd / "bad.txt").unlink(missing_ok=True)
 
 
+FAKE_KFINISH = r"""
+import json, os, sys, time
+cfg = sys.stdin.read() if sys.argv[1:] == ["-"] else ""
+with open(os.environ["FAKE_KFINISH_REC"], "w", encoding="utf-8") as f:
+    json.dump({"argv": sys.argv[1:], "cwd": os.getcwd(), "config": json.loads(cfg),
+               "secret_seen": any("SECRET-0123" in v or v.startswith("ghp_") for v in os.environ.values())}, f, ensure_ascii=False)
+time.sleep(float(os.environ.get("FAKE_KFINISH_SLEEP") or 0))
+if os.environ.get("FAKE_KFINISH_BAD"):
+    print("not json at all"); print("boom on stderr", file=sys.stderr); sys.exit(3)
+print("some noise line")
+print(json.dumps({"status": "ok", "task": json.loads(cfg)["task"], "report_md": "### 打包与上线（kfinish）"},
+                 ensure_ascii=False))
+"""
+
+
+def finish_tests():
+    print("finish / finish_wait（假 kfinish）")
+    fake = TMP / "fake_kfinish.py"
+    fake.write_text(FAKE_KFINISH, encoding="utf-8")
+    rec = TMP / "kfinish_rec.json"
+    base = {"GSB_FINISH": None, "GSB_FINISH_SCRIPT": str(fake), "FAKE_KFINISH_REC": str(rec)}
+
+    s = Server(**base)
+    try:
+        s.req("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
+        tools = {t["name"]: t for t in s.req("tools/list")["result"]["tools"]}
+        check({"finish", "finish_wait"} <= set(tools), "默认（没设 GSB_FINISH）tools/list 有 finish / finish_wait", list(tools))
+        sch = tools["finish"]["inputSchema"]
+        check(sch["required"] == ["task", "repo", "steps"]
+              and {"langs", "out", "port", "python", "pip_index", "probes", "extra_check", "deploy_commit",
+                   "allow_deploy", "deploy_probe", "deploy_unit"} <= set(sch["properties"])
+              and "明确同意上线" in sch["properties"]["allow_deploy"]["description"],
+              "finish 的 schema：三个必填 + 可选参数，allow_deploy 说明写明要明确同意", sch)
+        t, e = s.call("finish", {"task": "K900", "repo": str(TMP), "steps": ["pack", "verify", "deploy"],
+                                 "port": 8197, "deploy_commit": "abc123"})
+        c = json.loads(rec.read_text(encoding="utf-8"))
+        check(not e and json.loads(t) == {"status": "ok", "task": "K900", "report_md": "### 打包与上线（kfinish）"},
+              "跑完原样返回 kfinish 最后那一行 JSON", t)
+        check(c["config"] == {"task": "K900", "repo": str(TMP), "steps": ["pack", "verify", "deploy"],
+                              "port": 8197, "deploy": {"commit": "abc123", "allow": False}},
+              "参数映射成 config：没给的不传；allow_deploy 不传时 deploy.allow=false", c["config"])
+        check(c["argv"] == ["-"] and c["cwd"] == str(ROOT) and not c["secret_seen"],
+              "config 走 stdin（参数 -）、cwd 是仓库根、凭证变量不进子进程", c)
+        t, e = s.call("finish", {"task": "K901", "repo": str(TMP), "steps": ["pack"], "langs": ["zh"],
+                                 "out": {"zh": "/tmp/x_zh"}, "python": "/usr/bin/python3",
+                                 "pip_index": "https://mirror/simple", "probes": ["/", "/api"],
+                                 "extra_check": "/tmp/chk.py", "deploy_commit": "deadbeef",
+                                 "allow_deploy": True, "deploy_probe": "/tmp/p.py", "deploy_unit": "x.service"})
+        c = json.loads(rec.read_text(encoding="utf-8"))["config"]
+        check(c == {"task": "K901", "repo": str(TMP), "steps": ["pack"], "langs": ["zh"],
+                    "out": {"zh": "/tmp/x_zh"}, "python": "/usr/bin/python3",
+                    "pip_index": "https://mirror/simple", "probes": ["/", "/api"], "extra_check": "/tmp/chk.py",
+                    "deploy": {"commit": "deadbeef", "probe": "/tmp/p.py", "unit": "x.service", "allow": True}},
+              "全部参数都映射（deploy 子对象 commit/allow/probe/unit）；allow_deploy=true 才是 true", c)
+        t, e = s.call("finish", {"task": "K902", "repo": str(TMP), "steps": ["pack"], "allow_deploy": "yes"})
+        check(json.loads(rec.read_text(encoding="utf-8"))["config"]["deploy"]["allow"] is False,
+              "allow_deploy 不是布尔 true（如字符串 yes）也按 false")
+        t, e = s.call("finish", {"task": "K903", "steps": ["pack"]})
+        check(e is True and "repo" in t, "缺 repo 报参数错误", t)
+        t, e = s.call("finish_wait", {"finish_ids": ["f999-nope"]})
+        check("没有这个 finish_id" in t, "finish_wait 不认识的 id", t)
+    finally:
+        s.close()
+
+    s = Server(max_block=2, FAKE_KFINISH_SLEEP="4", **base)
+    try:
+        t0 = time.time()
+        t, e = s.call("finish", {"task": "K904", "repo": str(TMP), "steps": ["pack"]})
+        fid = field(t, "finish_id")
+        check("still_running" in t and fid and 1.5 < time.time() - t0 < 4 and "finish_wait" in t,
+              "GSB_MAX_BLOCK 很小时先返回 still_running + finish_id", t)
+        got = None
+        for _ in range(5):
+            got, e = s.call("finish_wait", {"finish_ids": [fid]})
+            if "still_running" not in got:
+                break
+        check(got and json.loads(got).get("task") == "K904", "再调 finish_wait 拿到 kfinish 的 JSON", got)
+    finally:
+        s.close()
+
+    s = Server(FAKE_KFINISH_BAD="1", **base)
+    try:
+        t, e = s.call("finish", {"task": "K905", "repo": str(TMP), "steps": ["pack"]})
+        d = json.loads(t)
+        check(d["exit_code"] == 3 and "not json" in d["stdout_tail"] and "boom" in d["stderr_tail"]
+              and d["status"].startswith("failed"), "输出不是 JSON：返回退出码、stdout / stderr 末尾", t)
+    finally:
+        s.close()
+
+    s = Server(GSB_FINISH="0")
+    try:
+        names = [x["name"] for x in s.req("tools/list")["result"]["tools"]]
+        check("finish" not in names and "finish_wait" not in names, "GSB_FINISH=0 时没有 finish / finish_wait", names)
+    finally:
+        s.close()
+    s = Server(GSB_FINISH=None, GSB_TOOLS_ONLY="finish,finish_wait")
+    try:
+        names = [x["name"] for x in s.req("tools/list")["result"]["tools"]]
+        check(names == ["finish", "finish_wait"], "GSB_TOOLS_ONLY 能过滤出只有 finish / finish_wait", names)
+    finally:
+        s.close()
+    s = Server(GSB_FINISH=None, GSB_TOOLS_ONLY="read_files")
+    try:
+        names = [x["name"] for x in s.req("tools/list")["result"]["tools"]]
+        check(names == ["read_files"], "GSB_TOOLS_ONLY=read_files 时 finish 不出现", names)
+    finally:
+        s.close()
+
+
 def main():
     command_tests()
     (TMP / "a.txt").write_text("".join(f"line{i}\n" for i in range(1, 11)), encoding="utf-8")
@@ -1765,6 +1881,7 @@ def main():
         k_verify_claude_tests()
         k38_tests()
         k47_tests()
+        finish_tests()
     finally:
         s.close()
         shutil.rmtree(TMP, ignore_errors=True)

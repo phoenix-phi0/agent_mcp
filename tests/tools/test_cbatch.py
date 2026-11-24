@@ -223,8 +223,11 @@ def main():
                                   "probe", "review", "verify")),
           "工具用法覆盖 ToolSearch 加载、读/改文件、等长命令、probe、review、verify")
     sel = pre2[pre2.index("select:"):].split("\"")[0][len("select:"):].split(",")
-    check(len(sel) == 10 and all(s.startswith("mcp__gsb_tools__") for s in sel),
-          "ToolSearch 里列的是 10 个 mcp__gsb_tools__ 全名", sel)
+    check(len(sel) == 12 and all(s.startswith("mcp__gsb_tools__") for s in sel)
+          and {"mcp__gsb_tools__finish", "mcp__gsb_tools__finish_wait"} <= set(sel),
+          "ToolSearch 里列的是 12 个 mcp__gsb_tools__ 全名（含 finish / finish_wait）", sel)
+    check("allow_deploy=true" in pre2 and "任务书明确允许" in pre2,
+          "工具用法写了 finish 一次做完、真上线要任务书明确允许才设 allow_deploy=true")
     check("取代第 5 条" in pre2 and "不要 sleep 轮询" in pre2,
           "第 8 条说明取代第 5 条的 sleep 做法")
     check(cbatch._system_prompt({"allowed_tools": ["mcp__gsb_tools__read_files"]}).endswith(cbatch.PREAMBLE_TOOLS)

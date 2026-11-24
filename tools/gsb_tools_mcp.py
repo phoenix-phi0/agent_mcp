@@ -32,6 +32,11 @@ goose 1.55 每轮只执行一个工具，所以这里的工具都一次做完多
   变了在结果里标「违规改动」。最终回复严格按 JSON 交回（必须带「环境」：解释器、引擎、
   起法），解析时核对其解释器是不是被验仓库的 .venv、引擎是不是被验仓库里那份，
   不符就在摘要里标「⚠ 环境不符」，结论按「无法验证」对待。
+- finish / finish_wait（默认开启，GSB_FINISH=0 才关）：K 任务收尾机器人 tools/kfinish.py
+  （打包 → 隔离验证 → 上线 dry-run / 真上线 → 线上探测）。按参数拼成 kfinish 的 config 走 stdin，
+  后台跑 `<仓库>/.venv/bin/python -m tools.kfinish -`（cwd 仓库根、独立进程组、总超时 5400 秒，
+  超时按进程组杀），结果原样返回 kfinish 输出的那一行 JSON。单次最多阻塞 GSB_MAX_BLOCK 秒，
+  没跑完返回 still_running + finish_id，再调 finish_wait。allow_deploy 默认 false（只做 dry-run）。
 
 goose 对 stdio 扩展的单次工具调用有超时（--with-extension 固定 300 秒，
 命令行改不了），所以单次调用最多阻塞 GSB_MAX_BLOCK 秒（默认 270）。
@@ -1507,6 +1512,145 @@ def verify_wait(verify_ids, timeout_secs=None, _cancel=None):
                       _tool="verify_wait", _arg="verify_ids")
 
 
+# ----------------------------------------------------------------------
+# finish / finish_wait（K 任务收尾机器人 tools/kfinish.py：打包、隔离验证、上线、线上探测）
+
+FINISH_ON = os.environ.get("GSB_FINISH", "1") != "0"
+FINISH_TIMEOUT = 5400
+_ENGINE_ROOT = Path(__file__).resolve().parent.parent
+_FINISHES = {}       # finish_id -> {"p", "t0", "t1", "deadline", "out", "err", "killed", "delivered", "config"}
+_FSEQ = [0]
+# kfinish 的可选参数：工具参数名 → config 键（没给的不传，用 kfinish 的默认值）
+_FINISH_TOP = ("langs", "out", "port", "python", "pip_index", "probes", "extra_check")
+_FINISH_DEPLOY = {"deploy_commit": "commit", "deploy_probe": "probe", "deploy_unit": "unit"}
+
+
+def finish_config(args, cwd=None):
+    """工具参数 → kfinish 的 config。deploy.allow 只有 allow_deploy 明确为 true 才是 true。"""
+    task = args.get("task")
+    if not isinstance(task, str) or not task.strip():
+        raise ValueError("task 必填，如 K197")
+    repo = args.get("repo")
+    if not isinstance(repo, str) or not repo.strip():
+        raise ValueError("repo 必填：要打包的 git 仓库 / worktree 路径")
+    steps = args.get("steps")
+    if isinstance(steps, str):
+        steps = [x.strip() for x in steps.split(",") if x.strip()]
+    if not isinstance(steps, list) or not steps:
+        raise ValueError("steps 必填：pack / verify / deploy 的非空子集")
+    cfg = {"task": task.strip(), "repo": os.path.normpath(_resolve(repo.strip(), cwd)), "steps": steps}
+    for k in _FINISH_TOP:
+        if args.get(k) is not None:
+            cfg[k] = args[k]
+    dep = {v: args[k] for k, v in _FINISH_DEPLOY.items() if args.get(k) is not None}
+    dep["allow"] = args.get("allow_deploy") is True
+    cfg["deploy"] = dep
+    return cfg
+
+
+def _finish_argv():
+    """测试用 GSB_FINISH_SCRIPT 指向假 kfinish（python <脚本> -），不碰真实打包。"""
+    fake = (os.environ.get("GSB_FINISH_SCRIPT") or "").strip()
+    py = _ENGINE_ROOT / ".venv" / "bin" / "python"
+    py = str(py) if py.is_file() else sys.executable
+    if fake:
+        return [sys.executable, fake, "-"]
+    return [py, "-m", "tools.kfinish", "-"]
+
+
+def _finish_watchdog(fid):
+    r = _FINISHES[fid]
+    p = r["p"]
+    while p.poll() is None:
+        if time.time() >= r["deadline"]:
+            r["killed"] = True
+            _killpg(p.pid)
+            p.wait()
+            break
+        time.sleep(0.5)
+    r["t1"] = time.time()
+
+
+def _finish_report(fid):
+    """结束了就返回 kfinish 那一行 JSON（原样）；解析不了就给退出码和 stdout/stderr 末尾。"""
+    r = _FINISHES[fid]
+    if r["t1"] is None:
+        el = round(time.time() - r["t0"], 1)
+        left = round(r["deadline"] - time.time())
+        return (f"状态：still_running（kfinish 还在跑，已用时 {el} 秒，离总超时 {left} 秒）\n"
+                f"finish_id：{fid}\n接着等：调 finish_wait(finish_ids=[\"{fid}\"])，不要用 sleep"), False
+    r["delivered"] = True
+    rc = r["p"].poll()
+    try:
+        out = Path(r["out"]).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        out = ""
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    if lines and not r["killed"]:
+        try:
+            if isinstance(json.loads(lines[-1]), dict):
+                return lines[-1], True
+        except json.JSONDecodeError:
+            pass
+    err = _tail(r["err"], 30)
+    st = (f"timeout（超过 {FINISH_TIMEOUT} 秒，已杀掉整个进程组）" if r["killed"]
+          else "failed（kfinish 没输出可解析的 JSON）")
+    return json.dumps({"status": st, "finish_id": fid, "exit_code": rc,
+                       "stdout_tail": out[-4000:], "stderr_tail": err[-4000:]},
+                      ensure_ascii=False), True
+
+
+def finish_wait(finish_ids, timeout_secs=None, _cancel=None):
+    if isinstance(finish_ids, str):
+        finish_ids = [x.strip() for x in finish_ids.split(",") if x.strip()]
+    if not isinstance(finish_ids, list) or not finish_ids:
+        raise ValueError("finish_ids 要是非空列表")
+    ids = [str(x) for x in finish_ids]
+    live = [x for x in ids if x in _FINISHES]
+    block = min(int(timeout_secs or MAX_BLOCK), MAX_BLOCK)
+    cancel = _cancel or threading.Event()
+    end = time.time() + block
+    while time.time() < end and not cancel.is_set():
+        if all(_FINISHES[x]["t1"] is not None for x in live):
+            break
+        time.sleep(0.2)
+    parts = []
+    for x in ids:
+        if x not in _FINISHES:
+            parts.append((x, f"错误：没有这个 finish_id：{x}（只认本会话里 finish 返回的 id）"))
+        else:
+            parts.append((x, _finish_report(x)[0]))
+    with _PLOCK:
+        _gc_keep(_FINISHES)
+    if len(parts) == 1:
+        return parts[0][1]
+    return "\n".join(f"===== finish_id：{x} =====\n{t}" for x, t in parts)
+
+
+def finish(args, cwd=None, _cancel=None):
+    cfg = finish_config(args, cwd)
+    _FSEQ[0] += 1
+    fid = f"f{_FSEQ[0]}-{os.getpid()}-{int(time.time())}"
+    os.makedirs(LOG_DIR, exist_ok=True)
+    out = os.path.join(LOG_DIR, f"finish_{fid}.out")
+    err = os.path.join(LOG_DIR, f"finish_{fid}.err")
+    env = {k: v for k, v in os.environ.items() if not _leaky_env(k, v)}
+    with open(out, "wb") as fo, open(err, "wb") as fe:
+        p = subprocess.Popen(_finish_argv(), cwd=str(_ENGINE_ROOT), env=env, stdin=subprocess.PIPE,
+                             stdout=fo, stderr=fe, start_new_session=True)
+    try:
+        p.stdin.write(json.dumps(cfg, ensure_ascii=False).encode("utf-8"))
+        p.stdin.close()
+    except OSError:
+        pass
+    t0 = time.time()
+    with _PLOCK:
+        _FINISHES[fid] = {"p": p, "t0": t0, "t1": None, "deadline": t0 + FINISH_TIMEOUT, "out": out,
+                          "err": err, "killed": False, "delivered": False, "config": cfg}
+    threading.Thread(target=_finish_watchdog, args=(fid,), daemon=True).start()
+    return finish_wait([fid], _cancel=_cancel)
+
+
 
 # ----------------------------------------------------------------------
 # 接口封装模板（tools/dslagent/templates/iface/*.zs）
@@ -2002,6 +2146,42 @@ VERIFY_TOOLS = [
          "required": ["verify_ids"]}},
 ]
 
+FINISH_TOOLS = [
+    {"name": "finish",
+     "description": ("K 任务收尾机器人（tools/kfinish.py）：打包 → 隔离验证 → 上线 dry-run（或真上线）→ 线上探测，"
+                     "按参数一次做完，不用写配置文件、不用拼 Bash。机器人自己有各步超时，这里总超时 "
+                     f"{FINISH_TIMEOUT} 秒（超时按进程组杀）。结果是 kfinish 输出的那一行 JSON：status "
+                     "（ok / failed / bad_config）、failed_step、reason、各步详情、report_md（可直接贴进报告）。"
+                     f"单次最多阻塞 {MAX_BLOCK} 秒，没跑完返回 still_running 和 finish_id，再调 finish_wait 接着等。"
+                     "真上线（allow_deploy=true）不可逆：只有任务书或用户明确同意上线时才设，否则只做 dry-run。"),
+     "inputSchema": {"type": "object", "properties": {
+         "task": {"type": "string", "description": "任务号，如 K197（必填，格式 K+数字，可带字母数字下划线后缀）"},
+         "repo": {"type": "string", "description": "要打包的 git 仓库 / worktree 路径（必填）；打包取它的 HEAD，未提交改动不进包（结果里列在 not_in_bundle）"},
+         "steps": {"type": "array", "items": {"type": "string", "enum": ["pack", "verify", "deploy"]},
+                   "description": "要做的步骤（必填），pack / verify / deploy 的子集，按 pack→verify→deploy 顺序执行；verify 需要本次或之前已打好包"},
+         "langs": {"type": "array", "items": {"type": "string", "enum": ["zh", "ja"]},
+                   "description": "打包 / 验证的语言，默认 [\"zh\",\"ja\"]"},
+         "out": {"type": "object", "description": "各语言的包输出目录 {\"zh\": 目录, \"ja\": 目录}；默认 zh→/workspace/dslagent_exp/kg_v4_bundle，ja→/workspace/dslagent_exp/kg_v4_bundle_ja_<task>",
+                 "properties": {"zh": {"type": "string"}, "ja": {"type": "string"}}},
+         "port": {"type": "integer", "description": "隔离验证起服务用的端口（做 verify 时必填）；不能是正式端口 8119，不能已被占用"},
+         "python": {"type": "string", "description": "装包、起服务用的解释器，默认 kfinish 内置的 uv cpython 3.13；一般不用传"},
+         "pip_index": {"type": "string", "description": "打包时的 PIP_INDEX_URL；不给用默认源（wheels 为 0 时机器人会自动换 pypi.org 重打一次）"},
+         "probes": {"type": "array", "items": {"type": "string"}, "description": "验证时逐个 GET 的路径，都要 200，默认 [\"/\"]"},
+         "extra_check": {"type": "string", "description": "可选：任务自己的检查脚本路径，验证时运行 <python> -I <脚本> <包目录> http://127.0.0.1:<port>，退出码要 0"},
+         "deploy_commit": {"type": "string", "description": "上线的提交（steps 含 deploy 时必填），传给 deploy.sh"},
+         "allow_deploy": {"type": "boolean", "description": "是否真上线，默认 false。只有任务书或用户明确同意上线时才设 true，否则只做 dry-run（deploy.status=dry_run_only）"},
+         "deploy_probe": {"type": "string", "description": "可选：上线后的线上探测脚本路径，运行 .venv/bin/python -I <脚本> <data_dir> <url>"},
+         "deploy_unit": {"type": "string", "description": "systemd 服务名，默认 ali-kg_v4.service；一般不用传"}},
+         "required": ["task", "repo", "steps"]}},
+    {"name": "finish_wait",
+     "description": (f"等 finish 的结果（单次最多阻塞 {MAX_BLOCK} 秒）。跑完了返回 kfinish 那一行 JSON；"
+                     "还没跑完返回 still_running，再调一次接着等。"),
+     "inputSchema": {"type": "object", "properties": {
+         "finish_ids": {"type": "array", "items": {"type": "string"}, "description": "finish 返回的 finish_id"},
+         "timeout_secs": {"type": "integer", "description": f"本次最多等几秒，默认且最多 {MAX_BLOCK}"}},
+         "required": ["finish_ids"]}},
+]
+
 if os.environ.get("GSB_CMD") == "1":
     TOOLS += [
         {"name": "cmd_list", "description": "列出当前调用方可用的固定指令和参数。",
@@ -2020,6 +2200,8 @@ if REVIEW_ON:
     TOOLS = TOOLS + REVIEW_TOOLS
 if VERIFY_ON:
     TOOLS = TOOLS + VERIFY_TOOLS
+if FINISH_ON:
+    TOOLS = TOOLS + FINISH_TOOLS
 
 # 探针专用：只暴露少数工具（典型 GSB_TOOLS_ONLY=read_files）
 _ONLY = [x.strip() for x in (os.environ.get("GSB_TOOLS_ONLY") or "").split(",") if x.strip()]
@@ -2072,6 +2254,9 @@ def _priority_instructions():
     if "verify" in have:
         p.append("回归、起服务实测、基线对比交给 verify（wait=false + verify_wait 可并行），"
                  "不要自己现写验证脚本；被验项目不在引擎仓库下时传 engine_repo 或保证 cwd 在引擎仓库。")
+    if "finish" in have:
+        p.append("打包、隔离验证、上线 dry-run 用 finish 一次做完（没跑完用 finish_wait 接着等）；"
+                 "真上线要任务书或用户明确同意才设 allow_deploy=true。")
     return ("工具用法：" + "".join(p)) if p else ""
 
 
@@ -2153,6 +2338,10 @@ def _call(name, args, cancel):
                       args.get("model"), args.get("engine_repo"), _cancel=cancel)
     if name == "verify_wait":
         return verify_wait(args.get("verify_ids"), args.get("timeout_secs"), _cancel=cancel)
+    if name == "finish":
+        return finish(args, _cancel=cancel)
+    if name == "finish_wait":
+        return finish_wait(args.get("finish_ids"), args.get("timeout_secs"), _cancel=cancel)
     raise KeyError(name)
 
 
@@ -2225,6 +2414,10 @@ def main():
         for r in _PROBES.values():
             r["stop"] = True
             if r["p"].poll() is None:
+                _killpg(r["p"].pid)
+        for r in _FINISHES.values():
+            # 允许真上线的不杀：deploy.sh 跑到一半被打断比跑完更糟；它自己有各步超时，会自己结束
+            if r["p"].poll() is None and not (r["config"].get("deploy") or {}).get("allow"):
                 _killpg(r["p"].pid)
 
 
