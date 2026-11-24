@@ -257,6 +257,7 @@ run 批量opencode $PY tests/tools/test_obatch.py
 run 批量codex   $PY tests/tools/test_cxbatch.py
 run 指令执行器 $PY tests/tools/test_cmd.py
 run HTN诊断    $PY tests/tools/test_htn_diag.py
+run kfinish机器人 $PY tests/tools/test_kfinish.py
 run 批量goose   $PY tests/tools/test_gsbatch.py
 run 探针检索    $PY tests/tools/test_code_search.py
 run Colab启动   $PY tests/tools/test_colab_vllm.py

@@ -1,0 +1,107 @@
+{
+  "name": "kfinish",
+  "python": "callbacks.py",
+  "predicates": {
+    "lang": 1, "want_pack": 0, "want_verify": 0, "want_deploy": 0, "deploy_allowed": 0,
+    "packed": 1, "wheels_zero": 1, "index_retried": 1, "pack_failed": 1,
+    "verified": 1, "verify_failed": 1,
+    "dryrun_ok": 0, "deployed": 0, "prod_checked": 0
+  },
+  "derived": [
+    {"head": "pack_pending()", "body": ["lang(?l)", "not packed(?l)"]},
+    {"head": "verify_pending()", "body": ["lang(?l)", "not verified(?l)"]}
+  ],
+  "sensors": [
+    {
+      "name": "state",
+      "run": {"callback": "state_facts"},
+      "extract": [
+        {"type": "json", "path": ["facts"], "facts": ["{value}"]}
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "name": "pack", "params": ["l"],
+      "pre": ["lang(?l)", "not packed(?l)", "not wheels_zero(?l)", "not pack_failed(?l)"],
+      "add": ["packed(?l)"], "del": [],
+      "run": {"callback": "pack"}
+    },
+    {
+      "name": "repack_index", "params": ["l"],
+      "pre": ["wheels_zero(?l)", "not index_retried(?l)", "not pack_failed(?l)"],
+      "add": ["packed(?l)", "index_retried(?l)"], "del": ["wheels_zero(?l)"],
+      "run": {"callback": "repack_index"}
+    },
+    {
+      "name": "verify", "params": ["l"],
+      "pre": ["packed(?l)", "not verified(?l)", "not verify_failed(?l)"],
+      "add": ["verified(?l)"], "del": [],
+      "run": {"callback": "verify"}
+    },
+    {
+      "name": "deploy_dryrun", "params": [],
+      "pre": ["want_deploy()", "not dryrun_ok()"],
+      "add": ["dryrun_ok()"], "del": [],
+      "run": {"callback": "deploy_dryrun"}
+    },
+    {
+      "name": "deploy", "params": [],
+      "pre": ["deploy_allowed()", "dryrun_ok()", "not deployed()"],
+      "add": ["deployed()"], "del": [],
+      "run": {"callback": "deploy"},
+      "irreversible": true
+    },
+    {
+      "name": "prod_check", "params": [],
+      "pre": ["deployed()", "not prod_checked()"],
+      "add": ["prod_checked()"], "del": [],
+      "run": {"callback": "prod_check"}
+    }
+  ],
+  "goals": ["packed", "verified", "dryrun_ok", "deployed", "prod_checked"],
+  "tasks": [
+    {"name": "finish", "params": []},
+    {"name": "pack_all", "params": []},
+    {"name": "pack_lang", "params": ["l"]},
+    {"name": "verify_all", "params": []},
+    {"name": "verify_lang", "params": ["l"]},
+    {"name": "deploy_part", "params": []},
+    {"name": "dryrun_step", "params": []},
+    {"name": "deploy_step", "params": []},
+    {"name": "check_step", "params": []}
+  ],
+  "methods": [
+    {"name": "finish_steps", "task": "finish", "params": [],
+     "subtasks": ["pack_all()", "verify_all()", "deploy_part()"]},
+
+    {"name": "pack_skip", "task": "pack_all", "params": [], "pre": ["not want_pack()"], "subtasks": []},
+    {"name": "pack_done", "task": "pack_all", "params": [], "pre": ["want_pack()", "not pack_pending()"], "subtasks": []},
+    {"name": "pack_next", "task": "pack_all", "params": [], "pre": ["want_pack()", "lang(?l)", "not packed(?l)"],
+     "subtasks": ["pack_lang(?l)", "pack_all()"]},
+    {"name": "pack_fresh", "task": "pack_lang", "params": ["l"],
+     "pre": ["not packed(?l)", "not wheels_zero(?l)", "not pack_failed(?l)"], "subtasks": ["pack(?l)"]},
+    {"name": "pack_retry_index", "task": "pack_lang", "params": ["l"],
+     "pre": ["not packed(?l)", "wheels_zero(?l)", "not index_retried(?l)", "not pack_failed(?l)"],
+     "subtasks": ["repack_index(?l)"]},
+
+    {"name": "verify_skip", "task": "verify_all", "params": [], "pre": ["not want_verify()"], "subtasks": []},
+    {"name": "verify_done", "task": "verify_all", "params": [], "pre": ["want_verify()", "not verify_pending()"], "subtasks": []},
+    {"name": "verify_next", "task": "verify_all", "params": [], "pre": ["want_verify()", "lang(?l)", "not verified(?l)"],
+     "subtasks": ["verify_lang(?l)", "verify_all()"]},
+    {"name": "verify_one", "task": "verify_lang", "params": ["l"],
+     "pre": ["packed(?l)", "not verified(?l)", "not verify_failed(?l)"], "subtasks": ["verify(?l)"]},
+
+    {"name": "deploy_skip", "task": "deploy_part", "params": [], "pre": ["not want_deploy()"], "subtasks": []},
+    {"name": "deploy_dry_only", "task": "deploy_part", "params": [], "pre": ["want_deploy()", "not deploy_allowed()"],
+     "subtasks": ["dryrun_step()"]},
+    {"name": "deploy_full", "task": "deploy_part", "params": [], "pre": ["want_deploy()", "deploy_allowed()"],
+     "subtasks": ["dryrun_step()", "deploy_step()", "check_step()"]},
+    {"name": "dryrun_done", "task": "dryrun_step", "params": [], "pre": ["dryrun_ok()"], "subtasks": []},
+    {"name": "dryrun_run", "task": "dryrun_step", "params": [], "pre": ["not dryrun_ok()"], "subtasks": ["deploy_dryrun()"]},
+    {"name": "deploy_done", "task": "deploy_step", "params": [], "pre": ["deployed()"], "subtasks": []},
+    {"name": "deploy_run", "task": "deploy_step", "params": [], "pre": ["not deployed()"], "subtasks": ["deploy()"]},
+    {"name": "check_done", "task": "check_step", "params": [], "pre": ["prod_checked()"], "subtasks": []},
+    {"name": "check_run", "task": "check_step", "params": [], "pre": ["not prod_checked()"], "subtasks": ["prod_check()"]}
+  ]
+}
