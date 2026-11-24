@@ -37,6 +37,12 @@ goose 1.55 每轮只执行一个工具，所以这里的工具都一次做完多
   后台跑 `<仓库>/.venv/bin/python -m tools.kfinish -`（cwd 仓库根、独立进程组、总超时 5400 秒，
   超时按进程组杀），结果原样返回 kfinish 输出的那一行 JSON。单次最多阻塞 GSB_MAX_BLOCK 秒，
   没跑完返回 still_running + finish_id，再调 finish_wait。allow_deploy 默认 false（只做 dry-run）。
+- diagnose / diagnose_wait（默认开启，GSB_DIAGNOSE=0 才关）：HTN 排查机器人 tools/htn_diag.py
+  （跑测试 → 红了拿报告 → 按覆盖差异排可疑行 → 必要时探针取值，只读不改代码）。后台跑
+  `<仓库>/.venv/bin/python -m tools.htn_diag <path> [--detail] [--full]`（cwd 仓库根、独立进程组、
+  总超时 1800 秒，超时按进程组杀），结果原样返回它的 stdout；退出码非 0 时前面加「退出码 N」并附
+  stderr 末尾。单次最多阻塞 GSB_MAX_BLOCK 秒，没跑完返回 still_running + diagnose_id，再调 diagnose_wait。
+  MCP 退出时杀掉还在跑的 diagnose。测试用 GSB_DIAGNOSE_SCRIPT 指向假脚本。
 
 goose 对 stdio 扩展的单次工具调用有超时（--with-extension 固定 300 秒，
 命令行改不了），所以单次调用最多阻塞 GSB_MAX_BLOCK 秒（默认 270）。
@@ -1651,6 +1657,114 @@ def finish(args, cwd=None, _cancel=None):
     return finish_wait([fid], _cancel=_cancel)
 
 
+# ----------------------------------------------------------------------
+# diagnose / diagnose_wait（HTN 排查机器人 tools/htn_diag.py：跑测试、拿报告、排可疑行、探针取值）
+
+DIAGNOSE_ON = os.environ.get("GSB_DIAGNOSE", "1") != "0"
+DIAGNOSE_TIMEOUT = 1800
+_DIAGNOSES = {}      # diagnose_id -> {"p", "t0", "t1", "deadline", "out", "err", "killed", "delivered", "argv"}
+_DSEQ = [0]
+
+
+def diagnose_argv(args):
+    """工具参数 → htn_diag 命令行。测试用 GSB_DIAGNOSE_SCRIPT 指向假脚本（python <脚本> <path> [...]）。"""
+    path = args.get("path")
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("path 必填：测试文件，相对仓库根，如 tests/tools/test_x.py")
+    tail = [path.strip()]
+    if args.get("detail") is True:
+        tail.append("--detail")
+    if args.get("full") is True:
+        tail.append("--full")
+    fake = (os.environ.get("GSB_DIAGNOSE_SCRIPT") or "").strip()
+    if fake:
+        return [sys.executable, fake] + tail
+    py = _ENGINE_ROOT / ".venv" / "bin" / "python"
+    py = str(py) if py.is_file() else sys.executable
+    return [py, "-m", "tools.htn_diag"] + tail
+
+
+def _diagnose_watchdog(did):
+    r = _DIAGNOSES[did]
+    p = r["p"]
+    while p.poll() is None:
+        if time.time() >= r["deadline"]:
+            r["killed"] = True
+            _killpg(p.pid)
+            p.wait()
+            break
+        time.sleep(0.5)
+    r["t1"] = time.time()
+
+
+def _diagnose_report(did):
+    """结束了就返回 htn_diag 的 stdout 原样；退出码非 0 时前面加「退出码 N」，后面附 stderr 末尾。"""
+    r = _DIAGNOSES[did]
+    if r["t1"] is None:
+        el = round(time.time() - r["t0"], 1)
+        left = round(r["deadline"] - time.time())
+        return (f"状态：still_running（htn_diag 还在跑，已用时 {el} 秒，离总超时 {left} 秒）\n"
+                f"diagnose_id：{did}\n接着等：调 diagnose_wait(diagnose_ids=[\"{did}\"])，不要用 sleep"), False
+    r["delivered"] = True
+    rc = r["p"].poll()
+    try:
+        out = Path(r["out"]).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        out = ""
+    if r["killed"]:
+        return (f"状态：timeout（超过 {DIAGNOSE_TIMEOUT} 秒，已杀掉整个进程组）\n"
+                f"stdout 末尾：\n{out[-4000:]}\nstderr 末尾：\n{_tail(r['err'], 30)[-4000:]}"), True
+    if rc == 0:
+        return out, True
+    return f"退出码 {rc}\n{out}\nstderr 末尾：\n{_tail(r['err'], 30)[-4000:]}", True
+
+
+def diagnose_wait(diagnose_ids, timeout_secs=None, _cancel=None):
+    if isinstance(diagnose_ids, str):
+        diagnose_ids = [x.strip() for x in diagnose_ids.split(",") if x.strip()]
+    if not isinstance(diagnose_ids, list) or not diagnose_ids:
+        raise ValueError("diagnose_ids 要是非空列表")
+    ids = [str(x) for x in diagnose_ids]
+    live = [x for x in ids if x in _DIAGNOSES]
+    block = min(int(timeout_secs or MAX_BLOCK), MAX_BLOCK)
+    cancel = _cancel or threading.Event()
+    end = time.time() + block
+    while time.time() < end and not cancel.is_set():
+        if all(_DIAGNOSES[x]["t1"] is not None for x in live):
+            break
+        time.sleep(0.2)
+    parts = []
+    for x in ids:
+        if x not in _DIAGNOSES:
+            parts.append((x, f"错误：没有这个 diagnose_id：{x}（只认本会话里 diagnose 返回的 id）"))
+        else:
+            parts.append((x, _diagnose_report(x)[0]))
+    with _PLOCK:
+        _gc_keep(_DIAGNOSES)
+    if len(parts) == 1:
+        return parts[0][1]
+    return "\n".join(f"===== diagnose_id：{x} =====\n{t}" for x, t in parts)
+
+
+def diagnose(args, _cancel=None):
+    argv = diagnose_argv(args)
+    _DSEQ[0] += 1
+    did = f"d{_DSEQ[0]}-{os.getpid()}-{int(time.time())}"
+    os.makedirs(LOG_DIR, exist_ok=True)
+    out = os.path.join(LOG_DIR, f"diagnose_{did}.out")
+    err = os.path.join(LOG_DIR, f"diagnose_{did}.err")
+    env = {k: v for k, v in os.environ.items() if not _leaky_env(k, v)}
+    with open(out, "wb") as fo, open(err, "wb") as fe:
+        p = subprocess.Popen(argv, cwd=str(_ENGINE_ROOT), env=env, stdin=subprocess.DEVNULL,
+                             stdout=fo, stderr=fe, start_new_session=True)
+    t0 = time.time()
+    with _PLOCK:
+        _DIAGNOSES[did] = {"p": p, "t0": t0, "t1": None, "deadline": t0 + DIAGNOSE_TIMEOUT, "out": out,
+                           "err": err, "killed": False, "delivered": False, "argv": argv}
+    threading.Thread(target=_diagnose_watchdog, args=(did,), daemon=True).start()
+    return diagnose_wait([did], _cancel=_cancel)
+
+
 
 # ----------------------------------------------------------------------
 # 接口封装模板（tools/dslagent/templates/iface/*.zs）
@@ -2182,6 +2296,28 @@ FINISH_TOOLS = [
          "required": ["finish_ids"]}},
 ]
 
+DIAGNOSE_TOOLS = [
+    {"name": "diagnose",
+     "description": ("HTN 排查机器人（tools/htn_diag.py）：测试挂了要找原因时先调它。它会跑这个测试 → 红了就拿测试报告 → "
+                     "按覆盖差异（失败用例走过、通过用例没走过的行）排可疑行 → 必要时下探针取变量值，返回精简结论："
+                     "失败用例、前 3 个可疑行（带上下一行和探针值）；测试是绿的就返回「测试通过」。只读诊断，不改代码。"
+                     f"总超时 {DIAGNOSE_TIMEOUT} 秒（超时按进程组杀）；单次最多阻塞 {MAX_BLOCK} 秒，没跑完返回 "
+                     "still_running 和 diagnose_id，再调 diagnose_wait 接着等。要全文加 detail=true（不会重跑）。"),
+     "inputSchema": {"type": "object", "properties": {
+         "path": {"type": "string", "description": "测试文件（必填），相对仓库根，如 tests/tools/test_x.py"},
+         "detail": {"type": "boolean", "description": ("默认 false。true 时返回所有失败用例、异常全文、测试报告和探针原文；"
+                                                       "10 分钟内排查过同一个测试就读缓存，不重跑")},
+         "full": {"type": "boolean", "description": "默认 false，调试用：完整摘要加每条指令的原始输出；一般不用传"}},
+         "required": ["path"]}},
+    {"name": "diagnose_wait",
+     "description": (f"等 diagnose 的结果（单次最多阻塞 {MAX_BLOCK} 秒）。跑完了返回排查结论原文；"
+                     "还没跑完返回 still_running，再调一次接着等。"),
+     "inputSchema": {"type": "object", "properties": {
+         "diagnose_ids": {"type": "array", "items": {"type": "string"}, "description": "diagnose 返回的 diagnose_id"},
+         "timeout_secs": {"type": "integer", "description": f"本次最多等几秒，默认且最多 {MAX_BLOCK}"}},
+         "required": ["diagnose_ids"]}},
+]
+
 if os.environ.get("GSB_CMD") == "1":
     TOOLS += [
         {"name": "cmd_list", "description": "列出当前调用方可用的固定指令和参数。",
@@ -2202,6 +2338,8 @@ if VERIFY_ON:
     TOOLS = TOOLS + VERIFY_TOOLS
 if FINISH_ON:
     TOOLS = TOOLS + FINISH_TOOLS
+if DIAGNOSE_ON:
+    TOOLS = TOOLS + DIAGNOSE_TOOLS
 
 # 探针专用：只暴露少数工具（典型 GSB_TOOLS_ONLY=read_files）
 _ONLY = [x.strip() for x in (os.environ.get("GSB_TOOLS_ONLY") or "").split(",") if x.strip()]
@@ -2257,6 +2395,9 @@ def _priority_instructions():
     if "finish" in have:
         p.append("打包、隔离验证、上线 dry-run 用 finish 一次做完（没跑完用 finish_wait 接着等）；"
                  "真上线要任务书或用户明确同意才设 allow_deploy=true。")
+    if "diagnose" in have:
+        p.append("测试挂了要找原因时，先调 diagnose(path=测试文件) 拿失败用例和可疑行，再决定读哪里的代码"
+                 "（没跑完用 diagnose_wait 接着等）；要全文加 detail=true（不会重跑）。")
     return ("工具用法：" + "".join(p)) if p else ""
 
 
@@ -2342,6 +2483,10 @@ def _call(name, args, cancel):
         return finish(args, _cancel=cancel)
     if name == "finish_wait":
         return finish_wait(args.get("finish_ids"), args.get("timeout_secs"), _cancel=cancel)
+    if name == "diagnose":
+        return diagnose(args, _cancel=cancel)
+    if name == "diagnose_wait":
+        return diagnose_wait(args.get("diagnose_ids"), args.get("timeout_secs"), _cancel=cancel)
     raise KeyError(name)
 
 
@@ -2418,6 +2563,10 @@ def main():
         for r in _FINISHES.values():
             # 允许真上线的不杀：deploy.sh 跑到一半被打断比跑完更糟；它自己有各步超时，会自己结束
             if r["p"].poll() is None and not (r["config"].get("deploy") or {}).get("allow"):
+                _killpg(r["p"].pid)
+        for r in _DIAGNOSES.values():
+            # 排查是只读的，直接杀
+            if r["p"].poll() is None:
                 _killpg(r["p"].pid)
 
 

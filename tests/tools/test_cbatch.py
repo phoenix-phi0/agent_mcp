@@ -223,9 +223,12 @@ def main():
                                   "probe", "review", "verify")),
           "工具用法覆盖 ToolSearch 加载、读/改文件、等长命令、probe、review、verify")
     sel = pre2[pre2.index("select:"):].split("\"")[0][len("select:"):].split(",")
-    check(len(sel) == 12 and all(s.startswith("mcp__gsb_tools__") for s in sel)
-          and {"mcp__gsb_tools__finish", "mcp__gsb_tools__finish_wait"} <= set(sel),
-          "ToolSearch 里列的是 12 个 mcp__gsb_tools__ 全名（含 finish / finish_wait）", sel)
+    check(len(sel) == 14 and all(s.startswith("mcp__gsb_tools__") for s in sel)
+          and {"mcp__gsb_tools__finish", "mcp__gsb_tools__finish_wait",
+               "mcp__gsb_tools__diagnose", "mcp__gsb_tools__diagnose_wait"} <= set(sel),
+          "ToolSearch 里列的是 14 个 mcp__gsb_tools__ 全名（含 finish / finish_wait / diagnose / diagnose_wait）", sel)
+    check("13. 测试挂了要找原因时，先调 diagnose(path=测试文件)" in pre2 and "detail=true（不会重跑）" in pre2,
+          "第 13 条：测试挂了先调 diagnose，要全文加 detail=true")
     check("allow_deploy=true" in pre2 and "任务书明确允许" in pre2,
           "工具用法写了 finish 一次做完、真上线要任务书明确允许才设 allow_deploy=true")
     check("取代第 5 条" in pre2 and "不要 sleep 轮询" in pre2,

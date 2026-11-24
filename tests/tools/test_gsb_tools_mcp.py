@@ -29,6 +29,9 @@ finish / finish_wait（默认开，GSB_FINISH=0 关）：GSB_FINISH_SCRIPT 指�
 config 原样写到文件、按环境变量睡一会再输出一行 JSON），验默认出现 / 关掉 / GSB_TOOLS_ONLY 过滤、
 参数映射成 config（allow_deploy 不传时 deploy.allow=false）、cwd 是仓库根、still_running 后 finish_wait、
 非 JSON 输出给退出码和末尾。不碰真实打包。
+diagnose / diagnose_wait（默认开，GSB_DIAGNOSE=0 关）：GSB_DIAGNOSE_SCRIPT 指向假 htn_diag，验默认出现 /
+关掉 / GSB_TOOLS_ONLY 过滤、detail/full 映射成 --detail/--full、缺 path 不起子进程、still_running 后
+diagnose_wait、退出码非 0 时带「退出码」。
 """
 
 import json
@@ -88,6 +91,9 @@ class Server:
         # finish 默认开启；老用例按原工具清单断言，这里统一先关，finish_tests 里传 GSB_FINISH=None 恢复默认
         env["GSB_FINISH"] = "0"
         env.pop("GSB_FINISH_SCRIPT", None)
+        # diagnose 同理：默认开启，这里先关，diagnose_tests 里传 GSB_DIAGNOSE=None 恢复默认
+        env["GSB_DIAGNOSE"] = "0"
+        env.pop("GSB_DIAGNOSE_SCRIPT", None)
         env.update(extra)
         env = {k: v for k, v in env.items() if v is not None}
         self.p = subprocess.Popen([sys.executable, str(SCRIPT)], cwd=str(TMP), env=env,
@@ -1693,6 +1699,103 @@ def finish_tests():
         s.close()
 
 
+FAKE_HTN_DIAG = r"""
+import json, os, sys, time
+with open(os.environ["FAKE_DIAG_REC"], "w", encoding="utf-8") as f:
+    json.dump({"argv": sys.argv[1:], "cwd": os.getcwd(),
+               "secret_seen": any("SECRET-0123" in v or v.startswith("ghp_") for v in os.environ.values())}, f, ensure_ascii=False)
+time.sleep(float(os.environ.get("FAKE_DIAG_SLEEP") or 0))
+if os.environ.get("FAKE_DIAG_BAD"):
+    print("测试报告读不到"); print("diag boom on stderr", file=sys.stderr); sys.exit(2)
+print("失败用例：test_a\n可疑行：x.py:10")
+"""
+
+
+def diagnose_tests():
+    print("diagnose / diagnose_wait（假 htn_diag）")
+    fake = TMP / "fake_htn_diag.py"
+    fake.write_text(FAKE_HTN_DIAG, encoding="utf-8")
+    rec = TMP / "diag_rec.json"
+    base = {"GSB_DIAGNOSE": None, "GSB_DIAGNOSE_SCRIPT": str(fake), "FAKE_DIAG_REC": str(rec)}
+
+    s = Server(**base)
+    try:
+        init = s.req("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
+        tools = {t["name"]: t for t in s.req("tools/list")["result"]["tools"]}
+        check({"diagnose", "diagnose_wait"} <= set(tools),
+              "默认（没设 GSB_DIAGNOSE）tools/list 有 diagnose / diagnose_wait", list(tools))
+        sch = tools["diagnose"]["inputSchema"]
+        check(sch["required"] == ["path"] and {"path", "detail", "full"} <= set(sch["properties"])
+              and sch["properties"]["detail"]["type"] == "boolean" and "不改代码" in tools["diagnose"]["description"],
+              "diagnose 的 schema：path 必填、detail/full 布尔，说明写明只读", sch)
+        check("diagnose(path=" in init["result"]["instructions"], "initialize 说明里有 diagnose 用法",
+              init["result"]["instructions"])
+        if rec.exists():
+            rec.unlink()
+        t, e = s.call("diagnose", {"path": "tests/tools/test_x.py"})
+        c = json.loads(rec.read_text(encoding="utf-8"))
+        check(not e and t == "失败用例：test_a\n可疑行：x.py:10\n", "退出码 0：原样返回 stdout", t)
+        check(c["argv"] == ["tests/tools/test_x.py"] and c["cwd"] == str(ROOT) and not c["secret_seen"],
+              "只给 path：命令行只有 path、cwd 是仓库根、凭证变量不进子进程", c)
+        s.call("diagnose", {"path": "tests/tools/test_x.py", "detail": True, "full": True})
+        c = json.loads(rec.read_text(encoding="utf-8"))
+        check(c["argv"] == ["tests/tools/test_x.py", "--detail", "--full"], "detail/full → --detail/--full", c["argv"])
+        s.call("diagnose", {"path": "tests/tools/test_x.py", "detail": True, "full": False})
+        c = json.loads(rec.read_text(encoding="utf-8"))
+        check(c["argv"] == ["tests/tools/test_x.py", "--detail"], "full=false 不带 --full", c["argv"])
+        rec.unlink()
+        t, e = s.call("diagnose", {"detail": True})
+        check(e is True and "path" in t and not rec.exists(), "缺 path 报参数错误、不起子进程", t)
+        t, e = s.call("diagnose_wait", {"diagnose_ids": ["d999-nope"]})
+        check("没有这个 diagnose_id" in t, "diagnose_wait 不认识的 id", t)
+    finally:
+        s.close()
+
+    s = Server(max_block=2, FAKE_DIAG_SLEEP="4", **base)
+    try:
+        t0 = time.time()
+        t, e = s.call("diagnose", {"path": "tests/tools/test_y.py"})
+        did = field(t, "diagnose_id")
+        check("still_running" in t and did and 1.5 < time.time() - t0 < 4 and "diagnose_wait" in t,
+              "GSB_MAX_BLOCK 很小时先返回 still_running + diagnose_id", t)
+        got = None
+        for _ in range(5):
+            got, e = s.call("diagnose_wait", {"diagnose_ids": [did]})
+            if "still_running" not in got:
+                break
+        check(got and got.startswith("失败用例：test_a"), "再调 diagnose_wait 拿到结论", got)
+    finally:
+        s.close()
+
+    s = Server(FAKE_DIAG_BAD="1", **base)
+    try:
+        t, e = s.call("diagnose", {"path": "tests/tools/test_z.py"})
+        check(t.startswith("退出码 2\n") and "测试报告读不到" in t and "diag boom" in t,
+              "退出码非 0：前面加「退出码 N」，附 stdout 和 stderr 末尾", t)
+    finally:
+        s.close()
+
+    s = Server(GSB_DIAGNOSE="0")
+    try:
+        names = [x["name"] for x in s.req("tools/list")["result"]["tools"]]
+        check("diagnose" not in names and "diagnose_wait" not in names,
+              "GSB_DIAGNOSE=0 时没有 diagnose / diagnose_wait", names)
+    finally:
+        s.close()
+    s = Server(GSB_DIAGNOSE=None, GSB_TOOLS_ONLY="diagnose,diagnose_wait")
+    try:
+        names = [x["name"] for x in s.req("tools/list")["result"]["tools"]]
+        check(names == ["diagnose", "diagnose_wait"], "GSB_TOOLS_ONLY 能过滤出只有 diagnose / diagnose_wait", names)
+    finally:
+        s.close()
+    s = Server(GSB_DIAGNOSE=None, GSB_TOOLS_ONLY="read_files")
+    try:
+        names = [x["name"] for x in s.req("tools/list")["result"]["tools"]]
+        check(names == ["read_files"], "GSB_TOOLS_ONLY=read_files 时 diagnose 不出现", names)
+    finally:
+        s.close()
+
+
 def main():
     command_tests()
     (TMP / "a.txt").write_text("".join(f"line{i}\n" for i in range(1, 11)), encoding="utf-8")
@@ -1882,6 +1985,7 @@ def main():
         k38_tests()
         k47_tests()
         finish_tests()
+        diagnose_tests()
     finally:
         s.close()
         shutil.rmtree(TMP, ignore_errors=True)
