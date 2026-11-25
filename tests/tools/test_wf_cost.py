@@ -373,6 +373,12 @@ def run():
         demo = demo_copy(tmp / 'g', edit=no_roles)
         _, client, _, err = run_demo(demo, [])
         check(err is not None and '角色清单无效' in str(err) and not client.calls, '没设 roles：报错，不调模型')
+
+        # 9. 预算为 0：只要有成本就超出
+        from tools.wf_plan import cost_summary
+        check(cost_summary([{'agent': 'ENGINEER_LITE', 'content': '甲'}], 0,
+                           ['ENGINEER_LITE', 'ENGINEER'], {'ENGINEER_LITE': 1}.__getitem__)['status'] == '超出',
+              '预算为 0：成本 1 > 0，status 是超出')
         print('wf cost passed')
     finally:
         shutil.rmtree(tmp)
