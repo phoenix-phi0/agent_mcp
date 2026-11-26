@@ -273,7 +273,8 @@ def test_6_1_agents_cards(tmp):
     svc = service(tmp)
     rows = svc.tools['agents'](KEY)
     assert rows and rows == svc.tools['agents'](KEY, 'workflow_demo')
-    assert all(set(row) == {'name', 'model', 'cost', 'description'} for row in rows)
+    assert all(set(row) == {'name', 'model', 'cost', 'description', 'category'} for row in rows)
+    assert all(row['category'] for row in rows)          # 卡都分了类（agents/CATALOG.md）
     assert any(row['name'] == 'ENGINEER' and row['model'] for row in rows)
     assert svc.tools['agents'](KEY, 'other') == []
     rejects(wc.ControlError, lambda: svc.tools['agents'](KEY, '\ud800'))

@@ -4,8 +4,11 @@
   "description": "会议主持人（sonnet）。每轮之后判断能不能出结论，最后按会上的发言写结论；自己不提新方案。",
   "tools": [],
   "packages": [],
-  "skills": ["skills/meeting.md"],
+  "skills": [
+    "skills/meeting.md"
+  ],
   "max_tool_rounds": 3,
   "timeout": 600,
-  "effort": "medium"
+  "effort": "medium",
+  "category": "会议"
 }

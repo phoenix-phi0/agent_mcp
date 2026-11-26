@@ -29,6 +29,10 @@
     "timeout": 1200,
     "max_turns": 60,
     "venv": false,
-    "mcp_tools": ["probe", "review"]
-  }
+    "mcp_tools": [
+      "probe",
+      "review"
+    ]
+  },
+  "category": "实现"
 }

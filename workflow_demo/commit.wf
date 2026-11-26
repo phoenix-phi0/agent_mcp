@@ -1,0 +1,79 @@
+# 提交：代码已经改好、只差提交时用。只做检查和准备，不提交——最后停下等人用 git_commit 提交。
+# 我的改动（起点 mark 以来、对照 allow）→ 查密钥 → 暂存我的改动 → 暂存版跑测试 → 基线（HEAD 的副本里跑）→ 对照失败
+# → 有新挂：失败分析（TRIAGE）后停下交给人；没新挂：记录员（SCRIBE）写提交说明，这个节点写了「确认 之后」：
+#   停下等人看说明（approve 结束，人自己用 git_commit 提交；也可以改了说明再 approve，reject 就重写）
+# 任何一步不对（范围外的改动、没有改动、查到密钥、补丁放不进暂存区）都直接停下交给人，后面的不做。
+# 机械步骤都是「指令」节点，由机器人跑命令表里的命令，不调模型。
+# 入口脚本要设：repo mark allow test project（project = 仓库在 work/ 下的目录名，失败分析员的 cwd 是 work/{project}）
+# 可选：triage（默认 TRIAGE）、scribe（默认 SCRIBE）
+我的改动
+    指令 git_mine repo={repo} mark={mark} allow={allow}
+    记录 mine
+如果 mine.状态 != 成功
+    范围不对
+        任务 起点以来有允许清单（{allow}）以外的改动，或者归属不明的文件，没有往下做。参考文本 mine 是分类结果（outside 范围外，unclear 归属不明）。处理好再重跑这个流程
+        角色 HUMAN
+        文本 mine=mine.data
+        格式 human_confirm
+        记录 stop
+如果 mine.状态 == 成功
+    如果 mine.data.mine == []
+        没有改动
+            任务 起点 {mark} 以来，允许清单（{allow}）里没有改动，没什么可提交的
+            角色 HUMAN
+            文本 mine=mine.data
+            格式 human_confirm
+            记录 stop
+    如果 mine.data.mine != []
+        查密钥
+            指令 secret_scan repo={repo} paths={mine.data.mine}
+            记录 sec
+        如果 sec.状态 != 成功
+            查到密钥
+                任务 要提交的文件里有像密钥、令牌的内容（参考文本 hits 列出了文件、行号和类别，不含内容），没有暂存。去掉以后再重跑
+                角色 HUMAN
+                文本 hits=sec.data.hits
+                格式 human_confirm
+                记录 stop
+        如果 sec.状态 == 成功
+            暂存
+                指令 git_stage_mine repo={repo} mark={mark} allow={allow}
+                记录 st
+            如果 st.状态 != 成功
+                暂存失败
+                    任务 改动没能放进暂存区（参考文本 stage 写了原因：补丁和暂存区对不上、归属不明等），一个都没放。处理好再重跑
+                    角色 HUMAN
+                    文本 stage=st.data
+                    格式 human_confirm
+                    记录 stop
+            如果 st.状态 == 成功
+                暂存版测试
+                    指令 staged_test repo={repo} path={test} from=staged
+                    记录 t
+                基线测试
+                    指令 staged_test repo={repo} path={test} from=head
+                    记录 h
+                对照失败
+                    指令 compare_failures base={h.结果} now={t.结果} name={test}
+                    记录 f
+                如果 f.状态 != 成功
+                    失败分析
+                        任务 暂存版的测试有新挂的（参考文本 failures 的 new），判断每个新挂的原因和出处。参考文本 test 是暂存版的测试输出，baseline 是 HEAD 的测试输出，mine 是这次的改动清单。仓库在 {repo}，只读
+                        角色 {triage 或 TRIAGE}
+                        文本 failures=f.data test=t.结果 baseline=h.结果 mine=mine.data
+                        格式 failure_analysis
+                        记录 tri
+                    新挂了
+                        任务 暂存版的测试有新挂的，没有往下写提交说明。参考文本 triage 是失败分析的结果。改好以后重跑这个流程
+                        角色 HUMAN
+                        文本 failures=f.data triage=tri
+                        格式 human_confirm
+                        记录 stop
+                如果 f.状态 == 成功
+                    写提交说明
+                        任务 按参考文本写这次的提交说明：staged 是暂存了哪些文件，mine 是改动清单，test 是暂存版测试的输出（最后几行）。只写参考文本里有的事
+                        角色 {scribe 或 SCRIBE}
+                        文本 staged=st.data.staged mine=mine.data test=t.结果
+                        格式 record_note
+                        确认 之后
+                        记录 note

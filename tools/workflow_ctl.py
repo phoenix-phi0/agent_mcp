@@ -254,9 +254,13 @@ class _Control:
                 "role": cfg.get("roles", {}).get(req["role"])}
         names = {req["name"], req["role"], go.get("role") or plan["role"]}
 
+        node_confirm = req.get("confirm_node")      # 流程里节点写了「确认 之后/之前/前后」
+
         def after(use_role):
             if ic.get("confirm_after") is not None:
                 return {"after": ic["confirm_after"], "reason": "item"}
+            if node_confirm in ("after", "both"):
+                return {"after": True, "reason": "node"}
             matched = _match(_rules(cfg, "after"), {req["name"], req["role"], use_role})
             return {"after": matched is not None, "reason": "rule:" + matched if matched else None}
 
@@ -344,6 +348,8 @@ class _Control:
             return {**meta, "action": "run", "by": "auto", **plan, **after(current_role), "reason": "item"}
         if cfg.get("mode") == "step" or self.force_step:
             return {**meta, "action": "wait", "reason": "step", **plan}
+        if matched is None and node_confirm in ("before", "both"):
+            return {**meta, "action": "wait", "reason": "node", **plan}
         if matched is not None:
             return {**meta, "action": "wait", "reason": "rule:" + matched, **plan}
         return {**meta, "action": "run", "by": "auto", **plan, **after(go.get("role") or plan["role"])}

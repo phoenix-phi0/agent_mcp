@@ -1,0 +1,10 @@
+{
+ "type": "object",
+ "description": "人看过以后的决定：提交（人自己用 git_commit 提交）、不提交，或者要返工（写明要改什么）。",
+ "additionalProperties": false,
+ "required": ["decide", "note"],
+ "properties": {
+  "decide": {"enum": ["提交", "不提交", "返工"]},
+  "note": {"type": "string", "description": "说明；返工时写要改什么"}
+ }
+}

@@ -1,0 +1,18 @@
+{
+  "model": "cli:codex/gpt-6.2-astra",
+  "effort": "medium",
+  "cost": 4,
+  "category": "验收",
+  "description": "高档验收员（Codex astra，项目只读）。ACCEPTOR 把握低、或依据抽查对不上时，由它按同一份清单重判；写法和格式同 ACCEPTOR（accept_check）。不自己改代码。",
+  "packages": [],
+  "skills": [
+    "skills/code_review.md"
+  ],
+  "agentic": {
+    "cwd": "work/{project}",
+    "sandbox": "project-read-only",
+    "timeout": 2400,
+    "max_turns": 80,
+    "venv": true
+  }
+}

@@ -384,7 +384,7 @@ def read_agents(data):
             continue
         if isinstance(card, dict):
             out.append({"name": d.name, "model": card.get("model"), "description": card.get("description"),
-                        "cost": card.get("cost")})
+                        "cost": card.get("cost"), "category": card.get("category")})
     return out
 
 

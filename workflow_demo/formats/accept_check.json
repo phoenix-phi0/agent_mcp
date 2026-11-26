@@ -1,0 +1,46 @@
+{
+ "type": "object",
+ "description": "按清单验收：逐条读代码和命令输出下结论，每条写依据（文件:行加原文，或命令输出原文）和把握。有一条不满足或未验证就判需修改。总把握取各条里最低的：有一条是低，总把握就是低，流程会换高一档的卡再判。只读，不改文件。",
+ "additionalProperties": false,
+ "required": ["decide", "summary", "把握", "checked"],
+ "properties": {
+  "decide": {"enum": ["通过", "需修改"]},
+  "summary": {"type": "string", "minLength": 1},
+  "把握": {"enum": ["高", "中", "低"], "description": "总把握：各条里最低的那个"},
+  "checked": {
+   "type": "array", "minItems": 1,
+   "items": {
+    "type": "object", "additionalProperties": false,
+    "required": ["item", "result", "依据", "把握"],
+    "properties": {
+     "item": {"type": "string", "minLength": 1, "description": "清单里的一条，照抄"},
+     "result": {"enum": ["满足", "不满足", "未验证"]},
+     "依据": {
+      "type": "array",
+      "items": {
+       "type": "object", "additionalProperties": false, "required": ["出处", "原文"],
+       "properties": {
+        "出处": {"type": "string", "minLength": 1,
+                 "description": "代码写 文件:行 或 文件:起-止（相对仓库根）；命令输出写命令名，如 run_test 输出"},
+        "原文": {"type": "string", "minLength": 1, "maxLength": 300, "description": "照抄那几行代码或那段输出"}
+       }
+      }
+     },
+     "把握": {"enum": ["高", "中", "低"]}
+    },
+    "allOf": [{"if": {"properties": {"result": {"enum": ["满足", "不满足"]}}, "required": ["result"]},
+               "then": {"properties": {"依据": {"minItems": 1}}}}]
+   }
+  },
+  "task": {"type": "string", "minLength": 1, "description": "需修改时必填：工程师能照做的返工要求（哪个文件哪里、期望怎样、怎么证明）"}
+ },
+ "allOf": [
+  {"if": {"properties": {"decide": {"const": "需修改"}}, "required": ["decide"]}, "then": {"required": ["task"]}},
+  {"if": {"properties": {"decide": {"const": "通过"}}, "required": ["decide"]},
+   "then": {"properties": {"checked": {"items": {"properties": {"result": {"const": "满足"}}}}}}},
+  {"if": {"properties": {"checked": {"contains": {"properties": {"把握": {"const": "低"}}, "required": ["把握"]}}}, "required": ["checked"]},
+   "then": {"properties": {"把握": {"const": "低"}}}},
+  {"if": {"properties": {"checked": {"contains": {"properties": {"把握": {"const": "中"}}, "required": ["把握"]}}}, "required": ["checked"]},
+   "then": {"properties": {"把握": {"enum": ["中", "低"]}}}}
+ ]
+}

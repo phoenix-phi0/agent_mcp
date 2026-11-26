@@ -25,6 +25,9 @@
     "timeout": 900,
     "max_turns": 60,
     "venv": false,
-    "mcp_tools": ["probe"]
-  }
+    "mcp_tools": [
+      "probe"
+    ]
+  },
+  "category": "验收"
 }

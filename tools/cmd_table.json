@@ -7,6 +7,24 @@
         "service"
       ]
     },
+    "workflow": {
+      "levels": [
+        "read"
+      ],
+      "allow": [
+        "run_test",
+        "test_at_head",
+        "test_report",
+        "locate",
+        "probe",
+        "blame_change",
+        "git_mark",
+        "git_stage_mine",
+        "wt_add",
+        "dir_test",
+        "staged_test"
+      ]
+    },
     "small_model": {
       "levels": [
         "read"
@@ -21,6 +39,402 @@
     }
   },
   "commands": [
+    {
+      "name": "check_evidence",
+      "level": "read",
+      "doc": "抽查依据：按记录里每条「出处（文件:行）」读原文核对，最后一行 JSON 列出对不上的；敏感文件不读",
+      "params": {
+        "dir": {
+          "type": "path",
+          "required": true,
+          "roots": [
+            "/workspace"
+          ],
+          "glob": "*",
+          "deny": [
+            "*/.git/*",
+            "*/.config/*",
+            "*/.codex/*",
+            "*/.claude/*"
+          ]
+        },
+        "record": {
+          "type": "text",
+          "required": true,
+          "max_len": 60000
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "python3 /workspace/agent_mcp/scripts/cmd/wf_tools.py evidence {dir} {record}"
+      ],
+      "mode": "sync",
+      "timeout": 60,
+      "max_output": 60000
+    },
+    {
+      "name": "compare_failures",
+      "level": "read",
+      "doc": "对照失败：基线（用例名列表或基线核对结果）和现在（列表或测试输出），分成新挂、原来就挂、修好了；认不出用例名但测试没过时，按 name（测试路径）记一个失败项；有新挂退出码 1",
+      "params": {
+        "base": {
+          "type": "text",
+          "required": true,
+          "max_len": 60000
+        },
+        "now": {
+          "type": "text",
+          "required": true,
+          "max_len": 200000
+        },
+        "name": {
+          "type": "text",
+          "max_len": 200,
+          "default": "",
+          "pattern": "[\\w./:-]*"
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "python3 /workspace/agent_mcp/scripts/cmd/wf_tools.py failures {base} {now} {name}"
+      ],
+      "mode": "sync",
+      "timeout": 60,
+      "max_output": 60000
+    },
+    {
+      "name": "git_mark",
+      "level": "write",
+      "doc": "记起点：用 git stash create 记下工作区和暂存区现在的样子（不动文件），返回起点编号",
+      "params": {
+        "repo": {
+          "type": "path",
+          "roots": [
+            "/workspace"
+          ],
+          "glob": "*",
+          "default": "/workspace/agent_mcp",
+          "deny": [
+            "*/.git/*",
+            "*/.config/*",
+            "*/.codex/*",
+            "*/.claude/*"
+          ]
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "python3 /workspace/agent_mcp/scripts/cmd/wf_tools.py mark {repo}"
+      ],
+      "mode": "sync",
+      "timeout": 60,
+      "max_output": 60000
+    },
+    {
+      "name": "git_mine",
+      "level": "read",
+      "doc": "我的改动：起点以来的改动按允许清单分成我的、范围外、归属不明；有范围外或归属不明退出码 1",
+      "params": {
+        "repo": {
+          "type": "path",
+          "roots": [
+            "/workspace"
+          ],
+          "glob": "*",
+          "default": "/workspace/agent_mcp",
+          "deny": [
+            "*/.git/*",
+            "*/.config/*",
+            "*/.codex/*",
+            "*/.claude/*"
+          ]
+        },
+        "mark": {
+          "type": "text",
+          "required": true,
+          "pattern": "[0-9]{8}-[0-9]{6}-[0-9a-f]{6}"
+        },
+        "allow": {
+          "type": "text_list",
+          "required": true,
+          "max_items": 100,
+          "max_len": 200,
+          "pattern": "(?!.*\\.\\.)[\\w.*?/\\[\\]@+-]{1,200}"
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "python3 /workspace/agent_mcp/scripts/cmd/wf_tools.py mine {repo} {mark} {allow}"
+      ],
+      "mode": "sync",
+      "timeout": 60,
+      "max_output": 60000
+    },
+    {
+      "name": "git_stage_mine",
+      "level": "write",
+      "doc": "暂存我的改动：只把起点以来、允许清单里的改动放进暂存区；先查密钥，归属不明或补丁冲突就一个都不放",
+      "params": {
+        "repo": {
+          "type": "path",
+          "roots": [
+            "/workspace"
+          ],
+          "glob": "*",
+          "default": "/workspace/agent_mcp",
+          "deny": [
+            "*/.git/*",
+            "*/.config/*",
+            "*/.codex/*",
+            "*/.claude/*"
+          ]
+        },
+        "mark": {
+          "type": "text",
+          "required": true,
+          "pattern": "[0-9]{8}-[0-9]{6}-[0-9a-f]{6}"
+        },
+        "allow": {
+          "type": "text_list",
+          "required": true,
+          "max_items": 100,
+          "max_len": 200,
+          "pattern": "(?!.*\\.\\.)[\\w.*?/\\[\\]@+-]{1,200}"
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "python3 /workspace/agent_mcp/scripts/cmd/wf_tools.py stage {repo} {mark} {allow}"
+      ],
+      "mode": "sync",
+      "timeout": 120,
+      "max_output": 60000
+    },
+    {
+      "name": "secret_scan",
+      "level": "read",
+      "doc": "查密钥：查仓库里这些文件有没有像密钥、令牌的内容，只报文件、行号和类别，不打印内容",
+      "params": {
+        "repo": {
+          "type": "path",
+          "roots": [
+            "/workspace"
+          ],
+          "glob": "*",
+          "default": "/workspace/agent_mcp",
+          "deny": [
+            "*/.git/*",
+            "*/.config/*",
+            "*/.codex/*",
+            "*/.claude/*"
+          ]
+        },
+        "paths": {
+          "type": "text_list",
+          "required": true,
+          "max_items": 200,
+          "max_len": 200,
+          "pattern": "(?!.*\\.\\.)[\\w./@+-]{1,200}"
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "python3 /workspace/agent_mcp/scripts/cmd/wf_tools.py secrets {repo} {paths}"
+      ],
+      "mode": "sync",
+      "timeout": 60,
+      "max_output": 60000
+    },
+    {
+      "name": "expect_text",
+      "level": "read",
+      "doc": "输出对正则：text 里有没有匹配 pattern 的内容（多行模式）；没有退出码 1",
+      "params": {
+        "text": {
+          "type": "text",
+          "required": true,
+          "max_len": 200000
+        },
+        "pattern": {
+          "type": "text",
+          "required": true,
+          "max_len": 500
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "python3 /workspace/agent_mcp/scripts/cmd/wf_tools.py expect {text} {pattern}"
+      ],
+      "mode": "sync",
+      "timeout": 30,
+      "max_output": 60000
+    },
+    {
+      "name": "file_size",
+      "level": "read",
+      "doc": "文件或目录的大小（字节）对照上限；超了退出码 1",
+      "params": {
+        "path": {
+          "type": "path",
+          "required": true,
+          "roots": [
+            "/workspace"
+          ],
+          "glob": "*",
+          "deny": [
+            "*/.git/*",
+            "*/.config/*",
+            "*/.codex/*",
+            "*/.claude/*"
+          ]
+        },
+        "max_bytes": {
+          "type": "int",
+          "required": true,
+          "min": 0,
+          "max": 1099511627776
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "python3 /workspace/agent_mcp/scripts/cmd/wf_tools.py size {path} {max_bytes}"
+      ],
+      "mode": "sync",
+      "timeout": 60,
+      "max_output": 60000
+    },
+    {
+      "name": "wt_add",
+      "level": "write",
+      "doc": "开 git 工作树：在 workflow_demo/work 下给仓库开一份只有提交过的文件的副本（分支 wf/<目录名>，从 HEAD 开）；已经开过就接着用",
+      "params": {
+        "repo": {
+          "type": "path",
+          "roots": [
+            "/workspace"
+          ],
+          "glob": "*",
+          "default": "/workspace/agent_mcp",
+          "deny": [
+            "*/.git/*",
+            "*/.config/*",
+            "*/.codex/*",
+            "*/.claude/*"
+          ]
+        },
+        "path": {
+          "type": "path",
+          "required": true,
+          "roots": [
+            "/workspace/agent_mcp/workflow_demo/work",
+            "/workspace/agent_mcp/data/tmp"
+          ],
+          "glob": "*",
+          "deny": [
+            "*/.git/*",
+            "*/.config/*",
+            "*/.codex/*",
+            "*/.claude/*"
+          ]
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "python3 /workspace/agent_mcp/scripts/cmd/wf_tools.py wt_add {repo} {path}"
+      ],
+      "mode": "sync",
+      "timeout": 120,
+      "max_output": 60000
+    },
+    {
+      "name": "dir_test",
+      "level": "write",
+      "doc": "在工作树目录里跑一个测试（用主仓库的虚拟环境）；输出最后一行 EXIT=退出码",
+      "params": {
+        "dir": {
+          "type": "path",
+          "required": true,
+          "roots": [
+            "/workspace/agent_mcp/workflow_demo/work",
+            "/workspace/agent_mcp/data/tmp"
+          ],
+          "glob": "*",
+          "deny": [
+            "*/.git/*",
+            "*/.config/*",
+            "*/.codex/*",
+            "*/.claude/*"
+          ]
+        },
+        "path": {
+          "type": "text",
+          "required": true,
+          "max_len": 200,
+          "pattern": "tests/[\\w./-]+\\.py"
+        },
+        "limit": {
+          "type": "int",
+          "min": 1,
+          "max": 200,
+          "default": 40
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "python3 /workspace/agent_mcp/scripts/cmd/wf_tools.py dir_test {dir} {path} {limit}"
+      ],
+      "mode": "sync",
+      "timeout": 170,
+      "max_output": 60000
+    },
+    {
+      "name": "staged_test",
+      "level": "write",
+      "doc": "把暂存区（from=staged）或 HEAD（from=head）检出到临时目录，在那里跑一个测试，跑完删掉；输出最后一行 EXIT=退出码",
+      "params": {
+        "repo": {
+          "type": "path",
+          "roots": [
+            "/workspace"
+          ],
+          "glob": "*",
+          "default": "/workspace/agent_mcp",
+          "deny": [
+            "*/.git/*",
+            "*/.config/*",
+            "*/.codex/*",
+            "*/.claude/*"
+          ]
+        },
+        "path": {
+          "type": "text",
+          "required": true,
+          "max_len": 200,
+          "pattern": "tests/[\\w./-]+\\.py"
+        },
+        "from": {
+          "type": "enum",
+          "values": [
+            "staged",
+            "head"
+          ],
+          "default": "staged"
+        },
+        "limit": {
+          "type": "int",
+          "min": 1,
+          "max": 200,
+          "default": 40
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "python3 /workspace/agent_mcp/scripts/cmd/wf_tools.py staged_test {repo} {path} {from} {limit}"
+      ],
+      "mode": "sync",
+      "timeout": 170,
+      "max_output": 60000
+    },
     {
       "name": "run_test",
       "level": "write",
@@ -881,6 +1295,39 @@
       ],
       "mode": "sync",
       "timeout": 60
+    },
+    {
+      "name": "count_lines",
+      "level": "read",
+      "doc": "统计目录或文件的文件数、行数和大小，按第一层目录分开，列出行数最多的文件",
+      "params": {
+        "path": {
+          "type": "path",
+          "roots": [
+            "/workspace"
+          ],
+          "glob": "*",
+          "default": "/workspace/agent_mcp"
+        },
+        "name": {
+          "type": "text",
+          "max_len": 80,
+          "pattern": "[A-Za-z0-9_.*?\\[\\]][A-Za-z0-9_.*?\\[\\]-]*",
+          "default": "*"
+        },
+        "limit": {
+          "type": "int",
+          "min": 1,
+          "max": 100,
+          "default": 15
+        }
+      },
+      "cwd": "/workspace/agent_mcp",
+      "steps": [
+        "python3 /workspace/agent_mcp/scripts/cmd/count_lines.py {path} {name} {limit}"
+      ],
+      "mode": "sync",
+      "timeout": 120
     }
   ],
   "common": {

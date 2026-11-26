@@ -1,0 +1,14 @@
+{
+  "model": "muse",
+  "cost": 2,
+  "category": "实现",
+  "description": "仓库工程师（中档，Muse）。在 agent_mcp 仓库的 git 工作树（work/<工作树名>，只有提交过的文件，没有配置和密钥）里按任务改代码、跑测试，交实现记录；只改任务允许的文件。改代码验收流程（code_accept.wf）的默认工程师。",
+  "packages": [],
+  "skills": [
+    "skills/implementation.md"
+  ],
+  "agentic": {
+    "cwd": "work/{project}",
+    "venv": false
+  }
+}

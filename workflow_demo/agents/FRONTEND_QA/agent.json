@@ -30,5 +30,6 @@
     "mcp_tools": [
       "probe"
     ]
-  }
+  },
+  "category": "验收"
 }

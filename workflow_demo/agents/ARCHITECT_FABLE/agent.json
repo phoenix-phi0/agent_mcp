@@ -13,5 +13,6 @@
   ],
   "max_tool_rounds": 3,
   "timeout": 3600,
-  "effort": "medium"
+  "effort": "medium",
+  "category": "架构"
 }

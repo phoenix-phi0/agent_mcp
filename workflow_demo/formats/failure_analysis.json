@@ -1,0 +1,166 @@
+{
+ "type": "object",
+ "description": "失败分析：拿对照失败的分组（新挂、原来就挂）、这次的改动清单和诊断结果，判断每个新挂的用例是什么原因、是谁改出来的。只读，不改文件。",
+ "additionalProperties": false,
+ "required": [
+  "状态",
+  "结果",
+  "依据",
+  "把握",
+  "failures"
+ ],
+ "properties": {
+  "状态": {
+   "enum": [
+    "已归因",
+    "归因不全"
+   ],
+   "description": "每个新挂的用例都归了因、把握不是低，才写已归因"
+  },
+  "结果": {
+   "type": "string",
+   "minLength": 1
+  },
+  "依据": {
+   "type": "array",
+   "minItems": 1,
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "出处",
+     "原文"
+    ],
+    "properties": {
+     "出处": {
+      "type": "string",
+      "pattern": "^[^\\s:]+:\\d+(-\\d+)?$",
+      "description": "相对项目根的文件:行 或 文件:起-止（测试输出就写日志文件:行）"
+     },
+     "原文": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+     }
+    }
+   }
+  },
+  "把握": {
+   "enum": [
+    "高",
+    "中",
+    "低"
+   ]
+  },
+  "failures": {
+   "type": "array",
+   "minItems": 1,
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "test",
+     "归因",
+     "原因",
+     "依据",
+     "把握",
+     "建议"
+    ],
+    "properties": {
+     "test": {
+      "type": "string",
+      "minLength": 1,
+      "description": "用例名，照对照失败里的写"
+     },
+     "归因": {
+      "enum": [
+       "我的改动",
+       "别人的改动",
+       "环境",
+       "原来就有",
+       "测试本身",
+       "不明"
+      ],
+      "description": "我的改动：这次改的代码引起；别人的改动：不在这次改动清单里的改动引起；环境：缺依赖、端口、密钥、网络；原来就有：基线里就挂；测试本身：测试写错或不稳定"
+     },
+     "原因": {
+      "type": "string",
+      "minLength": 1,
+      "description": "具体哪里错：期望什么、实际什么、哪一行引起"
+     },
+     "依据": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "出处",
+        "原文"
+       ],
+       "properties": {
+        "出处": {
+         "type": "string",
+         "pattern": "^[^\\s:]+:\\d+(-\\d+)?$",
+         "description": "相对项目根的文件:行 或 文件:起-止（测试输出就写日志文件:行）"
+        },
+        "原文": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 300
+        }
+       }
+      }
+     },
+     "把握": {
+      "enum": [
+       "高",
+       "中",
+       "低"
+      ]
+     },
+     "建议": {
+      "type": "string",
+      "minLength": 1,
+      "description": "怎么修、交给谁（这次的工程师 / 别人 / 人处理环境）"
+     }
+    }
+   }
+  }
+ },
+ "allOf": [
+  {
+   "if": {
+    "properties": {
+     "状态": {
+      "const": "已归因"
+     }
+    },
+    "required": [
+     "状态"
+    ]
+   },
+   "then": {
+    "properties": {
+     "failures": {
+      "items": {
+       "properties": {
+        "归因": {
+         "not": {
+          "const": "不明"
+         }
+        },
+        "把握": {
+         "enum": [
+          "高",
+          "中"
+         ]
+        }
+       }
+      }
+     }
+    }
+   }
+  }
+ ]
+}

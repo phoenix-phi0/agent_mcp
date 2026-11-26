@@ -1,0 +1,12 @@
+{
+  "model": "cli:claude/haiku",
+  "cost": 1,
+  "category": "记录",
+  "description": "记录员（haiku，便宜）。按参考文本写提交说明、汇总报告；只写记录里有的事，每段注明出处。不读文件、不调工具。写出来的东西用之前要先过查密钥。",
+  "tools": [],
+  "packages": [],
+  "skills": [
+    "skills/recording.md"
+  ],
+  "timeout": 300
+}

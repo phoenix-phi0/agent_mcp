@@ -12,5 +12,6 @@
     "timeout": 900,
     "venv": true,
     "min_reads": 3
-  }
+  },
+  "category": "验收"
 }

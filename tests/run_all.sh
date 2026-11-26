@@ -213,6 +213,11 @@ run 编排角色工具 $PY tests/tools/test_wf_gsb_tools.py
 run 编排成本分配 $PY tests/tools/test_wf_cost.py
 run claude换端点 $PY tests/tools/test_claude_endpoint.py
 run 编排代码重构 $PY tests/tools/test_wf_refactor.py
+run 编排机械步骤 $PY tests/tools/test_wf_cmd_step.py
+run 编排卡分类 $PY tests/tools/test_wf_card_catalog.py
+run 编排机械命令 $PY tests/tools/test_wf_tools.py
+run 编排改代码验收 $PY tests/tools/test_wf_code_accept.py
+run 编排提交 $PY tests/tools/test_wf_commit.py
 run 编排人工确认 $PY tests/tools/test_wf_confirm.py
 run 编排块内跳转 $PY tests/tools/test_wf_block_jump.py
 run 编排参考资料取字段 $PY tests/tools/test_wf_pick.py

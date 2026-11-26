@@ -363,6 +363,20 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
                      ARCHITECT_FABLE: "架构师·Fable", REVIEWER_GPT: "审查员·GPT", REFACTOR_ANALYST: "现状分析员",
                      ENGINEER_FABLE: "工程师·Fable", ENGINEER_GPT_LITE: "工程师·GPT便宜档", ENGINEER_GPT: "工程师·GPT中档",
                      ENGINEER_GPT_SENIOR: "工程师·GPT高档", QA_GPT: "QA·GPT" };
+  // 换卡下拉按卡的 category 分组（顺序同 agents/CATALOG.md）；没写 category 的放最后「其他」
+  var CARD_GROUPS = ["架构", "分析", "会议", "实现", "测试", "验收", "记录", "人"];
+  function cardOptions(agents, option) {
+    var groups = {}, order = CARD_GROUPS.slice();
+    (agents || []).forEach(function (a) {
+      var g = a.category || "其他";
+      if (order.indexOf(g) < 0) order.push(g);
+      (groups[g] = groups[g] || []).push(a);
+    });
+    if (order.indexOf("其他") >= 0) { order.splice(order.indexOf("其他"), 1); order.push("其他"); }
+    return order.filter(function (g) { return groups[g]; }).map(function (g) {
+      return '<optgroup label="' + g + '">' + groups[g].map(option).join("") + "</optgroup>";
+    }).join("");
+  }
   // 没列出的卡按名字前缀归色：新加的卡不用回来改这里
   var ROLE_PREFIX = [[/^ARCHITECT/, "--r-arch"], [/^REVIEW/, "--r-glm"], [/^ENGINEER/, "--r-eng"], [/^(QA|TEST|REFACTOR)/, "--r-qa"]];
   function roleVar(r) {
@@ -1284,10 +1298,10 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
         : human ? '<div class="act-row hint" id="act-human">这一步是人（卡 <span class="mono">' + esc(pd.card || pd.role) + "</span> 不调模型）：交上面的结果，或者换一张卡、换一个模型让 AI 代答</div>"
         : '<div class="act-row"><button type="button" class="btn2" data-act="exec"' + dis + '>按默认执行</button><span class="hint">卡 <span class="mono">' + esc(pd.card || pd.role) +
       '</span> · 模型 <span class="mono">' + esc(pd.model || "?") + "</span></span></div>") +
-      '<div class="act-row"><label>换卡 <select class="f-in" id="act-card"' + dis + '><option value="">不换</option>' + A.agents.map(function (a) {
+      '<div class="act-row"><label>换卡 <select class="f-in" id="act-card"' + dis + '><option value="">不换</option>' + cardOptions(A.agents, function (a) {
         return '<option value="' + esc(a.name) + '"' + (A.card === a.name ? " selected" : "") + ' title="' + esc(a.description || "") + '">' +
           esc((ROLE_LABEL[a.name] ? ROLE_LABEL[a.name] + " · " : "") + a.name + (a.model ? " · " + a.model : "")) + "</option>";
-      }).join("") + "</select></label>" +
+      }) + "</select></label>" +
       '<label>换模型 <input class="f-in short" id="act-model" type="text" list="act-models" placeholder="不换（要写全，如 cli:goose/glm-5.3）" value="' + esc(A.model) + '"' + dis + "></label>" +
       '<datalist id="act-models">' + models.map(function (m) { return '<option value="' + esc(m) + '">'; }).join("") + "</datalist>" +
       '<button type="button" class="btn2" data-act="exec-as"' + dis + ">按所选执行</button></div>" +
@@ -1548,7 +1562,7 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
         var x = over[r] || {};
         return "<tr><td class=\"mono\">" + esc(r) + '</td><td><input class="f-in" list="' + attr + '-models" data-' + attr + '-role="' + esc(r) + '" data-' + attr + '-kind="model" aria-label="' + esc(r) + ' 换模型" placeholder="不换（要写全，如 cli:goose/glm-5.3）" value="' + esc(x.model || "") + '"' + dis + "></td>" +
           '<td><select class="f-in" data-' + attr + '-role="' + esc(r) + '" data-' + attr + '-kind="card" aria-label="' + esc(r) + ' 换卡"' + dis + '><option value="">不换</option>' +
-          agents.map(function (a) { return '<option value="' + esc(a.name) + '"' + (x.card === a.name ? " selected" : "") + ">" + esc(a.name) + (a.model ? "（" + esc(a.model) + "）" : "") + "</option>"; }).join("") +
+          cardOptions(agents, function (a) { return '<option value="' + esc(a.name) + '"' + (x.card === a.name ? " selected" : "") + ">" + esc(a.name) + (a.model ? "（" + esc(a.model) + "）" : "") + "</option>"; }) +
           (x.card && !agents.some(function (a) { return a.name === x.card; }) ? '<option value="' + esc(x.card) + '" selected>' + esc(x.card) + "（找不到这张卡）</option>" : "") +
           "</select></td></tr>";
       }).join("") + '</tbody></table><datalist id="' + attr + '-models">' + models.map(function (m) { return '<option value="' + esc(m) + '">'; }).join("") + "</datalist>";
@@ -1784,9 +1798,9 @@ select.f-in { width: auto; min-width: 150px; max-width: 100%; }
     }
     if (A.rejecting) {
       h += '<label>打回说明（必填）<textarea class="f-in" id="act-note"' + dis + '>' + esc(A.note) + '</textarea></label>' +
-        '<div class="act-row"><label>换卡 <select class="f-in" id="act-card"' + dis + '><option value="">不换</option>' + A.agents.map(function (a) {
+        '<div class="act-row"><label>换卡 <select class="f-in" id="act-card"' + dis + '><option value="">不换</option>' + cardOptions(A.agents, function (a) {
           return '<option value="' + esc(a.name) + '"' + (A.card === a.name ? ' selected' : '') + '>' + esc(roleName(a.name) + ' · ' + a.name) + '</option>';
-        }).join('') + '</select></label><label>换模型 <input class="f-in short" id="act-model" value="' + esc(A.model) + '"' + dis + '></label></div>' +
+        }) + '</select></label><label>换模型 <input class="f-in short" id="act-model" value="' + esc(A.model) + '"' + dis + '></label></div>' +
         '<div class="hint">打回后会接着当前工作目录重做，上一次修改的文件仍保留。</div>' +
         '<div><button type="button" class="btn2 danger" data-act="reject-yes"' + (capped ? ' disabled' : dis) + '>确定打回</button></div>';
     }

@@ -1,0 +1,81 @@
+# 改代码验收：在 agent_mcp 仓库的 git 工作树里改一处代码，改完查范围、跑测试、对照失败、按清单验收，过了放进暂存区，停下等人提交。
+# 开工作树（只有提交过的文件，没有配置和密钥）→ 记起点 → 工程师改代码
+# → 我的改动（超出 allow 就返工，跳转最大 2 次）→ 跑测试 → 基线（工作树 HEAD 的副本里跑同一个测试）→ 对照失败
+# → 验收员按 checklist 验收 → 把握低换 ACCEPTOR_SENIOR 重判 → 抽查依据（对不上也换高档重判）→ 还是把握低就交给人判
+# → 需修改就返工（跳转最大 2 次）→ 暂存我的改动（先查密钥），这个节点写了「确认 之后」：跑完停下等人确认，人自己提交
+# 机械步骤都是「指令」节点，由机器人跑命令表里的命令，不调模型。
+# 入口脚本要设：task repo allow test checklist wt_path project（project = 工作树目录名，卡的 cwd 是 work/{project}）
+# 可选：engineer（默认 REPO_ENGINEER）、acceptor（默认 ACCEPTOR）
+开工作树
+    指令 wt_add repo={repo} path={wt_path}
+    记录 w
+记起点
+    指令 git_mark repo={w.data.path}
+    记录 m
+改代码
+    任务 {task}。在 git 工作树 {w.data.path} 里改（它是 {repo} 的副本，分支 {w.data.branch}，只有提交过的文件）。只改这些文件：{allow}；要改别的文件才能做完就写进 need_architect，不要改。改完在工作树目录里跑测试：/workspace/agent_mcp/.venv/bin/python {test}，全部通过。不 commit、不 push
+    角色 {engineer 或 REPO_ENGINEER}
+    格式 implementation
+    记录 impl
+标记:c
+我的改动
+    指令 git_mine repo={w.data.path} mark={m.data.id} allow={allow}
+    记录 mine
+如果 mine.状态 == 失败
+    范围返工
+        任务 改动超出了允许的文件。范围外：{mine.data.outside}；归属不明：{mine.data.unclear}。把这些文件恢复成开工时的样子（改过的用 git checkout 恢复，新建的删掉）；确实要改它们才能做完的，写进 need_architect。只允许改：{allow}。改完跑 /workspace/agent_mcp/.venv/bin/python {test}
+        角色 {engineer 或 REPO_ENGINEER}
+        格式 implementation
+        记录 impl
+    跳转 c 最大 2
+跑测试
+    指令 dir_test dir={w.data.path} path={test}
+    记录 t
+基线测试
+    指令 staged_test repo={w.data.path} path={test} from=head
+    记录 h
+对照失败
+    指令 compare_failures base={h.结果} now={t.结果} name={test}
+    记录 f
+验收
+    任务 按清单验收这次的改动。清单：{checklist}。另外两条必查：只改了允许的文件（{allow}，看参考文本 mine）；测试没有新挂的（看参考文本 failures 的 new，test 是这次的测试输出）。参考文本 impl 是工程师的实现记录。仓库副本在 {w.data.path}，只读
+    角色 {acceptor 或 ACCEPTOR}
+    文本 impl mine=mine.data test=t.结果 failures=f.data
+    格式 accept_check
+    记录 acc
+如果 acc.把握 == 低
+    升档验收
+        任务 上一位验收员对这份清单把握低，你来重判（参考文本 previous 是它的结果，只当线索）。清单：{checklist}。另外两条必查：只改了允许的文件（{allow}，看 mine）；测试没有新挂的（看 failures 的 new）。仓库副本在 {w.data.path}，只读
+        角色 ACCEPTOR_SENIOR
+        文本 impl mine=mine.data test=t.结果 failures=f.data previous=acc
+        格式 accept_check
+        记录 acc
+抽查依据
+    指令 check_evidence dir={w.data.path} record={acc}
+    记录 ev
+如果 ev.状态 == 失败
+    依据重判
+        任务 验收结果里有依据对不上代码（参考文本 evidence 的 bad 列出了哪几条、为什么），按同一份清单重判，对不上的那几条自己重新找代码写依据。清单：{checklist}。另外两条必查：只改了允许的文件（{allow}）；测试没有新挂的。仓库副本在 {w.data.path}，只读
+        角色 ACCEPTOR_SENIOR
+        文本 impl mine=mine.data test=t.结果 failures=f.data previous=acc evidence=ev.data
+        格式 accept_check
+        记录 acc
+如果 acc.把握 == 低
+    人判验收
+        任务 两位验收员都拿不准（把握低），请人按清单判一次：{checklist}。参考文本 previous 是最后一位验收员的结果
+        角色 HUMAN
+        文本 impl mine=mine.data test=t.结果 failures=f.data previous=acc
+        格式 accept_check
+        记录 acc
+如果 acc.decide == 需修改
+    返工
+        任务 {acc.task}。在工作树 {w.data.path} 里改，只改这些文件：{allow}。已有的测试不要为了通过而放宽或删掉。改完跑 /workspace/agent_mcp/.venv/bin/python {test}，全部通过。不 commit、不 push
+        角色 {engineer 或 REPO_ENGINEER}
+        格式 implementation
+        记录 impl
+    跳转 c 最大 2
+暂存
+    任务 验收通过的改动放进工作树 {w.data.path} 的暂存区（分支 {w.data.branch}）。跑完停下等人确认：看暂存结果（状态不是成功时写了原因：查到密钥、补丁冲突等），通过（approve）就结束，人自己提交；打回（reject）就重做这一步
+    指令 git_stage_mine repo={w.data.path} mark={m.data.id} allow={allow}
+    确认 之后
+    记录 st

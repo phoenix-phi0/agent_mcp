@@ -11,7 +11,17 @@ _EFFORTS = set(config.EFFORTS)
 # platform:<模型 ID>[@effort]：走 Claude Platform 托管 agent，工具在阿里云自托管 worker 的沙箱里执行（见 tools/platform_agent.py）
 _PLATFORM = re.compile(r"platform:claude-[a-z0-9][a-z0-9.-]*(@(low|medium|high|xhigh|max))?")
 _KEYS = {"model", "effort", "tools", "skills", "packages", "max_tool_rounds", "agentic", "cost", "description",
-         "timeout", "via"}
+         "timeout", "via", "category"}
+# category：卡的分类，只用来分组显示（agents 工具、查看器的换卡下拉）；目录见 workflow_demo/agents/CATALOG.md
+CATEGORIES = ("架构", "分析", "会议", "实现", "测试", "验收", "记录", "人")
+# 机械步骤：节点里写「指令 命令名 键=值 …」，由内置的 ROBOT 直接跑命令表（tools/cmd_table.json）里的命令，
+# 不调模型，不建卡。调用方是 workflow（只放行只读命令和几条跑测试的命令，提交、推送、重启服务不在里面）。
+# 参数值里可以写 {变量}；整个值就是一个 {变量} 时保留结构（列表还是列表）。
+CMD = "cmd"         # ROBOT 内部用的 model 标记，不能写在卡上
+_CMD_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
+CMD_CALLER = "workflow"
+ROBOT = "ROBOT"     # 内置的「机器人」：节点写了「指令」时由它执行，不用建卡
+CMD_OUTPUT_MAX = 20000
 
 
 HUMAN = "human"     # 卡的 model 写 "human"：这个角色是人，不调模型，只等人在查看器上交结果
@@ -39,8 +49,13 @@ def is_human_card(workdir, name):
     return card_executor(workdir, name) == HUMAN
 
 
-def load_agent(engine, name, model_override=None):
-    """读角色卡。model_override：外部控制换模型时整串替换卡里的 model（effort 写在 @ 后面）。"""
+def load_agent(engine, name, model_override=None, command=None):
+    """读角色卡。model_override：外部控制换模型时整串替换卡里的 model（effort 写在 @ 后面）。
+    name 是 ROBOT 时不读卡，按节点上的指令（command）跑命令。"""
+    if name == ROBOT:
+        if model_override:
+            raise DSLError(f"{ROBOT} 是跑命令的机器人，不能换模型；要让 AI 或人来做，换成别的卡")
+        return robot_profile(command)
     if not _NAME.fullmatch(name):
         raise DSLError(f"agent 名称无效：{name}")
     # 项目内 agent 优先；公共角色目录可复用，但只有含 agent.json 的目录才算可调用 agent。
@@ -57,6 +72,8 @@ def load_agent(engine, name, model_override=None):
         raise DSLError(f"agent「{name}」配置无法读取：{e}") from e
     if not isinstance(data, dict) or set(data) - _KEYS:
         raise DSLError(f"agent「{name}」配置字段无效：{set(data) - _KEYS if isinstance(data, dict) else '需要对象'}")
+    if "category" in data and data["category"] not in CATEGORIES:
+        raise DSLError(f"agent「{name}」category 只能是 {'、'.join(CATEGORIES)}（现在是 {data['category']!r}）")
     model = data.get("model")
     if not isinstance(model, str) or not model.strip():
         raise DSLError(f"agent「{name}」必须配置 model")
@@ -82,6 +99,8 @@ def load_agent(engine, name, model_override=None):
         return {"name": name, "model": HUMAN, "tools": [], "packages": [], "rounds": 1,
                 "system": soul.read_text(encoding="utf-8").strip(), "agentic": None, "cost": cost,
                 "description": str(data.get("description", "")).strip(), "timeout": None, "via": None}
+    if model == CMD:
+        raise DSLError(f"agent「{name}」model 不能写 cmd：机械步骤在节点里写「指令 命令名 键=值 …」，不建卡")
     is_platform = model.startswith("platform:")
     if is_platform:
         if not _PLATFORM.fullmatch(model):
@@ -221,6 +240,90 @@ def load_agent(engine, name, model_override=None):
             "cost": cost, "description": description.strip(), "timeout": call_timeout, "via": via}
 
 
+def _check_command(name, command, args):
+    if not isinstance(command, str) or not _CMD_NAME.fullmatch(command):
+        raise DSLError(f"「{name}」要写命令表里的命令名（现在是 {command!r}）")
+    from tools import cmd as _cmd
+    if command not in {c["name"] for c in _cmd.list_as(CMD_CALLER)}:
+        raise DSLError(f"「{name}」命令 {command} 不在命令表里，或流程（{CMD_CALLER}）没有权限跑它")
+    if not isinstance(args, dict) or any(not isinstance(k, str) for k in args):
+        raise DSLError(f"「{name}」命令参数必须是对象")
+    return command, args
+
+
+def robot_profile(command):
+    """节点上直接写「指令 命令名 键=值 …」：不用卡，由内置的 ROBOT 执行。"""
+    if not isinstance(command, dict):
+        raise DSLError(f"{ROBOT} 只用在写了「指令」的节点上")
+    cmd_name, args = _check_command(ROBOT, command.get("name"), command.get("args", {}))
+    return {"name": ROBOT, "model": CMD, "tools": [], "packages": [], "rounds": 1,
+            "system": f"机器人：照节点上的指令跑命令表里的 {cmd_name}，不调模型。", "agentic": None, "cost": None,
+            "description": "按指令跑命令表里的命令", "timeout": None, "via": None,
+            "command": cmd_name, "args": args}
+
+
+_WHOLE_VAR = re.compile(r"^\{([^{}]+)\}$")
+
+
+def _cmd_value(engine, value):
+    if isinstance(value, str):
+        m = _WHOLE_VAR.fullmatch(value.strip())
+        if m and "或" not in m[1]:
+            got = engine.lookup(m[1].strip())
+            if got is None:
+                raise DSLError(f"命令参数 {value} 没有值")
+            if isinstance(got, str) and got.lstrip()[:1] in ("[", "{"):
+                # 设 x = [...] 存的是 JSON 字面量文本：按结构传
+                try:
+                    return json.loads(got)
+                except ValueError:
+                    pass
+            return got
+        for ref in re.findall(r"(?<!\{)\{([^{}]+)\}(?!\})", value):
+            if "或" not in ref and engine.lookup(ref.strip()) is None:
+                raise DSLError(f"命令参数 {value} 里的变量 {ref} 没有值")
+        return str(engine.expand(value))
+    if isinstance(value, list):
+        return [_cmd_value(engine, v) for v in value]
+    if isinstance(value, dict):
+        return {k: _cmd_value(engine, v) for k, v in value.items()}
+    return value
+
+
+def run_cmd(engine, profile):
+    """机械步骤：按卡上的 command 和 args 跑一条命令表里的命令，返回固定结构的结果。
+    命令被拒（参数不合法、没权限）算这一步出错；命令跑了但退出码不是 0 算「失败」，由流程自己分支。"""
+    from tools import cmd as _cmd
+    args = {k: _cmd_value(engine, v) for k, v in profile["args"].items()}
+    # DSL 的变量都是字符串：命令表里写着 int / bool 的参数照类型转一下（转不了就原样交给命令表去拒）
+    spec = next((c["params"] for c in _cmd.list_as(CMD_CALLER) if c["name"] == profile["command"]), {})
+    for k, v in list(args.items()):
+        kind = (spec.get(k) or {}).get("type")
+        if kind == "int" and isinstance(v, str) and re.fullmatch(r"-?\d+", v.strip()):
+            args[k] = int(v.strip())
+        elif kind == "bool" and isinstance(v, str) and v.strip() in ("true", "false", "是", "否"):
+            args[k] = v.strip() in ("true", "是")
+        elif kind == "text" and isinstance(v, (dict, list)):
+            # 整条记录交给命令（如抽查依据）：按 JSON 文本传
+            args[k] = json.dumps(v, ensure_ascii=False)
+    res = _cmd.run_as(CMD_CALLER, profile["command"], args)
+    if res.get("status") == "rejected":
+        raise DSLError(f"命令 {profile['command']} 被拒：{res.get('reason') or res.get('output')}")
+    output = str(res.get("output") or "")
+    if len(output) > CMD_OUTPUT_MAX:
+        output = "…（前面已截断）" + output[-CMD_OUTPUT_MAX:]
+    data = None
+    last = output.strip().splitlines()[-1] if output.strip() else ""
+    if last.startswith("{") and last.endswith("}"):
+        try:
+            data = json.loads(last)
+        except ValueError:
+            data = None
+    ok = res.get("status") == "ok" and res.get("exit_code") == 0
+    return {"状态": "成功" if ok else "失败", "结果": output, "command": profile["command"], "args": args,
+            "exit_code": res.get("exit_code"), "data": data}
+
+
 def card_info(engine, name):
     """给编排的「角色清单」「成本合计」用：卡的名字、成本、一句话说明、模型。"""
     profile = load_agent(engine, name)
@@ -271,21 +374,24 @@ def _prompt(task, context, node=None, fmt=None, submit=False, notes=None, previo
 def _uses_submit(engine, profile, fmt):
     """有格式、模型是 cli:claude / cli:goose、不是离线假客户端 → 用 submit 工具交。"""
     if (not fmt or getattr(engine.client, "offline", False) is True or profile["model"].startswith("platform:")
-            or profile["model"] in EXTERNAL):
+            or profile["model"] in EXTERNAL or profile["model"] == CMD):
         return False
     spec = config.parse_model(profile["model"])
     return spec.channel == "cli" and spec.provider in ("claude", "goose", "codex", "muse")
 
 
-def describe(engine, name, task, context=None, model=None, node=None, fmt=None, notes=None, previous=None):
+def describe(engine, name, task, context=None, model=None, node=None, fmt=None, notes=None, previous=None,
+             command=None):
     """不调用，只给出这一步会怎么调：外部自己执行时照这个拼请求（prompt 里带格式）。"""
-    profile = load_agent(engine, name, model)
+    profile = load_agent(engine, name, model, command=command)
     out = {"card": name, "model": profile["model"], "agentic": bool(profile.get("agentic")),
            "system": profile["system"],
            "prompt": _prompt(task, context, node, fmt, notes=notes, previous=previous),
            "cost": profile.get("cost")}
     if fmt:
         out.update(format=fmt[0], schema=fmt[1])
+    if profile["model"] == CMD:
+        out.update(command=profile["command"], args=profile["args"])
     agentic = profile.get("agentic")
     if agentic:
         # 人工交代码用（workflow_ctl.submit_files）：这一步在哪个目录干活、用不用项目 venv、测试命令
@@ -298,8 +404,10 @@ def describe(engine, name, task, context=None, model=None, node=None, fmt=None, 
     return out
 
 
-def call_agent(engine, name, task, context=None, model=None, node=None, fmt=None, notes=None, previous=None):
-    profile = load_agent(engine, name, model)
+def call_agent(engine, name, task, context=None, model=None, node=None, fmt=None, notes=None, previous=None,
+               command=None):
+    # command：节点写了「指令」。换成别的卡（人、AI）来做这一步时用不到它
+    profile = load_agent(engine, name, model, command=command)
     for pack in profile["packages"]:
         if not _NAME.fullmatch(pack):
             raise DSLError(f"agent「{name}」动词包名无效：{pack}")
@@ -323,6 +431,15 @@ def call_agent(engine, name, task, context=None, model=None, node=None, fmt=None
                 {"role": "user", "content": prompt}]
     if engine.dry_run:
         return {}
+    if profile["model"] == CMD:
+        # 机械步骤：不调模型（假客户端也不消耗回复），结果有格式就照样校验
+        engine._wf_last_call["executor"] = f"cmd:{profile['command']}"
+        result = run_cmd(engine, profile)
+        errors = check_format(fmt, result)
+        if errors:
+            engine._wf_last_call["raw"] = json.dumps(result, ensure_ascii=False)[:20000]
+            raise DSLError(f"命令步骤「{name}」的结果不符合格式 {fmt[0]}：" + "；".join(errors[:5]))
+        return result
     if profile["model"] == HUMAN:
         raise DSLError(f"「{name}」是人：这一步要人在查看器上交结果（受控运行会在这里停下等），不会调模型")
     if profile["model"] == MUSE:

@@ -25,5 +25,6 @@
     "timeout": 900,
     "max_turns": 50,
     "venv": false
-  }
+  },
+  "category": "测试"
 }

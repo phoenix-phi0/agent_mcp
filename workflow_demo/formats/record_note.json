@@ -1,0 +1,24 @@
+{
+ "type": "object",
+ "description": "记录：按参考文本写提交说明或汇总报告。只写参考文本里有的事，每段说出自哪一步的记录；不写密钥、口令、个人信息。",
+ "additionalProperties": false,
+ "required": ["状态", "结果", "种类", "标题", "正文", "依据", "把握"],
+ "properties": {
+  "状态": {"enum": ["完成", "材料不足"], "description": "参考文本不够写清楚就写材料不足，在结果里说缺什么"},
+  "结果": {"type": "string", "minLength": 1, "description": "一句话说写了什么"},
+  "种类": {"enum": ["提交说明", "汇总报告"]},
+  "标题": {"type": "string", "minLength": 1, "maxLength": 72, "description": "提交说明的第一行 / 报告标题"},
+  "正文": {"type": "string", "minLength": 1, "maxLength": 8000},
+  "依据": {
+   "type": "array", "minItems": 1,
+   "items": {
+    "type": "object", "additionalProperties": false, "required": ["出处", "原文"],
+    "properties": {
+     "出处": {"type": "string", "minLength": 1, "description": "参考文本里的哪一项，如 task_results[1] 或 第 12 步"},
+     "原文": {"type": "string", "minLength": 1, "maxLength": 300}
+    }
+   }
+  },
+  "把握": {"enum": ["高", "中", "低"]}
+ }
+}

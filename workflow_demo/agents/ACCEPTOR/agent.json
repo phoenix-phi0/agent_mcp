@@ -1,0 +1,18 @@
+{
+  "model": "cli:codex/gpt-6.2-sol",
+  "effort": "medium",
+  "cost": 2,
+  "category": "验收",
+  "description": "验收员（中档，Codex sol，项目只读）。按清单读代码和命令输出，逐条判满足、不满足或未验证，每条给依据（文件:行和原文，或命令输出原文）和把握；格式 accept_check。和工程师（Muse）不是同一个模型，不自己审自己。把握低时流程换 ACCEPTOR_SENIOR 再判。",
+  "packages": [],
+  "skills": [
+    "skills/code_review.md"
+  ],
+  "agentic": {
+    "cwd": "work/{project}",
+    "sandbox": "project-read-only",
+    "timeout": 1800,
+    "max_turns": 60,
+    "venv": true
+  }
+}

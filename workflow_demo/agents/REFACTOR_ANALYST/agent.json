@@ -13,5 +13,6 @@
     "timeout": 1800,
     "max_turns": 60,
     "venv": true
-  }
+  },
+  "category": "分析"
 }

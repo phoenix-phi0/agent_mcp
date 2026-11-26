@@ -9,5 +9,6 @@
   "agentic": {
     "cwd": "work/{project}",
     "venv": true
-  }
+  },
+  "category": "实现"
 }

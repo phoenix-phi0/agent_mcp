@@ -9,5 +9,6 @@
   ],
   "max_tool_rounds": 3,
   "timeout": 300,
-  "via": "batchmgr"
+  "via": "batchmgr",
+  "category": "架构"
 }

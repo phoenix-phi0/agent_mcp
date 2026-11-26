@@ -28,5 +28,6 @@
     "timeout": 600,
     "max_turns": 40,
     "venv": false
-  }
+  },
+  "category": "实现"
 }

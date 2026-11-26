@@ -249,6 +249,18 @@ class CommandTests(unittest.TestCase):
             'exp_compare': {'run': 'demo-0001'}, 'exp_start': {'exp': 'demo'},
             'exp_cancel': {'run': 'demo-0001'},
             'exp_register': {'exp': 'demo', 'path': 'data/tmp/demo.py', 'result': 'data/tmp/result.json'},
+            'count_lines': {},
+            # 编排的机械命令（scripts/cmd/wf_tools.py，详测在 test_wf_tools.py）
+            'check_evidence': {'dir': '/workspace/agent_mcp', 'record': '{"依据": []}'},
+            'compare_failures': {'base': '[]', 'now': 'FAILED tests/a.py::t'},
+            'git_mark': {}, 'git_mine': {'mark': '20260101-123456-abcdef', 'allow': ['tools/cmd.py']},
+            'git_stage_mine': {'mark': '20260101-123456-abcdef', 'allow': ['tools/*.py']},
+            'secret_scan': {'paths': ['tools/cmd.py']},
+            'expect_text': {'text': 'EXIT=0', 'pattern': '^EXIT=0$'},
+            'file_size': {'path': '/workspace/agent_mcp/tools/cmd.py', 'max_bytes': 1000000},
+            'wt_add': {'path': '/workspace/agent_mcp/data/tmp/x_wt'},
+            'dir_test': {'dir': '/workspace/agent_mcp/data/tmp/x_wt', 'path': 'tests/tools/test_cmd.py'},
+            'staged_test': {'path': 'tests/tools/test_cmd.py', 'from': 'head'},
         }
         self.assertEqual(set(args) | {'job'}, {c['name'] for c in table['commands']})
         for command in table['commands']:
@@ -588,6 +600,63 @@ class OutputTests(unittest.TestCase):
         self.assertEqual(cmd.describe_as('nobody'), '')
         self.assertIn('roots=', cmd.describe_as('small_model', 'show'))
         self.assertIn('pattern=', cmd.describe_as('small_model', 'grep'))
+
+
+class ScriptCountJsonTests(unittest.TestCase):
+    """count_lines，用真实指令表在 data/tmp 下的临时目录里跑。"""
+
+    def setUp(self):
+        self.old = {key: os.environ.get(key) for key in ('CMD_TABLE', 'CMD_HOME')}
+        self.addCleanup(self.restore)
+        os.environ.pop('CMD_TABLE', None)
+        self.tmp = Path(tempfile.mkdtemp(prefix='cmd_new_test_', dir=cmd.ROOT / 'data/tmp'))
+        self.addCleanup(__import__('shutil').rmtree, self.tmp, True)
+        os.environ['CMD_HOME'] = str(self.tmp / 'state')
+        self.rel = str(self.tmp.relative_to(cmd.ROOT))
+        (self.tmp / 'sub').mkdir()
+        (self.tmp / 'show_args.py').write_text(
+            'import os, sys\nprint("cwd=" + os.getcwd())\nprint("args=" + " ".join(sys.argv[1:]))\n'
+            'print("exe=" + sys.executable)\nsys.exit(3 if "--fail" in sys.argv else 0)\n')
+
+    def restore(self):
+        for key, value in self.old.items():
+            if value is None: os.environ.pop(key, None)
+            else: os.environ[key] = value
+
+    def call(self, name, args, caller='tool_call'):
+        return cmd.run_as(caller, name, args)
+
+    def ok(self, name, args):
+        result = self.call(name, args)
+        self.assertEqual(result['status'], 'ok', result)
+        return result['output']
+
+    def rejected(self, name, args, caller='tool_call'):
+        result = self.call(name, args, caller)
+        self.assertEqual(result['status'], 'rejected', result)
+        return result['reason']
+
+    def test_count_lines(self):
+        (self.tmp / 'sub' / 'a.py').write_text('1\n2\n3\n')
+        (self.tmp / 'sub' / 'b.py').write_text('x\ny')          # 末行没有换行也算一行
+        (self.tmp / 'c.txt').write_text('t\n')
+        (self.tmp / 'bin.dat').write_bytes(b'\0\1\2\n\n')
+        for skipped in ('.git', '.venv', '__pycache__'):
+            (self.tmp / skipped).mkdir()
+            (self.tmp / skipped / 'z.py').write_text('\n' * 50)
+        os.symlink(cmd.ROOT / 'tools/cmd.py', self.tmp / 'link.py')
+        out = self.ok('count_lines', {'path': str(self.tmp), 'name': '*.py'})
+        self.assertIn('文件 3 个  行数 10  大小', out)   # show_args.py 5 行 + a.py 3 + b.py 2；符号链接不算
+        self.assertIn('3\tsub/a.py', out)
+        self.assertNotIn('z.py', out)
+        out = self.ok('count_lines', {'path': str(self.tmp)})
+        self.assertIn('其中二进制 1 个', out)
+        self.assertIn('按第一层目录', out)
+        out = self.ok('count_lines', {'path': str(self.tmp / 'sub' / 'a.py')})
+        self.assertIn('文件 1 个  行数 3', out)
+        self.rejected('count_lines', {'path': '/etc'})
+        self.rejected('count_lines', {'path': str(self.tmp), 'name': '*;ls'})
+
 
 
 class ExperimentCommandsTests(unittest.TestCase):

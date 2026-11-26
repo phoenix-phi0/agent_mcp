@@ -10,7 +10,14 @@ from pathlib import Path
 from tools.dsl_core import DSLError, Unexpanded, split_items, to_text
 from tools.wf_plan import cost_summary
 
-_TASK_FIELDS = {"任务", "角色", "文本", "记录", "格式"}
+_TASK_FIELDS = {"任务", "角色", "文本", "记录", "格式", "指令", "确认"}
+# 确认 之后 / 之前 / 前后：受控运行到这个节点一定停下等人确认（和启动时的 confirm_after / confirm_before 同样效果，
+# 写在流程里不用每次启动时传）。之后：跑完停下，人 approve 往下走、reject 带意见重做这一步；之前：开始前停下等 execute。
+_CONFIRM = {"之后": "after", "后": "after", "之前": "before", "前": "before", "前后": "both"}
+# 指令 命令名 键=值 …：这一步由内置的机器人（ROBOT）跑命令表里的命令，不用写角色、不调模型。
+# 值可以写 {变量}（整个值是一个变量时保留结构）；值里不能有空格，有空格的先放进变量
+_COMMAND = re.compile(r"^([a-z][a-z0-9_]*)((?:\s+[A-Za-z_]\w*=\S+)*)\s*$")
+ROBOT = "ROBOT"
 _JUMP = re.compile(r"^跳转\s+(\w+)\s+最大\s+(\d+)(?:\s+(用完继续))?\s*$")
 _LABEL = re.compile(r"^标记\s*:\s*(\w+)\s*$")
 _EACH = re.compile(r"^遍历\s+(\w+)\s+于\s+(.+)$")
@@ -460,11 +467,32 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                 for child_line, child_n, grandchildren in children:
                     key, sep, value = child_line.partition(" ")
                     if grandchildren or not sep or key not in _TASK_FIELDS or key in fields:
-                        raise DSLError(f"第 {child_n} 行：任务块只能包含任务、角色、文本、记录、格式各一项")
+                        raise DSLError(f"第 {child_n} 行：任务块只能包含任务、角色、文本、记录、格式、指令各一项")
                     fields[key] = value.strip()
                     child_line_of[key] = child_n
+                command = None
+                if fields.get("指令"):
+                    cm = _COMMAND.fullmatch(fields["指令"])
+                    if not cm:
+                        raise DSLError(f"第 {child_line_of['指令']} 行：指令写成「指令 命令名 键=值 …」，"
+                                       f"值里不能有空格：{fields['指令']}")
+                    if fields.get("角色") and fields["角色"] != ROBOT:
+                        raise DSLError(f"第 {n} 行：写了指令的节点由机器人执行，不写角色")
+                    args = {}
+                    for pair in cm[2].split():
+                        k, _, v = pair.partition("=")
+                        if k in args:
+                            raise DSLError(f"第 {child_line_of['指令']} 行：指令参数 {k} 写了两次")
+                        args[k] = v
+                    command = {"name": cm[1], "args": args}
+                    fields["角色"] = ROBOT
                 if not all(fields.get(x) for x in ("角色", "记录")):
-                    raise DSLError(f"第 {n} 行：任务块需要角色、记录")
+                    raise DSLError(f"第 {n} 行：任务块需要角色（或指令）、记录")
+                confirm_node = None
+                if "确认" in fields:
+                    confirm_node = _CONFIRM.get(fields["确认"])
+                    if confirm_node is None:
+                        raise DSLError(f"第 {child_line_of['确认']} 行：确认只能写 之后、之前 或 前后：{fields['确认']}")
                 record = fields["记录"]
                 if not _REF.fullmatch(record) or "." in record:
                     raise DSLError(f"第 {n} 行：记录名无效：{record}")
@@ -491,6 +519,12 @@ def run(engine, script, call_agent, name="workflow", describe=None, load_format=
                     event_request["item"] = {k: v for k, v in request["item"].items() if k != "key"}
                 # 只在用到时才多传参数：别的执行器（测试里的假 call_agent）签名不用跟着改
                 extra = {"node": line, "fmt": fmt} if fmt else {}
+                if command:
+                    request["command"] = command
+                    event_request["command"] = command
+                    extra["command"] = command
+                if confirm_node:
+                    request["confirm_node"] = confirm_node
                 decision = ctl.decide(request) if ctl is not None else {"action": "run"}
                 action = decision["action"]
                 # 这一步以前失败或被打回的尝试原样留在记录里。

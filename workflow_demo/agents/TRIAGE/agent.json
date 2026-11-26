@@ -1,0 +1,31 @@
+{
+  "model": "cli:claude/sonnet",
+  "effort": "medium",
+  "cost": 3,
+  "category": "分析",
+  "description": "失败分析员（sonnet）。拿对照失败的分组、这次的改动清单和诊断结果，判断每个新挂的用例是什么原因、是这次的改动还是别人的改动或环境引起的；每条给依据和把握。只读，可以单独重跑失败的用例，不改文件。",
+  "packages": [],
+  "skills": [
+    "skills/failure_analysis.md"
+  ],
+  "agentic": {
+    "cwd": "work/{project}",
+    "allowed_tools": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(ls:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git blame:*)",
+      "Bash(python -m pytest:*)"
+    ],
+    "timeout": 1800,
+    "max_turns": 60,
+    "venv": true,
+    "mcp_tools": [
+      "probe"
+    ]
+  }
+}
